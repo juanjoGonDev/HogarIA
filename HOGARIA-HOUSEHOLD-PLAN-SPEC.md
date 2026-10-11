@@ -1,6 +1,6 @@
 # HogarIA — Plano interactivo del hogar y tareas por zonas
 
-Estado: **implementación y hooks locales completados · CI manual pendiente** · 2026-10-11
+Estado: **implementación, verificaciones locales y CI completados · PR #47 listo para revisión** · 2026-10-11
 
 Este contrato concreta una nueva capacidad de HogarIA y complementa las reglas compartidas de
 `HOGARIA-SPEC.md` §12ap (aislamiento por hogar, membresía, permisos y proveedor de IA) y §13
@@ -288,10 +288,12 @@ Evidencia del editor y tareas:
 - [x] Typecheck, build, `check:ui`, tests completos aplicables y cobertura ≥70 % por archivo;
       registrar comando, resultado y limitación exactos.
 - [x] Hooks pre-commit/pre-push obligatorios ejecutados sin bypass.
-- [ ] CI de la rama. Mantener PR Draft mientras esté pendiente.
+- [x] CI de la rama: workflow manual completo y sin fallos; el PR se mantuvo Draft mientras los
+      gates estaban pendientes.
 - [x] Inspección Playwright con servidor aislado y datos sintéticos; PC y móvil, capturas comparables,
       geometría equivalente con tolerancia ≤1 CSS px, teclado/labels y ninguna información privada.
-- [ ] Mantener PR Draft hasta cumplir gates. Nunca hacer merge sin autorización explícita.
+- [x] PR #47 se mantuvo Draft mientras los gates estaban pendientes; se marca listo solo tras
+      aprobarlos. No se hizo merge.
 
 Cobertura verificada localmente:
 
@@ -299,22 +301,32 @@ Cobertura verificada localmente:
   1322 pruebas aprobadas, 1 omitida; 91,96 % statements, 83,62 % ramas, 96,01 % funciones y
   94,43 % líneas. Todos los archivos de `COVERED` superan 70 % en cada métrica.
 - `pnpm run test:client:coverage` — 1365 pruebas aprobadas; 94,47 % statements, 85,72 % ramas,
-  94,36 % funciones y 96,09 % líneas. Las fuentes de plan/tareas superan 70 % en las métricas
+  94,36 % funciones y 96,06 % líneas. Las fuentes de plan/tareas superan 70 % en las métricas
   instrumentadas; `household-tasks.service.ts` no tiene puntos de rama instrumentables (`BRF=0`).
 - `pnpm run check:ui`, `pnpm run typecheck:e2e` y `pnpm run build` — aprobados. El build muestra
   warnings de Angular ya presentes fuera de este cambio.
 - `pnpm run test:config` — 11/11 pruebas aprobadas. `pnpm run check:ui` revisó 224 archivos y 21
   reglas sin incidencias.
-- Los commits `c0c9fa7`, `4d37dff` y `48b3ffa` se publicaron en
+- Los commits `c0c9fa7`, `4d37dff`, `48b3ffa`, `c0ffe8a` y `cc073cd` se publicaron en
   `feat/household-floorplan`. Los hooks pre-commit y pre-push pasaron: Prettier, check:ui, build,
   typecheck E2E y `pnpm run test` (11 config, 1365 client, 1322 server + 1 skip).
 - `pnpm run lint:server` no pasa por el script existente (`eslint src --ext .ts` rechaza `--ext`
   bajo ESLint 9); el CI y los hooks actuales no invocan ese lint. No se alteró esa configuración,
   fuera del alcance de esta entrega.
 - La CI de este repositorio ejecuta su shard E2E canónico en Chromium; `mobile-chrome` se validó
-  adicionalmente en esta sesión. El PR #47 es Draft y su base es `arena/01a0a6c2-micocinai`, que no
-  coincide con las ramas `main`/`master` del disparador `pull_request`; GitHub omitió CI al publicar.
-  Se ejecutará el workflow `CI` manualmente sobre la rama, sin cambiar la base y ampliar el diff.
+  adicionalmente en esta sesión. El PR #47 se mantuvo Draft hasta pasar gates y su base
+  `arena/01a0a6c2-micocinai` no coincide con `main`/`master`, las ramas del disparador `pull_request`;
+  GitHub omitió CI al publicar.
+  Por eso se ejecutó `CI` manualmente, sin cambiar la base ni ampliar el diff. La primera corrida
+  (`38172522119`, SHA `c0ffe8a`) detectó tres defectos de las comprobaciones E2E: el test de
+  calendario no navegaba a la fecha creada fuera de la semana visible; el test de caducidades
+  buscaba la última fila con `:last-of-type`, que no correspondía al último resultado; y la matriz
+  responsive omitía B−1 para los breakpoints CSS nuevos de 359 y 639 px del plano/tareas.
+  Se corrigieron los tres tests, sin alterar el comportamiento de producto, en `cc073cd`; el lote
+  enfocado de los tres casos pasó 3/3. La corrida completa posterior [CI #38173445803](https://github.com/juanjoGonDev/MiCocinAI/actions/runs/38173445803), sobre el SHA
+  `cc073cd6b0a3dbfea9826cc1ed154540ffa4f434`, terminó **success** en sus nueve jobs: los cuatro
+  shards E2E, E2E full-stack, tests de servidor, typecheck y builds. Usa fixtures sintéticos; no
+  llamó al proveedor de IA. No se cambió la base del PR.
 
 ## Fuera de alcance v1
 
