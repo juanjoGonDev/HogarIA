@@ -302,7 +302,10 @@ pastel. Evitar tarjetas redundantes, paneles vacíos y formularios que reduzcan 
 - [ ] **Foto/propuesta:** original y plano generado comparables, con acciones revisar, aplicar o
       pedir cambio; móvil apila imagen y resultado sin esconder las acciones.
 - [ ] **Asignación de zonas:** plano seleccionable junto al panel de zona/responsable en escritorio;
-      al seleccionar una zona, móvil usa hoja inferior compacta con asignación y guardar.
+      al seleccionar una zona, móvil usa hoja inferior compacta con asignación y guardar. La persona
+      responsable puede ser un miembro activo, un conjunto compartido o quedar sin asignar; persistir
+      por hogar con control de versión y permiso, validar membresías en servidor, limpiar zonas
+      retiradas y no incluir identidades de miembros en el prompt de IA.
 - [ ] **Tareas semanales:** plano interactivo en la columna principal y editor de tarea/reparto/lista
       de la semana en columna secundaria; indicar persona, zona y día, con controles de asignación
       manual, aleatoria equitativa y guardar semana. En móvil, plano primero y panel de tareas debajo.
