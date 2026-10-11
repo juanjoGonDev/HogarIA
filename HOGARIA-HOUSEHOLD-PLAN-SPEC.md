@@ -1,6 +1,6 @@
 # HogarIA — Plano interactivo del hogar y tareas por zonas
 
-Estado: **spec activa · implementación pendiente** · 2026-10-11
+Estado: **implementación en curso · primera unidad completada** · 2026-10-11
 
 Este contrato concreta una nueva capacidad de HogarIA y complementa las reglas compartidas de
 `HOGARIA-SPEC.md` §12ap (aislamiento por hogar, membresía, permisos y proveedor de IA) y §13
@@ -114,10 +114,10 @@ type Plan = {
 su campo label como nombre visible. Cada planta usa el mismo `viewBox` normalizado; las paredes
 exteriores dibujan el perímetro y las interiores las divisiones. Los segmentos generados por IA
 son ortogonales. Todas las propiedades del objeto enviado al modelo son obligatorias; los valores
-ausentes se representan como `null` o listas vacías. Límites de carga:
-1–12 plantas, hasta 80 zonas y 250 paredes por planta, hasta 64 vértices por polígono y
-coordenadas enteras dentro de 0–10 000. La vista mantiene proporción, zoom y desplazamiento sin
-deformar geometría.
+ausentes se representan como `null` o listas vacías. Límites de carga: 1–12 plantas, niveles enteros
+entre -12 y 12, hasta 80 zonas, 250 paredes y 300 aberturas por planta, hasta 64 vértices por
+polígono, 20 avisos y coordenadas enteras entre 0 y 10 000. La vista mantiene proporción, zoom y
+desplazamiento sin deformar geometría.
 
 ### Respuesta de IA y validación obligatoria
 
@@ -183,18 +183,29 @@ transporte ya existentes se describen en `server/src/schemas/ai-response-format.
 ## Unidades de entrega y checklist de aceptación
 
 Mantener estas unidades atómicas, cada una con sus pruebas y evidencia antes de marcar `[x]`.
-El alcance completo previsiblemente supera 400 líneas: antes de empezar código se acordará la
-estrategia de PR y la spec permanecerá publicada en Draft.
+La implementación se mantiene en el PR Draft #47 y la rama `feat/household-floorplan`; el usuario
+aprobó un único PR en esta rama y la etiqueta `size:exception` para el alcance superior a 400 líneas.
 
 ### QA-HOUSEHOLD.PLAN.GEOMETRY.1 — catálogo, contrato y validador
 
-- [ ] Pruebas rojas para límites, IDs duplicados, puntos fuera de rango, polígonos degenerados o
+- [x] Pruebas rojas para límites, IDs duplicados, puntos fuera de rango, polígonos degenerados o
       autointersectados, referencias rotas, openings fuera de pared, ciclos/contención de zonas y
       enum `custom`; implementar esquema Zod + validación semántica compartidos.
-- [ ] Cubrir el catálogo de espacios con traducciones es/en, identificadores estables y tests que
+- [x] Cubrir el catálogo de espacios con traducciones es/en, identificadores estables y tests que
       garanticen jardín, balcón, terraza, patio, piscina, garaje y zona personalizada.
-- [ ] Coverage por archivo ≥70 % en statements, ramas, funciones y líneas; JSON Schema generado es
+- [x] Coverage por archivo ≥70 % en statements, ramas, funciones y líneas; JSON Schema generado es
       compatible con strict Structured Outputs y mantiene objeto raíz cerrado.
+
+Evidencia de QA-HOUSEHOLD.PLAN.GEOMETRY.1:
+
+- `pnpm exec vitest run src/schemas/household-plan.schema.spec.ts` (server): 11 pruebas aprobadas.
+- `pnpm --filter @hogaria/web exec ng test --no-watch --include src/app/features/household/household-area-catalog.spec.ts`:
+  2 pruebas aprobadas en ChromeHeadless.
+- Coverage focal del schema: 95,34 % statements, 75,6 % branches, 95,83 % funciones y 97,94 % líneas.
+  La ejecución focal de `vitest --coverage` aplicó los thresholds de todos los archivos incluidos y
+  terminó con error al no ejecutar sus suites; el archivo de esta unidad sí superó cada umbral.
+- `pnpm run build` (server) y `pnpm run check:ui`: aprobados. La cobertura completa queda pendiente
+  de la puerta general antes de cerrar el PR.
 
 ### QA-HOUSEHOLD.PLAN.AI-PROPOSAL.1 — generación, foto y revisión por chat
 

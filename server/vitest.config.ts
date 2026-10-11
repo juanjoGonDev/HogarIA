@@ -37,6 +37,7 @@ const COVERED = [
   'src/schemas/recipe.schema.ts',
   'src/schemas/ai.schema.ts',
   'src/schemas/generated-recipe.schema.ts',
+  'src/schemas/household-plan.schema.ts',
   'src/utils/product-key.ts',
   'src/utils/pantry-categories.ts',
   'src/utils/shopping-categories.ts',
