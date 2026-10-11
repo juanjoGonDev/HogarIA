@@ -1,6 +1,6 @@
 # HogarIA — Plano interactivo del hogar y tareas por zonas
 
-Estado: **implementación terminada · validación final de hooks/CI pendiente** · 2026-10-11
+Estado: **implementación y hooks locales completados · CI manual pendiente** · 2026-10-11
 
 Este contrato concreta una nueva capacidad de HogarIA y complementa las reglas compartidas de
 `HOGARIA-SPEC.md` §12ap (aislamiento por hogar, membresía, permisos y proveedor de IA) y §13
@@ -287,7 +287,8 @@ Evidencia del editor y tareas:
       verificada explícitamente. No llamar a IA real para gates repetibles.
 - [x] Typecheck, build, `check:ui`, tests completos aplicables y cobertura ≥70 % por archivo;
       registrar comando, resultado y limitación exactos.
-- [ ] Hooks pre-push y CI de la rama; mantener PR Draft mientras estén pendientes.
+- [x] Hooks pre-commit/pre-push obligatorios ejecutados sin bypass.
+- [ ] CI de la rama. Mantener PR Draft mientras esté pendiente.
 - [x] Inspección Playwright con servidor aislado y datos sintéticos; PC y móvil, capturas comparables,
       geometría equivalente con tolerancia ≤1 CSS px, teclado/labels y ninguna información privada.
 - [ ] Mantener PR Draft hasta cumplir gates. Nunca hacer merge sin autorización explícita.
@@ -304,12 +305,16 @@ Cobertura verificada localmente:
   warnings de Angular ya presentes fuera de este cambio.
 - `pnpm run test:config` — 11/11 pruebas aprobadas. `pnpm run check:ui` revisó 224 archivos y 21
   reglas sin incidencias.
+- Los commits `c0c9fa7`, `4d37dff` y `48b3ffa` se publicaron en
+  `feat/household-floorplan`. Los hooks pre-commit y pre-push pasaron: Prettier, check:ui, build,
+  typecheck E2E y `pnpm run test` (11 config, 1365 client, 1322 server + 1 skip).
 - `pnpm run lint:server` no pasa por el script existente (`eslint src --ext .ts` rechaza `--ext`
   bajo ESLint 9); el CI y los hooks actuales no invocan ese lint. No se alteró esa configuración,
   fuera del alcance de esta entrega.
 - La CI de este repositorio ejecuta su shard E2E canónico en Chromium; `mobile-chrome` se validó
-  adicionalmente en esta sesión. Hooks pre-push y CI todavía no se han ejecutado porque estos
-  commits aún no se han publicado.
+  adicionalmente en esta sesión. El PR #47 es Draft y su base es `arena/01a0a6c2-micocinai`, que no
+  coincide con las ramas `main`/`master` del disparador `pull_request`; GitHub omitió CI al publicar.
+  Se ejecutará el workflow `CI` manualmente sobre la rama, sin cambiar la base y ampliar el diff.
 
 ## Fuera de alcance v1
 
