@@ -825,6 +825,47 @@ describe('callAI: el cuerpo lleva solo lo configurado', () => {
     expect(body.response_format).toEqual(responseFormat);
   });
 
+  it('rechaza una respuesta truncada aunque el contenido parezca JSON completo', async () => {
+    vi.stubGlobal(
+      'fetch',
+      async () =>
+        new Response(
+          JSON.stringify({
+            choices: [{ finish_reason: 'length', message: { content: '{"answer":"ok"}' } }]
+          }),
+          { status: 200 }
+        )
+    );
+    const error = await callAITransport(CONFIG, []).catch((reason) => reason);
+    expect(error).toMatchObject({ code: 'BAD_JSON', detail: 'TRUNCATED' });
+  });
+
+  it('rechaza respuestas marcadas como refusal o content-filter sin exponerlas', async () => {
+    for (const choice of [
+      { finish_reason: 'stop', message: { refusal: 'private refusal text', content: null } },
+      { finish_reason: 'content_filter', message: { content: null } }
+    ]) {
+      vi.stubGlobal(
+        'fetch',
+        async () => new Response(JSON.stringify({ choices: [choice] }), { status: 200 })
+      );
+      const error = await callAITransport(CONFIG, []).catch((reason) => reason);
+      expect(error).toMatchObject({ code: 'BAD_JSON', detail: 'REFUSED' });
+      expect(error.message).not.toContain('private refusal text');
+    }
+  });
+
+  it('clasifica la cancelación del cliente separada del timeout del proveedor', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    vi.stubGlobal('fetch', async () => {
+      throw Object.assign(new Error('The operation was aborted'), { name: 'AbortError' });
+    });
+
+    const error = await callAITransport(CONFIG, [], controller.signal).catch((reason) => reason);
+    expect(error).toMatchObject({ code: 'PROVIDER', detail: 'CANCELLED' });
+  });
+
   it('los parametros en null no viajan: un proveedor estricto no recibe basura', async () => {
     let cuerpo: any;
     vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {

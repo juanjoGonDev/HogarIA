@@ -143,6 +143,29 @@ async function runMigrations(db: Database.Database): Promise<void> {
       UNIQUE(household_id, user_id)
     );
 
+    -- A single current plan per household plus an immutable snapshot for each applied version.
+    CREATE TABLE IF NOT EXISTS household_plans (
+      household_id TEXT PRIMARY KEY NOT NULL,
+      version INTEGER NOT NULL CHECK (version >= 1),
+      plan_json TEXT NOT NULL,
+      updated_by TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (household_id) REFERENCES households(id) ON DELETE CASCADE,
+      FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS household_plan_revisions (
+      household_id TEXT NOT NULL,
+      version INTEGER NOT NULL CHECK (version >= 1),
+      plan_json TEXT NOT NULL,
+      created_by TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (household_id, version),
+      FOREIGN KEY (household_id) REFERENCES households(id) ON DELETE CASCADE,
+      FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+    );
+
     -- Ingredients (pantry) table
     CREATE TABLE IF NOT EXISTS ingredients (
       id TEXT PRIMARY KEY,

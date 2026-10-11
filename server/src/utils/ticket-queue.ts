@@ -216,7 +216,8 @@ export function dispatchAI(
   messages: AiMessage[],
   db: SqlDb,
   responseFormat: AiResponseFormat,
-  kind: AiJobKind = 'recipe'
+  kind: AiJobKind = 'recipe',
+  externalSignal?: AbortSignal
 ): Promise<string> {
   const config = activeAiConfig(db, userId);
   if (!config)
@@ -231,6 +232,7 @@ export function dispatchAI(
     config,
     kind,
     payloadBytes,
+    externalSignal,
     run: (_fixedConfig, signal) => callAIWithConfig(config, messages, responseFormat, signal)
   }).result;
 }

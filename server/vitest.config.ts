@@ -13,7 +13,7 @@ import { defineConfig } from 'vitest/config';
  * las ramas del bootstrap que estos tests no montan, no codigo sin probar).
  *
  * Hoy quedan fuera, con su prueba atada a la fase que les corresponde:
- *   - src/routes/** (salvo shopping.routes.ts, household.routes.ts,
+ *   - src/routes/** (salvo shopping.routes.ts, household.routes.ts, household-plan.routes.ts,
  *     calendar.routes.ts, forgot-password.routes.ts, receipts.routes.ts, recipes.routes.ts,
  *     recipe-images.routes.ts y pantry.routes.ts,
  *     con spec propia) y src/index.ts
@@ -26,6 +26,7 @@ import { defineConfig } from 'vitest/config';
 const COVERED = [
   'src/routes/shopping.routes.ts',
   'src/routes/household.routes.ts',
+  'src/routes/household-plan.routes.ts',
   'src/routes/calendar.routes.ts',
   'src/routes/forgot-password.routes.ts',
   'src/routes/ai-queue.routes.ts',
@@ -64,6 +65,8 @@ const COVERED = [
   'src/routes/recipe-step-photos.routes.ts',
   'src/routes/pantry.routes.ts',
   'src/utils/week-calendar.ts',
+  'src/utils/household-plan.store.ts',
+  'src/utils/household-plan-ai.ts',
   'src/utils/weekly-plan.ts',
   'src/utils/caducidades.ts',
   'src/schemas/bcrypt-password.schema.ts',

@@ -31,6 +31,7 @@ export type AiJobKind =
   | 'weekly_plan'
   | 'shopping_photo'
   | 'expiry_estimate'
+  | 'household_plan'
   | 'connection_test';
 
 export interface AiConfigRow {
@@ -202,10 +203,11 @@ export async function callAI(
   messages: AiMessage[],
   db: SqlDb,
   responseFormat: AiResponseFormat,
-  kind: AiJobKind = 'recipe'
+  kind: AiJobKind = 'recipe',
+  externalSignal?: AbortSignal
 ): Promise<string> {
   const { dispatchAI } = await import('./ticket-queue.js');
-  return dispatchAI(userId, messages, db, responseFormat, kind);
+  return dispatchAI(userId, messages, db, responseFormat, kind, externalSignal);
 }
 
 /** Transporte de una configuración ya fijada por el dispatcher. */
@@ -229,6 +231,9 @@ export async function callAIWithConfig(
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    if (signal?.aborted) {
+      throw new AiCallError('PROVIDER', 'AI request was cancelled', 'CANCELLED');
+    }
     const timedOut = /timeout|abort/i.test(message);
     const detail = timedOut ? 'TIMEOUT' : 'CONNECTION_FAILED';
     throw new AiCallError(
@@ -250,7 +255,18 @@ export async function callAIWithConfig(
   } catch {
     throw new AiCallError('BAD_JSON', 'Invalid AI response format');
   }
-  const content = payload?.choices?.[0]?.message?.content;
+  const choice = payload?.choices?.[0];
+  const message = choice?.message;
+  if (choice?.finish_reason === 'length') {
+    throw new AiCallError('BAD_JSON', 'AI response was truncated', 'TRUNCATED');
+  }
+  if (
+    choice?.finish_reason === 'content_filter' ||
+    (typeof message?.refusal === 'string' && message.refusal.trim())
+  ) {
+    throw new AiCallError('BAD_JSON', 'AI provider refused the response', 'REFUSED');
+  }
+  const content = message?.content;
   if (typeof content !== 'string') {
     throw new AiCallError('BAD_JSON', 'Invalid AI response format');
   }

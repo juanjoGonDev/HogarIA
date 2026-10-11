@@ -52,6 +52,10 @@ import {
   utensilFilterSchema
 } from './pantry.schema.js';
 import { createRecipeSchema, recipeFilterSchema, updateRecipeSchema } from './recipe.schema.js';
+import {
+  householdPlanProposalRequestSchema,
+  householdPlanWriteSchema
+} from './household-plan.schema.js';
 import { generatedRecipeCandidateSchema } from './generated-recipe.schema.js';
 import {
   applyLinesSchema,
@@ -229,6 +233,30 @@ const ROWS: Row[] = [
     name: 'createHouseholdSchema',
     schema: createHouseholdSchema,
     required: { name: 'Los del 3B' }
+  },
+  {
+    name: 'householdPlanWriteSchema',
+    schema: householdPlanWriteSchema,
+    required: {
+      baseVersion: 0,
+      plan: {
+        schemaVersion: 1,
+        dwellingType: 'apartment',
+        dwellingTypeLabel: null,
+        summary: '',
+        warnings: [],
+        floors: [
+          { id: 'floor-0', name: 'Planta baja', level: 0, walls: [], openings: [], spaces: [] }
+        ]
+      }
+    },
+    note: 'El plano completo y su versión base se envían juntos para validar y guardar con CAS.'
+  },
+  {
+    name: 'householdPlanProposalRequestSchema',
+    schema: householdPlanProposalRequestSchema,
+    required: { baseVersion: 0 },
+    note: 'La solicitud de texto es opcional si la persona sube un boceto o una foto.'
   },
   { name: 'updateHouseholdSchema', schema: updateHouseholdSchema },
   { name: 'joinHouseholdSchema', schema: joinHouseholdSchema, required: { inviteCode: 'ABC123' } },

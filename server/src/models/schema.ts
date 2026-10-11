@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core';
+import { primaryKey, sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core';
 import { relations } from 'drizzle-orm';
 
 // ═══════════════════════════════════════════════════════════════════
@@ -48,6 +48,31 @@ export const householdsRelations = relations(households, ({ many }) => ({
   aiConfigs: many(aiConfigs),
   calendars: many(weeklyCalendars)
 }));
+
+export const householdPlans = sqliteTable('household_plans', {
+  householdId: text('household_id')
+    .primaryKey()
+    .references(() => households.id, { onDelete: 'cascade' }),
+  version: integer('version').notNull(),
+  planJson: text('plan_json').notNull(),
+  updatedBy: text('updated_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: text('created_at').default('CURRENT_TIMESTAMP'),
+  updatedAt: text('updated_at').default('CURRENT_TIMESTAMP')
+});
+
+export const householdPlanRevisions = sqliteTable(
+  'household_plan_revisions',
+  {
+    householdId: text('household_id')
+      .notNull()
+      .references(() => households.id, { onDelete: 'cascade' }),
+    version: integer('version').notNull(),
+    planJson: text('plan_json').notNull(),
+    createdBy: text('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: text('created_at').default('CURRENT_TIMESTAMP')
+  },
+  (table) => [primaryKey({ columns: [table.householdId, table.version] })]
+);
 
 // ═══════════════════════════════════════════════════════════════════
 // Ingredients (Pantry)

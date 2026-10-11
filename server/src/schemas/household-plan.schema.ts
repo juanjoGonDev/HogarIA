@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { createAiResponseFormat } from './ai-response-format.js';
+import { formText } from './form.js';
 
 export const HOUSEHOLD_AREA_KINDS = [
   'entrance',
@@ -152,6 +153,20 @@ export const HOUSEHOLD_PLAN_RESPONSE_FORMAT = createAiResponseFormat(
   'household_plan',
   householdPlanObjectSchema
 );
+
+export const householdPlanWriteSchema = z
+  .object({
+    baseVersion: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+    plan: householdPlanSchema
+  })
+  .strict();
+
+export const householdPlanProposalRequestSchema = z
+  .object({
+    baseVersion: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+    prompt: formText(4_000, 'Solicitud')
+  })
+  .strict();
 
 export function findHouseholdPlanIssues(plan: HouseholdPlan): SemanticIssue[] {
   const issues: SemanticIssue[] = [];

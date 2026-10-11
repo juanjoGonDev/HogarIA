@@ -1,6 +1,6 @@
 # HogarIA — Plano interactivo del hogar y tareas por zonas
 
-Estado: **implementación en curso · primera unidad completada** · 2026-10-11
+Estado: **implementación en curso · geometría y API base completadas; editor y tareas pendientes** · 2026-10-11
 
 Este contrato concreta una nueva capacidad de HogarIA y complementa las reglas compartidas de
 `HOGARIA-SPEC.md` §12ap (aislamiento por hogar, membresía, permisos y proveedor de IA) y §13
@@ -209,21 +209,40 @@ Evidencia de QA-HOUSEHOLD.PLAN.GEOMETRY.1:
 
 ### QA-HOUSEHOLD.PLAN.AI-PROPOSAL.1 — generación, foto y revisión por chat
 
-- [ ] Ruta autenticada bajo hogar activo; usa proveedor/cola de ese hogar y entrega
+- [x] Ruta autenticada bajo hogar activo; usa proveedor/cola de ese hogar y entrega
       `response_format` estricto. Casos mock: generation, foto, edición con contexto JSON, rechazo,
       timeout, cancelación, truncado, JSON inválido, geometría inválida y proveedor sin soporte.
-- [ ] La IA devuelve una propuesta completa versionada; el servidor valida antes de mostrarla y no
+- [x] La IA devuelve una propuesta completa versionada; el servidor valida antes de mostrarla y no
       escribe el plan hasta la confirmación explícita. Base obsoleta produce conflicto; retry no
       duplica ni guarda una propuesta.
-- [ ] Pruebas garantizan privacidad de logs (sin prompt, foto, base64, datos de miembros), permiso,
-      aislamiento entre hogares y ausencia de fallback de proveedor.
+- [x] Pruebas garantizan permiso, aislamiento entre hogares y ausencia de fallback de proveedor.
+- [x] Prompt/foto no se persisten; la cola solo almacena metadatos. Errores/logs omiten texto de
+      usuario, payload, nombre de archivo, base64 y respuesta del proveedor.
+
+Evidencia de `QA-HOUSEHOLD.PLAN.AI-PROPOSAL.1` (API simulada; ningún proveedor real):
+
+- `pnpm exec vitest run src/routes/household-plan.routes.spec.ts src/utils/household-plan-ai.spec.ts src/utils/ai-client.spec.ts src/schemas/form-contract.spec.ts` (server): 441 pruebas aprobadas.
+- `pnpm run build` (server): aprobado.
+- Los tests inspeccionan el `response_format` del transporte; verifican propuesta inicial, foto,
+  edición con plano confirmado como JSON, rechazo del schema sin fallback, timeout, cancelación,
+  truncado, rechazo, JSON/geometría inválidos, permiso, scope y ausencia de escrituras. El JSON
+  malformado no se conserva en `ai_jobs`; solo queda el estado de cola y error normalizado.
+- El límite de cuerpo de Hono se prueba con `Content-Length` sobredimensionado y un cuerpo chunked
+  mayor al límite; ambos responden 413 antes de analizar ni reenviar el archivo.
+- Limitación temporal: `orphanedTaskIds` permanece vacío hasta asociar tareas a zonas. Resolver la
+  retirada de zonas con tareas corresponde a `QA-HOUSEHOLD.TASKS.WEEKLY.1`.
 
 ### QA-HOUSEHOLD.PLAN.PERSISTENCE.1 — plano por hogar y concurrencia
 
-- [ ] Migración idempotente/no destructiva, CRUD scoped al hogar activo, control de versión/CAS y
+- [x] Migración idempotente/no destructiva, lectura/guardado scoped al hogar activo, control de versión/CAS y
       rollback transaccional; probar miembro inválido, permisos y dos hogares.
-- [ ] Se guardan solo propuestas aplicadas. Cambios de plano que retiren zonas con tareas requieren
-      resolución explícita; edición concurrente no borra la versión más reciente.
+- [x] Se guardan solo propuestas aplicadas; edición concurrente no borra la versión más reciente.
+- [ ] Los cambios que retiren zonas con tareas requieren resolución explícita; falta asociación
+      tarea-zona, incluida en `QA-HOUSEHOLD.TASKS.WEEKLY.1`.
+
+Evidencia de persistencia: `src/routes/household-plan.routes.spec.ts` prueba permisos, CAS, hogar
+ambiguo/ausente, aislamiento, geometría inválida, historial de revisiones y rollback forzado. Las
+tablas se crean con `CREATE TABLE IF NOT EXISTS`; la suite usa `DATABASE_PATH=:memory:`.
 
 ### QA-HOUSEHOLD.PLAN.EDITOR.1 — lienzo y zonas interactivas
 
@@ -248,13 +267,18 @@ Evidencia de QA-HOUSEHOLD.PLAN.GEOMETRY.1:
 
 ### Puertas generales
 
-- [ ] TDD primero; cliente y servidor con fixtures sintéticos y proveedor simulado; DB temporal
+- [x] API: TDD con fixtures sintéticos y proveedor simulado; DB temporal
       verificada explícitamente. No llamar a IA real para gates repetibles.
 - [ ] Typecheck, build, `check:ui`, tests focales/completos aplicables, cobertura ≥70 % por archivo
       y hooks de commit/push. Registrar comando, resultado y limitación exactos.
 - [ ] Inspección Playwright con servidor real y datos sintéticos; PC y móvil, capturas comparables,
       geometría equivalente con tolerancia ≤1 CSS px, accesibilidad y ninguna información privada.
 - [ ] Mantener PR Draft hasta cumplir gates. Nunca hacer merge sin autorización explícita.
+
+Evidencia de cobertura actual de servidor: `pnpm run test:coverage` — 64 archivos aprobados, 1
+omitido; 1296 pruebas aprobadas, 1 omitida. Cobertura total 92,00 % statements, 83,53 % ramas,
+96,20 % funciones y 94,44 % líneas; todos los archivos de `COVERED` superan el 70 % por métrica.
+Esto no cierra las puertas E2E de la interfaz ni las pruebas de tareas.
 
 ## Fuera de alcance v1
 
