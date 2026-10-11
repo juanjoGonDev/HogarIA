@@ -56,6 +56,10 @@ import {
   householdPlanProposalRequestSchema,
   householdPlanWriteSchema
 } from './household-plan.schema.js';
+import {
+  householdTaskWeekQuerySchema,
+  householdTaskWeekWriteSchema
+} from './household-task.schema.js';
 import { generatedRecipeCandidateSchema } from './generated-recipe.schema.js';
 import {
   applyLinesSchema,
@@ -257,6 +261,19 @@ const ROWS: Row[] = [
     schema: householdPlanProposalRequestSchema,
     required: { baseVersion: 0 },
     note: 'La solicitud de texto es opcional si la persona sube un boceto o una foto.'
+  },
+  query('householdTaskWeekQuerySchema', householdTaskWeekQuerySchema, {
+    weekStart: '2026-10-05'
+  }),
+  {
+    name: 'householdTaskWeekWriteSchema',
+    schema: householdTaskWeekWriteSchema,
+    required: {
+      baseVersion: 0,
+      weekStart: '2026-10-05',
+      tasks: []
+    },
+    note: 'El lote semanal completo se versiona y valida antes de guardar.'
   },
   { name: 'updateHouseholdSchema', schema: updateHouseholdSchema },
   { name: 'joinHouseholdSchema', schema: joinHouseholdSchema, required: { inviteCode: 'ABC123' } },

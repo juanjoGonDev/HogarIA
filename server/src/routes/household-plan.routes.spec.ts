@@ -48,6 +48,12 @@ function validPlan(): HouseholdPlan {
   };
 }
 
+function planWithoutSpaces(): HouseholdPlan {
+  const plan = validPlan();
+  plan.floors[0].spaces = [];
+  return plan;
+}
+
 describe('household plan persistence routes', () => {
   beforeAll(async () => {
     const database = await import('../config/database.js');
@@ -71,6 +77,7 @@ describe('household plan persistence routes', () => {
   afterEach(() => vi.unstubAllGlobals());
 
   beforeEach(() => {
+    db.prepare('DELETE FROM household_task_weeks').run();
     db.prepare('DELETE FROM household_plan_revisions').run();
     db.prepare('DELETE FROM household_plans').run();
     db.prepare('DELETE FROM ai_jobs').run();
@@ -106,23 +113,44 @@ describe('household plan persistence routes', () => {
     };
   }
 
-  function call(user: User, method: string, body?: unknown) {
+  function currentHouseholdId(user: User): string | undefined {
+    return (
+      (
+        db.prepare('SELECT household_id FROM users WHERE id = ?').get(user.id) as
+          { household_id: string | null } | undefined
+      )?.household_id ?? undefined
+    );
+  }
+
+  function call(
+    user: User,
+    method: string,
+    body?: unknown,
+    requestedHouseholdId = currentHouseholdId(user)
+  ) {
     return app.request('/api/household/plan', {
       method,
       headers: {
         authorization: `Bearer ${user.token}`,
-        'content-type': 'application/json'
+        'content-type': 'application/json',
+        ...(requestedHouseholdId ? { 'x-household-id': requestedHouseholdId } : {})
       },
       body: body === undefined ? undefined : JSON.stringify(body)
     });
   }
 
-  function callProposal(user: User, body: unknown, signal?: AbortSignal) {
+  function callProposal(
+    user: User,
+    body: unknown,
+    signal?: AbortSignal,
+    requestedHouseholdId = currentHouseholdId(user)
+  ) {
     const isForm = body instanceof FormData;
     return app.request('/api/household/plan/proposal', {
       method: 'POST',
       headers: {
         authorization: `Bearer ${user.token}`,
+        ...(requestedHouseholdId ? { 'x-household-id': requestedHouseholdId } : {}),
         ...(isForm ? {} : { 'content-type': 'application/json' })
       },
       body: isForm ? body : JSON.stringify(body),
@@ -231,6 +259,43 @@ describe('household plan persistence routes', () => {
     });
   });
 
+  it('rejects a plan read, write, or AI proposal captured for a home that is no longer active', async () => {
+    makeHousehold('home-a');
+    makeHousehold('home-b');
+    const member = makeUser('switching-member', 'home-a', true);
+    db.prepare(
+      `INSERT INTO household_members (id, household_id, user_id, role, permissions)
+       VALUES ('switching-member-b', 'home-b', ?, 'member', ?)`
+    ).run(member.id, JSON.stringify({ settings: true }));
+    db.prepare('UPDATE users SET household_id = ? WHERE id = ?').run('home-b', member.id);
+
+    const staleRead = await call(member, 'GET', undefined, 'home-a');
+    expect(staleRead.status).toBe(409);
+    expect(await staleRead.json()).toMatchObject({
+      success: false,
+      code: 'HOUSEHOLD_CONTEXT_CHANGED'
+    });
+
+    const staleWrite = await call(member, 'PUT', { baseVersion: 0, plan: validPlan() }, 'home-a');
+    expect(staleWrite.status).toBe(409);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM household_plans').get()).toEqual({ count: 0 });
+
+    const provider = vi.fn();
+    vi.stubGlobal('fetch', provider);
+    const staleProposal = await callProposal(
+      member,
+      { baseVersion: 0, prompt: 'Añade una cocina' },
+      undefined,
+      'home-a'
+    );
+    expect(staleProposal.status).toBe(409);
+    expect(await staleProposal.json()).toMatchObject({
+      success: false,
+      code: 'HOUSEHOLD_CONTEXT_CHANGED'
+    });
+    expect(provider).not.toHaveBeenCalled();
+  });
+
   it('returns a validated, versioned proposal through the household queue without saving it', async () => {
     makeHousehold('home-a');
     const owner = makeUser('owner-a', 'home-a', true);
@@ -270,6 +335,57 @@ describe('household plan persistence routes', () => {
     });
   });
 
+  it('includes the exact tasks orphaned by an AI proposal that removes their zone', async () => {
+    makeHousehold('home-a');
+    const owner = makeUser('owner-a', 'home-a', true);
+    addAiConfig('ai-home-a', owner.id, 'home-a');
+    db.prepare(
+      'INSERT INTO household_plans (household_id, version, plan_json) VALUES (?, 1, ?)'
+    ).run('home-a', JSON.stringify(validPlan()));
+    db.prepare(
+      `INSERT INTO household_task_weeks
+        (household_id, week_start, version, tasks_json, updated_by)
+       VALUES (?, ?, 1, ?, ?)`
+    ).run(
+      'home-a',
+      '2026-10-05',
+      JSON.stringify([
+        {
+          id: 'task-in-kitchen',
+          title: 'Limpiar',
+          details: null,
+          spaceId: 'living-room',
+          scheduledDate: '2026-10-05',
+          assignedMemberId: null,
+          completed: false
+        }
+      ]),
+      owner.id
+    );
+    const proposedPlan = planWithoutSpaces();
+    vi.stubGlobal(
+      'fetch',
+      async () =>
+        new Response(
+          JSON.stringify({
+            choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(proposedPlan) } }]
+          }),
+          { status: 200 }
+        )
+    );
+
+    const response = await callProposal(owner, { baseVersion: 1, prompt: 'Quita la cocina' });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      success: true,
+      data: { orphanedTaskIds: ['task-in-kitchen'] }
+    });
+    expect(db.prepare('SELECT version FROM household_task_weeks').get()).toMatchObject({
+      version: 1
+    });
+  });
+
   it('attaches a sketch from memory and never sends its uploaded filename', async () => {
     makeHousehold('home-a');
     const owner = makeUser('owner-a', 'home-a', true);
@@ -286,6 +402,9 @@ describe('household plan persistence routes', () => {
     });
     const form = new FormData();
     form.set('baseVersion', '0');
+    const draft = validPlan();
+    draft.summary = 'Borrador local';
+    form.set('draftPlan', JSON.stringify(draft));
     form.set(
       'image',
       new File(
@@ -297,6 +416,10 @@ describe('household plan persistence routes', () => {
 
     const response = await callProposal(owner, form);
     expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      success: true,
+      data: { draft: { summary: 'Borrador local' } }
+    });
     expect(providerBody.messages[1].content).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -306,6 +429,7 @@ describe('household plan persistence routes', () => {
       ])
     );
     expect(JSON.stringify(providerBody)).not.toContain('private-sketch-name');
+    expect(providerBody.messages[1].content[0].text).toContain(JSON.stringify(draft));
     expect(providerBody.response_format).toEqual(HOUSEHOLD_PLAN_RESPONSE_FORMAT);
   });
 
@@ -325,6 +449,16 @@ describe('household plan persistence routes', () => {
     const missing = await callProposal(owner, { baseVersion: 0, prompt: '  ' });
     expect(missing.status).toBe(400);
     expect(await missing.json()).toMatchObject({ success: false, code: 'PLAN_REQUEST_REQUIRED' });
+
+    const invalidDraft = validPlan();
+    invalidDraft.floors[0].spaces[0].polygon[0].x = 10_001;
+    const badDraft = await callProposal(owner, {
+      baseVersion: 0,
+      prompt: 'Usa el borrador',
+      draftPlan: invalidDraft
+    });
+    expect(badDraft.status).toBe(400);
+    expect(await badDraft.json()).toMatchObject({ success: false, code: 'INVALID_PLAN_REQUEST' });
 
     const denied = await callProposal(reader, { baseVersion: 0, prompt: 'Añade una cocina' });
     expect(denied.status).toBe(403);
@@ -372,6 +506,7 @@ describe('household plan persistence routes', () => {
       method: 'POST',
       headers: {
         authorization: `Bearer ${owner.token}`,
+        'x-household-id': 'home-a',
         'content-type': 'application/json'
       },
       body: JSON.stringify({ baseVersion: 0, prompt: 'Test', photoUrl: 'https://example.test' })
@@ -419,6 +554,8 @@ describe('household plan persistence routes', () => {
     const owner = makeUser('owner-a', 'home-a', true);
     addAiConfig('ai-home-a', owner.id, 'home-a');
     await call(owner, 'PUT', { baseVersion: 0, plan: validPlan() });
+    const draft = validPlan();
+    draft.summary = 'Borrador en memoria';
     let providerBody: any;
     const provider = vi.fn(async (_url: string, init: RequestInit) => {
       providerBody = JSON.parse(String(init.body));
@@ -428,7 +565,8 @@ describe('household plan persistence routes', () => {
 
     const response = await callProposal(owner, {
       baseVersion: 1,
-      prompt: 'Mueve la cocina sin cambiar el resto'
+      prompt: 'Mueve la cocina sin cambiar el resto',
+      draftPlan: draft
     });
 
     expect(response.status).toBe(502);
@@ -439,6 +577,7 @@ describe('household plan persistence routes', () => {
     expect(provider).toHaveBeenCalledTimes(1);
     expect(providerBody.response_format).toEqual(HOUSEHOLD_PLAN_RESPONSE_FORMAT);
     expect(providerBody.messages[1].content[0].text).toContain(JSON.stringify(validPlan()));
+    expect(providerBody.messages[1].content[0].text).toContain(JSON.stringify(draft));
     expect(providerBody.messages[1].content[0].text).toContain('Mueve la cocina');
     expect(db.prepare('SELECT COUNT(*) AS count FROM household_plan_revisions').get()).toEqual({
       count: 1
@@ -509,6 +648,62 @@ describe('household plan persistence routes', () => {
     const response = await call(user, 'GET');
     expect(response.status).toBe(404);
     expect(await response.json()).toMatchObject({ success: false, code: 'HOUSEHOLD_REQUIRED' });
+  });
+
+  it('requires confirmation before detaching zone-linked tasks and updates both records atomically', async () => {
+    makeHousehold('home-a');
+    const owner = makeUser('owner-a', 'home-a', true);
+    const created = await call(owner, 'PUT', { baseVersion: 0, plan: validPlan() });
+    expect(created.status).toBe(200);
+    db.prepare(
+      `INSERT INTO household_task_weeks
+        (household_id, week_start, version, tasks_json, updated_by)
+       VALUES (?, ?, 1, ?, ?)`
+    ).run(
+      'home-a',
+      '2026-10-05',
+      JSON.stringify([
+        {
+          id: 'clean-kitchen',
+          title: 'Limpiar cocina',
+          details: null,
+          spaceId: 'living-room',
+          scheduledDate: '2026-10-05',
+          assignedMemberId: null,
+          completed: false
+        }
+      ]),
+      owner.id
+    );
+
+    const needsConfirmation = await call(owner, 'PUT', {
+      baseVersion: 1,
+      plan: planWithoutSpaces()
+    });
+    expect(needsConfirmation.status).toBe(409);
+    expect(await needsConfirmation.json()).toMatchObject({
+      success: false,
+      code: 'PLAN_TASKS_REQUIRE_CONFIRMATION',
+      data: { orphanedTaskIds: ['clean-kitchen'] }
+    });
+    expect(db.prepare('SELECT version FROM household_plans').get()).toMatchObject({ version: 1 });
+    expect(db.prepare('SELECT version FROM household_task_weeks').get()).toMatchObject({
+      version: 1
+    });
+
+    const confirmed = await call(owner, 'PUT', {
+      baseVersion: 1,
+      plan: planWithoutSpaces(),
+      confirmOrphanedTaskIds: ['clean-kitchen']
+    });
+    expect(confirmed.status).toBe(200);
+    expect(db.prepare('SELECT version FROM household_plans').get()).toMatchObject({ version: 2 });
+    expect(db.prepare('SELECT version FROM household_task_weeks').get()).toMatchObject({
+      version: 2
+    });
+    expect(db.prepare('SELECT tasks_json FROM household_task_weeks').get()).toMatchObject({
+      tasks_json: expect.stringContaining('"spaceId":null')
+    });
   });
 
   it('scopes plans to the active household even when a member belongs to two homes', async () => {
@@ -649,7 +844,11 @@ describe('household plan persistence routes', () => {
 
     const wrongMedia = await app.request('/api/household/plan/proposal', {
       method: 'POST',
-      headers: { authorization: `Bearer ${owner.token}`, 'content-type': 'text/plain' },
+      headers: {
+        authorization: `Bearer ${owner.token}`,
+        'x-household-id': 'home-a',
+        'content-type': 'text/plain'
+      },
       body: 'not supported'
     });
     expect(wrongMedia.status).toBe(415);

@@ -74,6 +74,22 @@ export const householdPlanRevisions = sqliteTable(
   (table) => [primaryKey({ columns: [table.householdId, table.version] })]
 );
 
+export const householdTaskWeeks = sqliteTable(
+  'household_task_weeks',
+  {
+    householdId: text('household_id')
+      .notNull()
+      .references(() => households.id, { onDelete: 'cascade' }),
+    weekStart: text('week_start').notNull(),
+    version: integer('version').notNull(),
+    tasksJson: text('tasks_json').notNull(),
+    updatedBy: text('updated_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: text('created_at').default('CURRENT_TIMESTAMP'),
+    updatedAt: text('updated_at').default('CURRENT_TIMESTAMP')
+  },
+  (table) => [primaryKey({ columns: [table.householdId, table.weekStart] })]
+);
+
 // ═══════════════════════════════════════════════════════════════════
 // Ingredients (Pantry)
 // ═══════════════════════════════════════════════════════════════════

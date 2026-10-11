@@ -157,14 +157,22 @@ export const HOUSEHOLD_PLAN_RESPONSE_FORMAT = createAiResponseFormat(
 export const householdPlanWriteSchema = z
   .object({
     baseVersion: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
-    plan: householdPlanSchema
+    plan: householdPlanSchema,
+    confirmOrphanedTaskIds: z
+      .preprocess(
+        (value) =>
+          value == null || (typeof value === 'string' && value.trim() === '') ? [] : value,
+        z.array(idSchema).max(10_000)
+      )
+      .default([])
   })
   .strict();
 
 export const householdPlanProposalRequestSchema = z
   .object({
     baseVersion: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
-    prompt: formText(4_000, 'Solicitud')
+    prompt: formText(4_000, 'Solicitud'),
+    draftPlan: householdPlanSchema.nullish()
   })
   .strict();
 

@@ -3,6 +3,7 @@ import {
   HOUSEHOLD_AREA_KINDS,
   HOUSEHOLD_PLAN_RESPONSE_FORMAT,
   PLAN_LIMITS,
+  householdPlanWriteSchema,
   householdPlanSchema
 } from './household-plan.schema.js';
 import type { HouseholdPlan } from './household-plan.schema.js';
@@ -84,6 +85,22 @@ function expectTooBig(input: unknown, path: Array<string | number>): void {
 }
 
 describe('household plan schema and geometry contract', () => {
+  it('normalizes an empty orphan-task confirmation field to no confirmations', () => {
+    const plan = makeValidPlan();
+    const base = { baseVersion: 0, plan };
+
+    for (const value of [undefined, null, '', '   ']) {
+      const input = { ...base, confirmOrphanedTaskIds: value };
+      if (value === undefined)
+        delete (input as { confirmOrphanedTaskIds?: unknown }).confirmOrphanedTaskIds;
+      expect(householdPlanWriteSchema.parse(input).confirmOrphanedTaskIds).toEqual([]);
+    }
+
+    expect(
+      householdPlanWriteSchema.safeParse({ ...base, confirmOrphanedTaskIds: 'task-1' }).success
+    ).toBe(false);
+  });
+
   it('accepts a bounded multi-entity plan, including nested exterior spaces', () => {
     expect(householdPlanSchema.safeParse(makeValidPlan()).success).toBe(true);
   });

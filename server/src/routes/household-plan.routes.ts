@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { getDatabase } from '../config/database.js';
 import { authMiddleware } from '../middleware/auth.middleware.js';
@@ -9,6 +9,7 @@ import {
 import type { AppEnv } from '../types/hono-env.js';
 import { activeHouseholdId, needsActiveHouseholdSelection } from '../utils/household-context.js';
 import { readHouseholdPlan, saveHouseholdPlan } from '../utils/household-plan.store.js';
+import { findOrphanedHouseholdTaskIds } from '../utils/household-task.store.js';
 import { AiCallError, callAI } from '../utils/ai-client.js';
 import { resolveAiOutputLanguage } from '../utils/ai-output-language.js';
 import {
@@ -39,6 +40,7 @@ householdPlanRoutes.get('/plan', (c) => {
     }
     return c.json({ success: false, code: 'HOUSEHOLD_REQUIRED' }, 404);
   }
+  if (c.req.header('x-household-id') !== householdId) return householdContextChanged(c);
 
   try {
     c.header('Cache-Control', 'no-store');
@@ -71,6 +73,7 @@ householdPlanRoutes.post(
       }
       return c.json({ success: false, code: 'HOUSEHOLD_REQUIRED' }, 404);
     }
+    if (c.req.header('x-household-id') !== householdId) return householdContextChanged(c);
     if (!canEditHouseholdPlan(db, householdId, userId)) {
       return c.json(
         {
@@ -90,16 +93,27 @@ householdPlanRoutes.post(
         const form = await c.req.formData();
         const promptValue = form.get('prompt');
         const baseVersionValue = form.get('baseVersion');
+        const draftPlanValue = form.get('draftPlan');
         const imageValues = form.getAll('image');
         if (
           (promptValue !== null && typeof promptValue !== 'string') ||
+          (draftPlanValue !== null && typeof draftPlanValue !== 'string') ||
           imageValues.length > 1 ||
           (imageValues.length === 1 && typeof imageValues[0] === 'string')
         ) {
           return c.json({ success: false, code: 'INVALID_PLAN_REQUEST' }, 400);
         }
+        let draftPlan: unknown;
+        if (typeof draftPlanValue === 'string' && draftPlanValue.trim()) {
+          try {
+            draftPlan = JSON.parse(draftPlanValue);
+          } catch {
+            return c.json({ success: false, code: 'INVALID_PLAN_REQUEST' }, 400);
+          }
+        }
         body = {
           prompt: typeof promptValue === 'string' ? promptValue : undefined,
+          draftPlan,
           baseVersion:
             typeof baseVersionValue === 'string' && baseVersionValue.trim()
               ? Number(baseVersionValue)
@@ -178,6 +192,7 @@ householdPlanRoutes.post(
           ),
           prompt,
           currentPlan: snapshot.plan,
+          draftPlan: input.data.draftPlan,
           attachment,
           signal: c.req.raw.signal
         },
@@ -189,9 +204,10 @@ householdPlanRoutes.post(
         data: {
           baseVersion: snapshot.version,
           current: snapshot.plan,
+          draft: input.data.draftPlan ?? snapshot.plan,
           proposal: result.plan,
           diff: result.diff,
-          orphanedTaskIds: []
+          orphanedTaskIds: findOrphanedHouseholdTaskIds(db, householdId, snapshot.plan, result.plan)
         }
       });
     } catch (error) {
@@ -259,6 +275,7 @@ householdPlanRoutes.put('/plan', async (c) => {
     }
     return c.json({ success: false, code: 'HOUSEHOLD_REQUIRED' }, 404);
   }
+  if (c.req.header('x-household-id') !== householdId) return householdContextChanged(c);
 
   if (!canEditHouseholdPlan(db, householdId, userId)) {
     return c.json(
@@ -296,8 +313,21 @@ householdPlanRoutes.put('/plan', async (c) => {
       householdId,
       userId,
       input.data.baseVersion,
-      input.data.plan
+      input.data.plan,
+      input.data.confirmOrphanedTaskIds
     );
+    if (result.status === 'tasks-require-confirmation') {
+      c.header('Cache-Control', 'no-store');
+      return c.json(
+        {
+          success: false,
+          code: 'PLAN_TASKS_REQUIRE_CONFIRMATION',
+          message: 'El cambio de plano dejaría tareas sin zona. Confirma para desvincularlas.',
+          data: { snapshot: result.snapshot, orphanedTaskIds: result.orphanedTaskIds }
+        },
+        409
+      );
+    }
     if (result.status === 'conflict') {
       c.header('Cache-Control', 'no-store');
       return c.json(
@@ -342,4 +372,15 @@ function canEditHouseholdPlan(
   } catch {
     return false;
   }
+}
+
+function householdContextChanged(c: Context<AppEnv>) {
+  return c.json(
+    {
+      success: false,
+      code: 'HOUSEHOLD_CONTEXT_CHANGED',
+      message: 'El hogar activo cambió. Vuelve a cargarlo antes de continuar.'
+    },
+    409
+  );
 }

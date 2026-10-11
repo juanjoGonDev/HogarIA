@@ -1,5 +1,9 @@
 import type Database from 'better-sqlite3';
 import { householdPlanSchema, type HouseholdPlan } from '../schemas/household-plan.schema.js';
+import {
+  detachHouseholdTasksFromRemovedSpaces,
+  findOrphanedHouseholdTaskIds
+} from './household-task.store.js';
 
 export interface VersionedHouseholdPlan {
   version: number;
@@ -8,7 +12,12 @@ export interface VersionedHouseholdPlan {
 
 export type SaveHouseholdPlanResult =
   | { status: 'saved'; snapshot: VersionedHouseholdPlan }
-  | { status: 'conflict'; snapshot: VersionedHouseholdPlan };
+  | { status: 'conflict'; snapshot: VersionedHouseholdPlan }
+  | {
+      status: 'tasks-require-confirmation';
+      snapshot: VersionedHouseholdPlan;
+      orphanedTaskIds: string[];
+    };
 
 interface StoredPlanRow {
   version: number;
@@ -40,7 +49,8 @@ export function saveHouseholdPlan(
   householdId: string,
   userId: string,
   baseVersion: number,
-  plan: HouseholdPlan
+  plan: HouseholdPlan,
+  confirmOrphanedTaskIds: readonly string[] = []
 ): SaveHouseholdPlanResult {
   if (!Number.isSafeInteger(baseVersion) || baseVersion < 0) {
     throw new Error('Plan base version is invalid.');
@@ -52,6 +62,20 @@ export function saveHouseholdPlan(
   return db.transaction((): SaveHouseholdPlanResult => {
     const current = readHouseholdPlan(db, householdId);
     if (current.version !== baseVersion) return { status: 'conflict', snapshot: current };
+
+    const orphanedTaskIds = findOrphanedHouseholdTaskIds(
+      db,
+      householdId,
+      current.plan,
+      parsedPlan.data
+    );
+    const confirmed = new Set(confirmOrphanedTaskIds);
+    if (orphanedTaskIds.some((id) => !confirmed.has(id))) {
+      return { status: 'tasks-require-confirmation', snapshot: current, orphanedTaskIds };
+    }
+    if (orphanedTaskIds.length) {
+      detachHouseholdTasksFromRemovedSpaces(db, householdId, userId, orphanedTaskIds);
+    }
 
     const nextVersion = current.version + 1;
     if (current.version === 0) {
