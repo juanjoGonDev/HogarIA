@@ -1,6 +1,6 @@
 # HogarIA — Plano interactivo del hogar y tareas por zonas
 
-Estado: **implementación, verificaciones locales y CI completados · PR #47 listo para revisión** · 2026-10-11
+Estado: **funcionalidad y CI completados; pase de fidelidad visual en curso · PR #47 en Draft** · 2026-10-11
 
 Este contrato concreta una nueva capacidad de HogarIA y complementa las reglas compartidas de
 `HOGARIA-SPEC.md` §12ap (aislamiento por hogar, membresía, permisos y proveedor de IA) y §13
@@ -280,6 +280,46 @@ Evidencia del editor y tareas:
 - El flujo verifica lienzo/zonas, pared exterior/puerta principal, pisos y confirmación al borrarlos, carga de imagen, propuesta sin escritura prematura, cambio de pestaña con borrador conservado, tarea por zona, preview equitativo/no consecutivo, persistencia y edición tras recargar.
 - Viewports probados: 320, 359, 360, 639, 640, 767, 768, 1023 y 1024 px, además de 568×320; la pestaña conserva geometría/tipografía/espaciado equivalente con tolerancia ≤1 px y no hay overflow horizontal. Mobile Chrome usa `tap` en el plano y teclado; los componentes aplican `env(safe-area-inset-bottom, 0px)`. La emulación no sustituye comprobación en hardware físico con recorte/notch.
 - Capturas PC/móvil sintéticas inspeccionadas en `.e2e-screenshots/household-plan-tasks/{chromium,mobile-chrome}/` (lienzo, propuesta, tareas previas al reparto y semana guardada). Se excluyen de Git.
+
+### QA-HOUSEHOLD.PLAN.VISUAL-FIDELITY.1 — interfaz según los prototipos aprobados
+
+La referencia es la secuencia de seis mockups de esta conversación (archivos `exec-3d60ee65-e311-4692-a979-b1f4564929a9.png`,
+`exec-3be5f6ed-8bd1-47a8-b708-35ab9452dff0.png`, `exec-9299b3b6-c022-4f96-b9c4-7eb0337afc28.png`,
+`exec-e2e39a1a-d995-4927-bc38-205c925ab781.png`, `exec-455e098e-dd5b-4600-b0aa-1c9939baf363.png` y
+`exec-042a1622-76b0-4f9a-87d6-bc7f4e404ba3.png`). Hay que cotejar visualmente con esas imágenes, no
+solo comprobar que los controles existen. Mantener el shell y los tokens geométricos de HogarIA;
+fondo claro, superficies blancas, naranja solo para acción/selección, líneas azul marino y zonas
+pastel. Evitar tarjetas redundantes, paneles vacíos y formularios que reduzcan el plano a una miniatura.
+
+- [ ] **Inicio/método:** tipo de vivienda y número de plantas arriba; tres métodos (lienzo libre,
+      foto con IA, constructor guiado) en tarjetas equivalentes; CTA naranja `Empezar plano`. En móvil,
+      contenido apilado y CTA alcanzable sin desplazamiento lateral.
+- [ ] **Editor:** planta de varias estancias creíble como elemento principal; herramientas de
+      selección, pared, puerta, ventana y zona en barra horizontal visible; selector de plantas y
+      deshacer/zoom junto al lienzo; acción de previsualizar/aplicar clara. En móvil, lienzo ancho y
+      desplazable, herramientas táctiles compactas en dock de dos filas, sin paneles laterales que
+      estrangulen el dibujo.
+- [ ] **Foto/propuesta:** original y plano generado comparables, con acciones revisar, aplicar o
+      pedir cambio; móvil apila imagen y resultado sin esconder las acciones.
+- [ ] **Asignación de zonas:** plano seleccionable junto al panel de zona/responsable en escritorio;
+      al seleccionar una zona, móvil usa hoja inferior compacta con asignación y guardar.
+- [ ] **Tareas semanales:** plano interactivo en la columna principal y editor de tarea/reparto/lista
+      de la semana en columna secundaria; indicar persona, zona y día, con controles de asignación
+      manual, aleatoria equitativa y guardar semana. En móvil, plano primero y panel de tareas debajo.
+- [ ] **Ajuste por chat:** plano actual y propuesta visibles en paralelo con conversación y control de
+      aplicar/descartar; móvil permite alternar Actual/Propuesta y mantiene el chat/acciones accesibles
+      a continuación.
+- [ ] Los seis flujos anteriores quedan accesibles desde el producto real y preservan funciones,
+      permisos, persistencia, navegación, borradores y validación de IA; ninguna propuesta se aplica
+      automáticamente. Añadir datos sintéticos visualmente completos al E2E, sin fixtures personales.
+- [ ] Comparar capturas reales de Playwright con los seis mockups para escritorio y móvil, al menos
+      1440×900, 390×844, ancho mínimo soportado, orientación horizontal y ambos lados de los
+      breakpoints usados por estos componentes. Inspeccionar todas las capturas e iterar sobre
+      diferencias evidentes de jerarquía, distribución, densidad y proporciones antes de marcar.
+- [ ] Validar teclado, foco, nombres accesibles, contraste, controles táctiles, safe-area y ausencia
+      de overflow; guardar capturas sintéticas comparables en el directorio ignorado de E2E.
+- [ ] Registrar comandos, resultados y limitaciones reproducibles. No declarar fidelidad visual
+      completa basándose solo en unit tests, compilación o presencia de controles.
 
 ### Puertas generales
 
