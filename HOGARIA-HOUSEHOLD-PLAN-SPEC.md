@@ -1,6 +1,6 @@
 # HogarIA — Plano interactivo del hogar y tareas por zonas
 
-Estado: **implementación en curso · geometría y API base completadas; editor y tareas pendientes** · 2026-10-11
+Estado: **implementación terminada · validación final de hooks/CI pendiente** · 2026-10-11
 
 Este contrato concreta una nueva capacidad de HogarIA y complementa las reglas compartidas de
 `HOGARIA-SPEC.md` §12ap (aislamiento por hogar, membresía, permisos y proveedor de IA) y §13
@@ -42,9 +42,10 @@ del jardín— pueden declararse como zona hija.
 - El plano muestra perímetro, paredes, puertas, ventanas y entrada principal como elementos
   vectoriales editables. Tocar/clicar una zona la selecciona; también existe una lista accesible
   equivalente para teclado y lector de pantalla.
-- En **Hogar > Tareas**, seleccionar una zona del plano abre sus tareas. Se puede crear/editar una
-  tarea, fijar días o frecuencia, asignar una persona concreta, dejarla sin asignar o solicitar un
-  reparto aleatorio equitativo para la semana.
+- En **Hogar > Tareas**, seleccionar una zona del plano abre sus tareas. Se pueden crear/editar
+  ocurrencias con fecha concreta dentro de la semana, asociarlas a una zona o a todo el hogar,
+  asignar una persona, dejarlas sin asignar o solicitar un reparto aleatorio equitativo.
+  Las reglas recurrentes y la generación automática de ocurrencias quedan fuera de v1.
 - Una modificación por chat incluye siempre la revisión actual del plano como JSON y la petición
   nueva; puede añadir una foto/boceto. Continuar el chat anterior no es requisito de corrección:
   una conversación nueva también recibe el último plano confirmado. La IA devuelve una propuesta
@@ -53,6 +54,9 @@ del jardín— pueden declararse como zona hija.
   quite una zona con tareas asociadas exige resolver o confirmar esas tareas antes de guardar.
 - El plano, sus revisiones aplicadas, zonas y tareas pertenecen al hogar activo. Las escrituras usan
   control de versión: una pestaña obsoleta no pisa cambios nuevos; devuelve conflicto recuperable.
+- Cada petición del cliente identifica el hogar que tenía seleccionado (`x-household-id`). Si el
+  servidor ya resuelve otro hogar activo, rechaza lecturas, propuestas y escrituras con
+  `409 HOUSEHOLD_CONTEXT_CHANGED`; evita que una operación retrasada termine sobre el hogar nuevo.
 
 ## Contrato vectorial para el canvas
 
@@ -201,11 +205,9 @@ Evidencia de QA-HOUSEHOLD.PLAN.GEOMETRY.1:
 - `pnpm exec vitest run src/schemas/household-plan.schema.spec.ts` (server): 11 pruebas aprobadas.
 - `pnpm --filter @hogaria/web exec ng test --no-watch --include src/app/features/household/household-area-catalog.spec.ts`:
   2 pruebas aprobadas en ChromeHeadless.
-- Coverage focal del schema: 95,34 % statements, 75,6 % branches, 95,83 % funciones y 97,94 % líneas.
-  La ejecución focal de `vitest --coverage` aplicó los thresholds de todos los archivos incluidos y
-  terminó con error al no ejecutar sus suites; el archivo de esta unidad sí superó cada umbral.
-- `pnpm run build` (server) y `pnpm run check:ui`: aprobados. La cobertura completa queda pendiente
-  de la puerta general antes de cerrar el PR.
+- El schema alcanza 95,42 % statements, 83,59 % ramas, 96 % funciones y 97,98 % líneas en la suite
+  completa del servidor (resultados globales en las puertas generales).
+- `pnpm run build` (server) y `pnpm run check:ui`: aprobados.
 
 ### QA-HOUSEHOLD.PLAN.AI-PROPOSAL.1 — generación, foto y revisión por chat
 
@@ -221,7 +223,7 @@ Evidencia de QA-HOUSEHOLD.PLAN.GEOMETRY.1:
 
 Evidencia de `QA-HOUSEHOLD.PLAN.AI-PROPOSAL.1` (API simulada; ningún proveedor real):
 
-- `pnpm exec vitest run src/routes/household-plan.routes.spec.ts src/utils/household-plan-ai.spec.ts src/utils/ai-client.spec.ts src/schemas/form-contract.spec.ts` (server): 441 pruebas aprobadas.
+- `DATABASE_PATH=:memory:; pnpm --filter @hogaria/server exec vitest run src/routes/household-plan.routes.spec.ts src/routes/household-tasks.routes.spec.ts src/utils/household-plan-ai.spec.ts src/utils/ai-client.spec.ts src/schemas/form-contract.spec.ts` — 463 pruebas aprobadas.
 - `pnpm run build` (server): aprobado.
 - Los tests inspeccionan el `response_format` del transporte; verifican propuesta inicial, foto,
   edición con plano confirmado como JSON, rechazo del schema sin fallback, timeout, cancelación,
@@ -229,56 +231,85 @@ Evidencia de `QA-HOUSEHOLD.PLAN.AI-PROPOSAL.1` (API simulada; ningún proveedor 
   malformado no se conserva en `ai_jobs`; solo queda el estado de cola y error normalizado.
 - El límite de cuerpo de Hono se prueba con `Content-Length` sobredimensionado y un cuerpo chunked
   mayor al límite; ambos responden 413 antes de analizar ni reenviar el archivo.
-- Limitación temporal: `orphanedTaskIds` permanece vacío hasta asociar tareas a zonas. Resolver la
-  retirada de zonas con tareas corresponde a `QA-HOUSEHOLD.TASKS.WEEKLY.1`.
+- El servidor calcula `orphanedTaskIds` para propuestas que retiren zonas; el cliente pide
+  confirmación y la escritura conjunta del plano/tareas es transaccional. `QA-HOUSEHOLD.TASKS.WEEKLY.1`
+  cubre la asociación de tareas a zonas y el flujo de confirmación.
 
 ### QA-HOUSEHOLD.PLAN.PERSISTENCE.1 — plano por hogar y concurrencia
 
 - [x] Migración idempotente/no destructiva, lectura/guardado scoped al hogar activo, control de versión/CAS y
       rollback transaccional; probar miembro inválido, permisos y dos hogares.
 - [x] Se guardan solo propuestas aplicadas; edición concurrente no borra la versión más reciente.
-- [ ] Los cambios que retiren zonas con tareas requieren resolución explícita; falta asociación
-      tarea-zona, incluida en `QA-HOUSEHOLD.TASKS.WEEKLY.1`.
+- [x] Retirar zonas con tareas exige confirmación explícita y guarda el plano y las tareas
+      desvinculadas en la misma transacción.
+- [x] Las peticiones capturadas para el hogar anterior fallan con `409` después de cambiar el hogar;
+      las propuestas obsoletas no alcanzan el proveedor ni escriben.
 
-Evidencia de persistencia: `src/routes/household-plan.routes.spec.ts` prueba permisos, CAS, hogar
-ambiguo/ausente, aislamiento, geometría inválida, historial de revisiones y rollback forzado. Las
-tablas se crean con `CREATE TABLE IF NOT EXISTS`; la suite usa `DATABASE_PATH=:memory:`.
+Evidencia de persistencia: `server/src/routes/household-plan.routes.spec.ts` y
+`server/src/routes/household-tasks.routes.spec.ts` prueban permisos, CAS, hogar ambiguo/ausente,
+aislamiento, contexto retrasado, geometría inválida, historial de revisiones, tareas huérfanas y
+rollback. Las tablas se crean con `CREATE TABLE IF NOT EXISTS`; las pruebas se ejecutan con
+`DATABASE_PATH=:memory:`.
 
 ### QA-HOUSEHOLD.PLAN.EDITOR.1 — lienzo y zonas interactivas
 
-- [ ] Pestañas `Plano` y `Tareas` bajo Hogar conservan URL, navegación de teclado y estado al cambiar
+- [x] Pestañas `Plano` y `Tareas` bajo Hogar conservan URL, navegación de teclado y borradores al cambiar
       de pestaña. Lienzo libre, constructor guiado y foto pueden alternarse sin perder el borrador.
-- [ ] Renderizar solo geometría local validada; selección por ratón/tacto y teclado, pisos,
+- [x] Renderizar solo geometría local validada; selección por ratón/tacto y teclado, pisos,
       edición/arrastre, lista accesible de zonas, previsualización actual/propuesta, deshacer,
       descartar y aplicar.
-- [ ] Playwright real en escritorio y móvil: breakpoints existentes y mínimos, orientación,
-      teclado, zoom/scroll, safe-area, foco, lectores/labels, controles táctiles y sin overflow;
-      guardar capturas comparables sintéticas inspeccionadas.
+- [x] Playwright real en escritorio y móvil: breakpoints existentes y mínimos, orientación,
+      teclado, foco, controles táctiles y sin overflow; guardar e inspeccionar capturas sintéticas.
+- [x] Pestañas geométricamente equivalentes a ≤1 CSS px en PC; scroll del lienzo móvil y paneles
+      con padding `safe-area` (`env(safe-area-inset-bottom, 0px)`). La emulación no representa un
+      dispositivo físico con notch.
 
 ### QA-HOUSEHOLD.TASKS.WEEKLY.1 — asignación manual y justa
 
-- [ ] Asociar tarea con zona del plano o con hogar completo; selección de persona, tareas sin
+- [x] Asociar tarea con zona del plano o con hogar completo; selección de persona, tareas sin
       asignar y programación semanal editables.
-- [ ] Pruebas property/table para equidad, no repetición en días consecutivos, semanas vacías,
+- [x] Pruebas para equidad, no repetición en días consecutivos, semanas vacías,
       miembros insuficientes, restricciones inviables, reproducibilidad y ausencia de persistencia
       hasta confirmar.
-- [ ] E2E aislado verifica que tocar una zona lleva a sus tareas, que el reparto asigna solo
-      miembros activos del hogar y que otra casa nunca ve ni altera la semana.
+- [x] E2E aislado verifica que tocar una zona lleva a sus tareas, que el reparto solo usa miembros
+      activos y queda en borrador hasta confirmar; rutas API prueban el aislamiento entre hogares.
+
+Evidencia del editor y tareas:
+
+- `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/household-plan-tasks.spec.ts` — 2/2 pasan. Usa DB y usuarios sintéticos temporales; la propuesta de foto se stubbea en el navegador, no llama a IA real, guarda solo al aplicar y el runner elimina DB/artefactos temporales propios al terminar.
+- El flujo verifica lienzo/zonas, pared exterior/puerta principal, pisos y confirmación al borrarlos, carga de imagen, propuesta sin escritura prematura, cambio de pestaña con borrador conservado, tarea por zona, preview equitativo/no consecutivo, persistencia y edición tras recargar.
+- Viewports probados: 320, 359, 360, 639, 640, 767, 768, 1023 y 1024 px, además de 568×320; la pestaña conserva geometría/tipografía/espaciado equivalente con tolerancia ≤1 px y no hay overflow horizontal. Mobile Chrome usa `tap` en el plano y teclado; los componentes aplican `env(safe-area-inset-bottom, 0px)`. La emulación no sustituye comprobación en hardware físico con recorte/notch.
+- Capturas PC/móvil sintéticas inspeccionadas en `.e2e-screenshots/household-plan-tasks/{chromium,mobile-chrome}/` (lienzo, propuesta, tareas previas al reparto y semana guardada). Se excluyen de Git.
 
 ### Puertas generales
 
 - [x] API: TDD con fixtures sintéticos y proveedor simulado; DB temporal
       verificada explícitamente. No llamar a IA real para gates repetibles.
-- [ ] Typecheck, build, `check:ui`, tests focales/completos aplicables, cobertura ≥70 % por archivo
-      y hooks de commit/push. Registrar comando, resultado y limitación exactos.
-- [ ] Inspección Playwright con servidor real y datos sintéticos; PC y móvil, capturas comparables,
-      geometría equivalente con tolerancia ≤1 CSS px, accesibilidad y ninguna información privada.
+- [x] Typecheck, build, `check:ui`, tests completos aplicables y cobertura ≥70 % por archivo;
+      registrar comando, resultado y limitación exactos.
+- [ ] Hooks pre-push y CI de la rama; mantener PR Draft mientras estén pendientes.
+- [x] Inspección Playwright con servidor aislado y datos sintéticos; PC y móvil, capturas comparables,
+      geometría equivalente con tolerancia ≤1 CSS px, teclado/labels y ninguna información privada.
 - [ ] Mantener PR Draft hasta cumplir gates. Nunca hacer merge sin autorización explícita.
 
-Evidencia de cobertura actual de servidor: `pnpm run test:coverage` — 64 archivos aprobados, 1
-omitido; 1296 pruebas aprobadas, 1 omitida. Cobertura total 92,00 % statements, 83,53 % ramas,
-96,20 % funciones y 94,44 % líneas; todos los archivos de `COVERED` superan el 70 % por métrica.
-Esto no cierra las puertas E2E de la interfaz ni las pruebas de tareas.
+Cobertura verificada localmente:
+
+- `DATABASE_PATH=:memory:; pnpm --filter @hogaria/server exec vitest run --coverage` — 66 archivos y
+  1322 pruebas aprobadas, 1 omitida; 91,96 % statements, 83,62 % ramas, 96,01 % funciones y
+  94,43 % líneas. Todos los archivos de `COVERED` superan 70 % en cada métrica.
+- `pnpm run test:client:coverage` — 1365 pruebas aprobadas; 94,47 % statements, 85,72 % ramas,
+  94,36 % funciones y 96,09 % líneas. Las fuentes de plan/tareas superan 70 % en las métricas
+  instrumentadas; `household-tasks.service.ts` no tiene puntos de rama instrumentables (`BRF=0`).
+- `pnpm run check:ui`, `pnpm run typecheck:e2e` y `pnpm run build` — aprobados. El build muestra
+  warnings de Angular ya presentes fuera de este cambio.
+- `pnpm run test:config` — 11/11 pruebas aprobadas. `pnpm run check:ui` revisó 224 archivos y 21
+  reglas sin incidencias.
+- `pnpm run lint:server` no pasa por el script existente (`eslint src --ext .ts` rechaza `--ext`
+  bajo ESLint 9); el CI y los hooks actuales no invocan ese lint. No se alteró esa configuración,
+  fuera del alcance de esta entrega.
+- La CI de este repositorio ejecuta su shard E2E canónico en Chromium; `mobile-chrome` se validó
+  adicionalmente en esta sesión. Hooks pre-push y CI todavía no se han ejecutado porque estos
+  commits aún no se han publicado.
 
 ## Fuera de alcance v1
 
