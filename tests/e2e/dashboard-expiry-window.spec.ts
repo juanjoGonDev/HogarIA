@@ -161,13 +161,10 @@ test('Dashboard aplica el horizonte de caducidad guardado en Settings', async ({
       expect(geometry.sectionRight).toBeLessThanOrEqual(geometry.viewportWidth);
       await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
       const finalRow = expiry.locator('[data-test="dashboard-expiry-row"]').last();
-      const navClearance = await page.evaluate(() => {
-        const row = document.querySelector<HTMLElement>(
-          '[data-test="dashboard-expiry-row"]:last-of-type'
-        );
+      const navClearance = await finalRow.evaluate((row) => {
         const nav = document.querySelector<HTMLElement>('.bottom-nav');
         return {
-          rowBottom: row?.getBoundingClientRect().bottom ?? Number.POSITIVE_INFINITY,
+          rowBottom: row.getBoundingClientRect().bottom,
           navTop: nav?.getBoundingClientRect().top ?? Number.POSITIVE_INFINITY,
           navVisible: Boolean(nav && getComputedStyle(nav).display !== 'none')
         };

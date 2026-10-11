@@ -627,7 +627,8 @@ test.describe('Calendario', () => {
 
     await openButton.click();
     await page.fill('#event-title', 'Revisión del botiquín');
-    await page.fill('#event-date', daysFromToday(1));
+    const eventDate = daysFromToday(1);
+    await page.fill('#event-date', eventDate);
     await page.fill('#event-start', '06:30');
     await page.fill('#event-end', '07:45');
     await dialog.locator('[data-test="event-more-options"]').click();
@@ -642,6 +643,9 @@ test.describe('Calendario', () => {
     await expect(dialog).toHaveCount(0);
     expect(writes).toEqual(['POST']);
 
+    // El evento se crea mañana; selecciona esa fecha para que aparezca si cambia de semana.
+    await page.getByRole('gridcell', { name: `Ver el día ${eventDate}`, exact: true }).click();
+
     const eventCard = page
       .locator('[data-test="timeline-block-event"]')
       .filter({ hasText: 'Revisión del botiquín' });
@@ -649,7 +653,7 @@ test.describe('Calendario', () => {
     await eventCard.click();
     await expect(dialog.locator('.modal__title')).toContainText('Editar evento');
     await expect(dialog.locator('#event-title')).toHaveValue('Revisión del botiquín');
-    await expect(dialog.locator('#event-date')).toHaveValue(daysFromToday(1));
+    await expect(dialog.locator('#event-date')).toHaveValue(eventDate);
     await expect(dialog.locator('#event-start')).toHaveValue('06:30');
     await expect(dialog.locator('#event-end')).toHaveValue('07:45');
     await expect(kind.locator('.picker__value')).toHaveText('Casa');
