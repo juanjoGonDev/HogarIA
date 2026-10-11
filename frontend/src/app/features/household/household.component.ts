@@ -35,6 +35,8 @@ import {
   resolveHouseholdTab,
   type HouseholdTab
 } from './household-tabs.util';
+import { HouseholdPlanEditorComponent } from './household-plan-editor.component';
+import { HouseholdTasksComponent } from './household-tasks.component';
 
 type PermissionGroup = 'pantry' | 'recipes' | 'calendar' | 'members' | 'settings';
 interface PermissionField {
@@ -98,7 +100,9 @@ function completeMemberPermissions(value: unknown, role: MemberRole): MemberPerm
     ModalComponent,
     PickerComponent,
     LoadingComponent,
-    IconComponent
+    IconComponent,
+    HouseholdPlanEditorComponent,
+    HouseholdTasksComponent
   ],
   template: `
     <div class="household">
@@ -158,7 +162,11 @@ function completeMemberPermissions(value: unknown, role: MemberRole): MemberPerm
       </div>
 
       <!-- Household Content -->
-      <div *ngIf="householdService.household() as household" class="household__content">
+      <div
+        *ngIf="householdService.household() as household"
+        class="household__content"
+        [class.household--wide]="activeTab() === 'plan' || activeTab() === 'tasks'"
+      >
         <nav class="household-tabs" role="tablist" [attr.aria-label]="'household.hogar' | t">
           <button
             *ngFor="let tab of tabOptions"
@@ -445,6 +453,41 @@ function completeMemberPermissions(value: unknown, role: MemberRole): MemberPerm
             </app-button>
           </div>
         </section>
+
+        <section
+          [hidden]="activeTab() !== 'plan'"
+          id="household-panel-plan"
+          class="household-tab-panel"
+          role="tabpanel"
+          aria-labelledby="household-tab-plan"
+          tabindex="0"
+          data-test="household-panel-plan"
+        >
+          <app-household-plan-editor
+            [householdId]="household.id"
+            [canEdit]="household.myPermissions?.settings ?? household.myRole === 'admin'"
+            (planSaved)="refreshTasksAfterPlanSave()"
+            (zoneTasksSelected)="openTasksForZone($event)"
+          />
+        </section>
+
+        <section
+          [hidden]="activeTab() !== 'tasks'"
+          id="household-panel-tasks"
+          class="household-tab-panel"
+          role="tabpanel"
+          aria-labelledby="household-tab-tasks"
+          tabindex="0"
+          data-test="household-panel-tasks"
+        >
+          <app-household-tasks
+            [householdId]="household.id"
+            [canEdit]="household.myPermissions?.calendar?.edit ?? household.myRole === 'admin'"
+            [members]="household.members"
+            [selectedSpaceId]="selectedTaskSpaceId()"
+            [refreshToken]="tasksRefreshToken()"
+          />
+        </section>
       </div>
 
       <!-- Create Modal -->
@@ -559,6 +602,10 @@ function completeMemberPermissions(value: unknown, role: MemberRole): MemberPerm
         padding-block: var(--container-padding);
         max-width: 800px;
         margin: 0 auto;
+      }
+
+      .household.household--wide {
+        max-width: 1280px;
       }
 
       .household__header {
@@ -1038,8 +1085,12 @@ export class HouseholdComponent implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
 
   readonly activeTab = signal<HouseholdTab>('home');
+  readonly selectedTaskSpaceId = signal<string | null>(null);
+  readonly tasksRefreshToken = signal(0);
   readonly tabOptions: Array<{ value: HouseholdTab; label: TranslationKey }> = [
     { value: 'home', label: 'household.tab_home' },
+    { value: 'plan', label: 'household.tab_plan' },
+    { value: 'tasks', label: 'household.tab_tasks' },
     { value: 'members', label: 'household.tab_members' },
     { value: 'permissions', label: 'household.tab_permissions' },
     { value: 'settings', label: 'household.tab_settings' }
@@ -1091,9 +1142,10 @@ export class HouseholdComponent implements OnInit {
       const activeHouseholdId = this.householdService.activeHouseholdId();
       if (previousHouseholdId !== null && activeHouseholdId !== previousHouseholdId) {
         this.activeTab.set('home');
+        this.selectedTaskSpaceId.set(null);
         void this.router.navigate([], {
           relativeTo: this.route,
-          queryParams: { tab: null },
+          queryParams: { tab: null, space: null },
           queryParamsHandling: 'merge',
           replaceUrl: true
         });
@@ -1123,6 +1175,7 @@ export class HouseholdComponent implements OnInit {
     this.route.queryParamMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
       const queryTab = params.get('tab');
       this.activeTab.set(resolveHouseholdTab(queryTab));
+      this.selectedTaskSpaceId.set(params.get('space'));
       if (!isCanonicalHouseholdTabQuery(queryTab)) {
         void this.router.navigate([], {
           relativeTo: this.route,
@@ -1141,6 +1194,20 @@ export class HouseholdComponent implements OnInit {
       queryParams: { tab: householdTabQueryValue(tab) },
       queryParamsHandling: 'merge'
     });
+  }
+
+  openTasksForZone(spaceId: string): void {
+    this.selectedTaskSpaceId.set(spaceId);
+    this.activeTab.set('tasks');
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { tab: 'tasks', space: spaceId },
+      queryParamsHandling: 'merge'
+    });
+  }
+
+  refreshTasksAfterPlanSave(): void {
+    this.tasksRefreshToken.update((token) => token + 1);
   }
 
   onTabKeydown(event: KeyboardEvent): void {

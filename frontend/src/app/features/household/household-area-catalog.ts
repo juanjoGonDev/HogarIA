@@ -1,4 +1,5 @@
 import { householdEn, householdEs } from '../../core/i18n/dict/household';
+import type { HouseholdAreaKind } from '../../shared/models/household-plan.model';
 
 const interior = [
   { kind: 'entrance', labelKey: 'household.area_entrance' },
@@ -67,7 +68,7 @@ const shared = [
 
 export const HOUSEHOLD_AREA_CATALOG = { interior, exterior, shared } as const;
 export type HouseholdAreaGroup = keyof typeof HOUSEHOLD_AREA_CATALOG;
-export type HouseholdAreaKind = (typeof HOUSEHOLD_AREA_CATALOG)[HouseholdAreaGroup][number]['kind'];
+export type { HouseholdAreaKind } from '../../shared/models/household-plan.model';
 type HouseholdAreaLabelKey =
   (typeof HOUSEHOLD_AREA_CATALOG)[HouseholdAreaGroup][number]['labelKey'];
 

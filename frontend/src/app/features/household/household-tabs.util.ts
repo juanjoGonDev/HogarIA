@@ -1,4 +1,11 @@
-export const HOUSEHOLD_TABS = ['home', 'members', 'permissions', 'settings'] as const;
+export const HOUSEHOLD_TABS = [
+  'home',
+  'plan',
+  'tasks',
+  'members',
+  'permissions',
+  'settings'
+] as const;
 export type HouseholdTab = (typeof HOUSEHOLD_TABS)[number];
 
 export function resolveHouseholdTab(value: string | null | undefined): HouseholdTab {

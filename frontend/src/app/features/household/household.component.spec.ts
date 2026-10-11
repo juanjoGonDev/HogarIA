@@ -8,6 +8,8 @@ import { ConfirmService } from '../../core/services/confirm.service';
 import { I18nService } from '../../core/services/i18n.service';
 import { ToastService } from '../../core/services/toast.service';
 import { AuthService } from '../../core/services/auth.service';
+import { HouseholdPlanService } from '../../core/services/household-plan.service';
+import { HouseholdTasksService } from '../../core/services/household-tasks.service';
 import type { Household } from '../../shared/models/household.model';
 import { householdEn, householdEs } from '../../core/i18n/dict/household';
 
@@ -70,6 +72,7 @@ describe('HouseholdComponent', () => {
   }
 
   const i18n = {
+    resolved: signal<'es' | 'en'>('es'),
     changeTick: signal(0),
     t: (key: string) => key,
     plural: (_count: number, singular: string, plural: string) => (_count === 1 ? singular : plural)
@@ -92,6 +95,23 @@ describe('HouseholdComponent', () => {
         { provide: ConfirmService, useValue: confirm },
         { provide: AuthService, useValue: { currentUser: () => ({ id: 'synthetic-admin' }) } },
         { provide: I18nService, useValue: i18n },
+        {
+          provide: HouseholdPlanService,
+          useValue: {
+            load: jasmine.createSpy('loadPlan').and.returnValue(of({ version: 0, plan: null }))
+          }
+        },
+        {
+          provide: HouseholdTasksService,
+          useValue: {
+            load: jasmine
+              .createSpy('loadTasks')
+              .and.returnValue(of({ weekStart: '2026-10-05', version: 0, tasks: [] })),
+            save: jasmine
+              .createSpy('saveTasks')
+              .and.returnValue(of({ weekStart: '2026-10-05', version: 1, tasks: [] }))
+          }
+        },
         {
           provide: ActivatedRoute,
           useValue: { queryParamMap: queryParams.asObservable() }
@@ -307,7 +327,7 @@ describe('HouseholdComponent', () => {
     expect(component.activeTab()).toBe('home');
     expect(router.navigate).toHaveBeenCalledWith([], {
       relativeTo: TestBed.inject(ActivatedRoute),
-      queryParams: { tab: null },
+      queryParams: { tab: null, space: null },
       queryParamsHandling: 'merge',
       replaceUrl: true
     });

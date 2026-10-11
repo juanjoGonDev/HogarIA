@@ -1,0 +1,245 @@
+<section class="tasks-editor" [attr.aria-busy]="loading() || saving()">
+  <header class="tasks-editor__header">
+    <div>
+      <h2>{{ 'household.tasks_title' | t }}</h2>
+      <p>{{ 'household.tasks_description' | t }}</p>
+    </div>
+    <div class="tasks-editor__actions">
+      <button
+        type="button"
+        class="tasks-button tasks-button--quiet"
+        [disabled]="!canEdit || !isDirty() || saving()"
+        (click)="discardChanges()"
+      >{{ 'household.tasks_discard' | t }}</button>
+      <button
+        type="button"
+        class="tasks-button tasks-button--primary"
+        data-test="tasks-save"
+        [disabled]="!canEdit || !isDirty() || saving() || !!randomPreview()"
+        (click)="saveWeek()"
+      >{{ saving() ? ('household.tasks_saving' | t) : ('household.tasks_save' | t) }}</button>
+    </div>
+  </header>
+
+  <p *ngIf="!canEdit" class="tasks-editor__notice" data-test="tasks-read-only">
+    {{ 'household.tasks_read_only' | t }}
+  </p>
+  <p *ngIf="errorKey() as error" class="tasks-editor__message tasks-editor__message--error" role="alert">
+    {{ error | t }}
+  </p>
+  <p *ngIf="noticeKey() as notice" class="tasks-editor__message tasks-editor__message--success" role="status">
+    {{ notice | t }}
+  </p>
+
+  <div class="tasks-weekbar">
+    <button
+      type="button"
+      class="tasks-button"
+      [disabled]="loading() || saving()"
+      [attr.aria-label]="'household.tasks_previous_week' | t"
+      (click)="shiftWeek(-1)"
+    >‹</button>
+    <h3>{{ weekDays()[0].label }} – {{ weekDays()[6].label }}</h3>
+    <button
+      type="button"
+      class="tasks-button"
+      [disabled]="loading() || saving()"
+      [attr.aria-label]="'household.tasks_next_week' | t"
+      (click)="shiftWeek(1)"
+    >›</button>
+    <span class="tasks-weekbar__version">
+      {{ 'household.tasks_week_version' | t: { version: snapshot().version } }}
+    </span>
+  </div>
+
+  <div class="tasks-filter" *ngIf="spaces().length">
+    <span>{{ 'household.tasks_filter_area' | t }}</span>
+    <app-picker
+      id="household-tasks-filter-area"
+      [label]="'household.tasks_filter_area' | t"
+      [options]="areaFilterOptions()"
+      [value]="filterSpaceId()"
+      (valueChange)="filterSpaceId.set($event ?? '')"
+    />
+  </div>
+
+  <section *ngIf="canEdit" class="tasks-create" aria-labelledby="tasks-create-title">
+    <h3 id="tasks-create-title">{{ 'household.tasks_add' | t }}</h3>
+    <div class="tasks-create__grid">
+      <label class="tasks-create__title">
+        <span>{{ 'household.tasks_name' | t }}</span>
+        <input
+          [ngModel]="newTitle()"
+          (ngModelChange)="newTitle.set($event)"
+          maxlength="120"
+          [attr.aria-label]="'household.tasks_name' | t"
+        />
+      </label>
+      <div class="tasks-editor__field">
+        <span>{{ 'household.tasks_day' | t }}</span>
+        <app-picker
+          id="household-tasks-new-day"
+          [label]="'household.tasks_day' | t"
+          [options]="dayOptions()"
+          [value]="newDate()"
+          (valueChange)="newDate.set($event || weekStart())"
+        />
+      </div>
+      <div class="tasks-editor__field">
+        <span>{{ 'household.tasks_area' | t }}</span>
+        <app-picker
+          id="household-tasks-new-area"
+          [label]="'household.tasks_area' | t"
+          [options]="spaceOptions()"
+          [value]="newSpaceId()"
+          (valueChange)="newSpaceId.set($event ?? '')"
+        />
+      </div>
+      <div class="tasks-editor__field">
+        <span>{{ 'household.tasks_assignee' | t }}</span>
+        <app-picker
+          id="household-tasks-new-assignee"
+          [label]="'household.tasks_assignee' | t"
+          [options]="memberOptions()"
+          [value]="newMemberId()"
+          (valueChange)="newMemberId.set($event ?? '')"
+        />
+      </div>
+      <label class="tasks-create__details">
+        <span>{{ 'household.tasks_details' | t }}</span>
+        <input
+          [ngModel]="newDetails()"
+          (ngModelChange)="newDetails.set($event)"
+          maxlength="500"
+        />
+      </label>
+      <button
+        type="button"
+        class="tasks-button tasks-button--primary tasks-create__submit"
+        data-test="tasks-add"
+        [disabled]="!newTitle().trim() || draftTasks().length >= 200 || loading() || saving()"
+        (click)="addTask()"
+      >{{ 'household.tasks_add_button' | t }}</button>
+    </div>
+  </section>
+
+  <section *ngIf="randomPreview() as preview" class="tasks-random-preview" aria-live="polite" data-test="tasks-random-preview">
+    <div>
+      <h3>{{ 'household.tasks_preview_title' | t }}</h3>
+      <p>{{ 'household.tasks_preview_description' | t }}</p>
+    </div>
+    <ul>
+      <li *ngFor="let task of preview">
+        <span>{{ task.scheduledDate }} · {{ task.title }}</span>
+        <strong>{{ memberName(task.assignedMemberId) }}</strong>
+      </li>
+    </ul>
+    <div class="tasks-editor__actions">
+      <button type="button" class="tasks-button tasks-button--quiet" (click)="discardRandomPreview()">
+        {{ 'household.tasks_discard_preview' | t }}
+      </button>
+      <button type="button" class="tasks-button tasks-button--primary" (click)="applyRandomPreview()">
+        {{ 'household.tasks_use_distribution' | t }}
+      </button>
+    </div>
+  </section>
+
+  <div *ngIf="loading()" class="tasks-editor__loading" role="status">{{ 'household.tasks_loading' | t }}</div>
+  <div *ngIf="!loading()" class="tasks-days" data-test="tasks-week">
+    <section *ngFor="let day of weekDays()" class="tasks-day" [attr.data-date]="day.date">
+      <header class="tasks-day__header">
+        <h3>{{ day.label }}</h3>
+        <span>{{ tasksForDay(day.date).length }}</span>
+      </header>
+      <ul *ngIf="tasksForDay(day.date).length; else noTasks">
+        <li *ngFor="let task of tasksForDay(day.date)" class="task-card" [class.task-card--completed]="task.completed">
+          <label class="task-card__complete">
+            <input
+              type="checkbox"
+              [checked]="task.completed"
+              [disabled]="!canEdit || saving()"
+              [attr.aria-label]="'household.tasks_mark_complete' | t: { name: task.title }"
+              (change)="updateTask(task.id, { completed: $any($event.target).checked })"
+            />
+            <span class="visually-hidden">{{ 'household.tasks_mark_complete' | t: { name: task.title } }}</span>
+          </label>
+          <div class="task-card__fields">
+            <label>
+              <span class="visually-hidden">{{ 'household.tasks_name' | t }}</span>
+              <input
+                [ngModel]="task.title"
+                maxlength="120"
+                [disabled]="!canEdit || saving()"
+                (ngModelChange)="updateTask(task.id, { title: $event })"
+              />
+            </label>
+      <div class="tasks-editor__field">
+              <span>{{ 'household.tasks_area' | t }}</span>
+              <app-picker
+                [id]="'household-task-area-' + task.id"
+                [label]="('household.tasks_area' | t) + ': ' + task.title"
+                [options]="spaceOptions(task.spaceId)"
+                [value]="task.spaceId ?? ''"
+                [disabled]="!canEdit || saving()"
+                (valueChange)="updateTask(task.id, { spaceId: $event || null })"
+              />
+      </div>
+            <div class="tasks-editor__field">
+              <span>{{ 'household.tasks_assignee' | t }}</span>
+              <app-picker
+                [id]="'household-task-member-' + task.id"
+                [label]="('household.tasks_assignee' | t) + ': ' + task.title"
+                [options]="memberOptions(task.assignedMemberId)"
+                [value]="task.assignedMemberId ?? ''"
+                [disabled]="!canEdit || saving()"
+                (valueChange)="updateTask(task.id, { assignedMemberId: $event || null })"
+              />
+            </div>
+            <div class="tasks-editor__field">
+              <span>{{ 'household.tasks_day' | t }}</span>
+              <app-picker
+                [id]="'household-task-day-' + task.id"
+                [label]="('household.tasks_day' | t) + ': ' + task.title"
+                [options]="dayOptions(task.scheduledDate)"
+                [value]="task.scheduledDate"
+                [disabled]="!canEdit || saving()"
+                (valueChange)="updateTask(task.id, { scheduledDate: $event || task.scheduledDate })"
+              />
+            </div>
+            <label>
+              <span>{{ 'household.tasks_details' | t }}</span>
+              <input
+                [ngModel]="task.details ?? ''"
+                maxlength="500"
+                [disabled]="!canEdit || saving()"
+                (ngModelChange)="updateTask(task.id, { details: $event || null })"
+              />
+            </label>
+          </div>
+          <button
+            type="button"
+            class="tasks-link tasks-link--danger"
+            [disabled]="!canEdit || saving()"
+            [attr.aria-label]="'household.tasks_remove' | t: { name: task.title }"
+            (click)="deleteTask(task.id)"
+          >{{ 'household.tasks_remove_short' | t }}</button>
+        </li>
+      </ul>
+      <ng-template #noTasks><p class="tasks-day__empty">{{ 'household.tasks_no_day_tasks' | t }}</p></ng-template>
+    </section>
+  </div>
+
+  <section *ngIf="canEdit && draftTasks().length" class="tasks-random-tools">
+    <div>
+      <h3>{{ 'household.tasks_random_title' | t }}</h3>
+      <p>{{ 'household.tasks_random_description' | t }}</p>
+    </div>
+    <button
+      type="button"
+      class="tasks-button"
+      data-test="tasks-randomize"
+      [disabled]="loading() || saving() || !!randomPreview()"
+      (click)="createRandomPreview()"
+    >{{ 'household.tasks_randomize' | t }}</button>
+  </section>
+</section>
