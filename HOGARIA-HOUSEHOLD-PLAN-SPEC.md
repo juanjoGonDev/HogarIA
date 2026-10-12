@@ -1,6 +1,6 @@
 # HogarIA — Plano interactivo del hogar y tareas por zonas
 
-Estado: **implementación y pase visual local completados; hooks/push/CI pendientes · PR #47 en Draft** · 2026-10-12
+Estado: **implementación, pase visual y CI completados · PR #47 listo para revisión · 2026-10-12**
 
 Este contrato concreta una nueva capacidad de HogarIA y complementa las reglas compartidas de
 `HOGARIA-SPEC.md` §12ap (aislamiento por hogar, membresía, permisos y proveedor de IA) y §13
@@ -320,7 +320,7 @@ Evidencia visual y regresión:
 
 - `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/household-plan-tasks.spec.ts` — **2/2 pasan en 42,9 s** (ejecución final, 12-10-2026). Servidor/SQLite/artefactos aislados; el proveedor de IA se simula y la DB/artefactos temporales propios se limpian.
 - El primer pase halló dos fallos visuales que no detectaba el simple `scrollWidth`: a 320 px las pestañas del hogar se montaban; y en pantalla baja la decisión de foto quedaba debajo de la barra fija (`bottom=729,89`, `sticky top=693`). Se compactaron las pestañas hasta 389 px, con scroll/foco por teclado, y a 320×568 las acciones de foto dejan de ser fijas y permanecen alcanzables al desplazar. E2E verifica 320, 359, 360, 389 y 390 px y ambos casos pasan.
-- El primer CI halló que las media queries nuevas no estaban cubiertas por la matriz global B−1/B/B+1. Se añadieron 388–390, 1198–1201 y 1278–1281 px a `tests/e2e/layout-gutters.spec.ts`; ejecución aislada enfocada `node scripts/run-isolated-playwright.mjs --project=chromium --grep 'matriz responsive prueba' tests/e2e/layout-gutters.spec.ts` — **1/1 pasa**. El CI completo está repitiéndose.
+- El primer CI de esta revisión halló que las media queries nuevas no estaban cubiertas por la matriz global B−1/B/B+1. Se añadieron 388–390, 1198–1201 y 1278–1281 px a `tests/e2e/layout-gutters.spec.ts`; el test enfocado pasa 1/1 y el spec completo aislado pasa **7/7 en 1,3 min**.
 - Inspeccioné los seis estados `01-plan-start` a `06-chat-adjustment` de `.e2e-screenshots/household-plan-tasks/{chromium,mobile-chrome}/` a 1440×900 y 390×844; hay capturas adicionales 320×568 para cada flujo, una de las acciones de foto desplazadas y asignación/tareas en 568×320. También se comprueban 639, 640, 767, 768, 1023 y 1024 px.
 - Las capturas usan plan/foto sintéticos y no contienen datos personales. La emulación no sustituye un teléfono físico con notch. El mockup y la aplicación tienen shells distintas; por ello no se afirma igualdad raster píxel a píxel fuera del contenido de la vista Hogar.
 
@@ -330,13 +330,13 @@ Evidencia visual y regresión:
       verificada explícitamente. No llamar a IA real para gates repetibles.
 - [x] Typecheck, build, `check:ui`, tests completos aplicables y cobertura ≥70 % por archivo;
       registrar comando, resultado y limitación exactos.
-- [ ] Hooks pre-commit/pre-push obligatorios ejecutados sin bypass.
-- [ ] CI de la rama: workflow manual completo y sin fallos; el PR se mantuvo Draft mientras los
-      gates estaban pendientes.
+- [x] Hooks pre-commit/pre-push obligatorios ejecutados sin bypass: Prettier, `check:ui`, build,
+      typecheck E2E y tests completos.
+- [x] CI manual final `38212052262` completó correctamente los nueve jobs; PR #47 permaneció Draft
+      hasta pasar todos los gates.
 - [x] Inspección Playwright con servidor aislado y datos sintéticos; PC y móvil, capturas comparables,
       geometría equivalente con tolerancia ≤1 CSS px, teclado/labels y ninguna información privada.
-- [ ] PR #47 se mantiene Draft mientras los gates remotos estén pendientes; se marca listo solo tras
-      aprobarlos. No se hizo merge.
+- [x] PR #47 pasó a Ready for review tras aprobar los gates. No se hizo merge.
 
 Cobertura verificada localmente (repetición final después de la revisión visual):
 
@@ -356,9 +356,9 @@ Cobertura verificada localmente (repetición final después de la revisión visu
 - `pnpm run lint:client` no puede iniciar Angular ESLint porque falta el paquete existente
   `@angular-eslint/builder` (`Could not find ... builder's node package`). No se añadió dependencia
   fuera de alcance; `check:ui` sí pasa y ese lint no forma parte del gate de CI ni de los hooks.
-- Los commits `c0c9fa7`, `4d37dff`, `48b3ffa`, `c0ffe8a` y `cc073cd` se publicaron en
-  `feat/household-floorplan`. Los hooks pre-commit y pre-push pasaron: Prettier, check:ui, build,
-  typecheck E2E y `pnpm run test` (11 config, 1365 client, 1322 server + 1 skip).
+- Los commits de esta entrega se publicaron en `feat/household-floorplan` (persistencia, UI, E2E y
+  matriz responsive). Los hooks pre-commit y pre-push pasaron sin bypass: Prettier, check:ui, build,
+  typecheck E2E y `pnpm run test` (11 config, 1386 client, 1328 server + 1 skip).
 - `pnpm run lint:server` no pasa por el script existente (`eslint src --ext .ts` rechaza `--ext`
   bajo ESLint 9); el CI y los hooks actuales no invocan ese lint. No se alteró esa configuración,
   fuera del alcance de esta entrega.
@@ -376,6 +376,12 @@ Cobertura verificada localmente (repetición final después de la revisión visu
   `cc073cd6b0a3dbfea9826cc1ed154540ffa4f434`, terminó **success** en sus nueve jobs: los cuatro
   shards E2E, E2E full-stack, tests de servidor, typecheck y builds. Usa fixtures sintéticos; no
   llamó al proveedor de IA. No se cambió la base del PR.
+- La ejecución final `CI #38212052262`, sobre el código `a7e9c086cb48eb7cdaa91cb7c3292a12a88f3fd3`,
+  terminó **success en los nueve jobs** (cuatro shards E2E, full-stack, typecheck, servidor y builds).
+  El primer intento de esta pasada (`38211116502`) solo falló porque la matriz no incluía B−1/B/B+1
+  para los nuevos breakpoints 389, 1199/1200 y 1279/1280 px; tras añadirlos, el spec responsive
+  completo pasó 7/7 localmente y la corrida final quedó verde. El cambio posterior en la spec solo
+  registra esta evidencia; no modifica código de producto. Sin llamadas reales al proveedor.
 
 ## Fuera de alcance v1
 
