@@ -34,6 +34,12 @@ Una zona personalizada puede tener cualquier nombre no vacío y queda marcada co
 pretende que el enum sea infinito. Las estancias anidadas válidas —por ejemplo, una piscina dentro
 del jardín— pueden declararse como zona hija.
 
+En el editor deben ser fáciles de encontrar las zonas habituales de una vivienda española:
+recibidor, salón, comedor, cocina, despensa, dormitorios, baño, aseo, pasillo, escaleras,
+lavadero, despacho, garaje, **trastero**, **balcón**, terraza, patio y jardín. Las demás siguen
+disponibles en el selector agrupado; `custom` permite escribir cualquier otro nombre sin modificar
+el enum compartido.
+
 ## Flujo y alcance de producto
 
 - En **Hogar > Plano**, se puede empezar en el lienzo, colocar zonas desde un constructor guiado o
@@ -116,8 +122,11 @@ type Plan = {
 
 `DwellingType` y `AreaKind` son enums cerrados según las listas anteriores; `other`/`custom` usan
 su campo label como nombre visible. Cada planta usa el mismo `viewBox` normalizado; las paredes
-exteriores dibujan el perímetro y las interiores las divisiones. Los segmentos generados por IA
-son ortogonales. Todas las propiedades del objeto enviado al modelo son obligatorias; los valores
+exteriores dibujan el perímetro y las interiores las divisiones. Las paredes pueden ser horizontales,
+verticales o diagonales; la IA debe conservar los ángulos y contornos no rectangulares visibles en
+una foto/boceto en vez de regularizarlos a rectángulos. Cada zona conserva un polígono simple y
+puede ser cóncava; un editor manual debe poder crear una forma libre además de un rectángulo.
+Todas las propiedades del objeto enviado al modelo son obligatorias; los valores
 ausentes se representan como `null` o listas vacías. Límites de carga: 1–12 plantas, niveles enteros
 entre -12 y 12, hasta 80 zonas, 250 paredes y 300 aberturas por planta, hasta 64 vértices por
 polígono, 20 avisos y coordenadas enteras entre 0 y 10 000. La vista mantiene proporción, zoom y
@@ -136,7 +145,7 @@ desplazamiento sin deformar geometría.
 - `response_format` verifica la estructura, no la coherencia geométrica. El servidor vuelve a
   parsear con Zod y valida invariantes cruzadas antes de enviar propuesta al cliente: límites,
   tipo libre de vivienda con etiqueta requerida, IDs únicos, niveles únicos, polígonos simples/no
-  degenerados, paredes ortogonales no nulas, referencias de puertas a paredes, aberturas dentro de
+  degenerados, paredes no nulas (incluidas las diagonales), referencias de puertas a paredes, aberturas dentro de
   su pared, entrada principal en una puerta, referencias de zonas padre existentes, ausencia de
   ciclos y geometría hija contenida. Los errores no se dibujan ni se persisten.
 - Se instruye a la IA a conservar IDs de zonas sin cambios y a devolver el objeto completo de la
@@ -274,6 +283,23 @@ rollback. Las tablas se crean con `CREATE TABLE IF NOT EXISTS`; las pruebas se e
 - [x] E2E aislado verifica que tocar una zona lleva a sus tareas, que el reparto solo usa miembros
       activos y queda en borrador hasta confirmar; rutas API prueban el aislamiento entre hogares.
 
+### QA-HOUSEHOLD.PLAN.AREAS-AND-FREEFORM.1 — zonas habituales y geometría irregular
+
+- [ ] Las opciones rápidas incluyen al menos las estancias frecuentes en España, con los nombres
+      visibles «Trastero» y «Balcón»; el selector completo conserva zonas menos frecuentes agrupadas.
+- [ ] «Personalizada» permite añadir una estancia con cualquier nombre no vacío y ese nombre se
+      conserva en el borrador, la propuesta AI y la persistencia.
+- [ ] Crear una zona dibujando admite un polígono libre con tres o más vértices, sin restringir a
+      rectángulos; sigue siendo posible dibujar la forma rectangular con arrastre.
+- [ ] Foto/boceto con contorno cóncavo y pared oblicua produce una propuesta con geometría irregular
+      equivalente en el preview; las paredes diagonales, sus aberturas y tareas/selecciones mantienen
+      comportamiento válido.
+- [ ] TDD: schema/UI prueban zonas españolas, nombre custom, cierre de polígono, cancelar/deshacer,
+      autointersección, aristas diagonales y abertura en pared diagonal. La prueba AI comprueba que
+      el prompt pide respetar el contorno y que no se sustituye por una caja rectangular.
+- [ ] E2E sintética en PC y móvil, aislamiento de DB/proveedor, capturas, validación visual y
+      cobertura ≥70 % de los archivos afectados; sin usar planos ni hogares reales.
+
 Evidencia del editor y tareas:
 
 - `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/household-plan-tasks.spec.ts` — 2/2 pasan (repetición final: 41,6 s). Usa DB y usuarios sintéticos temporales; la propuesta de foto se stubbea en el navegador, no llama a IA real, guarda solo al aplicar y el runner elimina DB/artefactos temporales propios al terminar.
@@ -306,6 +332,9 @@ mockups.
       asignados del plano durante el dibujo (el prototipo reserva el naranja para la selección), y
       plegar la lista de zonas para no añadir un panel visible ausente del mockup sin quitar acceso
       por teclado/lector de pantalla.
+- [ ] **Iconos del flujo:** calcar las formas de herramientas, estancias, puertas/ventanas, chat y
+      asignación de los SVG del prototipo; ajustar trazo/color/tamaño además del contenedor. La E2E
+      comprueba el set de iconos en PC y móvil y las capturas `02-plan-editor` se cotejan de nuevo.
 - [ ] **Foto/propuesta:** cotejar tamaño y proporción de la foto original y el plano generado en
       ambos breakpoints, y la jerarquía cambiar/confirmar/continuar. El fixture de E2E debe parecer
       un boceto real y generar una propuesta con el mismo número de zonas que la referencia; no usar
@@ -325,23 +354,27 @@ mockups.
 - [x] E2E verifica interacción, permisos, persistencia, borradores, IA simulada, teclado/foco,
       labels, contraste AA en temas claro/oscuro, safe-area y ausencia de overflow; no hay fixtures
       personales ni llamadas reales a IA.
-- [x] Capturar e inspeccionar los seis estados sintéticos a 1440×900 y 390×844; verificar además
+- [x] Capturar e inspeccionar los seis estados sintéticos a 1280×970 y 390×950; verificar además
       breakpoints 320, 359, 360, 389, 390, 639, 640, 767, 768, 1023 y 1024 px y orientación 568×320.
-- [ ] Hacer capturas PC/móvil a la geometría visible del mockup, recortar las dos vistas del PNG
-      aprobado y generar seis comparaciones PC + seis móvil reproducibles en
-      `.e2e-screenshots/household-plan-comparison/`; inspeccionarlas y corregir diferencias de
-      composición, tamaño, jerarquía, color y espaciado. No marcar el flujo cerrado solo por pasar
-      pruebas de estructura ni declarar fidelidad visual exacta hasta inspeccionar las 12 vistas.
+- [x] Generar e inspeccionar las seis comparaciones PC + seis móvil en
+      `.e2e-screenshots/household-plan-comparison/` recortando la zona de producto de los mockups
+      y las capturas aisladas.
+- [ ] Corregir las diferencias pendientes de composición, tamaño, jerarquía, color y espaciado
+      observadas en esas 12 comparaciones. No declarar fidelidad visual exacta solo por pasar pruebas
+      de estructura.
 - [x] Registrar comprobaciones y limitaciones reproducibles; no inferir fidelidad solo por tests
       unitarios, compilación o presencia de controles.
 
 Evidencia visual y regresión:
 
-- `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/household-plan-tasks.spec.ts` — **2/2 pasan en 42,9 s** (ejecución final, 12-10-2026). Servidor/SQLite/artefactos aislados; el proveedor de IA se simula y la DB/artefactos temporales propios se limpian.
+- `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/household-plan-tasks.spec.ts` — **2/2 pasan en 46,0 s** (ejecución final, 12-10-2026). Servidor/SQLite/artefactos aislados; el proveedor de IA se simula y la DB/artefactos temporales propios se limpian.
+- La comparación con los mockups aprobados de los seis estados PC/móvil se regeneró e inspeccionó en `.e2e-screenshots/household-plan-comparison/`. Los iconos SVG de herramientas/estancias se ajustaron de 24 a 32 px en las vistas verificadas; E2E valida 32 px y que los rótulos de pestañas no se monten a 320 px.
+- `pnpm --filter @hogaria/web exec ng test --no-watch --include=src/app/features/household/household-area-catalog.spec.ts --include=src/app/features/household/household-area-glyph.component.spec.ts --include=src/app/features/household/household-tasks.component.spec.ts --include=src/app/features/household/household-plan-preview-map.component.spec.ts` — **22/22**.
+- `pnpm run check:ui` — sin incidencias (228 ficheros/21 reglas); `pnpm run typecheck:e2e` — aprobado.
 - El primer pase halló dos fallos visuales que no detectaba el simple `scrollWidth`: a 320 px las pestañas del hogar se montaban; y en pantalla baja la decisión de foto quedaba debajo de la barra fija (`bottom=729,89`, `sticky top=693`). Se compactaron las pestañas hasta 389 px, con scroll/foco por teclado, y a 320×568 las acciones de foto dejan de ser fijas y permanecen alcanzables al desplazar. E2E verifica 320, 359, 360, 389 y 390 px y ambos casos pasan.
 - El primer CI de esta revisión halló que las media queries nuevas no estaban cubiertas por la matriz global B−1/B/B+1. Se añadieron 388–390, 1198–1201 y 1278–1281 px a `tests/e2e/layout-gutters.spec.ts`; el test enfocado pasa 1/1 y el spec completo aislado pasa **7/7 en 1,3 min**.
-- Inspeccioné los seis estados `01-plan-start` a `06-chat-adjustment` de `.e2e-screenshots/household-plan-tasks/{chromium,mobile-chrome}/` a 1440×900 y 390×844; hay capturas adicionales 320×568 para cada flujo, una de las acciones de foto desplazadas y asignación/tareas en 568×320. También se comprueban 639, 640, 767, 768, 1023 y 1024 px.
-- Las capturas usan plan/foto sintéticos y no contienen datos personales. La emulación no sustituye un teléfono físico con notch. La primera comparación directa, realizada al localizar las referencias, encontró que el inicio es cercano en estructura, pero el editor usa rellenos pasteles y una lista de zonas visibles que el prototipo no muestra; la asignación móvil comprime el mapa y agrega estados/acciones que desplazan el CTA; las tareas presentan más controles simultáneos que el mockup; y el chat móvil no deja visible toda la continuación. El fixture también exhibe «Cocina QA»/«Cocina ampliada», que son datos de prueba y no referencia visual válida. Corregir estos puntos y guardar comparaciones PC/móvil es el trabajo activo. La shell real de HogarIA se conserva.
+- Las capturas actuales usan 1280×970 y 390×950 para acercarse al encuadre del mockup; los seis estados `01-plan-start` a `06-chat-adjustment` se regeneran en `.e2e-screenshots/household-plan-tasks/{chromium,mobile-chrome}/`, con capturas 320×568 y 568×320 adicionales. Las capturas usan plan/foto sintéticos, sin etiquetas QA ni datos personales. La emulación no sustituye un teléfono físico con notch.
+- La inspección de las 12 comparaciones confirma que la jerarquía del inicio, el dock del editor, la hoja de asignación móvil y las cuatro continuaciones del chat ya están presentes. Siguen pendientes la forma/proporción del plano sintético frente a la referencia, la proporción del plano propuesto en móvil y diferencias de densidad/espaciado del panel de tareas y el chat. La shell real de HogarIA se conserva; no se declara fidelidad exacta hasta corregir estas diferencias y reinspeccionar las comparaciones.
 
 ### Puertas generales
 
