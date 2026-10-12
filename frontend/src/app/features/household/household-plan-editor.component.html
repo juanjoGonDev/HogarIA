@@ -1,6 +1,7 @@
 <section
   class="plan-editor"
   [class.plan-editor--assignment-view]="assignmentViewActive()"
+  [class.plan-editor--freeform]="tool() === 'freeform'"
   [attr.aria-busy]="loading() || saving() || proposing()"
   (click)="closeAdvancedSettings($event)"
 >
@@ -52,7 +53,13 @@
     >
       <summary class="plan-advanced-summary">
         <span class="plan-more-label">{{ 'household.plan_more_options' | t }}</span>
-        <span class="plan-more-icon" aria-hidden="true">•••</span>
+        <span class="plan-more-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <circle cx="5" cy="12" r="1.5" />
+            <circle cx="12" cy="12" r="1.5" />
+            <circle cx="19" cy="12" r="1.5" />
+          </svg>
+        </span>
       </summary>
       <div class="plan-editor__advanced-settings-content">
         <button
@@ -72,21 +79,6 @@
             </svg>
           </span>
           {{ 'household.plan_draw_area' | t }}
-        </button>
-        <button
-          *ngIf="canEdit"
-          type="button"
-          class="plan-button plan-button--quiet"
-          data-test="plan-draw-freeform"
-          data-close-advanced-settings
-          [class.is-selected]="tool() === 'freeform'"
-          [attr.aria-pressed]="tool() === 'freeform'"
-          (click)="setTool('freeform')"
-        >
-          <span aria-hidden="true" class="plan-draw-area-toggle__icon">
-            <svg viewBox="0 0 64 64"><path d="m12 17 31-6 10 24-22 20-19-17z" /></svg>
-          </span>
-          {{ 'household.plan_draw_freeform' | t }}
         </button>
         <label
           class="plan-canvas__snap plan-snap-setting-mobile"
@@ -970,6 +962,30 @@
           <button
             type="button"
             class="plan-tool"
+            data-test="plan-tool-freeform"
+            [class.is-selected]="tool() === 'freeform' || tool() === 'space'"
+            [attr.aria-pressed]="tool() === 'freeform' || tool() === 'space'"
+            [attr.aria-label]="
+              (tool() === 'space' ? 'household.plan_draw_area' : 'household.plan_draw_freeform') | t
+            "
+            (click)="setTool('freeform')"
+          >
+            <span aria-hidden="true">
+              <svg *ngIf="tool() === 'space'; else freeformToolIcon" viewBox="0 0 64 64">
+                <path d="M13 18h37v31H13z" stroke-dasharray="5 5" />
+                <path d="M13 18v8m0 15v8h8m19 0h10v-8" />
+              </svg>
+              <ng-template #freeformToolIcon>
+                <svg viewBox="0 0 64 64"><path d="m12 17 31-6 10 24-22 20-19-17z" /></svg>
+              </ng-template>
+            </span>
+            {{
+              (tool() === 'space' ? 'household.plan_draw_area' : 'household.plan_draw_freeform') | t
+            }}
+          </button>
+          <button
+            type="button"
+            class="plan-tool"
             [class.is-selected]="tool() === 'door'"
             [attr.aria-pressed]="tool() === 'door'"
             (click)="setTool('door')"
@@ -1160,21 +1176,28 @@
                   <svg
                     householdAreaGlyph
                     [kind]="space.kind"
-                    [attr.x]="spaceCenter(space).x - 400"
-                    [attr.y]="spaceCenter(space).y - 930"
-                    width="800"
-                    height="800"
+                    [attr.x]="spaceCenter(space).x - spaceGlyphSize(space) / 2"
+                    [attr.y]="spaceGlyphTop(space)"
+                    [attr.width]="spaceGlyphSize(space)"
+                    [attr.height]="spaceGlyphSize(space)"
                     viewBox="0 0 64 64"
                     class="plan-canvas__space-icon"
                     aria-hidden="true"
                   ></svg>
                   <text
                     [attr.x]="spaceCenter(space).x"
-                    [attr.y]="spaceCenter(space).y"
+                    [attr.y]="spaceLabelTop(space)"
+                    [style.font-size.px]="spaceLabelFontSize(space)"
                     class="plan-canvas__space-label"
                     pointer-events="none"
                   >
-                    {{ space.label }}
+                    <tspan
+                      *ngFor="let line of spaceLabelLines(space); let lineIndex = index"
+                      [attr.x]="spaceCenter(space).x"
+                      [attr.dy]="lineIndex === 0 ? 0 : spaceLabelFontSize(space)"
+                    >
+                      {{ line }}
+                    </tspan>
                   </text>
                   <g
                     *ngFor="
@@ -1186,13 +1209,14 @@
                     <circle
                       [attr.cx]="assignmentMemberX(space, memberIndex)"
                       [attr.cy]="assignmentMemberY(space)"
-                      r="270"
+                      [attr.r]="assignmentMemberRadius(space)"
                       [attr.data-owner-index]="memberIndexForId(memberId) % 4"
                       class="plan-canvas__assignee-avatar"
                     />
                     <text
                       [attr.x]="assignmentMemberX(space, memberIndex)"
                       [attr.y]="assignmentMemberY(space)"
+                      [style.font-size.px]="assignmentMemberRadius(space) * 0.85"
                       [attr.data-owner-index]="memberIndexForId(memberId) % 4"
                       class="plan-canvas__assignee"
                     >
@@ -1228,47 +1252,78 @@
             [attr.aria-label]="'household.plan_draw_freeform' | t"
             data-test="plan-freeform-actions"
           >
-            <p role="status">{{ 'household.plan_freeform_hint' | t }}</p>
+            <p role="status">
+              <span class="plan-freeform-hint--full">{{ 'household.plan_freeform_hint' | t }}</span>
+              <span class="plan-freeform-hint--compact">{{
+                'household.plan_freeform_hint_compact' | t
+              }}</span>
+            </p>
             <button
               type="button"
               class="plan-button plan-button--quiet"
               data-test="plan-freeform-undo-point"
+              [attr.aria-label]="'household.plan_freeform_undo_point' | t"
               [disabled]="!freeformPoints().length"
               (click)="removeLastFreeformPoint()"
             >
               <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                 <path d="M9 14 4 9l5-5M4 9h10a6 6 0 0 1 0 12h-2" />
               </svg>
-              <span>{{ 'household.plan_freeform_undo_point' | t }}</span>
+              <span class="plan-freeform-label--full">{{
+                'household.plan_freeform_undo_point' | t
+              }}</span>
+              <span class="plan-freeform-label--compact">{{
+                'household.plan_freeform_undo_point_compact' | t
+              }}</span>
             </button>
             <button
               type="button"
               class="plan-button plan-button--primary"
               data-test="plan-freeform-finish"
+              [attr.aria-label]="'household.plan_freeform_finish' | t"
               [disabled]="freeformPoints().length < 3"
               (click)="finishFreeformSpace()"
             >
               <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                 <path d="m5 12 4 4L19 6" />
               </svg>
-              <span>{{ 'household.plan_freeform_finish' | t }}</span>
+              <span class="plan-freeform-label--full">{{
+                'household.plan_freeform_finish' | t
+              }}</span>
+              <span class="plan-freeform-label--compact">{{
+                'household.plan_freeform_finish_compact' | t
+              }}</span>
             </button>
             <button
               type="button"
               class="plan-button plan-button--quiet"
               data-test="plan-freeform-cancel"
+              [attr.aria-label]="'household.plan_freeform_cancel' | t"
               (click)="cancelFreeformDrawing()"
             >
               <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                 <path d="M6 6l12 12M18 6 6 18" />
               </svg>
-              <span>{{ 'household.plan_freeform_cancel' | t }}</span>
+              <span class="plan-freeform-label--full">{{
+                'household.plan_freeform_cancel' | t
+              }}</span>
+              <span class="plan-freeform-label--compact">{{
+                'household.plan_freeform_cancel_compact' | t
+              }}</span>
             </button>
           </div>
           <ng-container *ngIf="shownFloor() as floor">
-            <p *ngIf="!floor.spaces.length && !floor.walls.length" class="plan-canvas__empty">
-              {{ 'household.plan_canvas_empty' | t }}
-            </p>
+            <div
+              *ngIf="tool() === 'select' && !floor.spaces.length && !floor.walls.length"
+              class="plan-canvas__empty"
+              data-test="plan-canvas-empty"
+              role="status"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M3.5 4.5h17v15h-17zM12 4.5v7h8.5M3.5 11.5H12v8" />
+              </svg>
+              <span>{{ 'household.plan_canvas_empty' | t }}</span>
+            </div>
           </ng-container>
           <div
             *ngIf="selectedWall() as wall"

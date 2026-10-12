@@ -218,6 +218,17 @@ Evidencia de QA-HOUSEHOLD.PLAN.GEOMETRY.1:
   completa del servidor (resultados globales en las puertas generales).
 - `pnpm run build` (server) y `pnpm run check:ui`: aprobados.
 
+### QA-HOUSEHOLD.PLAN.GUIDED-PLACEMENT.1 — inserción de zonas sin solapamientos
+
+- [x] La inserción guiada encuentra un rectángulo útil dentro de la huella existente de la planta;
+      respeta los límites y no cubre zonas ya dibujadas, incluidas formas irregulares.
+- [x] Si no queda un espacio mínimo utilizable, no crea una zona superpuesta: comunica cómo seguir
+      y conserva intacto el borrador.
+- [x] En estancias compactas, el icono y los nombres largos se escalan/parten en líneas para caber
+      dentro de la zona sin pisar paredes o etiquetas vecinas.
+- [x] TDD en utilidad/componente y E2E sintética: distribución inicial irregular + altas repetidas,
+      error sin hueco, caja del texto dentro del polígono y revisión visual en escritorio/móvil.
+
 ### QA-HOUSEHOLD.PLAN.AI-PROPOSAL.1 — generación, foto y revisión por chat
 
 - [x] Ruta autenticada bajo hogar activo; usa proveedor/cola de ese hogar y entrega
@@ -333,7 +344,7 @@ mockups.
 
 - [ ] **Inicio:** dejar neutras las tarjetas de método antes de la elección explícita y cotejar
       vivienda/plantas, tres métodos ilustrados, CTA y espaciado en escritorio y móvil.
-- [ ] **Editor:** agrupar pared/puerta/ventana y espacios en una sola barra coherente; conservar
+- [x] **Editor:** agrupar pared/puerta/ventana y espacios en una sola barra coherente; conservar
       piso/zoom/historial arriba del plano y dock táctil debajo en móvil. Reducir los rellenos
       asignados del plano durante el dibujo (el prototipo reserva el naranja para la selección), y
       plegar la lista de zonas para no añadir un panel visible ausente del mockup sin quitar acceso
@@ -341,6 +352,33 @@ mockups.
       fila de igual altura y jerarquía, con icono SVG legible además de texto; dar a «Vista previa»
       un icono y alinear su contenido con los demás botones de acción. Verificar la geometría de esos
       controles en escritorio, móvil y 320 px; no basta con que estén presentes.
+- [x] **Planta vacía:** mostrar un único mensaje de inicio con icono de plano en modo selección;
+      ocultarlo al dibujar para no competir con las instrucciones específicas de pared/zona. La
+      regresión cubre planta vacía, entrada/salida del modo libre, tamaño del icono y alineación del
+      texto en PC y móvil.
+- [x] La lista desplegable de zonas no repite visualmente su título: los encabezados auxiliares
+      conservan nombre accesible pero usan la utilidad de texto visualmente oculto.
+- [x] En 390×950 px, la vista móvil en dibujo libre mantiene dentro del primer pantallazo el área
+      de trabajo, las dos filas del dock, sus acciones y «Vista previa», con al menos 8 px sobre la
+      navegación fija. En 320×568 px conserva scroll útil, objetivos táctiles ≥44 px, y «Vista
+      previa» puede llevarse por encima de la navegación sin overflow horizontal. El hint/etiquetas
+      móviles se acortan visualmente, pero los controles conservan su nombre accesible completo.
+- [x] **Auditoría de escritorio ancho (captura real 1920 px):** conservar la anchura máxima de
+      800 px que refleja el prototipo, pero centrar Plano y Tareas en la columna principal (no
+      anclarlos a su borde izquierdo y dejar un vacío asimétrico). Mantener título, barra de
+      herramientas, acciones y lienzo alineados; validar 1280 y 1920 px y que «Vista previa» quepa
+      en el primer pantallazo, centrada y con 460 px como en el prototipo. No ensanchar por
+      ensanchar sin resolver la geometría del canvas.
+- [x] En las capturas PC/móvil, revisar los controles visibles contra el DOM y el build actual:
+      acciones con texto/icono coherentes, SVG de tamaño común, grupos con separación y línea base
+      consistentes, nombres accesibles y objetivos táctiles suficientes. No añadir iconos decorativos
+      a pestañas o controles que ya se entienden por texto.
+- [x] **Modo libre y dock estrecho:** «Dibujar zona» debe estar disponible en el dock principal y
+      permanecer visible/seleccionado mientras se dibuja; no activar este modo desde «Más opciones»
+      para luego ocultar su estado. Mantener icono, `aria-pressed` y el mismo ritmo geométrico que el
+      resto de herramientas. En 320–359 px, la fila horizontal de zonas rápidas debe indicar que
+      continúa, permitir llegar a todas por desplazamiento y teclado, mantener objetivos táctiles
+      ≥44 px y no provocar overflow horizontal de página.
 - [ ] **Iconos del flujo:** calcar las formas de herramientas, estancias, puertas/ventanas, chat y
       asignación de los SVG del prototipo; ajustar trazo/color/tamaño además del contenedor. La E2E
       comprueba el set de iconos en PC y móvil y las capturas `02-plan-editor` se cotejan de nuevo.
@@ -357,16 +395,33 @@ mockups.
       cuatro opciones y CTA visible, no una tarjeta compacta con estado guardado/Más acciones que
       desplacen la decisión.
 - [ ] **Tareas:** cotejar el peso visual del plano y la jerarquía del panel semanal. Los controles
-      funcionales avanzados deben quedar accesibles sin sobrecargar la vista principal; las siete
-      asignaciones, el resumen de equidad y la acción de aplicar deben seguir visibles/alcanzables
-      en móvil. Cuando hay una sola tarea diaria, mostrar en la fila día + persona asignada sin
-      repetir el título; conservar el cambio de nombre, fecha/zona y completado dentro de la edición
-      accesible. Si un día tiene varias tareas, mantener sus títulos visibles para distinguirlas.
-- [ ] **Ajuste por chat:** cotejar el tamaño de los planos actual/propuesta, conversación y decisión;
-      en móvil mostrar/alcanzar tras la respuesta las cuatro continuaciones del prototipo (seguir
-      chat, nuevo chat, subir foto, volver al lienzo) en una cuadrícula 2×2 junto a aplicar/deshacer,
-      sin comprometer el estado de borrador ni guardar antes de la confirmación. En escritorio el
-      subtítulo del encabezado debe envolverse y no colisionar con subir foto/volver al lienzo.
+      funcionales avanzados deben quedar accesibles sin sobrecargar la vista principal.
+- [x] **Checklist semanal:** las siete asignaciones, el resumen de equidad y la acción de aplicar
+      siguen alcanzables en móvil. Cuando hay una sola tarea diaria, la fila muestra día + persona
+      sin repetir el título; nombre, fecha/zona y completado siguen accesibles en la edición. Si un
+      día tiene varias tareas, sus títulos permanecen visibles para distinguirlas.
+- [x] **Tareas móvil:** las pestañas de planta tienen fila propia sobre el plano, el título de zona
+      precede a la navegación semanal y las flechas mantienen objetivos táctiles de al menos 44 px.
+- [x] **Ajuste por chat, estructura PC/móvil:** alternar un plano grande cada vez en móvil y
+      mantener sus cuatro continuaciones en cuadrícula 2×2 junto a aplicar/deshacer, sin guardar
+      antes de confirmar el borrador. En escritorio el subtítulo envuelve sin colisionar con subir
+      foto/volver al lienzo. Playwright verifica las acciones visibles y la huella de la propuesta.
+- [ ] **Ajuste por chat, acabado visual:** cotejar densidad y espaciado restantes de planos,
+      conversación y decisión contra el mockup; en escritorio el plano debe ocupar al menos el 74 %
+      de la altura útil de su marco sin deformar su geometría. Mantener el fixture móvil casi
+      cuadrado y uno vertical en escritorio para que ambas comparaciones correspondan a sus
+      referencias; no ocultar diferencias de tipografía/respiración.
+- [x] **Ajuste por chat, alineación PC:** los controles de zoom/encaje quedan ≤24 px bajo las
+      tarjetas comparadas y no se desplazan con la altura de la conversación; E2E reproduce primero
+      el desfase de 103 px y verifica la separación corregida.
+- [x] **Ajuste por chat, controles móviles:** botones de archivo, pestañas, zoom, decisión y cuatro
+      continuaciones miden al menos 44×44 px y siguen completos con ≥8 px sobre navegación fija. La
+      regresión inicialmente detectó controles de 40 px; se compactó la composición sin reducir el
+      lienzo por debajo de 260 px.
+- [x] **Mapa semanal, estancias compactas:** mantener el nombre «Aseo» dentro de una estancia
+      pequeña, omitir solo el texto redundante de titular que no cabe y conservar la asignación en
+      el nombre accesible del área. Unit test y E2E móvil reproducen y eliminan la colisión de «Sin
+      asignar» con la estancia vecina.
 - [x] E2E verifica interacción, permisos, persistencia, borradores, IA simulada, teclado/foco,
       labels, contraste AA en temas claro/oscuro, safe-area y ausencia de overflow; no hay fixtures
       personales ni llamadas reales a IA.
@@ -393,9 +448,27 @@ Evidencia visual y regresión:
 - Las capturas actuales usan 1280×970 y 390×950 para acercarse al encuadre del mockup; los seis estados `01-plan-start` a `06-chat-adjustment` se regeneran en `.e2e-screenshots/household-plan-tasks/{chromium,mobile-chrome}/`, con capturas 320×568 y 568×320 adicionales. Las capturas usan plan/foto sintéticos, sin etiquetas QA ni datos personales. La emulación no sustituye un teléfono físico con notch.
 - La inspección de las 12 comparaciones confirma que la jerarquía del inicio, el dock del editor, la hoja de asignación móvil y las cuatro continuaciones del chat ya están presentes. Siguen pendientes la forma/proporción del plano sintético frente a la referencia, la proporción del plano propuesto en móvil y diferencias de densidad/espaciado del panel de tareas y el chat. La shell real de HogarIA se conserva; no se declara fidelidad exacta hasta corregir estas diferencias y reinspeccionar las comparaciones.
 - Revisión crítica del editor a partir de la captura real del 12-10-2026: faltaban iconos y geometría común en las tres acciones del dibujo libre, y «Vista previa» carecía de icono. Se añadieron primero regresiones E2E y luego SVG accesibles, tres columnas iguales y una reducción del canvas únicamente durante dibujo libre; inspección de capturas 1280×970, 390×950 y medición adicional a 320 px. La UI de dibujo libre ahora mantiene línea base, ancho/alto e iconos de 18 px iguales (tolerancia ≤1 px); sigue pendiente cotejar exhaustivamente todo el flujo con los mockups.
+- Revisión de alineación: un test E2E rojo a 1920 px encontró el editor y la semana anclados a la izquierda de la columna principal pese a su ancho de 800 px; se centraron sin ensanchar el canvas. La captura del menú mostró un título auxiliar visible y duplicado; se aplicó el patrón accesible de texto oculto.
+- La comparación corregida de 02 encontró diferencias residuales: el CTA de escritorio era 420 px frente a 460 px del mock y los controles de zoom/historial terminaban 181 px antes del borde derecho del editor. Se actualizó el recorte E2E para el editor centrado; pruebas rojas (420 vs. 460 y desfase de 181 px) precedieron al CTA de 460 px centrado y al anclaje de esos controles al borde derecho.
+- Regresión móvil roja a 390×950: la acción acababa en y=734, el dock en y=914 y la vista previa en y=974 detrás de la navegación que empezaba en y=886. Causa: un margen global de 33 px en el dock más botones de etiquetas largas apiladas. Se retiró ese margen, se compactaron hint/etiquetas con traducciones sin abreviar los nombres accesibles y se limitó el canvas a 260 px (200 px en 320–359). Verde: acciones y dock terminan en y=655/y=802, vista previa en y=862 y navegación en y=886; hay ≥8 px de separación. A 320×568 E2E comprueba scroll hasta la acción primaria, lienzo ≥200 px, toques ≥44 px y sin overflow horizontal.
+- El test rojo de móvil también detectó «Cancelar dibujo» partido en dos líneas; la etiqueta visual se redujo a «Cancelar», conservando el nombre accesible «Cancelar dibujo». Los estados de captura vuelven a cerrar la lista avanzada para no confundir el editor limpio con el panel expandido; luego el flujo E2E reabre la lista para continuar pruebas de selección. El test rojo de selección documentó esa condición de estado y se corrigió reabriendo la lista después de capturar.
+- Última validación UI aislada (12-10-2026): `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/household-plan-tasks.spec.ts` — **2/2**, 49,1 s. También `ng test` enfocado **38/38**, `pnpm run check:ui` (228 ficheros/21 reglas) y `pnpm run typecheck:e2e` pasan. En 320×568 se desplaza la acción principal a y=420–468, separada de la navegación que comienza en y=504. Capturas sintéticas inspeccionadas: `chromium/02-plan-editor-wide-desktop.png`, `mobile-chrome/02-plan-editor-freeform.png` y `mobile-chrome/02-plan-editor-freeform-320x568.png`.
+- `pnpm run build` — build producción correcto. Se movieron reglas móviles compactas al SCSS global compartido: desaparece el aviso de presupuesto del `household-plan-editor.component.scss`; permanecen avisos de presupuesto del bundle inicial/componentes ajenos y avisos Angular existentes, fuera de este cambio.
 - Segunda revisión de las comparaciones: el subtítulo del ajuste por chat colisionaba con las acciones de escritorio y las cuatro continuaciones móviles no estaban en una cuadrícula 2×2. Se envolvió el subtítulo y se ajustó la cuadrícula; E2E ahora mide ausencia de colisión y comprueba las cuatro opciones visibles sobre la navegación móvil. Las diferencias restantes de composición/densidad del chat continúan pendientes.
 - Revisión de evidencia del mockup móvil 06: la referencia aprobada usa pestañas para alternar y enseña un plano grande cada vez; no se requiere una comparación simultánea de miniaturas. La implementación mantiene ese patrón y las aserciones E2E no deben invertirse a dos planos simultáneos.
+- Inserción guiada: la colocación basada en `spaces.length` ubicaba zonas encima de la planta. TDD reprodujo el solapamiento en E2E; ahora la búsqueda toma el mayor rectángulo libre dentro de la huella, respeta los límites y conserva el borrador si no hay un hueco mínimo. Las etiquetas de zona se reducen/enrollan hasta tres líneas y se comprueba que su caja queda dentro del polígono. Validado con 38/38 pruebas de componente/utilidad, `check:ui`, `typecheck:e2e` y 2/2 proyectos Playwright aislados (Chromium + Mobile Chrome). Las capturas PC/móvil actuales muestran la inserción sin solapamiento; la cobertura por archivo se verificó por encima del 70 % en cada métrica.
 - Última inspección de la UI: el descarte de propuesta ahora es un botón de cierre con nombre accesible dentro del encabezado (44×44 px), sin enlace suelto debajo de «Continuar»; en 320–359 px el mapa conserva legibilidad con 172 px y libera el espacio necesario. Playwright verifica no-colisión título/estado, ≥8 px entre decisión y continuación fija y ≥8 px sobre navegación. La continuación queda separada de la barra móvil por 9 px en la captura 390×950.
+- Revisión crítica de Tareas móvil: Playwright primero detectó que las pestañas tapaban el mapa, que el título de zona compartía renglón con las fechas y que un desplazamiento de 64 px no bastaba para mostrar la última asignación encima de Guardar. Las pestañas ahora ocupan una fila de flujo; el título y las fechas usan filas separadas; flechas y plantas se prueban ≥44 px; el checklist se desplaza 112 px para demostrar que la última fila queda ≥8 px sobre Guardar, que a su vez permanece sobre la navegación. E2E Mobile Chrome pasa **1/1 (27,0 s)** y captura 390×950, 320×568 y 568×320; la comparación móvil se regeneró e inspeccionó. Sigue pendiente el cotejo global del peso visual mapa/panel.
+- Revisión del chat móvil: el primer test medía la respuesta de foto inicial, no la respuesta final que produce la captura 06. Medir la propuesta final en rojo halló huella **174,5 px** en canvas de 340 px: el stub transformaba artificialmente la revisión textual a aspecto retrato. La IA/UI conserva el aspecto de entrada; se corrigió el fixture para mantener el plano irregular casi cuadrado como el mockup. Verde: huella **259,8/340 px (76,4 %)** y relación ancho/alto ≥0,9; Playwright Mobile Chrome pasa **1/1 (26,8 s)** y regenera `06-chat-adjustment` a 390×950 y 320×568. El chat aún requiere inspección comparativa de densidad/espaciado.
+- Auditoría a partir de la captura señalada por el usuario: el modo de zona libre se podía activar solo desde «Más opciones» y el panel se cerraba al elegirlo; el dock visible seguía ofreciendo «Dibujar pared» sin reflejar que se estaba trazando una zona. En 320 px las zonas rápidas dependían de una fila horizontal parcialmente visible. Se añadieron criterios explícitos para mostrar el modo actual en el dock y comprobar el acceso por teclado/scroll; quedaron pendientes hasta la regresión verde descrita a continuación.
+- Regresión del modo invisible: Playwright primero falló en PC/móvil porque no existía un botón visible del modo tras activar «Zona libre». El dock incluye ahora el control SVG seleccionado, conserva ese estado para el modo rectangular avanzado y cambia etiqueta/forma según el modo. En 320 px se comprueba que el foco de teclado desplaza la fila hasta «Patio», que el control ≥44×44 queda totalmente visible y que la página no se desborda. La ejecución aislada `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/household-plan-tasks.spec.ts` pasa **2/2**; capturas sintéticas PC 1920×1032 y móvil 390×950/320×568 inspeccionadas; captura 390 deja 11,2 px sobre la navegación fija.
+- TDD visual de 06: la E2E inicial midió solo la caja SVG y el fixture horizontal ocupaba **54,8 %** de la altura útil en el marco vertical. Se añadió un fixture desktop vertical (el renderer conserva su relación de aspecto) y la huella visible final ocupa **94,4 %**; el fixture móvil permanece casi cuadrado. Se corrigió además una fila autoexpandida por el chat que alejaba el zoom **103 px** de las tarjetas: ahora el E2E limita la separación a **24 px**.
+- Auditoría táctil móvil del chat: el test rojo encontró alturas de **40 px** en subida de imagen, pestañas, zoom, decisión y continuación. Se llevaron a **≥44×44 px**, se compactó la separación/texto y se conservó la separación exigida respecto de navegación; la prueba Mobile Chrome pasa y la captura 06 permanece completa.
+- Auditoría del mapa semanal: la captura 05 mostraba «Sin asignar» ocupando el pasillo/aseo estrecho y colisionando con etiquetas vecinas. Se oculta únicamente el rótulo de titular cuando la menor dimensión del polígono es inferior a **1600 unidades**; se mantienen nombre, relleno, avatar si existe, selección y `aria-label` con estado. Unit test **16/16** y regresión E2E móvil pasan; la comparación PC/móvil se regeneró e inspeccionó tras el pase conjunto.
+- Crítica del estado vacío a partir de la captura real: en un piso sin zonas el mensaje genérico «Añade una zona o dibuja el primer espacio» persistía debajo del lienzo incluso al dibujar libremente, duplicando/contradiciendo la instrucción del modo. TDD falló primero; ahora el mensaje con icono de plano solo aparece en selección y desaparece al empezar un dibujo. El E2E valida presencia, SVG de 18×18 px y alineación icono/texto (≤1 px), y vuelve a comprobar que reaparece al volver a selección. Primera corrida E2E detectó un selector de prueba que contaba el SVG exterior y el SVG interno del glifo como dos iconos; se restringió al SVG directo (no era defecto de interfaz). Ejecución aislada final `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/household-plan-tasks.spec.ts`: **2/2**, 54,5 s, DB/artefactos temporales, proveedor simulado. Unit test del editor: **28/28**. Capturas sintéticas `02-plan-editor-empty-floor.png` y `02-plan-editor-empty-freeform.png` en ambas carpetas `chromium` y `mobile-chrome`; 12 comparaciones PC/móvil regeneradas e inspeccionadas.
+- Revisión crítica tras la nueva captura del editor: la imagen aportada muestra el estado de zona libre sin selección visible ni iconos en las acciones de vértice. En el build actual esos defectos ya están cubiertos por el dock persistente `Zona libre`, su estado `aria-pressed`, y SVG/geométrica común en las acciones; la captura aislada actual `chromium/02-plan-editor-wide-desktop.png` confirma su representación a 1920 px. No se da por resuelta la impresión global: siguen abiertos el calco exacto de SVG y las diferencias visibles de densidad/espaciado de las pantallas de propuesta, tareas y chat recogidas en los checks pendientes.
+- Revalidación visual (12-10-2026): se ejecutó `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/household-plan-tasks.spec.ts` — **2/2 en 51,7 s** con DB/artefactos temporales y proveedor simulado; la cobertura incluye móvil 320×568, 390×950 y orientación 568×320. Se regeneraron las 12 comparaciones con `scripts/create-household-plan-comparison.ps1` y se inspeccionaron de nuevo las vistas de Inicio, editor, propuesta fotográfica, asignación y ajuste por chat. El mapa móvil de asignación alcanza 380 px y mantiene ≥8 px hasta la hoja de asignación. Persisten diferencias no cosméticas: densidad y saltos de línea de los controles de chat en móvil, jerarquía del panel semanal y correspondencia exacta de las formas SVG.
+- Después de esa revisión: `pnpm run check:ui` (228 archivos/21 reglas) y `pnpm run typecheck:e2e` pasan; `pnpm run build` pasa con warnings preexistentes de Angular/presupuesto de bundles y estilos. No se volvió a ejecutar coverage porque las últimas modificaciones fueron solo de estilos y E2E; la última cobertura registrada sigue por encima de 70 % por métrica y archivo del alcance.
 
 ### Puertas generales
 
@@ -409,7 +482,7 @@ Evidencia visual y regresión:
       hasta pasar todos los gates.
 - [x] Inspección Playwright con servidor aislado y datos sintéticos; PC y móvil, capturas comparables,
       geometría equivalente con tolerancia ≤1 CSS px, teclado/labels y ninguna información privada.
-- [x] PR #47 pasó a Ready for review tras aprobar los gates. No se hizo merge.
+- [x] PR #47 continúa Draft como se solicitó; no se hizo merge.
 
 Cobertura verificada localmente (repetición final después de la revisión visual):
 

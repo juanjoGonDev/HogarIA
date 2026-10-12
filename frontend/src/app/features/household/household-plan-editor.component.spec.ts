@@ -150,6 +150,26 @@ describe('HouseholdPlanEditorComponent', () => {
     expect(component.isDirty()).toBeTrue();
   });
 
+  it('hides the generic empty-plan prompt while freehand drawing instructions are active', async () => {
+    await mount();
+    component.selectEntryMethod('photo');
+    component.startPlan();
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('.plan-canvas__empty')).not.toBeNull();
+    expect(
+      fixture.nativeElement.querySelector('[data-test="plan-canvas-empty"] svg')
+    ).not.toBeNull();
+
+    component.setTool('freeform');
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('.plan-canvas__empty')).toBeNull();
+    expect(
+      fixture.nativeElement.querySelector('[data-test="plan-freeform-actions"]')
+    ).not.toBeNull();
+  });
+
   it('uses a landscape starter floor proportioned for the plan canvas reference', async () => {
     await mount();
     component.selectEntryMethod('guided');
@@ -174,6 +194,170 @@ describe('HouseholdPlanEditorComponent', () => {
     expect(viewX + viewWidth).toBeGreaterThan(Math.max(...xs));
     expect(viewY + viewHeight).toBeGreaterThan(Math.max(...ys));
     expect(viewWidth / viewHeight).toBeCloseTo(1.25, 1);
+  });
+
+  it('places guided areas inside the existing footprint without covering another zone', async () => {
+    await mount();
+    component.selectEntryMethod('guided');
+    component.startPlan();
+    component.setSelectedKind('custom');
+    component.selectedLabel.set('Sala de música');
+    const originalSpaces = structuredClone(component.activeFloor()!.spaces);
+    const allOriginalPoints = originalSpaces.flatMap((space) => space.polygon);
+
+    component.addGuidedSpace();
+
+    const inserted = component
+      .activeFloor()!
+      .spaces.find((space) => space.label === 'Sala de música');
+    expect(inserted).toBeDefined();
+    const insertedBounds = {
+      minX: Math.min(...inserted!.polygon.map((point) => point.x)),
+      maxX: Math.max(...inserted!.polygon.map((point) => point.x)),
+      minY: Math.min(...inserted!.polygon.map((point) => point.y)),
+      maxY: Math.max(...inserted!.polygon.map((point) => point.y))
+    };
+    expect(insertedBounds.minX).toBeGreaterThanOrEqual(
+      Math.min(...allOriginalPoints.map((p) => p.x))
+    );
+    expect(insertedBounds.maxX).toBeLessThanOrEqual(Math.max(...allOriginalPoints.map((p) => p.x)));
+    expect(insertedBounds.minY).toBeGreaterThanOrEqual(
+      Math.min(...allOriginalPoints.map((p) => p.y))
+    );
+    expect(insertedBounds.maxY).toBeLessThanOrEqual(Math.max(...allOriginalPoints.map((p) => p.y)));
+    expect(
+      originalSpaces.every((space) => {
+        const bounds = {
+          minX: Math.min(...space.polygon.map((point) => point.x)),
+          maxX: Math.max(...space.polygon.map((point) => point.x)),
+          minY: Math.min(...space.polygon.map((point) => point.y)),
+          maxY: Math.max(...space.polygon.map((point) => point.y))
+        };
+        return (
+          insertedBounds.maxX <= bounds.minX ||
+          insertedBounds.minX >= bounds.maxX ||
+          insertedBounds.maxY <= bounds.minY ||
+          insertedBounds.minY >= bounds.maxY
+        );
+      })
+    ).toBeTrue();
+  });
+
+  it('does not add a guided zone when the floor has no useful free rectangle', async () => {
+    await mount();
+    const fullFloor = structuredClone(component.draft());
+    fullFloor.floors[0].spaces = [
+      {
+        id: 'occupied-floor',
+        kind: 'custom',
+        label: 'Zona completa',
+        parentSpaceId: null,
+        polygon: [
+          { x: 0, y: 0 },
+          { x: 10_000, y: 0 },
+          { x: 10_000, y: 10_000 },
+          { x: 0, y: 10_000 }
+        ]
+      }
+    ];
+    component.draft.set(fullFloor);
+    component.setSelectedKind('kitchen');
+
+    component.addGuidedSpace();
+
+    expect(component.draft()).toEqual(fullFloor);
+    expect(String(component.errorKey())).toBe('household.plan_no_guided_space');
+  });
+
+  it('wraps long zone labels and scales their icon to compact areas', async () => {
+    await mount();
+    const compactSpace = {
+      ...component.draft().floors[0].spaces[0],
+      label: 'Sala de música',
+      polygon: [
+        { x: 3_000, y: 4_400 },
+        { x: 4_300, y: 4_400 },
+        { x: 4_300, y: 5_600 },
+        { x: 3_000, y: 5_600 }
+      ]
+    };
+
+    expect(component.spaceLabelLines(compactSpace)).toEqual(['Sala de', 'música']);
+    expect(component.spaceLabelFontSize(compactSpace)).toBeLessThan(290);
+    expect(component.spaceGlyphSize(compactSpace)).toBeLessThan(800);
+    expect(component.spaceLabelTop(compactSpace)).toBeGreaterThan(
+      component.spaceGlyphTop(compactSpace)
+    );
+    expect(
+      component.spaceLabelLines({ ...compactSpace, label: 'Sala superextraordinariamente' })[0]
+    ).toBe('Sala');
+    expect(
+      component.spaceLabelLines({ ...compactSpace, label: 'superextraordinariamente' })
+    ).toEqual(['superext', 'raordina', 'riamente']);
+    const longLabelLines = component.spaceLabelLines({
+      ...compactSpace,
+      label: 'superextraordinariamenteextraordinariamente'
+    });
+    expect(longLabelLines).toHaveSize(3);
+    expect(longLabelLines[2].endsWith('…')).toBeTrue();
+    expect(component.spaceLabelLines({ ...compactSpace, label: '   ' })).toEqual(['']);
+  });
+
+  it('keeps assignment markers below labels and within narrow room bounds', async () => {
+    await mount();
+    component.selectEntryMethod('guided');
+    component.startPlan();
+    const kitchen = component.draft().floors[0].spaces.find((space) => space.kind === 'kitchen');
+    expect(kitchen).toBeDefined();
+    if (!kitchen) return;
+
+    component.assignmentSnapshot.set({
+      planVersion: 0,
+      version: 1,
+      assignments: { [kitchen.id]: ['member-a', 'member-b', 'member-c'] }
+    });
+    component.selectSpace(kitchen);
+
+    const labelBottom =
+      component.spaceLabelTop(kitchen) +
+      (component.spaceLabelLines(kitchen).length - 1) * component.spaceLabelFontSize(kitchen) +
+      component.spaceLabelFontSize(kitchen) / 2;
+    const markerTop =
+      component.assignmentMemberY(kitchen) - component.assignmentMemberRadius(kitchen);
+    expect(markerTop - labelBottom).toBeGreaterThanOrEqual(60);
+    expect(component.assignmentMemberRadius(kitchen)).toBe(210);
+
+    const narrowSpace = {
+      ...kitchen,
+      polygon: [
+        { x: 300, y: 4_000 },
+        { x: 1_100, y: 4_000 },
+        { x: 1_100, y: 5_000 },
+        { x: 300, y: 5_000 }
+      ]
+    };
+    const radius = component.assignmentMemberRadius(narrowSpace);
+    expect(radius).toBeLessThan(component.assignmentMemberRadius(kitchen));
+    expect(component.assignmentMemberX(narrowSpace, 0) - radius).toBeGreaterThanOrEqual(350);
+    expect(component.assignmentMemberX(narrowSpace, 2) + radius).toBeLessThanOrEqual(1_050);
+
+    const bathroom = component.draft().floors[0].spaces.find((space) => space.kind === 'bathroom');
+    expect(bathroom).toBeDefined();
+    if (!bathroom) return;
+    component.assignmentSnapshot.update((snapshot) => ({
+      ...snapshot,
+      assignments: { ...snapshot.assignments, [bathroom.id]: ['member-a'] }
+    }));
+    component.selectSpace(bathroom);
+    const bathroomMinY = Math.min(...bathroom.polygon.map((point) => point.y));
+    const bathroomLabelBottom =
+      component.spaceLabelTop(bathroom) +
+      (component.spaceLabelLines(bathroom).length - 1) * component.spaceLabelFontSize(bathroom) +
+      component.spaceLabelFontSize(bathroom) / 2;
+    const bathroomMarkerTop =
+      component.assignmentMemberY(bathroom) - component.assignmentMemberRadius(bathroom);
+    expect(component.spaceGlyphTop(bathroom)).toBeGreaterThanOrEqual(bathroomMinY + 60);
+    expect(bathroomMarkerTop - bathroomLabelBottom).toBeGreaterThanOrEqual(60);
   });
 
   it('uses the illustrated method and dwelling icons from the plan setup design', async () => {

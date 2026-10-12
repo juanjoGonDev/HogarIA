@@ -51,6 +51,8 @@ interface WeekDay {
   shortLabel: string;
 }
 
+const MAP_OWNER_LABEL_MIN_SPAN = 1_600;
+
 @Component({
   selector: 'app-household-tasks',
   standalone: true,
@@ -414,6 +416,16 @@ export class HouseholdTasksComponent implements OnChanges {
     if (assigned.length > 1) return this.i18n.t('household.plan_zone_shared');
     return (
       assigned[0]?.name.trim().split(/\s+/u)[0] ?? this.i18n.t('household.plan_zone_unassigned')
+    );
+  }
+
+  spaceMapAssigneeLabelVisible(space: HouseholdPlanSpace): boolean {
+    if (space.polygon.length < 3) return false;
+    const xs = space.polygon.map((point) => point.x);
+    const ys = space.polygon.map((point) => point.y);
+    return (
+      Math.min(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) >=
+      MAP_OWNER_LABEL_MIN_SPAN
     );
   }
 

@@ -71,7 +71,9 @@ foreach ($state in $states) {
   try {
     # Compare the product content below each prototype/app shell, not their different navigation shells.
     $desktopReference = Get-Crop $reference $state.DesktopX 104 $state.DesktopWidth 894
-    $desktopActual = Get-Crop $desktop 312 76 $state.DesktopWidth 894
+    # At 1280px the 800px plan editor is centered in the main content track (x=380),
+    # rather than starting at the page-container gutter (x=312).
+    $desktopActual = Get-Crop $desktop 380 76 $state.DesktopWidth 894
     # Crop the 390x950 phone screen, excluding its status bar and device bezel.
     $mobileReference = Get-Crop $reference 1124 54 390 950
     Save-Comparison $desktopReference $desktopActual (Join-Path $OutputDirectory "$($state.Name)-desktop.png")

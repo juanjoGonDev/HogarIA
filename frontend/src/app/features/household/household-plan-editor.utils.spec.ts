@@ -1,5 +1,6 @@
 import {
   createHouseholdPlanSpace,
+  findGuidedSpacePlacement,
   createHouseholdPlanPolygon,
   createHouseholdPlanWall,
   cloneHouseholdPlan,
@@ -39,6 +40,81 @@ function floor(walls: HouseholdPlanWall[] = []): HouseholdPlanFloor {
 }
 
 describe('household plan editor geometry helpers', () => {
+  it('starts guided areas at the standard position on an empty floor', () => {
+    expect(findGuidedSpacePlacement([])).toEqual({
+      start: { x: 700, y: 700 },
+      end: { x: 3_300, y: 3_200 }
+    });
+  });
+
+  it('finds a useful gap without intersecting existing polygon bounds', () => {
+    const existingSpaces = [
+      space({
+        polygon: [
+          { x: 300, y: 1_400 },
+          { x: 3_600, y: 1_400 },
+          { x: 3_600, y: 4_000 },
+          { x: 300, y: 4_000 }
+        ]
+      }),
+      space({
+        id: 'bathroom',
+        polygon: [
+          { x: 300, y: 4_000 },
+          { x: 3_000, y: 4_000 },
+          { x: 3_000, y: 5_600 },
+          { x: 300, y: 5_600 }
+        ]
+      }),
+      space({
+        id: 'bedroom',
+        polygon: [
+          { x: 300, y: 5_600 },
+          { x: 4_300, y: 5_600 },
+          { x: 4_300, y: 8_600 },
+          { x: 500, y: 8_600 }
+        ]
+      })
+    ];
+
+    const placement = findGuidedSpacePlacement(existingSpaces);
+
+    expect(placement).not.toBeNull();
+    const width = placement!.end.x - placement!.start.x;
+    const height = placement!.end.y - placement!.start.y;
+    expect(width).toBeGreaterThanOrEqual(700);
+    expect(height).toBeGreaterThanOrEqual(700);
+    expect(width).toBeLessThanOrEqual(2_600);
+    expect(height).toBeLessThanOrEqual(2_500);
+    expect(
+      existingSpaces.every((candidate) => {
+        const xs = candidate.polygon.map((point) => point.x);
+        const ys = candidate.polygon.map((point) => point.y);
+        return (
+          placement!.end.x <= Math.min(...xs) ||
+          placement!.start.x >= Math.max(...xs) ||
+          placement!.end.y <= Math.min(...ys) ||
+          placement!.start.y >= Math.max(...ys)
+        );
+      })
+    ).toBeTrue();
+  });
+
+  it('returns no guided placement when all available plan bounds are occupied', () => {
+    expect(
+      findGuidedSpacePlacement([
+        space({
+          polygon: [
+            { x: 0, y: 0 },
+            { x: 10_000, y: 0 },
+            { x: 10_000, y: 10_000 },
+            { x: 0, y: 10_000 }
+          ]
+        })
+      ])
+    ).toBeNull();
+  });
+
   it('starts with one valid floor and the supported dwelling defaults', () => {
     expect(emptyHouseholdPlan('Planta baja')).toEqual({
       schemaVersion: 1,

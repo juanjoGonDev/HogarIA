@@ -9,7 +9,8 @@ import type { HouseholdMember } from '../../shared/models/household.model';
 import type {
   HouseholdPlan,
   HouseholdPlanFloor,
-  HouseholdPlanOpening
+  HouseholdPlanOpening,
+  HouseholdPlanSpace
 } from '../../shared/models/household-plan.model';
 import type {
   HouseholdTaskOccurrence,
@@ -163,6 +164,33 @@ describe('HouseholdTasksComponent', () => {
     });
 
     expect(component.planViewBox().split(' ').map(Number)).toEqual([-439, -439, 10_878, 1_878]);
+  });
+
+  it('omits owner captions from compact room footprints without changing their accessible assignment', async () => {
+    await mount();
+    const source = plan.floors[0].spaces[0];
+    const compactRoom: HouseholdPlanSpace = {
+      ...source,
+      polygon: [
+        { x: 100, y: 100 },
+        { x: 1_399, y: 100 },
+        { x: 1_399, y: 1_299 },
+        { x: 100, y: 1_299 }
+      ]
+    };
+    const readableRoom: HouseholdPlanSpace = {
+      ...source,
+      polygon: [
+        { x: 100, y: 100 },
+        { x: 2_100, y: 100 },
+        { x: 2_100, y: 2_100 },
+        { x: 100, y: 2_100 }
+      ]
+    };
+
+    expect(component.spaceMapAssigneeLabelVisible(compactRoom)).toBe(false);
+    expect(component.spaceMapAssigneeLabelVisible(readableRoom)).toBe(true);
+    expect(component.spaceAssignmentLabel(compactRoom.id)).toBe('household.plan_zone_unassigned');
   });
 
   it('adds and edits a household-week task locally and saves it with the versioned API', async () => {

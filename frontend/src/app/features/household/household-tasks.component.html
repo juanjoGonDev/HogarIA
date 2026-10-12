@@ -126,7 +126,12 @@
                   />
                 </ng-container>
               </ng-container>
-              <g *ngFor="let space of floor.spaces" class="tasks-map__label" aria-hidden="true">
+              <g
+                *ngFor="let space of floor.spaces"
+                class="tasks-map__label"
+                [attr.data-space-id]="space.id"
+                aria-hidden="true"
+              >
                 <svg
                   householdAreaGlyph
                   [kind]="space.kind"
@@ -169,6 +174,7 @@
                   </text>
                 </g>
                 <text
+                  *ngIf="spaceMapAssigneeLabelVisible(space)"
                   [attr.x]="spaceCenter(space).x"
                   [attr.y]="spaceCenter(space).y + 680"
                   class="tasks-map__owner"

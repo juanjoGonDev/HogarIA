@@ -86,7 +86,7 @@
 
   .plan-editor__workspace > .plan-editor__header-actions {
     grid-area: actions;
-    width: min(420px, 100%);
+    width: min(460px, 100%);
     justify-self: center;
   }
 }
@@ -101,7 +101,7 @@
 
 .plan-editor__header-actions {
   grid-area: header-actions;
-  width: min(420px, 100%);
+  width: min(460px, 100%);
   justify-self: center;
 }
 
@@ -532,6 +532,11 @@
     width: max-content;
     flex: 0 1 auto;
   }
+
+  .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-setup, .plan-review))
+    .plan-editor__toolbar-actions {
+    margin-left: auto;
+  }
 }
 
 .plan-floor-tabs {
@@ -691,10 +696,18 @@
 }
 
 .plan-more-icon {
-  display: block;
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
   color: var(--text-secondary);
-  font-size: var(--text-sm);
-  letter-spacing: 1px;
+}
+
+.plan-more-icon svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
 }
 
 .plan-toolbar-icon {
@@ -1434,6 +1447,11 @@
   font-size: var(--text-sm);
 }
 
+.plan-freeform-hint--compact,
+.plan-freeform-label--compact {
+  display: none;
+}
+
 .plan-canvas__freeform-actions > .plan-button {
   display: inline-flex;
   min-width: 0;
@@ -1459,9 +1477,26 @@
 }
 
 .plan-canvas__empty {
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
   margin: 0;
   color: var(--text-secondary);
   font-size: var(--text-sm);
+  text-align: center;
+}
+
+.plan-canvas__empty svg {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
 }
 
 .plan-canvas__controls {
@@ -3257,6 +3292,10 @@
     justify-self: center;
   }
 
+  .plan-review__compare-card .plan-compare-canvas__label {
+    font-size: 300px;
+  }
+
   .plan-review__compare-card,
   .plan-chat {
     gap: var(--space-2);
@@ -3418,6 +3457,10 @@
     height: min(30vh, 270px);
     max-height: 270px;
     aspect-ratio: 1.35 / 1;
+  }
+
+  .plan-review__compare-card .plan-compare-canvas__label {
+    font-size: 440px;
   }
 
   .plan-editor:has(.plan-review__chat-view) .plan-editor__header p {
@@ -3623,14 +3666,14 @@
   }
 
   .plan-editor--assignment-view .plan-canvas__viewport {
-    height: min(38vh, 358px);
-    min-height: min(38vh, 358px);
+    height: min(40vh, 380px);
+    min-height: min(40vh, 380px);
   }
 
   .plan-editor--assignment-view .plan-details:has(.plan-details__selected) .plan-details__selected {
     right: 0;
     bottom: calc(
-      var(--bottom-nav-height) + var(--space-2) + 25px + env(safe-area-inset-bottom, 0px)
+      var(--bottom-nav-height) + var(--space-2) + 24px + env(safe-area-inset-bottom, 0px)
     );
     left: 0;
     min-height: min(29vh, 270px);
@@ -3878,5 +3921,39 @@
 
   .plan-editor__header-actions {
     margin-top: var(--space-2);
+  }
+}
+
+/* Compact freeform controls keep the mobile drawing flow inside one viewport. */
+@media (max-width: 767px) {
+  .plan-editor--freeform:not(.plan-editor--assignment-view) .plan-canvas__viewport {
+    height: clamp(200px, 30vh, 260px);
+    min-height: clamp(200px, 30vh, 210px);
+    max-height: 260px;
+  }
+
+  .plan-canvas__freeform-actions > .plan-button {
+    flex-direction: row;
+    gap: 4px;
+    padding: 4px;
+    font-size: 0.75rem;
+  }
+
+  .plan-freeform-label--compact {
+    white-space: nowrap;
+  }
+
+  .plan-freeform-hint--full,
+  .plan-freeform-label--full {
+    display: none;
+  }
+
+  .plan-freeform-hint--compact,
+  .plan-freeform-label--compact {
+    display: inline;
+  }
+
+  .plan-editor--freeform:not(.plan-editor--assignment-view) .plan-canvas-toolbar {
+    margin-top: 0;
   }
 }

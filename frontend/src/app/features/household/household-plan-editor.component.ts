@@ -59,6 +59,7 @@ import {
   createHouseholdPlanSpace,
   createHouseholdPlanWall,
   emptyHouseholdPlan,
+  findGuidedSpacePlacement,
   moveHouseholdPlanSpace,
   openingSegment,
   openingRails as makeOpeningRails,
@@ -607,20 +608,23 @@ export class HouseholdPlanEditorComponent implements OnChanges, OnDestroy {
       this.errorKey.set('household.plan_area_limit');
       return;
     }
-    const index = floor.spaces.length;
-    const left = 700 + (index % 3) * 3_000;
-    const top = 700 + Math.floor(index / 3) * 3_000;
+    const placement = findGuidedSpacePlacement(floor.spaces);
+    if (!placement) {
+      this.errorKey.set('household.plan_no_guided_space');
+      return;
+    }
     const space = createHouseholdPlanSpace(
       this.selectedKind(),
       this.roomLabel(),
       this.newId('space'),
-      { x: left, y: top },
-      { x: left + 2_600, y: top + 2_500 }
+      placement.start,
+      placement.end
     );
     if (!space) {
       this.errorKey.set('household.plan_custom_label_required');
       return;
     }
+    this.resetMessages();
     this.updateFloor(floor.id, (current) => ({ ...current, spaces: [...current.spaces, space] }));
     this.selectedSpaceId.set(space.id);
     this.selectedWallId.set(null);
@@ -788,16 +792,148 @@ export class HouseholdPlanEditorComponent implements OnChanges, OnDestroy {
   }
 
   assignmentMemberX(space: HouseholdPlanSpace, memberIndex: number): number {
-    const assignedCount = this.assignmentSnapshot().assignments[space.id]?.length ?? 1;
-    return this.spaceCenter(space).x + (memberIndex - (assignedCount - 1) / 2) * 520;
+    const assignedCount = Math.max(1, this.assignmentSnapshot().assignments[space.id]?.length ?? 1);
+    if (assignedCount === 1) return this.spaceCenter(space).x;
+    const bounds = this.spaceBounds(space);
+    const radius = this.assignmentMemberRadius(space);
+    const spacing = Math.min(
+      520,
+      Math.max(0, (bounds.maxX - bounds.minX - 2 * radius - 100) / (assignedCount - 1))
+    );
+    return this.spaceCenter(space).x + (memberIndex - (assignedCount - 1) / 2) * spacing;
   }
 
   assignmentMemberY(space: HouseholdPlanSpace): number {
-    return this.spaceCenter(space).y + 420;
+    const bounds = this.spaceBounds(space);
+    const radius = this.assignmentMemberRadius(space);
+    return Math.min(this.spaceCenter(space).y + 1_000, bounds.maxY - radius - 160);
+  }
+
+  assignmentMemberRadius(space: HouseholdPlanSpace): number {
+    const bounds = this.spaceBounds(space);
+    const assignedCount = Math.max(1, this.assignmentSnapshot().assignments[space.id]?.length ?? 1);
+    const perMemberWidth = (bounds.maxX - bounds.minX - 100) / assignedCount;
+    const fontSize = this.spaceLabelFontSize(space);
+    const labelHeight = fontSize * this.spaceLabelLines(space).length;
+    const gap = this.spaceGlyphLabelGap(space);
+    const verticalRadius = Math.floor((bounds.maxY - bounds.minY - labelHeight - gap - 380) / 2);
+    return Math.max(60, Math.min(210, Math.floor((perMemberWidth - 120) / 2), verticalRadius));
   }
 
   spaceCenter(space: HouseholdPlanSpace): HouseholdPlanPoint {
     return polygonCentroid(space.polygon);
+  }
+
+  spaceLabelLines(space: HouseholdPlanSpace): string[] {
+    const bounds = this.spaceBounds(space);
+    const maxCharacters = Math.max(6, Math.floor((bounds.maxX - bounds.minX) / 150));
+    const lines: string[] = [];
+    let line = '';
+    for (const word of space.label.trim().split(/\s+/).filter(Boolean)) {
+      if (word.length > maxCharacters) {
+        if (line) lines.push(line);
+        line = '';
+        for (let index = 0; index < word.length; index += maxCharacters) {
+          lines.push(word.slice(index, index + maxCharacters));
+        }
+      } else if (!line) {
+        line = word;
+      } else if (line.length + word.length + 1 <= maxCharacters) {
+        line = `${line} ${word}`;
+      } else {
+        lines.push(line);
+        line = word;
+      }
+    }
+    if (line) lines.push(line);
+    if (lines.length > 3) {
+      lines.length = 3;
+      lines[2] = `${lines[2].slice(0, Math.max(1, maxCharacters - 1))}…`;
+    }
+    return lines.length ? lines : [''];
+  }
+
+  spaceLabelFontSize(space: HouseholdPlanSpace): number {
+    const bounds = this.spaceBounds(space);
+    const width = bounds.maxX - bounds.minX;
+    const height = bounds.maxY - bounds.minY;
+    const lines = this.spaceLabelLines(space);
+    const longestLine = Math.max(...lines.map((line) => line.length), 1);
+    const horizontalLimit = (width * 0.8) / (longestLine * 0.6);
+    const verticalLimit = height / (lines.length * 2);
+    return Math.max(100, Math.floor(Math.min(290, horizontalLimit, verticalLimit)));
+  }
+
+  spaceGlyphSize(space: HouseholdPlanSpace): number {
+    const bounds = this.spaceBounds(space);
+    const width = bounds.maxX - bounds.minX;
+    const height = bounds.maxY - bounds.minY;
+    const labelHeight = this.spaceLabelFontSize(space) * this.spaceLabelLines(space).length;
+    const naturalSize = Math.max(
+      100,
+      Math.floor(Math.min(800, width * 0.28, height - labelHeight - 120))
+    );
+    if (
+      !this.assignmentViewActive() ||
+      !(this.assignmentSnapshot().assignments[space.id]?.length ?? 0)
+    ) {
+      return naturalSize;
+    }
+
+    const gap = this.spaceGlyphLabelGap(space);
+    const minTop = bounds.minY + 60;
+    const markerTop = this.assignmentMemberY(space) - this.assignmentMemberRadius(space);
+    const availableSize = markerTop - 60 - minTop - labelHeight - gap;
+    return Math.max(100, Math.min(naturalSize, Math.floor(availableSize)));
+  }
+
+  spaceGlyphTop(space: HouseholdPlanSpace): number {
+    const fontSize = this.spaceLabelFontSize(space);
+    const gap = this.spaceGlyphLabelGap(space);
+    const labelHeight = fontSize * this.spaceLabelLines(space).length;
+    const glyphSize = this.spaceGlyphSize(space);
+    const totalHeight = glyphSize + labelHeight + gap;
+    const naturalTop = this.spaceCenter(space).y - totalHeight / 2;
+    if (
+      !this.assignmentViewActive() ||
+      !(this.assignmentSnapshot().assignments[space.id]?.length ?? 0)
+    ) {
+      return naturalTop;
+    }
+
+    const bounds = this.spaceBounds(space);
+    const minTop = bounds.minY + 60;
+    const maxTop =
+      this.assignmentMemberY(space) - this.assignmentMemberRadius(space) - 60 - totalHeight;
+    return Math.max(minTop, Math.min(naturalTop, maxTop));
+  }
+
+  spaceLabelTop(space: HouseholdPlanSpace): number {
+    const fontSize = this.spaceLabelFontSize(space);
+    const gap = this.spaceGlyphLabelGap(space);
+    return this.spaceGlyphTop(space) + this.spaceGlyphSize(space) + gap + fontSize / 2;
+  }
+
+  private spaceGlyphLabelGap(space: HouseholdPlanSpace): number {
+    const fontSize = this.spaceLabelFontSize(space);
+    const hasAssignments = (this.assignmentSnapshot().assignments[space.id]?.length ?? 0) > 0;
+    return this.assignmentViewActive() && hasAssignments
+      ? Math.min(90, Math.round(fontSize * 0.31))
+      : Math.min(130, Math.round(fontSize * 0.45));
+  }
+
+  private spaceBounds(space: HouseholdPlanSpace): {
+    minX: number;
+    maxX: number;
+    minY: number;
+    maxY: number;
+  } {
+    return {
+      minX: Math.min(...space.polygon.map((point) => point.x)),
+      maxX: Math.max(...space.polygon.map((point) => point.x)),
+      minY: Math.min(...space.polygon.map((point) => point.y)),
+      maxY: Math.max(...space.polygon.map((point) => point.y))
+    };
   }
 
   comparisonFloor(plan: HouseholdPlan | null): HouseholdPlanFloor | null {

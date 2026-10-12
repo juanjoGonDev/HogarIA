@@ -9,7 +9,7 @@ import type {
 
 function fitSyntheticPlan(
   source: HouseholdPlan,
-  shape: 'landscape' | 'photo' | 'portrait' | 'task'
+  shape: 'landscape' | 'portrait' | 'photo' | 'task'
 ): HouseholdPlan {
   const plan = structuredClone(source);
   for (const floor of plan.floors) {
@@ -27,11 +27,11 @@ function fitSyntheticPlan(
     const height = Math.max(1, maxY - minY);
     const scaleX =
       shape === 'portrait'
-        ? Math.min(0.75, 6500 / width)
+        ? 5800 / width
         : Math.min(shape === 'photo' ? 1.15 : shape === 'task' ? 1.3 : 1.25, 9600 / width);
     const scaleY =
       shape === 'portrait'
-        ? Math.min(9600 / height, (width * scaleX) / (height * 0.67))
+        ? 8800 / height
         : shape === 'task'
           ? Math.min(1.05, 9600 / height, (width * scaleX) / (height * 1.3))
           : Math.min(1.15, 9600 / height);
@@ -790,6 +790,48 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   await expect(page.locator('[data-test="plan-undo"] svg')).toBeVisible();
   await expect(page.locator('[data-test="plan-redo"] svg')).toBeVisible();
   await expect(page.locator('[data-test="plan-floor-tabs"] .plan-floor-tabs__tab')).toHaveCount(2);
+  const floorTabsControl = page.locator('[data-test="plan-floor-tabs"] .plan-floor-tabs__tab');
+  const emptyCanvasState = page.locator('[data-test="plan-canvas-empty"]');
+  await floorTabsControl.nth(1).click();
+  await expect(emptyCanvasState, 'a blank floor gets one clear start hint').toBeVisible();
+  await expect(
+    emptyCanvasState.locator('svg'),
+    'the empty-state cue uses a matching plan icon'
+  ).toBeVisible();
+  const emptyStateLayout = await emptyCanvasState.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const icon = element.querySelector('svg')?.getBoundingClientRect();
+    const text = element.querySelector('span')?.getBoundingClientRect();
+    return {
+      width: bounds.width,
+      iconWidth: icon?.width ?? 0,
+      iconHeight: icon?.height ?? 0,
+      centerOffset:
+        icon && text
+          ? Math.abs(icon.top + icon.height / 2 - (text.top + text.height / 2))
+          : Infinity
+    };
+  });
+  expect(emptyStateLayout.iconWidth, 'the empty-state icon shares the action icon scale').toBe(18);
+  expect(emptyStateLayout.iconHeight, 'the empty-state icon remains square').toBe(18);
+  expect(
+    emptyStateLayout.centerOffset,
+    'empty-state icon and copy share a visual center'
+  ).toBeLessThanOrEqual(1);
+  await screenshot(page, '02-plan-editor-empty-floor', viewport);
+  await page.locator('[data-test="plan-tool-freeform"]').click();
+  await expect(
+    emptyCanvasState,
+    'the generic hint leaves room for active drawing guidance'
+  ).toBeHidden();
+  await expect(page.locator('[data-test="plan-freeform-actions"]')).toBeVisible();
+  await screenshot(page, '02-plan-editor-empty-freeform', viewport);
+  await page.locator('.plan-canvas-toolbar__tools .plan-tool').first().click();
+  await expect(
+    emptyCanvasState,
+    'returning to selection restores the blank-floor hint'
+  ).toBeVisible();
+  await floorTabsControl.first().click();
   if (mobile) {
     await expect(page.locator('.plan-editor__toolbar-actions .plan-canvas__snap')).toBeHidden();
     const floorTabText = await page
@@ -861,14 +903,76 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   );
   const zoneDisclosure = page.locator('.plan-details__zones-disclosure');
   await expect(page.locator('.plan-editor__advanced-settings')).toBeVisible();
+  const advancedSettingsToggle = page.locator('.plan-editor__advanced-settings > summary');
+  await expect(
+    advancedSettingsToggle.locator('svg'),
+    'the overflow control uses the product icon system'
+  ).toBeVisible();
+  await expect(advancedSettingsToggle).toHaveAccessibleName('Más opciones');
   await expect(zoneDisclosure, 'zone list is tucked into accessible More options').toBeHidden();
   const prototypeGlyphSizes = await page.evaluate(() => ({
     tool: document.querySelector('.plan-tool svg')?.getBoundingClientRect().width,
     room: document.querySelector('.plan-room-chip svg')?.getBoundingClientRect().width
   }));
   expect(prototypeGlyphSizes).toEqual({ tool: 32, room: 32 });
+  const quickAddIcons = await page
+    .locator('.plan-canvas-toolbar__rooms > button > svg')
+    .evaluateAll((icons) =>
+      icons.map((icon) => {
+        const bounds = icon.getBoundingClientRect();
+        return { width: bounds.width, height: bounds.height };
+      })
+    );
+  expect(quickAddIcons, 'all six quick-add room buttons have matching icons').toHaveLength(6);
+  for (const icon of quickAddIcons) {
+    expect(icon.width, 'quick-add icons match the approved 32 px glyph').toBe(32);
+    expect(icon.height, 'quick-add icons use consistent square geometry').toBe(32);
+  }
+  if (!mobile) {
+    const previewAction = await page.locator('.plan-editor__header-actions').boundingBox();
+    const editorBounds = await page.locator('.plan-editor').boundingBox();
+    expect(previewAction).not.toBeNull();
+    expect(editorBounds).not.toBeNull();
+    expect(previewAction!.width, 'desktop preview matches the 460 px prototype button').toBe(460);
+    expect(
+      Math.abs(
+        previewAction!.x + previewAction!.width / 2 - editorBounds!.x - editorBounds!.width / 2
+      ),
+      'desktop preview aligns to the editor center'
+    ).toBeLessThanOrEqual(1);
+    const toolbarAlignment = await page.evaluate(() => {
+      const editor = document.querySelector<HTMLElement>('.plan-editor')?.getBoundingClientRect();
+      const floors = document
+        .querySelector<HTMLElement>('.plan-floor-tabs')
+        ?.getBoundingClientRect();
+      const actions = document
+        .querySelector<HTMLElement>('.plan-editor__toolbar-actions')
+        ?.getBoundingClientRect();
+      if (!editor || !floors || !actions) throw new Error('Desktop plan controls are missing');
+      return {
+        editorLeft: editor.left,
+        editorRight: editor.right,
+        floorLeft: floors.left,
+        actionsRight: actions.right
+      };
+    });
+    expect(
+      Math.abs(toolbarAlignment.floorLeft - toolbarAlignment.editorLeft),
+      'desktop floor tabs align to the canvas and editor left edge'
+    ).toBeLessThanOrEqual(1);
+    expect(
+      Math.abs(toolbarAlignment.actionsRight - toolbarAlignment.editorRight),
+      'desktop zoom/history controls align to the canvas and editor right edge'
+    ).toBeLessThanOrEqual(1);
+  }
   await screenshot(page, '02-plan-editor', viewport);
   await openPlanZoneList(page);
+  const accessibleAreaListHeading = page.locator('.plan-details__zones > h3.visually-hidden');
+  await expect(accessibleAreaListHeading).toHaveAccessibleName('Zonas de esta planta');
+  const accessibleAreaListHeadingBounds = await accessibleAreaListHeading.boundingBox();
+  expect(accessibleAreaListHeadingBounds).not.toBeNull();
+  expect(accessibleAreaListHeadingBounds!.width).toBeLessThanOrEqual(1);
+  expect(accessibleAreaListHeadingBounds!.height).toBeLessThanOrEqual(1);
   for (const [label, kind] of [
     ['Trastero', 'storage_room'],
     ['Balcón', 'balcony'],
@@ -887,7 +991,7 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     await zoneDisclosure.locator('summary').click();
   await expect(zoneDisclosure).not.toHaveAttribute('open', '');
   const drawingTools = page.locator('.plan-canvas-toolbar__tools .plan-tool');
-  await expect(drawingTools).toHaveCount(4);
+  await expect(drawingTools).toHaveCount(5);
   await page.locator('.plan-editor__advanced-settings > summary').click();
   const drawAreaMode = page.locator('[data-test="plan-draw-area"]');
   await expect(drawAreaMode).toBeVisible();
@@ -912,14 +1016,93 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   );
   await expect(guidedCustomArea).toBeVisible();
   await expect(page.locator('[data-test="plan-selected-space"] h3')).toHaveText('Sala de música');
+  const guidedSpaceBounds = await page.locator('.plan-canvas__space').evaluateAll((elements) => {
+    const bounds = (element: Element) => {
+      const points = Array.from((element as SVGPolygonElement).points, (point) => ({
+        x: point.x,
+        y: point.y
+      }));
+      return {
+        minX: Math.min(...points.map((point) => point.x)),
+        maxX: Math.max(...points.map((point) => point.x)),
+        minY: Math.min(...points.map((point) => point.y)),
+        maxY: Math.max(...points.map((point) => point.y))
+      };
+    };
+    const inserted = elements.find(
+      (element) => element.getAttribute('aria-label') === 'Sala de música'
+    );
+    if (!inserted) throw new Error('The new guided area is not in the plan canvas');
+    const insertedBounds = bounds(inserted);
+    return elements
+      .filter((element) => element !== inserted)
+      .map(bounds)
+      .map((existing) => ({
+        overlaps:
+          insertedBounds.minX < existing.maxX &&
+          insertedBounds.maxX > existing.minX &&
+          insertedBounds.minY < existing.maxY &&
+          insertedBounds.maxY > existing.minY
+      }));
+  });
+  expect(guidedSpaceBounds.every(({ overlaps }) => !overlaps)).toBe(true);
+  const customLabelFits = await guidedCustomArea.evaluate((element) => {
+    const polygon = element as SVGPolygonElement;
+    const label = element.parentElement?.querySelector<SVGTextElement>('.plan-canvas__space-label');
+    if (!label) throw new Error('The guided area has no visible label');
+    const areaBounds = polygon.getBBox();
+    const labelBounds = label.getBBox();
+    return (
+      labelBounds.x >= areaBounds.x &&
+      labelBounds.y >= areaBounds.y &&
+      labelBounds.x + labelBounds.width <= areaBounds.x + areaBounds.width &&
+      labelBounds.y + labelBounds.height <= areaBounds.y + areaBounds.height
+    );
+  });
+  expect(customLabelFits).toBe(true);
 
   await page.locator('[data-test="plan-selected-space"] .plan-details__close').click();
   await openPlanZoneList(page);
   await choosePickerOption(page, /Tipo de zona:/, 'Otra zona personalizada');
   await customAreaName.fill('Despacho en L');
+  const activeFreeformTool = page.locator('[data-test="plan-tool-freeform"]');
+  await expect(activeFreeformTool, 'freeform drawing is a primary tool').toBeVisible();
+  await activeFreeformTool.click();
+  await expect(page.locator('.plan-editor')).toHaveClass(/plan-editor--freeform/);
+  await expect(
+    activeFreeformTool,
+    'the active freeform mode stays visible in the primary drawing dock'
+  ).toBeVisible();
+  await expect(activeFreeformTool).toHaveAttribute('aria-pressed', 'true');
+  await expect(
+    activeFreeformTool.locator('svg'),
+    'the visible mode has a matching icon'
+  ).toBeVisible();
   await page.locator('.plan-editor__advanced-settings > summary').click();
-  await page.locator('[data-test="plan-draw-freeform"]').click();
-  await expect(page.locator('.plan-editor__advanced-settings')).not.toHaveAttribute('open', '');
+  await page.locator('[data-test="plan-draw-area"]').click();
+  await expect(activeFreeformTool).toHaveAttribute('aria-pressed', 'true');
+  await expect(activeFreeformTool).toHaveText('Dibujar zona');
+  await activeFreeformTool.click();
+  await expect(activeFreeformTool).toHaveText('Zona libre');
+  const toolIcons = await page
+    .locator('.plan-canvas-toolbar__tools .plan-tool svg')
+    .evaluateAll((icons) =>
+      icons.map((icon) => {
+        const bounds = icon.getBoundingClientRect();
+        return { width: bounds.width, height: bounds.height };
+      })
+    );
+  expect(toolIcons.length, 'every primary tool has a visible icon').toBe(5);
+  expect(
+    Math.max(...toolIcons.map(({ width }) => width)) -
+      Math.min(...toolIcons.map(({ width }) => width)),
+    'primary tool icons share one width'
+  ).toBeLessThanOrEqual(1);
+  expect(
+    Math.max(...toolIcons.map(({ height }) => height)) -
+      Math.min(...toolIcons.map(({ height }) => height)),
+    'primary tool icons share one height'
+  ).toBeLessThanOrEqual(1);
   const freeformCanvas = page.locator('.plan-canvas');
   await freeformCanvas.scrollIntoViewIfNeeded();
   const freeformActionButtons = page.locator('[data-test="plan-freeform-actions"] > button');
@@ -964,6 +1147,53 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     page.locator('.plan-canvas__preview-action svg'),
     'preview has an icon alongside its label'
   ).toBeVisible();
+  await expect(freeformActionButtons.nth(0)).toHaveAccessibleName('Quitar último punto');
+  await expect(freeformActionButtons.nth(1)).toHaveAccessibleName('Terminar zona');
+  await expect(freeformActionButtons.nth(2)).toHaveAccessibleName('Cancelar dibujo');
+  if (mobile) {
+    await expect(freeformActionButtons.nth(2).locator('.plan-freeform-label--compact')).toHaveText(
+      'Cancelar'
+    );
+    await page.evaluate(() => window.scrollTo(0, 0));
+    const mobileEditorFirstView = await page.evaluate(() => {
+      const bounds = (selector: string) => {
+        const element = document.querySelector<HTMLElement>(selector);
+        if (!element) throw new Error(`Missing first-view region: ${selector}`);
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return {
+          top: rect.top,
+          bottom: rect.bottom,
+          height: rect.height,
+          marginTop: style.marginTop
+        };
+      };
+      const workspace = document.querySelector<HTMLElement>('.plan-editor__workspace');
+      const editor = document.querySelector<HTMLElement>('.plan-editor');
+      return {
+        actions: bounds('.plan-canvas__freeform-actions'),
+        toolbar: bounds('.plan-canvas-toolbar'),
+        preview: bounds('.plan-canvas__preview-action'),
+        navigation: bounds('.bottom-nav'),
+        workspace: workspace ? getComputedStyle(workspace).display : 'missing',
+        editorGap: editor ? getComputedStyle(editor).rowGap : 'missing',
+        canvasColumn: document
+          .querySelector<HTMLElement>('.plan-canvas-column')
+          ?.getBoundingClientRect().height
+      };
+    });
+    console.info(`[visual:mobile-freeform-first-view] ${JSON.stringify(mobileEditorFirstView)}`);
+    for (const region of [mobileEditorFirstView.actions, mobileEditorFirstView.toolbar]) {
+      expect(
+        region.bottom,
+        'mobile freeform actions and both dock rows stay above bottom navigation'
+      ).toBeLessThanOrEqual(mobileEditorFirstView.navigation.top - 8);
+    }
+    expect(
+      mobileEditorFirstView.preview.bottom,
+      'mobile preview remains visible in the freeform first view'
+    ).toBeLessThanOrEqual(mobileEditorFirstView.navigation.top - 8);
+  }
   if (!mobile) {
     const freeformPreview = await page.locator('.plan-canvas__preview-action').boundingBox();
     expect(freeformPreview).not.toBeNull();
@@ -972,9 +1202,107 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
       'the preview action stays visible after drawing controls appear'
     ).toBeLessThanOrEqual(viewport.height);
   }
+  if ((await zoneDisclosure.getAttribute('open')) !== null) {
+    await zoneDisclosure.locator('summary').click();
+    await expect(zoneDisclosure).not.toHaveAttribute('open', '');
+  }
+  await expect(
+    zoneDisclosure,
+    'the default editor capture hides the optional zone list'
+  ).toBeHidden();
   await screenshot(page, '02-plan-editor-freeform', viewport);
+  if (!mobile) {
+    const wideDesktop = { width: 1920, height: 1032 };
+    await page.setViewportSize(wideDesktop);
+    const editorAlignment = await page.evaluate(() => {
+      const editor = document.querySelector<HTMLElement>('.plan-editor');
+      const pageContainer = document.querySelector<HTMLElement>(
+        'app-page-container.page-container--bounded'
+      );
+      const selectors = [
+        '.plan-editor__header',
+        '.plan-editor__toolbar',
+        '.plan-canvas-toolbar',
+        '.plan-editor__workspace'
+      ];
+      if (!editor) throw new Error('The plan editor is missing at the wide desktop breakpoint');
+      if (!pageContainer) throw new Error('The bounded page container is missing');
+      const editorBounds = editor.getBoundingClientRect();
+      const pageBounds = pageContainer.getBoundingClientRect();
+      const children = selectors.map((selector) => {
+        const element = document.querySelector<HTMLElement>(selector);
+        if (!element) throw new Error(`Missing editor region: ${selector}`);
+        const bounds = element.getBoundingClientRect();
+        return { left: bounds.left, right: bounds.right };
+      });
+      return {
+        width: editorBounds.width,
+        editorLeft: editorBounds.left,
+        editorRight: editorBounds.right,
+        editorCenter: editorBounds.left + editorBounds.width / 2,
+        pageCenter: pageBounds.left + pageBounds.width / 2,
+        children
+      };
+    });
+    expect(
+      editorAlignment.width,
+      'desktop width stays within the approved prototype scale'
+    ).toBeLessThanOrEqual(800);
+    expect(
+      Math.abs(editorAlignment.editorCenter - editorAlignment.pageCenter),
+      'the editor centers inside the main content track on a wide desktop'
+    ).toBeLessThanOrEqual(1);
+    for (const region of editorAlignment.children) {
+      expect(Math.abs(region.left - editorAlignment.editorLeft)).toBeLessThanOrEqual(1);
+      expect(Math.abs(region.right - editorAlignment.editorRight)).toBeLessThanOrEqual(1);
+    }
+    const widePreview = await page.locator('.plan-canvas__preview-action').boundingBox();
+    expect(widePreview).not.toBeNull();
+    expect(
+      widePreview!.y + widePreview!.height,
+      'preview stays visible in the 1920 × 1032 first view'
+    ).toBeLessThanOrEqual(wideDesktop.height);
+    await screenshot(page, '02-plan-editor-wide-desktop', wideDesktop);
+    await page.setViewportSize(viewport);
+  }
   if (mobile) {
     await page.setViewportSize({ width: 320, height: 568 });
+    const quickRoomButtons = page.locator('.plan-canvas-toolbar__rooms > button');
+    await expect(quickRoomButtons).toHaveCount(6);
+    const quickRoomRow = page.locator('.plan-canvas-toolbar__rooms');
+    const rowOverflow = await quickRoomRow.evaluate((element) => ({
+      scrollWidth: element.scrollWidth,
+      clientWidth: element.clientWidth
+    }));
+    expect(
+      rowOverflow.scrollWidth,
+      'the narrow quick-add row signals more content'
+    ).toBeGreaterThan(rowOverflow.clientWidth);
+    await quickRoomButtons.nth(5).focus();
+    const finalRoomBounds = await quickRoomButtons.nth(5).boundingBox();
+    const quickRoomBounds = await quickRoomRow.boundingBox();
+    expect(finalRoomBounds).not.toBeNull();
+    expect(quickRoomBounds).not.toBeNull();
+    expect(
+      finalRoomBounds!.x,
+      'the last shortcut can be reached by keyboard focus'
+    ).toBeGreaterThanOrEqual(quickRoomBounds!.x - 1);
+    expect(
+      finalRoomBounds!.x + finalRoomBounds!.width,
+      'the focused last shortcut is brought fully into view'
+    ).toBeLessThanOrEqual(quickRoomBounds!.x + quickRoomBounds!.width + 1);
+    expect(
+      finalRoomBounds!.width,
+      'quick-add targets remain at least 44 px wide'
+    ).toBeGreaterThanOrEqual(44);
+    expect(
+      finalRoomBounds!.height,
+      'quick-add targets remain at least 44 px high'
+    ).toBeGreaterThanOrEqual(44);
+    await expect(
+      freeformActionButtons.nth(0).locator('.plan-freeform-label--compact'),
+      'the point-removal action uses a concise mobile label'
+    ).toHaveText('Deshacer');
     const narrowActionButtons = await freeformActionButtons.evaluateAll((elements) =>
       elements.map((element) => {
         const bounds = element.getBoundingClientRect();
@@ -996,12 +1324,60 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
         Math.min(...narrowActionButtons.map(({ width }) => width)),
       'freeform action columns stay aligned at the 320 px minimum'
     ).toBeLessThanOrEqual(1);
-    await captureResponsiveScreenshot(page, '02-plan-editor-freeform-320x568', {
-      width: 320,
-      height: 568
+    expect(
+      Math.min(...narrowActionButtons.map(({ height }) => height)),
+      'freeform action touch targets remain at least 44 px high at the 320 px minimum'
+    ).toBeGreaterThanOrEqual(44);
+    const narrowCanvas = await page.locator('.plan-canvas__viewport').boundingBox();
+    expect(
+      narrowCanvas?.height,
+      'the narrow freeform canvas remains drawable'
+    ).toBeGreaterThanOrEqual(200);
+    const narrowDocumentWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+    expect(
+      narrowDocumentWidth,
+      'the narrow editor has no horizontal page overflow'
+    ).toBeLessThanOrEqual(320);
+    const narrowPreviewButton = page.locator('.plan-canvas__preview-action');
+    await narrowPreviewButton.scrollIntoViewIfNeeded();
+    const narrowPreview = await narrowPreviewButton.boundingBox();
+    const narrowNavigation = await page.locator('.bottom-nav').boundingBox();
+    expect(narrowPreview).not.toBeNull();
+    expect(narrowNavigation).not.toBeNull();
+    const narrowScrollMetrics = await page.evaluate(() => {
+      const preview = document.querySelector<HTMLElement>('.plan-canvas__preview-action');
+      const main = document.querySelector<HTMLElement>('.main');
+      const rect = preview?.getBoundingClientRect();
+      return {
+        windowScrollY: window.scrollY,
+        mainScrollTop: main?.scrollTop ?? null,
+        previewTop: rect?.top ?? null,
+        previewBottom: rect?.bottom ?? null,
+        mainOverflowY: main ? getComputedStyle(main).overflowY : 'missing',
+        documentScrollHeight: document.documentElement.scrollHeight
+      };
     });
+    console.info(`[visual:narrow-freeform-preview] ${JSON.stringify(narrowScrollMetrics)}`);
+    expect(
+      narrowPreview!.y,
+      'the primary preview action remains within the viewport after scrolling at 320 px'
+    ).toBeGreaterThanOrEqual(0);
+    expect(
+      narrowPreview!.y + narrowPreview!.height,
+      'the primary preview action scrolls clear of mobile navigation at 320 px'
+    ).toBeLessThanOrEqual(narrowNavigation!.y - 8);
+    await screenshot(
+      page,
+      '02-plan-editor-freeform-320x568',
+      {
+        width: 320,
+        height: 568
+      },
+      false
+    );
     await page.setViewportSize(viewport);
   }
+  await openPlanZoneList(page);
   const freeformTapPoints = await freeformCanvas.evaluate((element) => {
     const svg = element as SVGSVGElement;
     const matrix = svg.getScreenCTM();
@@ -1211,8 +1587,8 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     );
     expect(
       assignmentMapBounds!.height,
-      'the floor plan remains the dominant visual in the mobile assignment view'
-    ).toBeGreaterThanOrEqual(350);
+      'the mobile assignment map matches the prototype’s vertical prominence'
+    ).toBeGreaterThanOrEqual(380);
     expect(
       assignmentMapBounds!.y + assignmentMapBounds!.height,
       'the assignment sheet must not cover the floor plan'
@@ -1325,6 +1701,119 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   const selectedZone = page.locator('.plan-canvas__space--selected');
   await expect(selectedZone).toHaveAttribute('aria-label', 'Cocina');
   await expect(selectedZone).toHaveCSS('fill', 'rgb(255, 224, 204)');
+  const overlappingAssignmentLabels = await page
+    .locator('.plan-canvas__space-label')
+    .evaluateAll((labels) =>
+      labels.flatMap((label) => {
+        const svgLabel = label as SVGTextElement;
+        const labelBounds = svgLabel.getBBox();
+        const markers = Array.from(
+          svgLabel.parentElement?.querySelectorAll<SVGCircleElement>(
+            '.plan-canvas__assignee-avatar'
+          ) ?? []
+        );
+        return markers
+          .filter((marker) => {
+            const markerBounds = marker.getBBox();
+            return (
+              markerBounds.x < labelBounds.x + labelBounds.width &&
+              markerBounds.x + markerBounds.width > labelBounds.x &&
+              markerBounds.y < labelBounds.y + labelBounds.height &&
+              markerBounds.y + markerBounds.height > labelBounds.y
+            );
+          })
+          .map(() => svgLabel.textContent?.trim() ?? '');
+      })
+    );
+  expect(
+    overlappingAssignmentLabels,
+    'assignment badges must not obscure room names in the floor plan'
+  ).toEqual([]);
+  const assignmentMarkersOutsideRooms = await page
+    .locator('.plan-canvas__space')
+    .evaluateAll((spaces) =>
+      spaces.flatMap((space) => {
+        const polygon = space as SVGPolygonElement;
+        const points = Array.from(polygon.points, (point) => ({ x: point.x, y: point.y }));
+        const isInside = (x: number, y: number) => {
+          let inside = false;
+          for (
+            let current = 0, previous = points.length - 1;
+            current < points.length;
+            previous = current++
+          ) {
+            const a = points[current]!;
+            const b = points[previous]!;
+            const crosses = a.y > y !== b.y > y;
+            if (crosses && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+          }
+          return inside;
+        };
+        const markers = Array.from(
+          polygon.parentElement?.querySelectorAll<SVGCircleElement>(
+            '.plan-canvas__assignee-avatar'
+          ) ?? []
+        );
+        return markers
+          .filter((marker) => {
+            const radius = Number(marker.getAttribute('r')) + 20;
+            const centerX = Number(marker.getAttribute('cx'));
+            const centerY = Number(marker.getAttribute('cy'));
+            return Array.from({ length: 16 }, (_, index) => (index * Math.PI * 2) / 16).some(
+              (angle) =>
+                !isInside(centerX + Math.cos(angle) * radius, centerY + Math.sin(angle) * radius)
+            );
+          })
+          .map(() => polygon.getAttribute('aria-label') ?? '');
+      })
+    );
+  expect(
+    assignmentMarkersOutsideRooms,
+    'assignment badges and their outlines must remain inside irregular room boundaries'
+  ).toEqual([]);
+  const assignmentIconsOutsideRooms = await page
+    .locator('.plan-canvas__space-icon')
+    .evaluateAll((icons) =>
+      icons.flatMap((icon) => {
+        const polygon = icon.parentElement?.querySelector<SVGPolygonElement>('.plan-canvas__space');
+        if (!polygon) return ['missing room boundary'];
+        const points = Array.from(polygon.points, (point) => ({ x: point.x, y: point.y }));
+        const isInside = (x: number, y: number) => {
+          let inside = false;
+          for (
+            let current = 0, previous = points.length - 1;
+            current < points.length;
+            previous = current++
+          ) {
+            const a = points[current]!;
+            const b = points[previous]!;
+            if (a.y > y !== b.y > y && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) {
+              inside = !inside;
+            }
+          }
+          return inside;
+        };
+        const bounds = {
+          x: Number(icon.getAttribute('x')),
+          y: Number(icon.getAttribute('y')),
+          width: Number(icon.getAttribute('width')),
+          height: Number(icon.getAttribute('height'))
+        };
+        const corners = [
+          [bounds.x, bounds.y],
+          [bounds.x + bounds.width, bounds.y],
+          [bounds.x, bounds.y + bounds.height],
+          [bounds.x + bounds.width, bounds.y + bounds.height]
+        ];
+        return corners.every(([x, y]) => isInside(x!, y!))
+          ? []
+          : [polygon.getAttribute('aria-label') ?? ''];
+      })
+    );
+  expect(
+    assignmentIconsOutsideRooms,
+    'room icons must remain inside their zone when responsibility markers are shown'
+  ).toEqual([]);
   // Force Chromium to rasterize the selected SVG path before the viewport capture.
   await selectedZone.screenshot({ animations: 'disabled' });
   await screenshot(page, '04-zone-assignment', viewport);
@@ -1449,12 +1938,14 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
 
   // This browser-level stub exercises the upload/review UI without contacting an AI provider.
   // Real request_format, geometry validation, and persistence are covered by isolated server tests.
-  const proposedPlan = irregularSyntheticPlan(savedPlan);
+  const proposedPlan = mobile
+    ? irregularSyntheticPlan(savedPlan)
+    : portraitPlan(irregularSyntheticPlan(savedPlan));
   proposedPlan.floors[0].spaces.find((space) => space.id === kitchenId)!.label = 'Cocina';
   const followupPlan = addAseoByBedrooms(proposedPlan);
-  const chatCurrentPlan = portraitPlan(savedPlan);
-  const chatDraftPlan = portraitPlan(proposedPlan);
-  const chatProposalPlan = portraitPlan(followupPlan);
+  const chatCurrentPlan = mobile ? landscapePlan(savedPlan) : portraitPlan(savedPlan);
+  const chatDraftPlan = mobile ? landscapePlan(proposedPlan) : portraitPlan(proposedPlan);
+  const chatProposalPlan = mobile ? landscapePlan(followupPlan) : portraitPlan(followupPlan);
   const proposalRequestBodies: string[] = [];
   await page.route('**/api/household/plan/proposal', async (route) => {
     const request = route.request();
@@ -1927,6 +2418,43 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
       .locator('.plan-compare-canvas')
       .boundingBox();
     expect(proposedCanvasBounds).not.toBeNull();
+    const mapControlsBounds = await page
+      .locator('[data-test="plan-chat-map-controls"]')
+      .boundingBox();
+    expect(mapControlsBounds).not.toBeNull();
+    const mapCardBottom = Math.max(
+      currentCardBounds!.y + currentCardBounds!.height,
+      proposedCardBounds!.y + proposedCardBounds!.height
+    );
+    expect(
+      mapControlsBounds!.y - mapCardBottom,
+      'desktop zoom and fit controls stay directly beneath the before/after maps'
+    ).toBeGreaterThanOrEqual(0);
+    expect(
+      mapControlsBounds!.y - mapCardBottom,
+      'desktop zoom controls do not drift toward the bottom of the taller chat column'
+    ).toBeLessThanOrEqual(24);
+    const proposedPlanOccupancy = await proposedPlanCard
+      .locator('.plan-compare-canvas')
+      .evaluate((element) => {
+        const svg = element as SVGSVGElement;
+        const canvas = svg.getBoundingClientRect();
+        const viewBox = svg.viewBox.baseVal;
+        const bounds = Array.from(
+          svg.querySelectorAll<SVGGraphicsElement>(
+            '.plan-compare-canvas__space, .plan-compare-canvas__wall'
+          )
+        ).map((shape) => shape.getBBox());
+        const minY = Math.min(...bounds.map(({ y }) => y));
+        const maxY = Math.max(...bounds.map(({ y, height }) => y + height));
+        const scale = Math.min(canvas.width / viewBox.width, canvas.height / viewBox.height);
+        return { height: ((maxY - minY) * scale) / canvas.height };
+      });
+    console.info(`[visual:chat-plan-occupancy] ${JSON.stringify(proposedPlanOccupancy)}`);
+    expect(
+      proposedPlanOccupancy.height,
+      'the desktop floorplan footprint fills its portrait comparison frame'
+    ).toBeGreaterThanOrEqual(0.74);
     expect(
       proposedCanvasBounds!.height,
       'desktop before/after plans should match the prototype height'
@@ -1967,6 +2495,31 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
       bottomNavigation!.y - 8
     );
     expect(applyButton!.y + applyButton!.height).toBeLessThanOrEqual(bottomNavigation!.y - 8);
+    const chatTouchTargets = await page
+      .locator(
+        [
+          '.plan-review__header-actions .plan-file',
+          '.plan-review__header-actions > button',
+          '.plan-review__mobile-tabs button',
+          '[data-test="plan-chat-map-controls"] button',
+          '.plan-chat .plan-review__actions .plan-button',
+          '.plan-chat__continuation'
+        ].join(',')
+      )
+      .evaluateAll((elements) =>
+        elements.map((element) => {
+          const bounds = element.getBoundingClientRect();
+          return {
+            name: (element as HTMLElement).innerText.trim(),
+            width: bounds.width,
+            height: bounds.height
+          };
+        })
+      );
+    expect(
+      chatTouchTargets.every(({ width, height }) => width >= 44 && height >= 44),
+      `all mobile chat actions meet the 44 px touch target: ${JSON.stringify(chatTouchTargets)}`
+    ).toBe(true);
     const continuationButtons = await page
       .locator('[data-test="plan-chat-continuation"]')
       .evaluateAll((elements) =>
@@ -2032,6 +2585,49 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   await expect(page.locator('[data-test="plan-proposal-apply"]')).toBeVisible();
   await expect(page.locator('[data-test="plan-chat-continuation"]')).toHaveCount(4);
   if (mobile) await expect(page.locator('.plan-review__mobile-tabs')).toBeVisible();
+  if (mobile) {
+    const mobileChatPlan = page.locator(
+      '.plan-review__compare-card--proposal .plan-compare-canvas'
+    );
+    const mobileChatDrawing = mobileChatPlan.locator('.plan-compare-canvas__drawing');
+    const canvasBounds = await mobileChatPlan.boundingBox();
+    expect(canvasBounds).not.toBeNull();
+    const footprintBounds = await mobileChatDrawing.evaluate((drawing) => {
+      const polygons = Array.from(
+        drawing.querySelectorAll<SVGPolygonElement>('.plan-compare-canvas__space')
+      );
+      const bounds = polygons.map((polygon) => polygon.getBoundingClientRect());
+      if (!bounds.length) return null;
+      const left = Math.min(...bounds.map((bound) => bound.left));
+      const right = Math.max(...bounds.map((bound) => bound.right));
+      const top = Math.min(...bounds.map((bound) => bound.top));
+      const bottom = Math.max(...bounds.map((bound) => bound.bottom));
+      return { width: right - left, height: bottom - top };
+    });
+    expect(footprintBounds).not.toBeNull();
+    const roomLabels = await mobileChatPlan.evaluate((canvas) => {
+      const spaces = Array.from(canvas.querySelectorAll('.plan-compare-canvas__space'));
+      const labels = Array.from(canvas.querySelectorAll('.plan-compare-canvas__label'));
+      return labels.map((label, index) => ({
+        height: label.getBoundingClientRect().height,
+        width: label.getBoundingClientRect().width,
+        roomWidth: spaces[index]?.getBoundingClientRect().width ?? 0
+      }));
+    });
+    expect(roomLabels.length).toBeGreaterThan(0);
+    expect(
+      roomLabels.every(({ height, width, roomWidth }) => height >= 10 && width <= roomWidth * 0.9),
+      `mobile room labels should be readable without escaping their zones: ${JSON.stringify(roomLabels)}`
+    ).toBe(true);
+    expect(
+      footprintBounds!.width,
+      'the final irregular proposal should fill the mobile canvas rather than render as a thumbnail'
+    ).toBeGreaterThanOrEqual(canvasBounds!.width * 0.74);
+    expect(
+      footprintBounds!.width / footprintBounds!.height,
+      'the final mobile proposal matches the approved near-square house-plan proportion'
+    ).toBeGreaterThanOrEqual(0.9);
+  }
   expect(proposalWrites).toHaveLength(0);
   await screenshot(page, '06-chat-adjustment', viewport);
   if (mobile) {
@@ -2183,10 +2779,9 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
       const floorTabsBounds = await floorTabs.boundingBox();
       expect(floorTabsBounds).not.toBeNull();
       expect(
-        floorTabsBounds!.y,
-        'floor selection must overlay the mobile map, not push the checklist down'
-      ).toBeGreaterThanOrEqual(taskMap!.y - 1);
-      expect(floorTabsBounds!.y + floorTabsBounds!.height).toBeLessThanOrEqual(taskMap!.y + 48);
+        floorTabsBounds!.y + floorTabsBounds!.height,
+        'floor selection occupies its own row above the map'
+      ).toBeLessThanOrEqual(taskMap!.y - 8);
     }
   }
   if (!mobile) {
@@ -2248,6 +2843,16 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     await expect(page.locator(`.tasks-map__area--owner-${ownerIndex}`)).not.toHaveCount(0);
   }
   await expect(page.locator('.tasks-map__area--shared')).toHaveCount(2);
+  const compactAseoLabel = page.locator('.tasks-map__label[data-space-id="space-followup-aseo"]');
+  await expect(compactAseoLabel.locator('.tasks-map__name')).toHaveText('Aseo');
+  await expect(
+    compactAseoLabel.locator('.tasks-map__owner'),
+    'a compact room keeps its room name while removing an owner caption that cannot fit'
+  ).toHaveCount(0);
+  await expect(
+    page.locator('.tasks-map__area[data-space-id="space-followup-aseo"]'),
+    'the compact-room assignment remains available to assistive technology'
+  ).toHaveAttribute('aria-label', 'Aseo, Sin asignar');
   await expect(page.locator('.tasks-map__area.is-selected')).toHaveAttribute(
     'data-space-id',
     kitchenId
@@ -2390,8 +2995,24 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     });
     expect(
       taskRowsLayout.visibleCount,
-      `all seven checklist rows should be visible above sticky weekly actions: ${JSON.stringify(taskRowsLayout)}`
-    ).toBe(7);
+      `the mobile checklist begins with unobscured rows above sticky actions: ${JSON.stringify(taskRowsLayout)}`
+    ).toBeGreaterThanOrEqual(1);
+    await page.evaluate(() => window.scrollBy(0, 112));
+    const lastTaskBounds = await taskCards.last().boundingBox();
+    const scrolledWeekActions = await page.locator('.tasks-schedule__footer').boundingBox();
+    const scrolledBottomNavigation = await page.locator('.bottom-nav').boundingBox();
+    expect(lastTaskBounds).not.toBeNull();
+    expect(scrolledWeekActions).not.toBeNull();
+    expect(scrolledBottomNavigation).not.toBeNull();
+    expect(
+      lastTaskBounds!.y + lastTaskBounds!.height,
+      'scrolling exposes the last assignment row above the sticky save actions'
+    ).toBeLessThanOrEqual(scrolledWeekActions!.y - 8);
+    expect(
+      scrolledWeekActions!.y + scrolledWeekActions!.height,
+      'sticky save actions stay above the application navigation'
+    ).toBeLessThanOrEqual(scrolledBottomNavigation!.y - 8);
+    await page.evaluate(() => window.scrollTo(0, 0));
     expect(
       firstTaskRow!.y + firstTaskRow!.height,
       'at least one planned task should appear unobscured below the interactive plan without scrolling'
@@ -2427,6 +3048,80 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     'the title remains editable in the accessible task details'
   ).toHaveValue('Limpieza de cocina');
   await firstWeeklyTask.locator('.task-card__details summary').click();
+  if (!mobile) {
+    const wideDesktop = { width: 1920, height: 1032 };
+    await page.setViewportSize(wideDesktop);
+    const taskEditorAlignment = await page.evaluate(() => {
+      const editor = document.querySelector<HTMLElement>('.tasks-editor');
+      const pageContainer = document.querySelector<HTMLElement>(
+        'app-page-container.page-container--bounded'
+      );
+      if (!editor || !pageContainer) throw new Error('The wide desktop task editor is missing');
+      const editorBounds = editor.getBoundingClientRect();
+      const pageBounds = pageContainer.getBoundingClientRect();
+      return {
+        width: editorBounds.width,
+        center: editorBounds.left + editorBounds.width / 2,
+        pageCenter: pageBounds.left + pageBounds.width / 2
+      };
+    });
+    expect(taskEditorAlignment.width).toBeLessThanOrEqual(800);
+    expect(
+      Math.abs(taskEditorAlignment.center - taskEditorAlignment.pageCenter),
+      'the task checklist aligns with the centered plan editor on a wide desktop'
+    ).toBeLessThanOrEqual(1);
+    await screenshot(page, '05-weekly-tasks-wide-desktop', wideDesktop);
+    await page.setViewportSize(viewport);
+  }
+  if (mobile) {
+    const floorTabs = page.locator('.tasks-floor-tabs');
+    const map = page.locator('.tasks-map-viewport');
+    const floorTabsBounds = await floorTabs.boundingBox();
+    const mapBounds = await map.boundingBox();
+    expect(floorTabsBounds).not.toBeNull();
+    expect(mapBounds).not.toBeNull();
+    expect(
+      floorTabsBounds!.y + floorTabsBounds!.height,
+      'mobile floor tabs sit above the map instead of covering room labels'
+    ).toBeLessThanOrEqual(mapBounds!.y - 8);
+    for (const tab of await floorTabs.locator('button').all()) {
+      const tabBounds = await tab.boundingBox();
+      expect(
+        tabBounds?.height,
+        'floor tabs remain comfortable touch targets'
+      ).toBeGreaterThanOrEqual(44);
+    }
+    const zoneHeadingBounds = await page.locator('.tasks-zone-heading h3').boundingBox();
+    const weekbarBounds = await page.locator('.tasks-weekbar').boundingBox();
+    expect(zoneHeadingBounds).not.toBeNull();
+    expect(weekbarBounds).not.toBeNull();
+    expect(
+      weekbarBounds!.y,
+      'the selected-zone title has its own line before weekly navigation'
+    ).toBeGreaterThanOrEqual(zoneHeadingBounds!.y + zoneHeadingBounds!.height - 1);
+    const headingsOverlap =
+      zoneHeadingBounds!.x < weekbarBounds!.x + weekbarBounds!.width &&
+      zoneHeadingBounds!.x + zoneHeadingBounds!.width > weekbarBounds!.x &&
+      zoneHeadingBounds!.y < weekbarBounds!.y + weekbarBounds!.height &&
+      zoneHeadingBounds!.y + zoneHeadingBounds!.height > weekbarBounds!.y;
+    expect(headingsOverlap, 'selected-zone title and week controls never overlap').toBe(false);
+    for (const control of await page.locator('.tasks-weekbar .tasks-button--icon').all()) {
+      const controlBounds = await control.boundingBox();
+      expect(controlBounds).not.toBeNull();
+      expect(
+        controlBounds!.width,
+        'weekly navigation has a 44px touch target'
+      ).toBeGreaterThanOrEqual(44);
+      expect(
+        controlBounds!.height,
+        'weekly navigation has a 44px touch target'
+      ).toBeGreaterThanOrEqual(44);
+      expect(
+        controlBounds!.x + controlBounds!.width,
+        'weekly navigation remains inside the mobile viewport'
+      ).toBeLessThanOrEqual(viewport.width);
+    }
+  }
   await screenshot(page, '05-weekly-tasks', viewport);
   if (mobile) {
     for (const size of [

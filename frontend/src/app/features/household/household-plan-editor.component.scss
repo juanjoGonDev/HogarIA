@@ -13,21 +13,21 @@
   .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-review, .plan-setup)) {
     max-width: 800px;
     margin-right: auto;
-    margin-left: 0;
+    margin-left: auto;
     margin-top: 42px;
   }
 
   .plan-editor:has(.plan-review__photo) {
     max-width: 800px;
     margin-right: auto;
-    margin-left: 0;
+    margin-left: auto;
     margin-top: 42px;
   }
 
   .plan-editor:has(.plan-review__chat-view) {
     max-width: 800px;
     margin-right: auto;
-    margin-left: 0;
+    margin-left: auto;
     margin-top: 26px;
     row-gap: 0;
   }
@@ -35,7 +35,7 @@
   .plan-editor--assignment-view {
     max-width: 800px;
     margin-right: auto;
-    margin-left: 0;
+    margin-left: auto;
     margin-top: 19px;
     row-gap: 2px;
   }
@@ -214,7 +214,7 @@
   .tasks-editor {
     max-width: 800px;
     margin-right: auto;
-    margin-left: 0;
+    margin-left: auto;
   }
 
   .tasks-map-viewport {
@@ -225,25 +225,9 @@
 }
 
 @media (max-width: 767px) {
-  .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-setup, .plan-review)):has(
-      .plan-canvas__freeform-actions
-    )
-    .plan-canvas__viewport {
-    height: min(34vh, 300px);
-    min-height: min(34vh, 220px);
-    max-height: min(34vh, 300px);
-  }
-
-  .plan-canvas__freeform-actions > .plan-button {
-    flex-direction: column;
-    gap: var(--space-1);
-    padding: var(--space-1);
-    font-size: var(--text-xs);
-  }
-
   .plan-editor--assignment-view .plan-canvas__viewport {
-    height: min(38vh, 358px);
-    min-height: min(38vh, 358px);
+    height: min(40vh, 380px);
+    min-height: min(40vh, 380px);
   }
 
   .plan-editor--assignment-view .plan-details:has(.plan-details__selected) .plan-details__selected {
@@ -300,11 +284,13 @@
 
   .plan-review__chat-view {
     grid-template-columns: minmax(0, 1.04fr) minmax(0, 1.02fr) minmax(240px, 0.95fr);
+    grid-template-rows: 492px minmax(44px, auto);
   }
 
   .plan-review__map-controls {
     grid-column: 1 / 3;
     grid-row: 2;
+    align-self: start;
     justify-content: flex-start;
     padding-inline: 2px;
   }
@@ -372,7 +358,7 @@
 
   .plan-editor:has(.plan-review__chat-view) .plan-review__header-actions .plan-file,
   .plan-editor:has(.plan-review__chat-view) .plan-review__header-actions > .plan-button {
-    min-height: 40px;
+    min-height: 44px;
   }
 
   .plan-editor:has(.plan-review__chat-view) .plan-review {
@@ -386,7 +372,7 @@
   .plan-review__chat-view {
     grid-template-columns: minmax(0, 1fr);
     align-items: start;
-    gap: 4px;
+    gap: 2px;
   }
 
   .plan-review__mobile-tabs {
@@ -398,7 +384,7 @@
   }
 
   .plan-review__mobile-tabs button {
-    min-height: 40px;
+    min-height: 44px;
     padding: var(--space-1) var(--space-2);
     font-size: var(--text-xs);
   }
@@ -423,9 +409,9 @@
 
   .plan-review__compare-card .plan-compare-canvas {
     width: min(100%, 340px);
-    height: min(70vw, 270px);
+    height: min(70vw, 265px);
     min-height: 260px;
-    max-height: 280px;
+    max-height: 265px;
     margin-top: 0;
     aspect-ratio: 1.05 / 1;
   }
@@ -438,11 +424,11 @@
 
   .plan-review__zoom-group button,
   .plan-review__map-controls > button {
-    min-height: 40px;
+    min-height: 44px;
   }
 
   .plan-review__zoom-group button {
-    min-width: 40px;
+    min-width: 44px;
     padding-inline: var(--space-2);
   }
 
@@ -459,6 +445,7 @@
     grid-column: 1 / -1;
     grid-row: 4;
     margin-top: 0;
+    padding-block: 2px;
   }
 
   .plan-chat .plan-review__actions {
@@ -467,7 +454,7 @@
   }
 
   .plan-chat .plan-review__actions .plan-button {
-    min-height: 40px;
+    min-height: 44px;
   }
 
   .plan-chat__messages {
@@ -476,7 +463,7 @@
   }
 
   .plan-chat__messages p {
-    padding: 6px var(--space-2);
+    padding: 4px var(--space-2);
     font-size: var(--text-sm);
     line-height: var(--leading-tight);
   }
@@ -491,7 +478,7 @@
   }
 
   .plan-chat__continuation {
-    min-height: 40px;
+    min-height: 44px;
     padding: 2px 6px;
     font-size: 11px;
     line-height: 1.05;

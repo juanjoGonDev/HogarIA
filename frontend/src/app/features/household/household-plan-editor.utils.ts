@@ -11,6 +11,9 @@ import type {
 const COORDINATE_MIN = 0;
 const COORDINATE_MAX = 10_000;
 const MIN_SHAPE_EDGE = 100;
+const GUIDED_SPACE_MAX_WIDTH = 2_600;
+const GUIDED_SPACE_MAX_HEIGHT = 2_500;
+const GUIDED_SPACE_MIN_EDGE = 700;
 
 export function emptyHouseholdPlan(defaultFloorName: string): HouseholdPlan {
   return {
@@ -136,6 +139,79 @@ export function moveHouseholdPlanSpace(
     ...space,
     polygon: space.polygon.map((point) => ({ x: point.x + dx, y: point.y + dy }))
   };
+}
+
+export function findGuidedSpacePlacement(
+  spaces: readonly HouseholdPlanSpace[]
+): { start: HouseholdPlanPoint; end: HouseholdPlanPoint } | null {
+  const boxes = spaces
+    .filter((space) => space.polygon.length >= 3)
+    .map((space) => ({
+      minX: Math.min(...space.polygon.map((point) => point.x)),
+      maxX: Math.max(...space.polygon.map((point) => point.x)),
+      minY: Math.min(...space.polygon.map((point) => point.y)),
+      maxY: Math.max(...space.polygon.map((point) => point.y))
+    }));
+  if (spaces.length === 0) {
+    return { start: { x: 700, y: 700 }, end: { x: 3_300, y: 3_200 } };
+  }
+  if (boxes.length === 0) return null;
+
+  const xs = [...new Set(boxes.flatMap((box) => [box.minX, box.maxX]))].sort((a, b) => a - b);
+  const ys = [...new Set(boxes.flatMap((box) => [box.minY, box.maxY]))].sort((a, b) => a - b);
+  if (xs.length < 2 || ys.length < 2) return null;
+
+  const freeRows = ys.slice(0, -1).map((top, rowIndex) =>
+    xs.slice(0, -1).map((left, columnIndex) => {
+      const right = xs[columnIndex + 1];
+      const bottom = ys[rowIndex + 1];
+      return !boxes.some(
+        (box) => box.minX < right && box.maxX > left && box.minY < bottom && box.maxY > top
+      );
+    })
+  );
+
+  let best: { start: HouseholdPlanPoint; end: HouseholdPlanPoint; area: number } | null = null;
+  for (let topIndex = 0; topIndex < freeRows.length; topIndex += 1) {
+    const freeColumns = xs.slice(0, -1).map(() => true);
+    for (let bottomIndex = topIndex; bottomIndex < freeRows.length; bottomIndex += 1) {
+      const rawHeight = ys[bottomIndex + 1] - ys[topIndex];
+      for (let columnIndex = 0; columnIndex < freeColumns.length; columnIndex += 1) {
+        freeColumns[columnIndex] &&= freeRows[bottomIndex][columnIndex];
+      }
+      const height = Math.min(rawHeight, GUIDED_SPACE_MAX_HEIGHT);
+      if (height >= GUIDED_SPACE_MIN_EDGE) {
+        const freeRunEnd = freeColumns.map(() => -1);
+        for (let columnIndex = freeColumns.length - 1; columnIndex >= 0; columnIndex -= 1) {
+          if (freeColumns[columnIndex]) {
+            freeRunEnd[columnIndex] =
+              freeColumns[columnIndex + 1] && columnIndex + 1 < freeColumns.length
+                ? freeRunEnd[columnIndex + 1]
+                : columnIndex;
+          }
+        }
+        for (let startIndex = 0; startIndex < freeColumns.length; startIndex += 1) {
+          const lastFreeIndex = freeRunEnd[startIndex];
+          if (lastFreeIndex < startIndex) continue;
+          const rawWidth = xs[lastFreeIndex + 1] - xs[startIndex];
+          const width = Math.min(rawWidth, GUIDED_SPACE_MAX_WIDTH);
+          if (width < GUIDED_SPACE_MIN_EDGE) continue;
+          const area = width * height;
+          if (!best || area > best.area) {
+            const left = xs[startIndex];
+            const top = ys[topIndex];
+            best = {
+              start: { x: left, y: top },
+              end: { x: left + width, y: top + height },
+              area
+            };
+          }
+        }
+      }
+      if (rawHeight >= GUIDED_SPACE_MAX_HEIGHT) break;
+    }
+  }
+  return best ? { start: best.start, end: best.end } : null;
 }
 
 export function openingSegment(
