@@ -2,6 +2,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { signal } from '@angular/core';
 import { HttpErrorResponse } from '@angular/common/http';
 import { of, Subject, throwError } from 'rxjs';
+import { setDateLocale } from '../../core/time';
 import { I18nService } from '../../core/services/i18n.service';
 import { HouseholdPlanService } from '../../core/services/household-plan.service';
 import { HouseholdTasksService } from '../../core/services/household-tasks.service';
@@ -124,6 +125,8 @@ describe('HouseholdTasksComponent', () => {
 
   beforeEach(() => {
     assignmentResponse = { planVersion: 0, version: 0, assignments: {} };
+    i18n.resolved.set('es');
+    setDateLocale('es-ES');
     TestBed.resetTestingModule();
   });
 
@@ -164,6 +167,39 @@ describe('HouseholdTasksComponent', () => {
     });
 
     expect(component.planViewBox().split(' ').map(Number)).toEqual([-439, -439, 10_878, 1_878]);
+  });
+
+  it('formats compact week ranges across and within month boundaries', async () => {
+    await mount();
+
+    component.weekStart.set('2026-10-12');
+    expect(component.weekRangeLabel()).toBe('12–18 oct');
+
+    component.weekStart.set('2026-10-26');
+    expect(component.weekRangeLabel()).toBe('26 oct – 1 nov');
+
+    i18n.resolved.set('en');
+    setDateLocale('en-GB');
+    expect(component.weekRangeLabel()).toBe('26 Oct – 1 Nov');
+  });
+
+  it('keeps each member and task count together in the weekly summary', async () => {
+    await mount();
+    component.draftTasks.set([
+      {
+        id: 'summary-task',
+        title: 'Limpiar cocina',
+        details: null,
+        spaceId: 'kitchen',
+        scheduledDate: component.weekStart(),
+        assignedMemberId: 'ada',
+        completed: false
+      }
+    ]);
+
+    expect(component.assignmentSummary()).toBe(
+      'household.tasks_distribution_label: Ada\u00a01 · Lin\u00a00'
+    );
   });
 
   it('omits owner captions from compact room footprints without changing their accessible assignment', async () => {

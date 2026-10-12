@@ -46,13 +46,7 @@
             role="group"
             [attr.aria-label]="'household.tasks_plan_title' | t"
           >
-            <defs>
-              <pattern id="tasks-plan-grid" width="250" height="250" patternUnits="userSpaceOnUse">
-                <path d="M 250 0 L 0 0 0 250" class="tasks-plan-canvas__grid" fill="none" />
-              </pattern>
-            </defs>
             <rect width="10000" height="10000" class="tasks-plan-canvas__paper" />
-            <rect width="10000" height="10000" fill="url(#tasks-plan-grid)" />
 
             <ng-container *ngIf="activeFloor() as floor">
               <polygon
@@ -233,7 +227,7 @@
       </p>
       <div class="tasks-board__context">
         <section class="tasks-zone-heading" aria-live="polite">
-          <div>
+          <div class="tasks-zone-heading__title">
             <span class="tasks-zone-heading__eyebrow visually-hidden">
               {{ 'household.tasks_selected_zone' | t }}
             </span>
@@ -255,35 +249,42 @@
           <span *ngIf="activeSpaceId()" class="tasks-zone-heading__owner">
             {{ spaceMapAssigneeLabel(activeSpaceId()!) }}
           </span>
-        </section>
-
-        <div class="tasks-weekbar">
-          <button
-            type="button"
-            class="tasks-button tasks-button--icon"
-            [disabled]="loading() || saving()"
-            [attr.aria-label]="'household.tasks_previous_week' | t"
-            (click)="shiftWeek(-1)"
+          <div
+            class="tasks-weekbar"
+            role="group"
+            [attr.aria-label]="'household.tasks_weekly_assignment' | t"
           >
-            ‹
-          </button>
-          <div class="tasks-weekbar__range">
-            <span class="visually-hidden">{{ 'household.tasks_weekly_assignment' | t }}</span>
-            <h3>{{ weekDays()[0].label }} – {{ weekDays()[6].label }}</h3>
+            <button
+              type="button"
+              class="tasks-button tasks-button--icon"
+              [disabled]="loading() || saving()"
+              [attr.aria-label]="'household.tasks_previous_week' | t"
+              (click)="shiftWeek(-1)"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="m15 18-6-6 6-6" />
+              </svg>
+            </button>
+            <div class="tasks-weekbar__range">
+              <span class="visually-hidden">{{ 'household.tasks_weekly_assignment' | t }}</span>
+              <h3>{{ weekRangeLabel() }}</h3>
+            </div>
+            <button
+              type="button"
+              class="tasks-button tasks-button--icon"
+              [disabled]="loading() || saving()"
+              [attr.aria-label]="'household.tasks_next_week' | t"
+              (click)="shiftWeek(1)"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="m9 18 6-6-6-6" />
+              </svg>
+            </button>
+            <span class="tasks-weekbar__version">
+              {{ 'household.tasks_week_version' | t: { version: snapshot().version } }}
+            </span>
           </div>
-          <button
-            type="button"
-            class="tasks-button tasks-button--icon"
-            [disabled]="loading() || saving()"
-            [attr.aria-label]="'household.tasks_next_week' | t"
-            (click)="shiftWeek(1)"
-          >
-            ›
-          </button>
-          <span class="tasks-weekbar__version">
-            {{ 'household.tasks_week_version' | t: { version: snapshot().version } }}
-          </span>
-        </div>
+        </section>
       </div>
 
       <section *ngIf="canEdit" class="tasks-create" [attr.aria-label]="'household.tasks_add' | t">
@@ -307,6 +308,9 @@
             [disabled]="!newTitle().trim() || draftTasks().length >= 200 || loading() || saving()"
             (click)="addTask()"
           >
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
             {{ 'household.tasks_add_button' | t }}
           </button>
         </div>
@@ -442,10 +446,9 @@
         data-test="tasks-week"
         aria-labelledby="tasks-schedule-title"
       >
-        <header class="tasks-schedule__header visually-hidden">
+        <header class="tasks-schedule__header">
           <div>
             <h3 id="tasks-schedule-title">{{ 'household.tasks_weekly_assignment' | t }}</h3>
-            <p>{{ assignmentSummary() }}</p>
           </div>
         </header>
         <div class="tasks-days">
@@ -591,9 +594,20 @@
           class="tasks-schedule__footer"
           [class.tasks-schedule__footer--has-randomizer]="canEdit && draftTasks().length > 0"
         >
-          <p class="tasks-schedule__summary">{{ assignmentSummary() }}</p>
+          <p class="tasks-schedule__summary">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M4 19h16M7 16v-5m5 5V5m5 11V9" />
+            </svg>
+            <span>{{ assignmentSummary() }}</span>
+          </p>
           <details class="tasks-schedule__more-actions" data-test="tasks-actions-menu">
-            <summary [attr.aria-label]="'household.tasks_more_actions' | t">•••</summary>
+            <summary [attr.aria-label]="'household.tasks_more_actions' | t">
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <circle cx="5" cy="12" r="1.5" />
+                <circle cx="12" cy="12" r="1.5" />
+                <circle cx="19" cy="12" r="1.5" />
+              </svg>
+            </summary>
             <div>
               <button
                 *ngIf="canEdit && draftTasks().length"
@@ -622,6 +636,9 @@
             [disabled]="!canEdit || !isDirty() || saving() || !!randomPreview()"
             (click)="saveWeek()"
           >
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="m5 12 4 4L19 6" />
+            </svg>
             {{ saving() ? ('household.tasks_saving' | t) : ('household.tasks_save' | t) }}
           </button>
         </div>

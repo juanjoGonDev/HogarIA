@@ -2898,8 +2898,15 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   await expect(page.locator('[data-test="household-panel-tasks"]')).toBeVisible();
   await expect(page.locator('[data-test="tasks-layout"]')).toBeVisible();
   await expect(page.locator('[data-test="tasks-plan-canvas"]')).toBeVisible();
+  await expect(
+    page.locator('.tasks-plan-canvas__grid'),
+    'the task map uses the clean paper treatment from the approved screen'
+  ).toHaveCount(0);
+  await expect(page.locator('.tasks-map-viewport')).toHaveCSS('background-image', 'none');
   await expect(page.locator('.tasks-plan-canvas svg[householdAreaGlyph]')).toHaveCount(8);
-  await expect(page.locator('.tasks-zone-heading h3')).toHaveText('Cocina');
+  await expect(page.locator('.tasks-zone-heading__title h3')).toHaveText('Cocina');
+  await expect(page.locator('.tasks-weekbar button svg')).toHaveCount(2);
+  await expect(page.locator('[data-test="tasks-add"] svg')).toBeVisible();
   const fairAssignment = page.getByRole('radio', { name: 'Aleatoria y equitativa' });
   await fairAssignment.check();
   await expect(fairAssignment).toHaveAttribute('aria-describedby', 'tasks-random-mode-description');
@@ -2909,7 +2916,11 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   await page.getByRole('radio', { name: 'Elegir persona' }).check();
   if (mobile) {
     await expect(page.locator('.tasks-create__title-caption')).toHaveCSS('position', 'absolute');
-    await expect(page.locator('.tasks-assignment-settings h3')).toHaveCSS('position', 'static');
+    await expect(page.locator('.tasks-assignment-settings h3')).toHaveCSS('position', 'absolute');
+    await expect(page.locator('.tasks-assignment-settings')).toHaveAttribute(
+      'aria-labelledby',
+      'tasks-assignment-mode-title'
+    );
     await expect(page.locator('.tasks-schedule__header')).toHaveCSS('position', 'static');
     const taskForm = await page.locator('.tasks-create').boundingBox();
     const assignmentSettings = await page.locator('.tasks-assignment-settings').boundingBox();
@@ -2946,10 +2957,27 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   if (mobile) {
     await expect(page.locator('.tasks-zone-heading__controls')).toBeHidden();
     await expect(
-      page.locator('.tasks-zone-heading h3'),
+      page.locator('.tasks-zone-heading__title h3'),
       'the selected zone title should remain visible beside the weekly list'
     ).toBeVisible();
     await expect(page.locator('.tasks-map__area[role="button"]').first()).toBeVisible();
+    const zoneAndWeekLayout = await page.evaluate(() => {
+      const heading = document.querySelector('.tasks-zone-heading');
+      const title = heading
+        ?.querySelector('.tasks-zone-heading__title h3')
+        ?.getBoundingClientRect();
+      const weekbar = heading?.querySelector('.tasks-weekbar')?.getBoundingClientRect();
+      return {
+        weekbarIsIntegrated: !!weekbar,
+        titleCenter: title ? title.top + title.height / 2 : -1,
+        weekbarCenter: weekbar ? weekbar.top + weekbar.height / 2 : -1
+      };
+    });
+    expect(zoneAndWeekLayout.weekbarIsIntegrated).toBe(true);
+    expect(
+      Math.abs(zoneAndWeekLayout.titleCenter - zoneAndWeekLayout.weekbarCenter),
+      'the selected zone and week navigation share one compact mobile row'
+    ).toBeLessThanOrEqual(1);
   }
   const taskMap = await page.locator('.tasks-map-viewport').boundingBox();
   expect(taskMap?.height).toBeLessThanOrEqual(mobile ? 350 : 700);
@@ -3001,6 +3029,29 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
       expect(textBounds.scrollWidth).toBeLessThanOrEqual(textBounds.clientWidth + 1);
     }
   }
+  await expect(
+    page.locator('#tasks-schedule-title'),
+    'the weekly assignment section keeps its visible context on both desktop and mobile'
+  ).toBeVisible();
+  await expect(page.locator('.tasks-schedule__summary svg')).toBeVisible();
+  await expect(page.locator('[data-test="tasks-actions-menu"] summary svg')).toBeVisible();
+  await expect(page.locator('[data-test="tasks-save"] svg')).toBeVisible();
+  const weeklySummarySurface = await page
+    .locator('.tasks-schedule__summary')
+    .evaluate((element) => getComputedStyle(element).backgroundColor);
+  expect(weeklySummarySurface).not.toBe('rgba(0, 0, 0, 0)');
+  const saveActionWidth = await page.locator('.tasks-schedule__footer').evaluate((footer) => {
+    const button = footer.querySelector<HTMLElement>('[data-test="tasks-save"]');
+    if (!button) throw new Error('The week footer must contain its save action');
+    return {
+      button: button.getBoundingClientRect().width,
+      available: footer.getBoundingClientRect().width
+    };
+  });
+  expect(
+    saveActionWidth.button,
+    'the apply-week CTA should retain almost all of the footer width'
+  ).toBeGreaterThanOrEqual(saveActionWidth.available - 16);
   if (mobile) {
     expect(
       taskMap?.height,
@@ -3077,9 +3128,9 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   const patioSpaceId = savedPlan.floors[0].spaces.find((space) => space.kind === 'patio')!.id;
   const patioOnTaskMap = page.locator(`.tasks-map__area[data-space-id="${patioSpaceId}"]`);
   await patioOnTaskMap.click();
-  await expect(page.locator('.tasks-zone-heading h3')).toHaveText('Patio');
+  await expect(page.locator('.tasks-zone-heading__title h3')).toHaveText('Patio');
   await page.locator(`.tasks-map__area[data-space-id="${kitchenId}"]`).click();
-  await expect(page.locator('.tasks-zone-heading h3')).toHaveText('Cocina');
+  await expect(page.locator('.tasks-zone-heading__title h3')).toHaveText('Cocina');
 
   const taskTitles = Array.from({ length: 7 }, () => 'Limpieza de cocina');
   const createForm = page.locator('.tasks-create');
@@ -3220,8 +3271,8 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     });
     expect(
       taskRowsLayout.visibleCount,
-      `the mobile checklist begins with unobscured rows above sticky actions: ${JSON.stringify(taskRowsLayout)}`
-    ).toBeGreaterThanOrEqual(1);
+      `the mobile checklist should show three full task rows above sticky actions: ${JSON.stringify(taskRowsLayout)}`
+    ).toBeGreaterThanOrEqual(3);
     await taskCards.last().evaluate((element) => element.scrollIntoView({ block: 'center' }));
     const lastTaskBounds = await taskCards.last().boundingBox();
     const scrolledWeekActions = await page.locator('.tasks-schedule__footer').boundingBox();
@@ -3316,14 +3367,18 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
         'floor tabs remain comfortable touch targets'
       ).toBeGreaterThanOrEqual(44);
     }
-    const zoneHeadingBounds = await page.locator('.tasks-zone-heading h3').boundingBox();
+    const zoneHeadingBounds = await page.locator('.tasks-zone-heading__title h3').boundingBox();
     const weekbarBounds = await page.locator('.tasks-weekbar').boundingBox();
     expect(zoneHeadingBounds).not.toBeNull();
     expect(weekbarBounds).not.toBeNull();
     expect(
-      weekbarBounds!.y,
-      'the selected-zone title has its own line before weekly navigation'
-    ).toBeGreaterThanOrEqual(zoneHeadingBounds!.y + zoneHeadingBounds!.height - 1);
+      Math.abs(
+        zoneHeadingBounds!.y +
+          zoneHeadingBounds!.height / 2 -
+          (weekbarBounds!.y + weekbarBounds!.height / 2)
+      ),
+      'selected-zone title and weekly navigation share one balanced row'
+    ).toBeLessThanOrEqual(1);
     const headingsOverlap =
       zoneHeadingBounds!.x < weekbarBounds!.x + weekbarBounds!.width &&
       zoneHeadingBounds!.x + zoneHeadingBounds!.width > weekbarBounds!.x &&

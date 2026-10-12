@@ -16,6 +16,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import type { TranslationKey } from '../../core/i18n';
 import { TranslatePipe } from '../../core/pipes/translate.pipe';
+import { dateLocale } from '../../core/time';
 import { HouseholdPlanService } from '../../core/services/household-plan.service';
 import { HouseholdTasksService } from '../../core/services/household-tasks.service';
 import { I18nService } from '../../core/services/i18n.service';
@@ -122,6 +123,20 @@ export class HouseholdTasksComponent implements OnChanges {
       } satisfies WeekDay;
     })
   );
+  readonly weekRangeLabel = computed(() => {
+    const days = this.weekDays();
+    const first = days[0];
+    const last = days[days.length - 1];
+    const firstDate = parseLocalDate(first.date);
+    const lastDate = parseLocalDate(last.date);
+    const locale = dateLocale();
+    const dateFormatter = new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'short' });
+    if (firstDate.getMonth() === lastDate.getMonth()) {
+      const dayFormatter = new Intl.DateTimeFormat(locale, { day: 'numeric' });
+      return `${dayFormatter.format(firstDate)}–${dateFormatter.format(lastDate)}`;
+    }
+    return `${dateFormatter.format(firstDate)} – ${dateFormatter.format(lastDate)}`;
+  });
   readonly dayPickerOptions = computed<PickerOption[]>(() =>
     this.weekDays().map((day) => ({ value: day.date, label: day.label }))
   );
@@ -459,7 +474,7 @@ export class HouseholdTasksComponent implements OnChanges {
     }));
     if (!counts.some((entry) => entry.count)) return this.i18n.t('household.tasks_no_assignments');
     return `${this.i18n.t('household.tasks_distribution_label')}: ${counts
-      .map((entry) => `${entry.name} ${entry.count}`)
+      .map((entry) => `${entry.name}\u00a0${entry.count}`)
       .join(' · ')}`;
   }
 

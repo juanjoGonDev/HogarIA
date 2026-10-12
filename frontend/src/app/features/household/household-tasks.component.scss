@@ -131,6 +131,7 @@
 
   .tasks-schedule__footer {
     gap: var(--space-1);
+    row-gap: 0;
     padding: 2px var(--space-1);
   }
 
@@ -139,8 +140,8 @@
   }
 
   .tasks-schedule__more-actions > summary {
-    width: 36px;
-    min-height: 36px;
+    width: 44px;
+    min-height: 44px;
   }
 }
 
@@ -270,7 +271,7 @@
   }
 }
 
-/* Keep the three visible labels from the approved weekly checklist on phone screens. */
+/* Keep the mobile task form compact without removing its accessible labels. */
 @media (max-width: 767px) {
   .tasks-board {
     gap: 0;
@@ -313,18 +314,15 @@
 
   .tasks-assignment-settings h3 {
     grid-column: 1 / -1;
-    position: static;
-    display: block;
-    width: auto;
-    height: auto;
+    position: absolute;
+    width: 1px;
+    height: 1px;
     padding: 0;
-    margin: 0;
-    overflow: visible;
-    clip: auto;
-    white-space: normal;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
     border: 0;
-    color: var(--text-secondary);
-    font-size: var(--text-sm);
   }
 
   .tasks-assignment-mode {
@@ -359,26 +357,9 @@
     font-size: 11px !important;
   }
 
-  .tasks-schedule__header.visually-hidden {
-    position: static;
-    display: block;
-    width: auto;
-    height: auto;
-    padding: 0 var(--space-2);
-    margin: 0;
-    overflow: visible;
-    clip: auto;
-    white-space: normal;
-    border: 0;
-  }
-
   .tasks-schedule__header h3 {
     margin: 0;
     font-size: var(--text-sm);
-  }
-
-  .tasks-schedule__header p {
-    display: none;
   }
 
   .tasks-schedule {
@@ -387,13 +368,14 @@
   }
 
   .task-card {
-    height: auto;
+    height: 44px;
     min-height: 44px;
+    box-sizing: border-box;
   }
 
   .tasks-schedule__footer {
-    row-gap: var(--space-6);
-    margin-top: var(--space-4);
+    row-gap: 0;
+    margin-top: var(--space-2);
   }
 }
 
