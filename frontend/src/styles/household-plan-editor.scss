@@ -3568,11 +3568,50 @@
 }
 
 .plan-editor--assignment-view .plan-zone-assignment__members {
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 2px;
 }
 
-.plan-editor--assignment-view .plan-zone-member {
-  background: var(--bg-primary);
+@media (min-width: 1024px) {
+  .plan-editor--assignment-view .plan-zone-member {
+    box-sizing: border-box;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 30px minmax(2em, auto) 12px;
+    min-width: 0;
+    height: 88px;
+    min-height: 88px;
+    justify-items: center;
+    align-content: center;
+    gap: 2px;
+    padding: 4px 0;
+    background: var(--bg-primary);
+    font-size: var(--text-xs);
+    text-align: center;
+  }
+
+  .plan-editor--assignment-view .plan-zone-member > span:nth-child(2) {
+    max-width: 100%;
+    overflow-wrap: normal;
+    line-height: var(--leading-tight);
+    text-overflow: clip;
+    white-space: normal;
+  }
+
+  .plan-editor--assignment-view .plan-zone-member--shared > span:nth-child(2) {
+    font-size: 0.6rem;
+    letter-spacing: -0.02em;
+    white-space: nowrap;
+  }
+
+  .plan-editor--assignment-view .plan-zone-member__avatar {
+    width: 30px;
+    height: 30px;
+  }
+
+  .plan-editor--assignment-view .plan-zone-member__radio {
+    width: 12px;
+    height: 12px;
+  }
 }
 
 .plan-editor--assignment-view .plan-details__legend {

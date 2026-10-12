@@ -1686,6 +1686,50 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     expect(saveBounds).not.toBeNull();
     if (bottomNavBounds)
       expect(saveBounds!.y + saveBounds!.height).toBeLessThanOrEqual(bottomNavBounds.y);
+  } else {
+    const memberButtons = zoneAssignment.locator(
+      '[data-test="plan-zone-member"], .plan-zone-member--shared'
+    );
+    await expect(memberButtons).toHaveCount(4);
+    const memberTiles = await memberButtons.evaluateAll((elements) =>
+      elements.map((element) => {
+        const bounds = element.getBoundingClientRect();
+        return {
+          x: bounds.x,
+          y: bounds.y,
+          width: bounds.width,
+          height: bounds.height
+        };
+      })
+    );
+    expect(
+      Math.max(...memberTiles.map((tile) => tile.y)) -
+        Math.min(...memberTiles.map((tile) => tile.y)),
+      'desktop responsibility choices should share one aligned row'
+    ).toBeLessThanOrEqual(1);
+    expect(
+      Math.max(...memberTiles.map((tile) => tile.height)) -
+        Math.min(...memberTiles.map((tile) => tile.height)),
+      'desktop responsibility tiles should have equal heights'
+    ).toBeLessThanOrEqual(1);
+    expect(
+      Math.min(...memberTiles.map((tile) => tile.height)),
+      'desktop responsibility choices should remain large enough to scan and tap'
+    ).toBeGreaterThanOrEqual(72);
+    const sharedLabel = zoneAssignment.locator('.plan-zone-member--shared > span:nth-child(2)');
+    const sharedTextLayout = await sharedLabel.evaluate((element) => ({
+      scrollWidth: element.scrollWidth,
+      clientWidth: element.clientWidth,
+      whiteSpace: getComputedStyle(element).whiteSpace,
+      overflowWrap: getComputedStyle(element).overflowWrap,
+      fontSize: Number.parseFloat(getComputedStyle(element).fontSize)
+    }));
+    expect(
+      sharedTextLayout.scrollWidth,
+      'the shared assignment label must fit as a whole word without an awkward mid-word wrap'
+    ).toBeLessThanOrEqual(sharedTextLayout.clientWidth);
+    expect(sharedTextLayout.overflowWrap).toBe('normal');
+    expect(sharedTextLayout.fontSize).toBeGreaterThanOrEqual(9.5);
   }
   if (!mobile) {
     const workspace = page.locator('.plan-editor__workspace');
@@ -1701,6 +1745,23 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   const selectedZone = page.locator('.plan-canvas__space--selected');
   await expect(selectedZone).toHaveAttribute('aria-label', 'Cocina');
   await expect(selectedZone).toHaveCSS('fill', 'rgb(255, 224, 204)');
+  const selectedZoneColors = await selectedZone.evaluate((element) => {
+    const probe = document.createElement('span');
+    probe.style.color = 'var(--primary)';
+    document.body.append(probe);
+    const primary = getComputedStyle(probe).color;
+    probe.remove();
+    return {
+      fill: getComputedStyle(element).fill,
+      stroke: getComputedStyle(element).stroke,
+      primary
+    };
+  });
+  expect(
+    selectedZoneColors.stroke,
+    'orange selection outline must remain distinct from the responsibility fill'
+  ).toBe(selectedZoneColors.primary);
+  expect(selectedZoneColors.fill).toBe('rgb(255, 224, 204)');
   const overlappingAssignmentLabels = await page
     .locator('.plan-canvas__space-label')
     .evaluateAll((labels) =>
