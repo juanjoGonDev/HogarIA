@@ -1,6 +1,6 @@
 # HogarIA — Plano interactivo del hogar y tareas por zonas
 
-Estado: **funcionalidad y CI completados; pase de fidelidad visual en curso · PR #47 en Draft** · 2026-10-11
+Estado: **implementación y pase visual local completados; hooks/push/CI pendientes · PR #47 en Draft** · 2026-10-12
 
 Este contrato concreta una nueva capacidad de HogarIA y complementa las reglas compartidas de
 `HOGARIA-SPEC.md` §12ap (aislamiento por hogar, membresía, permisos y proveedor de IA) y §13
@@ -276,53 +276,52 @@ rollback. Las tablas se crean con `CREATE TABLE IF NOT EXISTS`; las pruebas se e
 
 Evidencia del editor y tareas:
 
-- `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/household-plan-tasks.spec.ts` — 2/2 pasan. Usa DB y usuarios sintéticos temporales; la propuesta de foto se stubbea en el navegador, no llama a IA real, guarda solo al aplicar y el runner elimina DB/artefactos temporales propios al terminar.
+- `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/household-plan-tasks.spec.ts` — 2/2 pasan (repetición final: 41,6 s). Usa DB y usuarios sintéticos temporales; la propuesta de foto se stubbea en el navegador, no llama a IA real, guarda solo al aplicar y el runner elimina DB/artefactos temporales propios al terminar.
 - El flujo verifica lienzo/zonas, pared exterior/puerta principal, pisos y confirmación al borrarlos, carga de imagen, propuesta sin escritura prematura, cambio de pestaña con borrador conservado, tarea por zona, preview equitativo/no consecutivo, persistencia y edición tras recargar.
 - Viewports probados: 320, 359, 360, 639, 640, 767, 768, 1023 y 1024 px, además de 568×320; la pestaña conserva geometría/tipografía/espaciado equivalente con tolerancia ≤1 px y no hay overflow horizontal. Mobile Chrome usa `tap` en el plano y teclado; los componentes aplican `env(safe-area-inset-bottom, 0px)`. La emulación no sustituye comprobación en hardware físico con recorte/notch.
-- Capturas PC/móvil sintéticas inspeccionadas en `.e2e-screenshots/household-plan-tasks/{chromium,mobile-chrome}/` (lienzo, propuesta, tareas previas al reparto y semana guardada). Se excluyen de Git.
+- Capturas PC/móvil sintéticas inspeccionadas en `.e2e-screenshots/household-plan-tasks/{chromium,mobile-chrome}/` (los seis pasos `01-plan-start` a `06-chat-adjustment`; también propuesta, previsualización aleatoria y semana guardada). Se excluyen de Git.
 
 ### QA-HOUSEHOLD.PLAN.VISUAL-FIDELITY.1 — interfaz según los prototipos aprobados
 
-La referencia es la secuencia de seis mockups de esta conversación (archivos `exec-3d60ee65-e311-4692-a979-b1f4564929a9.png`,
-`exec-3be5f6ed-8bd1-47a8-b708-35ab9452dff0.png`, `exec-9299b3b6-c022-4f96-b9c4-7eb0337afc28.png`,
-`exec-e2e39a1a-d995-4927-bc38-205c925ab781.png`, `exec-455e098e-dd5b-4600-b0aa-1c9939baf363.png` y
-`exec-042a1622-76b0-4f9a-87d6-bc7f4e404ba3.png`). Hay que cotejar visualmente con esas imágenes, no
-solo comprobar que los controles existen. Mantener el shell y los tokens geométricos de HogarIA;
-fondo claro, superficies blancas, naranja solo para acción/selección, líneas azul marino y zonas
-pastel. Evitar tarjetas redundantes, paneles vacíos y formularios que reduzcan el plano a una miniatura.
+La referencia es la secuencia de seis mockups aprobados en esta conversación (archivos
+`exec-3d60ee65-e311-4692-a979-b1f4564929a9.png`, `exec-3be5f6ed-8bd1-47a8-b708-35ab9452dff0.png`,
+`exec-9299b3b6-c022-4f96-b9c4-7eb0337afc28.png`, `exec-e2e39a1a-d995-4927-bc38-205c925ab781.png`,
+`exec-455e098e-dd5b-4600-b0aa-1c9939baf363.png` y `exec-042a1622-76b0-4f9a-87d6-bc7f4e404ba3.png`).
+Mantener la shell y los tokens geométricos reales de HogarIA; fondo claro, superficies blancas,
+naranja para acción/selección, líneas azul marino y zonas pastel. Se evalúan la composición y
+jerarquía de la vista del producto, no las barras de navegador ni la shell dibujada dentro de los
+mockups.
 
-- [ ] **Inicio/método:** tipo de vivienda y número de plantas arriba; tres métodos (lienzo libre,
-      foto con IA, constructor guiado) en tarjetas equivalentes; CTA naranja `Empezar plano`. En móvil,
-      contenido apilado y CTA alcanzable sin desplazamiento lateral.
-- [ ] **Editor:** planta de varias estancias creíble como elemento principal; herramientas de
-      selección, pared, puerta, ventana y zona en barra horizontal visible; selector de plantas y
-      deshacer/zoom junto al lienzo; acción de previsualizar/aplicar clara. En móvil, lienzo ancho y
-      desplazable, herramientas táctiles compactas en dock de dos filas, sin paneles laterales que
-      estrangulen el dibujo.
-- [ ] **Foto/propuesta:** original y plano generado comparables, con acciones revisar, aplicar o
-      pedir cambio; móvil apila imagen y resultado sin esconder las acciones.
-- [ ] **Asignación de zonas:** plano seleccionable junto al panel de zona/responsable en escritorio;
-      al seleccionar una zona, móvil usa hoja inferior compacta con asignación y guardar. La persona
-      responsable puede ser un miembro activo, un conjunto compartido o quedar sin asignar; persistir
-      por hogar con control de versión y permiso, validar membresías en servidor, limpiar zonas
-      retiradas y no incluir identidades de miembros en el prompt de IA.
-- [ ] **Tareas semanales:** plano interactivo en la columna principal y editor de tarea/reparto/lista
-      de la semana en columna secundaria; indicar persona, zona y día, con controles de asignación
-      manual, aleatoria equitativa y guardar semana. En móvil, plano primero y panel de tareas debajo.
-- [ ] **Ajuste por chat:** plano actual y propuesta visibles en paralelo con conversación y control de
-      aplicar/descartar; móvil permite alternar Actual/Propuesta y mantiene el chat/acciones accesibles
-      a continuación.
-- [ ] Los seis flujos anteriores quedan accesibles desde el producto real y preservan funciones,
-      permisos, persistencia, navegación, borradores y validación de IA; ninguna propuesta se aplica
-      automáticamente. Añadir datos sintéticos visualmente completos al E2E, sin fixtures personales.
-- [ ] Comparar capturas reales de Playwright con los seis mockups para escritorio y móvil, al menos
-      1440×900, 390×844, ancho mínimo soportado, orientación horizontal y ambos lados de los
-      breakpoints usados por estos componentes. Inspeccionar todas las capturas e iterar sobre
-      diferencias evidentes de jerarquía, distribución, densidad y proporciones antes de marcar.
-- [ ] Validar teclado, foco, nombres accesibles, contraste, controles táctiles, safe-area y ausencia
-      de overflow; guardar capturas sintéticas comparables en el directorio ignorado de E2E.
-- [ ] Registrar comandos, resultados y limitaciones reproducibles. No declarar fidelidad visual
-      completa basándose solo en unit tests, compilación o presencia de controles.
+- [x] **Inicio:** vivienda seleccionada única, plantas separadas, tres métodos en tarjetas ilustradas
+      y CTA principal; escritorio en tres columnas y móvil apilado sin scroll horizontal.
+- [x] **Editor:** el plano ocupa el área principal; herramientas, pisos, cuadrícula, historial,
+      zoom y previsualización conservan la jerarquía del prototipo. En móvil el lienzo se mantiene
+      ancho entre el selector de plantas y el dock táctil/CTA.
+- [x] **Foto/propuesta:** original y plano generado se presentan como superficies comparables,
+      ofrecen cambiar/confirmar y mantienen continuar/descartar accesibles. En ≤359 px las vistas
+      se compactan; a 320×568 las acciones pasan al flujo desplazable para no cubrir la decisión.
+- [x] **Asignación:** vista dedicada sin herramientas de dibujo, con mapa, pisos, asignación
+      individual/compartida/sin asignar y leyenda en escritorio; mapa seguido por panel compacto
+      en móvil, sin superposición incluso en 320×568 y 568×320.
+- [x] **Tareas:** mapa y panel semanal en columnas relacionadas; móvil muestra primero el mapa y
+      después el editor/lista desplazable, sin que los controles inferiores tapen filas.
+- [x] **Ajuste por chat:** planos actual/propuesta, conversación, aplicar/descartar y subir boceto/
+      volver al lienzo; en móvil se alternan los planos y las acciones permanecen después del chat.
+      Una nueva foto conserva la geometría como borrador; no se guarda sin aplicar.
+- [x] E2E verifica interacción, permisos, persistencia, borradores, IA simulada, teclado/foco,
+      labels, contraste AA en temas claro/oscuro, safe-area y ausencia de overflow; no hay fixtures
+      personales ni llamadas reales a IA.
+- [x] Inspeccionar las seis capturas sintéticas de Playwright a 1440×900 y 390×844; verificar además
+      breakpoints 320, 359, 360, 389, 390, 639, 640, 767, 768, 1023 y 1024 px y orientación 568×320.
+- [x] Registrar comprobaciones y limitaciones reproducibles; no inferir fidelidad solo por tests
+      unitarios, compilación o presencia de controles.
+
+Evidencia visual y regresión:
+
+- `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/household-plan-tasks.spec.ts` — **2/2 pasan en 42,9 s** (ejecución final, 12-10-2026). Servidor/SQLite/artefactos aislados; el proveedor de IA se simula y la DB/artefactos temporales propios se limpian.
+- El primer pase halló dos fallos visuales que no detectaba el simple `scrollWidth`: a 320 px las pestañas del hogar se montaban; y en pantalla baja la decisión de foto quedaba debajo de la barra fija (`bottom=729,89`, `sticky top=693`). Se compactaron las pestañas hasta 389 px, con scroll/foco por teclado, y a 320×568 las acciones de foto dejan de ser fijas y permanecen alcanzables al desplazar. E2E verifica 320, 359, 360, 389 y 390 px y ambos casos pasan.
+- Inspeccioné los seis estados `01-plan-start` a `06-chat-adjustment` de `.e2e-screenshots/household-plan-tasks/{chromium,mobile-chrome}/` a 1440×900 y 390×844; hay capturas adicionales 320×568 para cada flujo, una de las acciones de foto desplazadas y asignación/tareas en 568×320. También se comprueban 639, 640, 767, 768, 1023 y 1024 px.
+- Las capturas usan plan/foto sintéticos y no contienen datos personales. La emulación no sustituye un teléfono físico con notch. El mockup y la aplicación tienen shells distintas; por ello no se afirma igualdad raster píxel a píxel fuera del contenido de la vista Hogar.
 
 ### Puertas generales
 
@@ -330,26 +329,32 @@ pastel. Evitar tarjetas redundantes, paneles vacíos y formularios que reduzcan 
       verificada explícitamente. No llamar a IA real para gates repetibles.
 - [x] Typecheck, build, `check:ui`, tests completos aplicables y cobertura ≥70 % por archivo;
       registrar comando, resultado y limitación exactos.
-- [x] Hooks pre-commit/pre-push obligatorios ejecutados sin bypass.
-- [x] CI de la rama: workflow manual completo y sin fallos; el PR se mantuvo Draft mientras los
+- [ ] Hooks pre-commit/pre-push obligatorios ejecutados sin bypass.
+- [ ] CI de la rama: workflow manual completo y sin fallos; el PR se mantuvo Draft mientras los
       gates estaban pendientes.
 - [x] Inspección Playwright con servidor aislado y datos sintéticos; PC y móvil, capturas comparables,
       geometría equivalente con tolerancia ≤1 CSS px, teclado/labels y ninguna información privada.
-- [x] PR #47 se mantuvo Draft mientras los gates estaban pendientes; se marca listo solo tras
+- [ ] PR #47 se mantiene Draft mientras los gates remotos estén pendientes; se marca listo solo tras
       aprobarlos. No se hizo merge.
 
-Cobertura verificada localmente:
+Cobertura verificada localmente (repetición final después de la revisión visual):
 
-- `DATABASE_PATH=:memory:; pnpm --filter @hogaria/server exec vitest run --coverage` — 66 archivos y
-  1322 pruebas aprobadas, 1 omitida; 91,96 % statements, 83,62 % ramas, 96,01 % funciones y
-  94,43 % líneas. Todos los archivos de `COVERED` superan 70 % en cada métrica.
-- `pnpm run test:client:coverage` — 1365 pruebas aprobadas; 94,47 % statements, 85,72 % ramas,
-  94,36 % funciones y 96,06 % líneas. Las fuentes de plan/tareas superan 70 % en las métricas
-  instrumentadas; `household-tasks.service.ts` no tiene puntos de rama instrumentables (`BRF=0`).
-- `pnpm run check:ui`, `pnpm run typecheck:e2e` y `pnpm run build` — aprobados. El build muestra
+- `$env:DATABASE_PATH=':memory:'; pnpm run test:coverage` — servidor: 66 archivos, 1328 pruebas
+  aprobadas y 1 omitida; 91,76 % statements, 83,48 % ramas, 95,56 % funciones y 94,27 % líneas.
+  Cliente: 1386 pruebas aprobadas; 93,99 % statements, 85,07 % ramas, 93,82 % funciones y
+  95,63 % líneas. Los archivos del alcance superan 70 % en cada métrica; editor 85,38/70,41/85,71/89,8 %
+  y mapa de propuesta 97,14/88,88/100/98,36 % (statements/ramas/funciones/líneas).
+- `pnpm run check:ui`, `pnpm run typecheck:e2e` y `pnpm run build` — aprobados. `check:ui` revisó
+  228 archivos y 21 reglas; el build muestra
   warnings de Angular ya presentes fuera de este cambio.
-- `pnpm run test:config` — 11/11 pruebas aprobadas. `pnpm run check:ui` revisó 224 archivos y 21
+- `pnpm run test:config` — 11/11 pruebas aprobadas. `pnpm run check:ui` revisó 228 archivos y 21
   reglas sin incidencias.
+- Repetido en esta revisión: `pnpm run check:ui`, `pnpm run typecheck:e2e`, `pnpm run test:config`,
+  `pnpm run test:coverage` y `pnpm run build` pasan. El build mantiene warnings de presupuesto de
+  bundles/estilos ya existentes.
+- `pnpm run lint:client` no puede iniciar Angular ESLint porque falta el paquete existente
+  `@angular-eslint/builder` (`Could not find ... builder's node package`). No se añadió dependencia
+  fuera de alcance; `check:ui` sí pasa y ese lint no forma parte del gate de CI ni de los hooks.
 - Los commits `c0c9fa7`, `4d37dff`, `48b3ffa`, `c0ffe8a` y `cc073cd` se publicaron en
   `feat/household-floorplan`. Los hooks pre-commit y pre-push pasaron: Prettier, check:ui, build,
   typecheck E2E y `pnpm run test` (11 config, 1365 client, 1322 server + 1 skip).
