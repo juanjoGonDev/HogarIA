@@ -534,11 +534,11 @@
           >
           <div class="plan-review__photo-source-actions">
             <label class="plan-file plan-file--compact">
-            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-              <rect x="3" y="4" width="18" height="16" rx="2" />
-              <circle cx="8.5" cy="9" r="1.5" />
-              <path d="m4 17 5-5 3 3 3-4 5 6" />
-            </svg>
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <rect x="3" y="4" width="18" height="16" rx="2" />
+                <circle cx="8.5" cy="9" r="1.5" />
+                <path d="m4 17 5-5 3 3 3-4 5 6" />
+              </svg>
               <span>{{ 'household.plan_upload_another' | t }}</span>
               <input
                 data-test="plan-photo-upload"
@@ -548,10 +548,10 @@
               />
             </label>
             <label class="plan-file plan-file--compact plan-file--camera">
-            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-              <path d="M4 7h3l1.5-2h7L17 7h3a1 1 0 0 1 1 1v10H3V8a1 1 0 0 1 1-1Z" />
-              <circle cx="12" cy="13" r="3.5" />
-            </svg>
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M4 7h3l1.5-2h7L17 7h3a1 1 0 0 1 1 1v10H3V8a1 1 0 0 1 1-1Z" />
+                <circle cx="12" cy="13" r="3.5" />
+              </svg>
               <span>{{ 'household.plan_take_photo' | t }}</span>
               <input
                 data-test="plan-photo-camera"
@@ -567,6 +567,19 @@
           <div class="plan-review__card-heading">
             <h4>{{ 'household.plan_proposal_title_short' | t }}</h4>
             <span class="plan-review__ready">{{ 'household.plan_proposal_ready' | t }}</span>
+            <button
+              type="button"
+              class="plan-button plan-button--quiet plan-review__photo-discard"
+              data-test="plan-proposal-discard"
+              [attr.aria-label]="'household.plan_discard_proposal' | t"
+              [attr.title]="'household.plan_discard_proposal' | t"
+              [disabled]="saving()"
+              (click)="discardProposal()"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M6 6l12 12M18 6 6 18" />
+              </svg>
+            </button>
           </div>
           <app-household-plan-preview-map
             [floor]="comparisonFloor(proposed.proposal)"
@@ -722,13 +735,13 @@
                 </svg>
               </span>
               <span class="plan-chat__assistant-copy">{{
-                  'household.plan_chat_proposal_message'
-                    | t
-                      : {
-                          added: proposed.diff.addedSpaceIds.length,
-                          changed: proposed.diff.modifiedSpaceIds.length
-                        }
-                }}</span>
+                'household.plan_chat_proposal_message'
+                  | t
+                    : {
+                        added: proposed.diff.addedSpaceIds.length,
+                        changed: proposed.diff.modifiedSpaceIds.length
+                      }
+              }}</span>
             </p>
           </div>
           <div class="plan-review__actions">
@@ -831,15 +844,6 @@
           (click)="continueEditingProposal()"
         >
           {{ 'household.plan_photo_continue' | t }}
-        </button>
-        <button
-          type="button"
-          class="plan-link plan-review__photo-discard"
-          data-test="plan-proposal-discard"
-          [disabled]="saving()"
-          (click)="discardProposal()"
-        >
-          {{ 'household.plan_discard_proposal' | t }}
         </button>
       </div>
     </section>
@@ -1011,14 +1015,7 @@
             type="button"
             class="plan-room-chip"
             *ngFor="
-              let kind of [
-                'kitchen',
-                'living_room',
-                'bathroom',
-                'bedroom',
-                'hallway',
-                'patio'
-              ]
+              let kind of ['kitchen', 'living_room', 'bathroom', 'bedroom', 'hallway', 'patio']
             "
             [disabled]="!canEdit"
             (click)="addQuickArea($any(kind))"
@@ -1239,7 +1236,10 @@
               [disabled]="!freeformPoints().length"
               (click)="removeLastFreeformPoint()"
             >
-              {{ 'household.plan_freeform_undo_point' | t }}
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M9 14 4 9l5-5M4 9h10a6 6 0 0 1 0 12h-2" />
+              </svg>
+              <span>{{ 'household.plan_freeform_undo_point' | t }}</span>
             </button>
             <button
               type="button"
@@ -1248,7 +1248,10 @@
               [disabled]="freeformPoints().length < 3"
               (click)="finishFreeformSpace()"
             >
-              {{ 'household.plan_freeform_finish' | t }}
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="m5 12 4 4L19 6" />
+              </svg>
+              <span>{{ 'household.plan_freeform_finish' | t }}</span>
             </button>
             <button
               type="button"
@@ -1256,7 +1259,10 @@
               data-test="plan-freeform-cancel"
               (click)="cancelFreeformDrawing()"
             >
-              {{ 'household.plan_freeform_cancel' | t }}
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M6 6l12 12M18 6 6 18" />
+              </svg>
+              <span>{{ 'household.plan_freeform_cancel' | t }}</span>
             </button>
           </div>
           <ng-container *ngIf="shownFloor() as floor">
@@ -1327,17 +1333,17 @@
             "
             (click)="savePlan()"
           >
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
             {{ saving() ? ('household.plan_saving' | t) : ('household.plan_preview' | t) }}
           </button>
         </div>
 
         <aside class="plan-details" [attr.aria-label]="'household.plan_area_list' | t">
-          <details
-            class="plan-details__zones-disclosure"
-          >
-            <summary
-              class="plan-details__zones-summary"
-            >
+          <details class="plan-details__zones-disclosure">
+            <summary class="plan-details__zones-summary">
               <span>{{ 'household.plan_area_list' | t }}</span>
               <span class="plan-details__zones-count">{{
                 activeFloor()?.spaces?.length ?? 0
@@ -1515,8 +1521,7 @@
                       <circle cx="9" cy="7" r="3" />
                       <circle cx="17" cy="8" r="2.5" />
                       <path d="M3.5 19a5.5 5.5 0 0 1 11 0m-.5-4a4.5 4.5 0 0 1 7.5 3.5" />
-                    </svg>
-                  </span
+                    </svg> </span
                   ><span>{{ 'household.plan_zone_shared' | t }}</span
                   ><span class="plan-zone-member__radio" aria-hidden="true"></span>
                 </button>

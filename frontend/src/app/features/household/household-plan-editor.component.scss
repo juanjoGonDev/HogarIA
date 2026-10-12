@@ -103,8 +103,7 @@
     margin-top: 15px;
   }
 
-  .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-review, .plan-setup))
-    .plan-tool,
+  .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-review, .plan-setup)) .plan-tool,
   .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-review, .plan-setup))
     .plan-room-chip {
     min-height: 100px;
@@ -118,6 +117,14 @@
   .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-review, .plan-setup))
     .plan-canvas__viewport {
     height: min(46vh, 422px);
+  }
+
+  .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-review, .plan-setup)):has(
+      .plan-canvas__freeform-actions
+    )
+    .plan-canvas__viewport {
+    height: min(36vh, 340px);
+    min-height: 300px;
   }
 
   .plan-editor.plan-editor--assignment-view:not(:has(.plan-setup, .plan-review))
@@ -157,8 +164,7 @@
     overflow: visible;
   }
 
-  .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-setup, .plan-review))
-    .plan-tool {
+  .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-setup, .plan-review)) .plan-tool {
     min-width: 0;
     min-height: 100px;
     flex: 1 1 0;
@@ -178,9 +184,12 @@
   }
 
   .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-setup, .plan-review))
-    .plan-tool > span svg,
+    .plan-tool
+    > span
+    svg,
   .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-setup, .plan-review))
-    .plan-room-chip svg {
+    .plan-room-chip
+    svg {
     width: 32px;
     height: 32px;
   }
@@ -216,6 +225,22 @@
 }
 
 @media (max-width: 767px) {
+  .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-setup, .plan-review)):has(
+      .plan-canvas__freeform-actions
+    )
+    .plan-canvas__viewport {
+    height: min(34vh, 300px);
+    min-height: min(34vh, 220px);
+    max-height: min(34vh, 300px);
+  }
+
+  .plan-canvas__freeform-actions > .plan-button {
+    flex-direction: column;
+    gap: var(--space-1);
+    padding: var(--space-1);
+    font-size: var(--text-xs);
+  }
+
   .plan-editor--assignment-view .plan-canvas__viewport {
     height: min(38vh, 358px);
     min-height: min(38vh, 358px);
@@ -258,7 +283,7 @@
 
   .plan-editor:has(.plan-review__chat-view) > .plan-editor__header p {
     font-size: 16px;
-    white-space: nowrap;
+    white-space: normal;
   }
 
   .plan-review__compare-card {
@@ -274,8 +299,7 @@
   }
 
   .plan-review__chat-view {
-    grid-template-columns:
-      minmax(0, 1.04fr) minmax(0, 1.02fr) minmax(240px, 0.95fr);
+    grid-template-columns: minmax(0, 1.04fr) minmax(0, 1.02fr) minmax(240px, 0.95fr);
   }
 
   .plan-review__map-controls {
@@ -553,7 +577,7 @@
 
 @media (max-width: 359px) {
   .plan-editor:has(.plan-review__photo) .plan-review__photo-result .plan-compare-canvas {
-    height: 195px;
-    max-height: 195px;
+    height: 172px;
+    max-height: 172px;
   }
 }

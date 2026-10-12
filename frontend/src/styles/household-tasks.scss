@@ -910,6 +910,18 @@
   gap: 0 var(--space-2);
 }
 
+.task-card--compact .task-card__fields {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.task-card--compact .task-card__assignment {
+  grid-column: 1;
+}
+
+.task-card--compact .task-card__details {
+  grid-column: 2;
+}
+
 .task-card__title input {
   min-height: 32px !important;
   padding: var(--space-1) var(--space-2) !important;
@@ -923,6 +935,13 @@
 .task-card__title input:focus-visible {
   border-color: var(--border-default) !important;
   background: var(--bg-primary) !important;
+}
+
+.task-card__more-fields .task-card__title--details input {
+  min-height: 40px !important;
+  border-color: var(--border-default) !important;
+  background: var(--bg-primary) !important;
+  font-weight: var(--font-normal) !important;
 }
 
 .task-card__assignment {

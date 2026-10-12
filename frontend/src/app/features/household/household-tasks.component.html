@@ -455,6 +455,7 @@
               <li
                 *ngFor="let task of tasksForDay(day.date)"
                 class="task-card"
+                [class.task-card--compact]="tasksForDay(day.date).length === 1"
                 [class.task-card--completed]="task.completed"
               >
                 <label class="task-card__complete">
@@ -470,7 +471,7 @@
                   }}</span>
                 </label>
                 <div class="task-card__fields">
-                  <label class="task-card__title">
+                  <label class="task-card__title" *ngIf="tasksForDay(day.date).length > 1">
                     <span class="visually-hidden">{{ 'household.tasks_name' | t }}</span>
                     <input
                       [ngModel]="task.title"
@@ -496,6 +497,18 @@
                       </svg>
                     </summary>
                     <div class="task-card__more-fields">
+                      <label
+                        class="task-card__title task-card__title--details"
+                        *ngIf="tasksForDay(day.date).length === 1"
+                      >
+                        <span>{{ 'household.tasks_name' | t }}</span>
+                        <input
+                          [ngModel]="task.title"
+                          maxlength="120"
+                          [disabled]="!canEdit || saving()"
+                          (ngModelChange)="updateTask(task.id, { title: $event })"
+                        />
+                      </label>
                       <div class="tasks-editor__field">
                         <span>{{ 'household.tasks_assignee' | t }}</span>
                         <app-picker

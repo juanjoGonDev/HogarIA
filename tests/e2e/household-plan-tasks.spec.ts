@@ -922,6 +922,86 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   await expect(page.locator('.plan-editor__advanced-settings')).not.toHaveAttribute('open', '');
   const freeformCanvas = page.locator('.plan-canvas');
   await freeformCanvas.scrollIntoViewIfNeeded();
+  const freeformActionButtons = page.locator('[data-test="plan-freeform-actions"] > button');
+  await expect(freeformActionButtons).toHaveCount(3);
+  for (const action of await freeformActionButtons.all()) {
+    await expect(action.locator('svg'), 'each freeform action has a matching icon').toBeVisible();
+  }
+  const alignedFreeformActions = await freeformActionButtons.evaluateAll((elements) =>
+    elements.map((element) => {
+      const bounds = element.getBoundingClientRect();
+      const icon = element.querySelector('svg')?.getBoundingClientRect();
+      return {
+        x: bounds.x,
+        y: bounds.y,
+        width: bounds.width,
+        height: bounds.height,
+        iconWidth: icon?.width ?? 0,
+        iconHeight: icon?.height ?? 0
+      };
+    })
+  );
+  expect(
+    Math.max(...alignedFreeformActions.map(({ y }) => y)) -
+      Math.min(...alignedFreeformActions.map(({ y }) => y)),
+    'freeform actions share one baseline'
+  ).toBeLessThanOrEqual(1);
+  expect(
+    Math.max(...alignedFreeformActions.map(({ height }) => height)) -
+      Math.min(...alignedFreeformActions.map(({ height }) => height)),
+    'freeform actions share a consistent touch height'
+  ).toBeLessThanOrEqual(1);
+  expect(
+    Math.max(...alignedFreeformActions.map(({ width }) => width)) -
+      Math.min(...alignedFreeformActions.map(({ width }) => width)),
+    'freeform actions share equal columns'
+  ).toBeLessThanOrEqual(1);
+  for (const action of alignedFreeformActions) {
+    expect(action.iconWidth, 'action icon width stays consistent').toBe(18);
+    expect(action.iconHeight, 'action icon height stays consistent').toBe(18);
+  }
+  await expect(
+    page.locator('.plan-canvas__preview-action svg'),
+    'preview has an icon alongside its label'
+  ).toBeVisible();
+  if (!mobile) {
+    const freeformPreview = await page.locator('.plan-canvas__preview-action').boundingBox();
+    expect(freeformPreview).not.toBeNull();
+    expect(
+      freeformPreview!.y + freeformPreview!.height,
+      'the preview action stays visible after drawing controls appear'
+    ).toBeLessThanOrEqual(viewport.height);
+  }
+  await screenshot(page, '02-plan-editor-freeform', viewport);
+  if (mobile) {
+    await page.setViewportSize({ width: 320, height: 568 });
+    const narrowActionButtons = await freeformActionButtons.evaluateAll((elements) =>
+      elements.map((element) => {
+        const bounds = element.getBoundingClientRect();
+        return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height };
+      })
+    );
+    expect(
+      Math.max(...narrowActionButtons.map(({ y }) => y)) -
+        Math.min(...narrowActionButtons.map(({ y }) => y)),
+      'freeform actions remain aligned at the 320 px minimum'
+    ).toBeLessThanOrEqual(1);
+    expect(
+      Math.max(...narrowActionButtons.map(({ height }) => height)) -
+        Math.min(...narrowActionButtons.map(({ height }) => height)),
+      'freeform actions keep equal touch targets at the 320 px minimum'
+    ).toBeLessThanOrEqual(1);
+    expect(
+      Math.max(...narrowActionButtons.map(({ width }) => width)) -
+        Math.min(...narrowActionButtons.map(({ width }) => width)),
+      'freeform action columns stay aligned at the 320 px minimum'
+    ).toBeLessThanOrEqual(1);
+    await captureResponsiveScreenshot(page, '02-plan-editor-freeform-320x568', {
+      width: 320,
+      height: 568
+    });
+    await page.setViewportSize(viewport);
+  }
   const freeformTapPoints = await freeformCanvas.evaluate((element) => {
     const svg = element as SVGSVGElement;
     const matrix = svg.getScreenCTM();
@@ -1442,6 +1522,51 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   await expect(page.getByRole('button', { name: 'Confirmar', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Cambiar', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Continuar editando', exact: true })).toBeVisible();
+  const discardPhotoProposal = page.getByRole('button', { name: 'Descartar propuesta' });
+  await expect(discardPhotoProposal).toBeVisible();
+  await expect(
+    discardPhotoProposal.locator('svg'),
+    'discard has an icon-only affordance'
+  ).toBeVisible();
+  expect(
+    await discardPhotoProposal.evaluate(
+      (element) => element.closest('.plan-review__card-heading') !== null
+    ),
+    'discard stays with the proposal status, not as a detached link under the primary action'
+  ).toBe(true);
+  const photoHeaderGeometry = await page
+    .locator('.plan-review__photo-result .plan-review__card-heading')
+    .evaluate((header) => {
+      const bounds = (element: Element) => {
+        const { left, right, top, bottom } = element.getBoundingClientRect();
+        return { left, right, top, bottom };
+      };
+      const intersects = (a: ReturnType<typeof bounds>, b: ReturnType<typeof bounds>) =>
+        a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+      const title = header.querySelector('h4');
+      const ready = header.querySelector('.plan-review__ready');
+      const discard = header.querySelector('[data-test="plan-proposal-discard"]');
+      return {
+        discardOverlapsTitle: !!title && !!discard && intersects(bounds(title), bounds(discard)),
+        discardOverlapsStatus: !!ready && !!discard && intersects(bounds(ready), bounds(discard)),
+        discardHeight: discard?.getBoundingClientRect().height ?? 0
+      };
+    });
+  expect(
+    photoHeaderGeometry.discardOverlapsTitle,
+    'discard does not cover the proposal title'
+  ).toBe(false);
+  expect(
+    photoHeaderGeometry.discardOverlapsStatus,
+    'discard does not cover the ready-to-review status'
+  ).toBe(false);
+  expect(
+    photoHeaderGeometry.discardHeight,
+    'discard remains an accessible touch target'
+  ).toBeGreaterThanOrEqual(44);
+  await expect(
+    page.locator('.plan-review__actions--photo [data-test="plan-proposal-discard"]')
+  ).toHaveCount(0);
   await expect(page.locator('[data-test="plan-attachment-preview"]')).toBeVisible();
   await expect(
     page.locator('.plan-review__photo-source-actions svg'),
@@ -1623,6 +1748,29 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
       expect(decision).not.toBeNull();
       expect(sticky).not.toBeNull();
       expect(decision!.y + decision!.height).toBeLessThanOrEqual(sticky!.y - 8);
+      const narrowProposalMap = await page
+        .locator('.plan-review__photo-result .plan-compare-canvas')
+        .boundingBox();
+      expect(narrowProposalMap).not.toBeNull();
+      expect(narrowProposalMap!.height).toBeGreaterThanOrEqual(170);
+      expect(narrowProposalMap!.height).toBeLessThanOrEqual(180);
+      const discardCollision = await page
+        .locator('.plan-review__photo-result .plan-review__card-heading')
+        .evaluate((header) => {
+          const discard = header.querySelector('[data-test="plan-proposal-discard"]');
+          const title = header.querySelector('h4');
+          const status = header.querySelector('.plan-review__ready');
+          if (!discard || !title || !status) throw new Error('Photo proposal header is incomplete');
+          const overlaps = (element: Element) => {
+            const a = discard.getBoundingClientRect();
+            const b = element.getBoundingClientRect();
+            return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+          };
+          return overlaps(title) || overlaps(status);
+        });
+      expect(discardCollision, `discard must not cover photo proposal text at ${width}px`).toBe(
+        false
+      );
     }
     await page.setViewportSize(viewport);
     await page.evaluate(() => window.scrollTo(0, 0));
@@ -1666,6 +1814,48 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   await expect(page.locator('[data-test="plan-chat-continuation"]')).toHaveCount(4);
   await expect(page.locator('.plan-editor__header h2')).toHaveText('Plano');
   await expect(page.locator('.plan-review__header-actions .plan-file')).toBeVisible();
+  if (mobile) {
+    const continuationLayout = await page
+      .locator('[data-test="plan-chat-continuation"]')
+      .evaluateAll((elements) =>
+        elements.map((element) => {
+          const bounds = element.getBoundingClientRect();
+          return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height };
+        })
+      );
+    expect(
+      Math.abs(continuationLayout[0].y - continuationLayout[1].y),
+      'the first two chat continuations share a row on mobile'
+    ).toBeLessThanOrEqual(1);
+    expect(
+      Math.abs(continuationLayout[2].y - continuationLayout[3].y),
+      'the second two chat continuations share a row on mobile'
+    ).toBeLessThanOrEqual(1);
+    expect(continuationLayout[1].x, 'continuation columns stay side by side').toBeGreaterThan(
+      continuationLayout[0].x
+    );
+  } else {
+    const headerCollision = await page.locator('.plan-editor__header').evaluate((header) => {
+      const paragraph = header.querySelector('p');
+      const actions = header.querySelector('.plan-review__header-actions');
+      if (!paragraph || !actions) throw new Error('Missing header copy or actions');
+      const range = document.createRange();
+      range.selectNodeContents(paragraph);
+      const textLines = Array.from(range.getClientRects());
+      const buttons = actions.getBoundingClientRect();
+      return textLines.some(
+        (line) =>
+          line.left < buttons.right &&
+          line.right > buttons.left &&
+          line.top < buttons.bottom &&
+          line.bottom > buttons.top
+      );
+    });
+    expect(
+      headerCollision,
+      'the desktop subtitle never runs beneath the photo/canvas actions'
+    ).toBe(false);
+  }
   await expect(
     page.locator('.plan-chat__assistant-avatar svg'),
     'the assistant reply retains its home mark'
@@ -2226,6 +2416,17 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
       expect(textBounds.scrollWidth).toBeLessThanOrEqual(textBounds.clientWidth + 1);
     }
   }
+  await expect(
+    page.locator('.task-card__fields > .task-card__title'),
+    'a single scheduled task per day should not repeat its title in the compact weekly row'
+  ).toHaveCount(0);
+  const firstWeeklyTask = page.locator('.task-card').first();
+  await firstWeeklyTask.locator('.task-card__details summary').click();
+  await expect(
+    firstWeeklyTask.locator('.task-card__more-fields .task-card__title input'),
+    'the title remains editable in the accessible task details'
+  ).toHaveValue('Limpieza de cocina');
+  await firstWeeklyTask.locator('.task-card__details summary').click();
   await screenshot(page, '05-weekly-tasks', viewport);
   if (mobile) {
     for (const size of [
@@ -2290,12 +2491,13 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
 
   // A field-level edit remains a local draft until saving and persists on reload.
   const editedTitle = 'Limpieza cocina editada';
-  await page
-    .locator('.task-card')
-    .first()
-    .locator('.task-card__fields input')
-    .first()
-    .fill(editedTitle);
+  const editableTaskRow = page.locator('.task-card').first();
+  await editableTaskRow.locator('.task-card__details summary').click();
+  const editableTaskTitle = editableTaskRow.locator(
+    '.task-card__more-fields .task-card__title input'
+  );
+  await editableTaskTitle.fill(editedTitle);
+  await expect(editableTaskTitle).toHaveValue(editedTitle);
   await expect(page.locator('[data-test="tasks-save"]')).toBeEnabled();
   for (const ratio of await primaryButtonContrast(page, '[data-test="tasks-save"]')) {
     expect(ratio, 'weekly task actions meet WCAG AA in both themes').toBeGreaterThanOrEqual(4.5);
@@ -2310,7 +2512,11 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   await page.reload();
   await page.getByRole('tab', { name: 'Tareas' }).click();
   await expect(page.locator('.task-card')).toHaveCount(7);
-  await expect(page.locator('.task-card').filter({ hasText: editedTitle })).toHaveCount(1);
+  const persistedTaskRow = page.locator('.task-card').first();
+  await persistedTaskRow.locator('.task-card__details summary').click();
+  await expect(
+    persistedTaskRow.locator('.task-card__more-fields .task-card__title input')
+  ).toHaveValue(editedTitle);
 
   // Keyboard tab navigation, focus visibility, orientation, breakpoints, and minimum width.
   const planTab = page.getByRole('tab', { name: 'Plano' });

@@ -573,4 +573,40 @@ describe('HouseholdTasksComponent', () => {
     expect(component.memberName(task.assignedMemberId)).toBe('household.tasks_member_unavailable');
     expect(component.areaName(task.spaceId)).toBe('household.tasks_area_removed');
   });
+
+  it('shows task titles only when multiple tasks on a day need distinguishing', async () => {
+    await mount();
+    const monday = component.weekStart();
+    const tuesdayDate = new Date(`${monday}T00:00:00.000Z`);
+    tuesdayDate.setUTCDate(tuesdayDate.getUTCDate() + 1);
+    const tuesday = tuesdayDate.toISOString().slice(0, 10);
+    const task = (id: string, title: string, scheduledDate: string): HouseholdTaskOccurrence => ({
+      id,
+      title,
+      details: null,
+      spaceId: 'kitchen',
+      scheduledDate,
+      assignedMemberId: 'ada',
+      completed: false
+    });
+    component.draftTasks.set([
+      task('monday-clean', 'Limpiar cocina', monday),
+      task('monday-floor', 'Fregar suelo', monday),
+      task('tuesday-clean', 'Limpiar cocina', tuesday)
+    ]);
+    fixture.detectChanges();
+
+    const mondayRows = fixture.nativeElement.querySelector(
+      `.tasks-day[data-date="${monday}"]`
+    ) as HTMLElement;
+    const tuesdayRow = fixture.nativeElement.querySelector(
+      `.tasks-day[data-date="${tuesday}"] .task-card`
+    ) as HTMLElement;
+    expect(mondayRows.querySelectorAll('.task-card__fields > .task-card__title').length).toBe(2);
+    expect(tuesdayRow.classList.contains('task-card--compact')).toBeTrue();
+    expect(tuesdayRow.querySelector('.task-card__fields > .task-card__title')).toBeNull();
+    expect(
+      tuesdayRow.querySelector('.task-card__more-fields .task-card__title input')
+    ).not.toBeNull();
+  });
 });

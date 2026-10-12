@@ -306,7 +306,7 @@ Evidencia del editor y tareas:
 - `pnpm --filter @hogaria/web exec ng test --no-watch --include=src/app/features/household/household-area-catalog.spec.ts` — 4/4.
 - `pnpm --filter @hogaria/server exec vitest run src/schemas/household-plan.schema.spec.ts src/utils/household-plan-ai.spec.ts` — 19/19.
 - `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/household-plan-tasks.spec.ts` — 2/2 pasan en 50,7 s (12-10-2026). Usa DB/usuarios temporales sintéticos; la IA se stubbea en el navegador y no se llama al proveedor. El runner limpia solo los artefactos temporales que crea.
-- `$env:DATABASE_PATH=':memory:'; pnpm run test:coverage` — cliente 1396/1396 y servidor 1330/1331 (1 omitida); cobertura cliente 93,89/84,75/93,62/95,59 % y servidor 91,76/83,51/95,56/94,27 % (statements/branches/functions/lines). Sin errores de umbral.
+- `$env:DATABASE_PATH=':memory:'; pnpm run test:coverage` — cliente 1396/1396 y servidor 1330/1331 (1 omitida); cobertura cliente 93,89/84,75/93,62/95,58 % y servidor 91,76/83,51/95,56/94,27 % (statements/branches/functions/lines). Sin errores de umbral.
 - `pnpm run check:ui`, `pnpm run typecheck:e2e` y `pnpm run build` — pasan. Build conserva avisos preexistentes de Angular/presupuesto y no informa exceso CSS del editor del plano.
 - El flujo verifica lienzo/zonas, pared exterior/puerta principal, pisos y confirmación al borrarlos, carga de imagen, propuesta sin escritura prematura, cambio de pestaña con borrador conservado, tarea por zona, preview equitativo/no consecutivo, persistencia y edición tras recargar.
 - Viewports probados: 320, 359, 360, 639, 640, 767, 768, 1023 y 1024 px, además de 568×320; la pestaña conserva geometría/tipografía/espaciado equivalente con tolerancia ≤1 px y no hay overflow horizontal. Mobile Chrome usa `tap` en el plano y teclado; los componentes aplican `env(safe-area-inset-bottom, 0px)`. La emulación no sustituye comprobación en hardware físico con recorte/notch.
@@ -337,14 +337,21 @@ mockups.
       piso/zoom/historial arriba del plano y dock táctil debajo en móvil. Reducir los rellenos
       asignados del plano durante el dibujo (el prototipo reserva el naranja para la selección), y
       plegar la lista de zonas para no añadir un panel visible ausente del mockup sin quitar acceso
-      por teclado/lector de pantalla.
+      por teclado/lector de pantalla. En dibujo libre, alinear las tres acciones de vértice en una
+      fila de igual altura y jerarquía, con icono SVG legible además de texto; dar a «Vista previa»
+      un icono y alinear su contenido con los demás botones de acción. Verificar la geometría de esos
+      controles en escritorio, móvil y 320 px; no basta con que estén presentes.
 - [ ] **Iconos del flujo:** calcar las formas de herramientas, estancias, puertas/ventanas, chat y
       asignación de los SVG del prototipo; ajustar trazo/color/tamaño además del contenedor. La E2E
       comprueba el set de iconos en PC y móvil y las capturas `02-plan-editor` se cotejan de nuevo.
 - [ ] **Foto/propuesta:** cotejar tamaño y proporción de la foto original y el plano generado en
-      ambos breakpoints, y la jerarquía cambiar/confirmar/continuar. El fixture de E2E debe parecer
-      un boceto real y generar una propuesta con el mismo número de zonas que la referencia; no usar
-      etiquetas de QA en imágenes.
+      ambos breakpoints, y la jerarquía cambiar/confirmar/continuar. Mantener una salida accesible
+      para descartar el borrador como control de icono compacto en el encabezado de propuesta, no
+      como enlace suelto bajo la acción principal. El fixture de E2E debe parecer un boceto real y
+      generar una propuesta con el mismo número de zonas que la referencia; no usar etiquetas de QA
+      en imágenes. A 320–359 px verificar que el descarte no tapa título/estado y que la decisión
+      y la continuación mantienen un margen ≥8 px frente a las acciones fijas; el plano sigue
+      legible sin ocupar más altura de la disponible en pantallas estrechas.
 - [ ] **Asignación:** mantener mapa + selector lateral en escritorio. En móvil igualar la
       prominencia vertical del mapa y presentar la edición en una hoja inferior con nombre/estado,
       cuatro opciones y CTA visible, no una tarjeta compacta con estado guardado/Más acciones que
@@ -352,11 +359,14 @@ mockups.
 - [ ] **Tareas:** cotejar el peso visual del plano y la jerarquía del panel semanal. Los controles
       funcionales avanzados deben quedar accesibles sin sobrecargar la vista principal; las siete
       asignaciones, el resumen de equidad y la acción de aplicar deben seguir visibles/alcanzables
-      en móvil.
+      en móvil. Cuando hay una sola tarea diaria, mostrar en la fila día + persona asignada sin
+      repetir el título; conservar el cambio de nombre, fecha/zona y completado dentro de la edición
+      accesible. Si un día tiene varias tareas, mantener sus títulos visibles para distinguirlas.
 - [ ] **Ajuste por chat:** cotejar el tamaño de los planos actual/propuesta, conversación y decisión;
       en móvil mostrar/alcanzar tras la respuesta las cuatro continuaciones del prototipo (seguir
-      chat, nuevo chat, subir foto, volver al lienzo) junto a aplicar/deshacer, sin comprometer el
-      estado de borrador ni guardar antes de la confirmación.
+      chat, nuevo chat, subir foto, volver al lienzo) en una cuadrícula 2×2 junto a aplicar/deshacer,
+      sin comprometer el estado de borrador ni guardar antes de la confirmación. En escritorio el
+      subtítulo del encabezado debe envolverse y no colisionar con subir foto/volver al lienzo.
 - [x] E2E verifica interacción, permisos, persistencia, borradores, IA simulada, teclado/foco,
       labels, contraste AA en temas claro/oscuro, safe-area y ausencia de overflow; no hay fixtures
       personales ni llamadas reales a IA.
@@ -373,14 +383,19 @@ mockups.
 
 Evidencia visual y regresión:
 
-- `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/household-plan-tasks.spec.ts` — **2/2 pasan en 46,0 s** (ejecución final, 12-10-2026). Servidor/SQLite/artefactos aislados; el proveedor de IA se simula y la DB/artefactos temporales propios se limpian.
+- `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/household-plan-tasks.spec.ts` — **2/2 pasan en 49,6 s** (12-10-2026, última ejecución). Servidor/SQLite/artefactos aislados; el proveedor de IA se simula y la DB/artefactos temporales propios se limpian.
 - La comparación con los mockups aprobados de los seis estados PC/móvil se regeneró e inspeccionó en `.e2e-screenshots/household-plan-comparison/`. Los iconos SVG de herramientas/estancias se ajustaron de 24 a 32 px en las vistas verificadas; E2E valida 32 px y que los rótulos de pestañas no se monten a 320 px.
 - `pnpm --filter @hogaria/web exec ng test --no-watch --include=src/app/features/household/household-area-catalog.spec.ts --include=src/app/features/household/household-area-glyph.component.spec.ts --include=src/app/features/household/household-tasks.component.spec.ts --include=src/app/features/household/household-plan-preview-map.component.spec.ts` — **22/22**.
 - `pnpm run check:ui` — sin incidencias (228 ficheros/21 reglas); `pnpm run typecheck:e2e` — aprobado.
+- `pnpm --filter @hogaria/web exec ng test --no-watch --include=src/app/features/household/household-tasks.component.spec.ts` — **15/15**; las filas con tarea única no repiten el título y conservan su edición accesible.
 - El primer pase halló dos fallos visuales que no detectaba el simple `scrollWidth`: a 320 px las pestañas del hogar se montaban; y en pantalla baja la decisión de foto quedaba debajo de la barra fija (`bottom=729,89`, `sticky top=693`). Se compactaron las pestañas hasta 389 px, con scroll/foco por teclado, y a 320×568 las acciones de foto dejan de ser fijas y permanecen alcanzables al desplazar. E2E verifica 320, 359, 360, 389 y 390 px y ambos casos pasan.
 - El primer CI de esta revisión halló que las media queries nuevas no estaban cubiertas por la matriz global B−1/B/B+1. Se añadieron 388–390, 1198–1201 y 1278–1281 px a `tests/e2e/layout-gutters.spec.ts`; el test enfocado pasa 1/1 y el spec completo aislado pasa **7/7 en 1,3 min**.
 - Las capturas actuales usan 1280×970 y 390×950 para acercarse al encuadre del mockup; los seis estados `01-plan-start` a `06-chat-adjustment` se regeneran en `.e2e-screenshots/household-plan-tasks/{chromium,mobile-chrome}/`, con capturas 320×568 y 568×320 adicionales. Las capturas usan plan/foto sintéticos, sin etiquetas QA ni datos personales. La emulación no sustituye un teléfono físico con notch.
 - La inspección de las 12 comparaciones confirma que la jerarquía del inicio, el dock del editor, la hoja de asignación móvil y las cuatro continuaciones del chat ya están presentes. Siguen pendientes la forma/proporción del plano sintético frente a la referencia, la proporción del plano propuesto en móvil y diferencias de densidad/espaciado del panel de tareas y el chat. La shell real de HogarIA se conserva; no se declara fidelidad exacta hasta corregir estas diferencias y reinspeccionar las comparaciones.
+- Revisión crítica del editor a partir de la captura real del 12-10-2026: faltaban iconos y geometría común en las tres acciones del dibujo libre, y «Vista previa» carecía de icono. Se añadieron primero regresiones E2E y luego SVG accesibles, tres columnas iguales y una reducción del canvas únicamente durante dibujo libre; inspección de capturas 1280×970, 390×950 y medición adicional a 320 px. La UI de dibujo libre ahora mantiene línea base, ancho/alto e iconos de 18 px iguales (tolerancia ≤1 px); sigue pendiente cotejar exhaustivamente todo el flujo con los mockups.
+- Segunda revisión de las comparaciones: el subtítulo del ajuste por chat colisionaba con las acciones de escritorio y las cuatro continuaciones móviles no estaban en una cuadrícula 2×2. Se envolvió el subtítulo y se ajustó la cuadrícula; E2E ahora mide ausencia de colisión y comprueba las cuatro opciones visibles sobre la navegación móvil. Las diferencias restantes de composición/densidad del chat continúan pendientes.
+- Revisión de evidencia del mockup móvil 06: la referencia aprobada usa pestañas para alternar y enseña un plano grande cada vez; no se requiere una comparación simultánea de miniaturas. La implementación mantiene ese patrón y las aserciones E2E no deben invertirse a dos planos simultáneos.
+- Última inspección de la UI: el descarte de propuesta ahora es un botón de cierre con nombre accesible dentro del encabezado (44×44 px), sin enlace suelto debajo de «Continuar»; en 320–359 px el mapa conserva legibilidad con 172 px y libera el espacio necesario. Playwright verifica no-colisión título/estado, ≥8 px entre decisión y continuación fija y ≥8 px sobre navegación. La continuación queda separada de la barra móvil por 9 px en la captura 390×950.
 
 ### Puertas generales
 
