@@ -469,6 +469,7 @@ Evidencia visual y regresión:
 - Revisión crítica tras la nueva captura del editor: la imagen aportada muestra el estado de zona libre sin selección visible ni iconos en las acciones de vértice. En el build actual esos defectos ya están cubiertos por el dock persistente `Zona libre`, su estado `aria-pressed`, y SVG/geométrica común en las acciones; la captura aislada actual `chromium/02-plan-editor-wide-desktop.png` confirma su representación a 1920 px. No se da por resuelta la impresión global: siguen abiertos el calco exacto de SVG y las diferencias visibles de densidad/espaciado de las pantallas de propuesta, tareas y chat recogidas en los checks pendientes.
 - Revalidación visual (12-10-2026): se ejecutó `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/household-plan-tasks.spec.ts` — **2/2 en 51,7 s** con DB/artefactos temporales y proveedor simulado; la cobertura incluye móvil 320×568, 390×950 y orientación 568×320. Se regeneraron las 12 comparaciones con `scripts/create-household-plan-comparison.ps1` y se inspeccionaron de nuevo las vistas de Inicio, editor, propuesta fotográfica, asignación y ajuste por chat. El mapa móvil de asignación alcanza 380 px y mantiene ≥8 px hasta la hoja de asignación. Persisten diferencias no cosméticas: densidad y saltos de línea de los controles de chat en móvil, jerarquía del panel semanal y correspondencia exacta de las formas SVG.
 - Después de esa revisión: `pnpm run check:ui` (228 archivos/21 reglas) y `pnpm run typecheck:e2e` pasan; `pnpm run build` pasa con warnings preexistentes de Angular/presupuesto de bundles y estilos. No se volvió a ejecutar coverage porque las últimas modificaciones fueron solo de estilos y E2E; la última cobertura registrada sigue por encima de 70 % por métrica y archivo del alcance.
+- Entrega intermedia publicada sin cerrar la revisión: commit `89f26da` (`fix(household): polish floorplan editor flow`) en `feat/household-floorplan`. Lefthook pre-commit y pre-push pasaron sin bypass; el push ejecutó formato, `check:ui`, build, typecheck E2E y suite completa (config **11/11**, cliente **1406/1406**, servidor **1330 aprobadas + 1 omitida**). PR #47 permanece Draft; la fidelidad visual sigue abierta.
 
 ### Puertas generales
 
@@ -486,11 +487,12 @@ Evidencia visual y regresión:
 
 Cobertura verificada localmente (repetición final después de la revisión visual):
 
-- `$env:DATABASE_PATH=':memory:'; pnpm run test:coverage` — servidor: 66 archivos, 1328 pruebas
+- `$env:DATABASE_PATH=':memory:'; pnpm run test:coverage` — servidor: 66 archivos, 1330 pruebas
   aprobadas y 1 omitida; 91,76 % statements, 83,48 % ramas, 95,56 % funciones y 94,27 % líneas.
-  Cliente: 1386 pruebas aprobadas; 93,99 % statements, 85,07 % ramas, 93,82 % funciones y
-  95,63 % líneas. Los archivos del alcance superan 70 % en cada métrica; editor 85,38/70,41/85,71/89,8 %
-  y mapa de propuesta 97,14/88,88/100/98,36 % (statements/ramas/funciones/líneas).
+  Cliente: 1406 pruebas aprobadas; 93,95 % statements, 84,83 % ramas, 93,82 % funciones y
+  95,65 % líneas. Los archivos del alcance superan 70 % en cada métrica; editor
+  85,87/71,01/85,36/89,92 %, utilidades 94,22/79,38/97,95/98,89 % y tareas
+  93,09/83,8/93,85/95,75 % (statements/ramas/funciones/líneas).
 - `pnpm run check:ui`, `pnpm run typecheck:e2e` y `pnpm run build` — aprobados. `check:ui` revisó
   228 archivos y 21 reglas; el build muestra
   warnings de Angular ya presentes fuera de este cambio.
@@ -504,7 +506,7 @@ Cobertura verificada localmente (repetición final después de la revisión visu
   fuera de alcance; `check:ui` sí pasa y ese lint no forma parte del gate de CI ni de los hooks.
 - Los commits de esta entrega se publicaron en `feat/household-floorplan` (persistencia, UI, E2E y
   matriz responsive). Los hooks pre-commit y pre-push pasaron sin bypass: Prettier, check:ui, build,
-  typecheck E2E y `pnpm run test` (11 config, 1386 client, 1328 server + 1 skip).
+  typecheck E2E y `pnpm run test` (11 config, 1406 client, 1330 server + 1 skip).
 - `pnpm run lint:server` no pasa por el script existente (`eslint src --ext .ts` rechaza `--ext`
   bajo ESLint 9); el CI y los hooks actuales no invocan ese lint. No se alteró esa configuración,
   fuera del alcance de esta entrega.
