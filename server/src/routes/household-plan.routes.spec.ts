@@ -78,6 +78,7 @@ describe('household plan persistence routes', () => {
 
   beforeEach(() => {
     db.prepare('DELETE FROM household_task_weeks').run();
+    db.prepare('DELETE FROM household_plan_assignments').run();
     db.prepare('DELETE FROM household_plan_revisions').run();
     db.prepare('DELETE FROM household_plans').run();
     db.prepare('DELETE FROM ai_jobs').run();
@@ -158,6 +159,19 @@ describe('household plan persistence routes', () => {
     });
   }
 
+  function callAssignments(user: User, method: string, body?: unknown) {
+    const householdId = currentHouseholdId(user);
+    return app.request('/api/household/plan/assignments', {
+      method,
+      headers: {
+        authorization: `Bearer ${user.token}`,
+        'content-type': 'application/json',
+        ...(householdId ? { 'x-household-id': householdId } : {})
+      },
+      body: body === undefined ? undefined : JSON.stringify(body)
+    });
+  }
+
   function addAiConfig(id: string, userId: string, householdId: string) {
     db.prepare(
       `INSERT INTO ai_configs
@@ -196,6 +210,130 @@ describe('household plan persistence routes', () => {
     });
     expect(db.prepare('SELECT COUNT(*) AS count FROM household_plan_revisions').get()).toEqual({
       count: 1
+    });
+  });
+
+  it('persists household-scoped zone responsibility with membership and plan version checks', async () => {
+    makeHousehold('home-a');
+    makeHousehold('home-b');
+    const owner = makeUser('owner-a', 'home-a', true);
+    const second = makeUser('second-a', 'home-a', true);
+    const reader = makeUser('reader-a', 'home-a', false);
+    const otherHomeMember = makeUser('member-b', 'home-b', true);
+    const savedPlan = await call(owner, 'PUT', { baseVersion: 0, plan: validPlan() });
+    expect(savedPlan.status).toBe(200);
+
+    const initial = await callAssignments(owner, 'GET');
+    expect(initial.status).toBe(200);
+    expect(await initial.json()).toMatchObject({
+      success: true,
+      data: { planVersion: 1, version: 0, assignments: {} }
+    });
+
+    const denied = await callAssignments(reader, 'PUT', {
+      baseVersion: 0,
+      basePlanVersion: 1,
+      spaceId: 'living-room',
+      memberIds: [reader.id]
+    });
+    expect(denied.status).toBe(403);
+
+    const assigned = await callAssignments(owner, 'PUT', {
+      baseVersion: 0,
+      basePlanVersion: 1,
+      spaceId: 'living-room',
+      memberIds: [owner.id]
+    });
+    expect(assigned.status).toBe(200);
+    expect(await assigned.json()).toMatchObject({
+      success: true,
+      data: { planVersion: 1, version: 1, assignments: { 'living-room': [owner.id] } }
+    });
+
+    const shared = await callAssignments(owner, 'PUT', {
+      baseVersion: 1,
+      basePlanVersion: 1,
+      spaceId: 'living-room',
+      memberIds: [owner.id, second.id]
+    });
+    expect(shared.status).toBe(200);
+    expect(await shared.json()).toMatchObject({
+      success: true,
+      data: { version: 2, assignments: { 'living-room': [owner.id, second.id] } }
+    });
+
+    const staleAssignment = await callAssignments(owner, 'PUT', {
+      baseVersion: 1,
+      basePlanVersion: 1,
+      spaceId: 'living-room',
+      memberIds: [owner.id]
+    });
+    expect(staleAssignment.status).toBe(409);
+    expect(await staleAssignment.json()).toMatchObject({
+      success: false,
+      code: 'PLAN_ASSIGNMENTS_VERSION_CONFLICT'
+    });
+
+    const stalePlan = await callAssignments(owner, 'PUT', {
+      baseVersion: 2,
+      basePlanVersion: 0,
+      spaceId: 'living-room',
+      memberIds: [owner.id]
+    });
+    expect(stalePlan.status).toBe(409);
+    expect(await stalePlan.json()).toMatchObject({
+      success: false,
+      code: 'PLAN_VERSION_CONFLICT'
+    });
+
+    const foreignMember = await callAssignments(owner, 'PUT', {
+      baseVersion: 2,
+      basePlanVersion: 1,
+      spaceId: 'living-room',
+      memberIds: [otherHomeMember.id]
+    });
+    expect(foreignMember.status).toBe(422);
+    expect(await foreignMember.json()).toMatchObject({
+      success: false,
+      code: 'PLAN_ASSIGNMENT_MEMBER_NOT_ACTIVE'
+    });
+
+    const missingSpace = await callAssignments(owner, 'PUT', {
+      baseVersion: 2,
+      basePlanVersion: 1,
+      spaceId: 'missing-space',
+      memberIds: [owner.id]
+    });
+    expect(missingSpace.status).toBe(404);
+    expect(await missingSpace.json()).toMatchObject({
+      success: false,
+      code: 'PLAN_ASSIGNMENT_SPACE_NOT_FOUND'
+    });
+
+    const unassigned = await callAssignments(owner, 'PUT', {
+      baseVersion: 2,
+      basePlanVersion: 1,
+      spaceId: 'living-room',
+      memberIds: []
+    });
+    expect(unassigned.status).toBe(200);
+    expect(await unassigned.json()).toMatchObject({
+      success: true,
+      data: { version: 3, assignments: {} }
+    });
+
+    await callAssignments(owner, 'PUT', {
+      baseVersion: 3,
+      basePlanVersion: 1,
+      spaceId: 'living-room',
+      memberIds: [owner.id]
+    });
+    const spaceRemoved = await call(owner, 'PUT', { baseVersion: 1, plan: planWithoutSpaces() });
+    expect(spaceRemoved.status).toBe(200);
+    const afterRemoval = await callAssignments(owner, 'GET');
+    expect(await afterRemoval.json()).toMatchObject({
+      success: true,
+      data: { planVersion: 2, version: 5, assignments: {} }
     });
   });
 

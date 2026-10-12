@@ -19,7 +19,7 @@ import { defineConfig } from 'vitest/config';
  *     con spec propia) y src/index.ts
  *                             → el resto se prueba de momento con la suite e2e
  *   - src/middleware/** (salvo timestamp, que entro el dia que se escribio),
- *     src/schemas/** (salvo receipts.schema.ts y recipe.schema.ts), src/utils/log-store.ts,
+ *     src/schemas/** (salvo receipts.schema.ts, recipe.schema.ts y household-plan-assignment.schema.ts), src/utils/log-store.ts,
  *     src/utils/logger.ts      → unidades puras; entran con P1/P2, que es cuando se
  *     escriben sus tests de contrato
  */
@@ -40,6 +40,7 @@ const COVERED = [
   'src/schemas/ai.schema.ts',
   'src/schemas/generated-recipe.schema.ts',
   'src/schemas/household-plan.schema.ts',
+  'src/schemas/household-plan-assignment.schema.ts',
   'src/schemas/household-task.schema.ts',
   'src/utils/product-key.ts',
   'src/utils/pantry-categories.ts',
@@ -68,6 +69,7 @@ const COVERED = [
   'src/routes/pantry.routes.ts',
   'src/utils/week-calendar.ts',
   'src/utils/household-plan.store.ts',
+  'src/utils/household-plan-assignment.store.ts',
   'src/utils/household-task.store.ts',
   'src/utils/household-plan-ai.ts',
   'src/utils/weekly-plan.ts',

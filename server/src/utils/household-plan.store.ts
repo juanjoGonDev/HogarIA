@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import { householdPlanSchema, type HouseholdPlan } from '../schemas/household-plan.schema.js';
+import { removeAssignmentsForMissingSpaces } from './household-plan-assignment.store.js';
 import {
   detachHouseholdTasksFromRemovedSpaces,
   findOrphanedHouseholdTaskIds
@@ -95,6 +96,8 @@ export function saveHouseholdPlan(
         return { status: 'conflict', snapshot: readHouseholdPlan(db, householdId) };
       }
     }
+
+    removeAssignmentsForMissingSpaces(db, householdId, parsedPlan.data, userId);
 
     db.prepare(
       `INSERT INTO household_plan_revisions (household_id, version, plan_json, created_by)

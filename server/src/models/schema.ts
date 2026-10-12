@@ -74,6 +74,17 @@ export const householdPlanRevisions = sqliteTable(
   (table) => [primaryKey({ columns: [table.householdId, table.version] })]
 );
 
+export const householdPlanAssignments = sqliteTable('household_plan_assignments', {
+  householdId: text('household_id')
+    .primaryKey()
+    .references(() => households.id, { onDelete: 'cascade' }),
+  version: integer('version').notNull(),
+  assignmentsJson: text('assignments_json').notNull(),
+  updatedBy: text('updated_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: text('created_at').default('CURRENT_TIMESTAMP'),
+  updatedAt: text('updated_at').default('CURRENT_TIMESTAMP')
+});
+
 export const householdTaskWeeks = sqliteTable(
   'household_task_weeks',
   {

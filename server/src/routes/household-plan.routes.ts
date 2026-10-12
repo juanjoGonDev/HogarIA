@@ -6,9 +6,15 @@ import {
   householdPlanProposalRequestSchema,
   householdPlanWriteSchema
 } from '../schemas/household-plan.schema.js';
+import { householdPlanAssignmentWriteSchema } from '../schemas/household-plan-assignment.schema.js';
 import type { AppEnv } from '../types/hono-env.js';
 import { activeHouseholdId, needsActiveHouseholdSelection } from '../utils/household-context.js';
 import { readHouseholdPlan, saveHouseholdPlan } from '../utils/household-plan.store.js';
+import {
+  HouseholdPlanAssignmentError,
+  readHouseholdPlanAssignments,
+  saveHouseholdPlanAssignment
+} from '../utils/household-plan-assignment.store.js';
 import { findOrphanedHouseholdTaskIds } from '../utils/household-task.store.js';
 import { AiCallError, callAI } from '../utils/ai-client.js';
 import { resolveAiOutputLanguage } from '../utils/ai-output-language.js';
@@ -347,6 +353,78 @@ householdPlanRoutes.put('/plan', async (c) => {
   }
 });
 
+householdPlanRoutes.get('/plan/assignments', (c) => {
+  const userId = c.get('userId');
+  const db = getDatabase();
+  const householdId = activeHouseholdId(db, userId);
+  if (!householdId) {
+    if (needsActiveHouseholdSelection(db, userId)) return householdSelectionRequired(c);
+    return c.json({ success: false, code: 'HOUSEHOLD_REQUIRED' }, 404);
+  }
+  if (c.req.header('x-household-id') !== householdId) return householdContextChanged(c);
+  try {
+    c.header('Cache-Control', 'no-store');
+    return c.json({ success: true, data: readHouseholdPlanAssignments(db, householdId) });
+  } catch {
+    return c.json({ success: false, code: 'HOUSEHOLD_PLAN_ASSIGNMENTS_UNAVAILABLE' }, 500);
+  }
+});
+
+householdPlanRoutes.put('/plan/assignments', async (c) => {
+  const userId = c.get('userId');
+  const db = getDatabase();
+  const householdId = activeHouseholdId(db, userId);
+  if (!householdId) {
+    if (needsActiveHouseholdSelection(db, userId)) return householdSelectionRequired(c);
+    return c.json({ success: false, code: 'HOUSEHOLD_REQUIRED' }, 404);
+  }
+  if (c.req.header('x-household-id') !== householdId) return householdContextChanged(c);
+  if (!canEditHouseholdPlan(db, householdId, userId)) {
+    return c.json({ success: false, code: 'HOUSEHOLD_SETTINGS_REQUIRED' }, 403);
+  }
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ success: false, code: 'INVALID_PLAN_ASSIGNMENT' }, 400);
+  }
+  const input = householdPlanAssignmentWriteSchema.safeParse(body);
+  if (!input.success) {
+    return c.json(
+      {
+        success: false,
+        code: 'INVALID_PLAN_ASSIGNMENT',
+        errors: input.error.issues.map((issue) => ({ path: issue.path, message: issue.message }))
+      },
+      400
+    );
+  }
+
+  try {
+    const result = saveHouseholdPlanAssignment(db, householdId, userId, input.data);
+    if (result.status === 'plan-conflict') {
+      c.header('Cache-Control', 'no-store');
+      return c.json({ success: false, code: 'PLAN_VERSION_CONFLICT', data: result }, 409);
+    }
+    if (result.status === 'conflict') {
+      c.header('Cache-Control', 'no-store');
+      return c.json(
+        { success: false, code: 'PLAN_ASSIGNMENTS_VERSION_CONFLICT', data: result.snapshot },
+        409
+      );
+    }
+    c.header('Cache-Control', 'no-store');
+    return c.json({ success: true, data: result.snapshot });
+  } catch (error) {
+    if (error instanceof HouseholdPlanAssignmentError) {
+      const status = error.code === 'PLAN_ASSIGNMENT_SPACE_NOT_FOUND' ? 404 : 422;
+      return c.json({ success: false, code: error.code }, status);
+    }
+    return c.json({ success: false, code: 'HOUSEHOLD_PLAN_ASSIGNMENT_SAVE_FAILED' }, 500);
+  }
+});
+
 function canEditHouseholdPlan(
   db: ReturnType<typeof getDatabase>,
   householdId: string,
@@ -380,6 +458,17 @@ function householdContextChanged(c: Context<AppEnv>) {
       success: false,
       code: 'HOUSEHOLD_CONTEXT_CHANGED',
       message: 'El hogar activo cambió. Vuelve a cargarlo antes de continuar.'
+    },
+    409
+  );
+}
+
+function householdSelectionRequired(c: Context<AppEnv>) {
+  return c.json(
+    {
+      success: false,
+      code: 'HOUSEHOLD_SELECTION_REQUIRED',
+      message: 'Selecciona el hogar antes de consultar sus asignaciones de zonas.'
     },
     409
   );

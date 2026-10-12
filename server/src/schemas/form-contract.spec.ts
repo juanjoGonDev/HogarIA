@@ -60,6 +60,7 @@ import {
   householdTaskWeekQuerySchema,
   householdTaskWeekWriteSchema
 } from './household-task.schema.js';
+import { householdPlanAssignmentWriteSchema } from './household-plan-assignment.schema.js';
 import { generatedRecipeCandidateSchema } from './generated-recipe.schema.js';
 import {
   applyLinesSchema,
@@ -261,6 +262,17 @@ const ROWS: Row[] = [
     schema: householdPlanProposalRequestSchema,
     required: { baseVersion: 0 },
     note: 'La solicitud de texto es opcional si la persona sube un boceto o una foto.'
+  },
+  {
+    name: 'householdPlanAssignmentWriteSchema',
+    schema: householdPlanAssignmentWriteSchema,
+    required: {
+      baseVersion: 0,
+      basePlanVersion: 0,
+      spaceId: 'kitchen',
+      memberIds: ['member-a']
+    },
+    note: 'La asignación cambia una sola zona mediante control de versión; el servidor comprueba membresía y pertenencia al plano.'
   },
   query('householdTaskWeekQuerySchema', householdTaskWeekQuerySchema, {
     weekStart: '2026-10-05'

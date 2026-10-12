@@ -166,6 +166,17 @@ async function runMigrations(db: Database.Database): Promise<void> {
       FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
     );
 
+    CREATE TABLE IF NOT EXISTS household_plan_assignments (
+      household_id TEXT PRIMARY KEY NOT NULL,
+      version INTEGER NOT NULL CHECK (version >= 1),
+      assignments_json TEXT NOT NULL,
+      updated_by TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (household_id) REFERENCES households(id) ON DELETE CASCADE,
+      FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+    );
+
     CREATE TABLE IF NOT EXISTS household_task_weeks (
       household_id TEXT NOT NULL,
       week_start TEXT NOT NULL,
