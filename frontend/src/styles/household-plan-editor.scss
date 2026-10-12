@@ -314,7 +314,7 @@
 
 .plan-setup__dwelling {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(150px, 0.3fr);
+  grid-template-columns: minmax(0, 1fr) minmax(190px, 0.3fr);
   align-items: center;
   gap: var(--space-5);
   padding: var(--space-5);
@@ -424,6 +424,16 @@
 
 .plan-setup__floor-count app-picker {
   width: min(100%, 100px);
+}
+
+@media (min-width: 768px) {
+  .plan-setup__floor-count {
+    align-self: start;
+  }
+
+  .plan-setup__floor-count app-picker {
+    width: min(100%, 168px);
+  }
 }
 
 .plan-editor textarea {

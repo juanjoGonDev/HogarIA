@@ -761,6 +761,29 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
       'the enlarged method glyph keeps clear of its title'
     ).toBeLessThanOrEqual(methodTitle!.x - 4);
   } else {
+    const desktopFloorGeometry = await page.evaluate(() => {
+      const dwellingHeading = document
+        .querySelector('.plan-setup__dwelling-types h3')
+        ?.getBoundingClientRect();
+      const floorGroup = document.querySelector('.plan-setup__floor-count');
+      const floorLabel = floorGroup?.querySelector(':scope > span')?.getBoundingClientRect();
+      const floorPicker = floorGroup?.querySelector('app-picker')?.getBoundingClientRect();
+      if (!dwellingHeading || !floorLabel || !floorPicker) {
+        throw new Error('The desktop dwelling and floor-count fields must be present');
+      }
+      return {
+        dwellingHeadingTop: dwellingHeading.top,
+        floorLabelTop: floorLabel.top,
+        pickerWidth: floorPicker.width
+      };
+    });
+    expect(
+      Math.abs(desktopFloorGeometry.dwellingHeadingTop - desktopFloorGeometry.floorLabelTop),
+      'desktop floor label aligns with dwelling type heading'
+    ).toBeLessThanOrEqual(1);
+    expect(desktopFloorGeometry.pickerWidth, 'desktop floor picker matches prototype width').toBe(
+      168
+    );
     const methodIcon = await page.locator('.plan-method-card__icon').first().boundingBox();
     expect(
       methodIcon?.width,
