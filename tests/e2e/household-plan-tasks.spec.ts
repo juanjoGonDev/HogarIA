@@ -993,6 +993,21 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   const drawingTools = page.locator('.plan-canvas-toolbar__tools .plan-tool');
   await expect(drawingTools).toHaveCount(5);
   await expect(drawingTools.nth(1)).toHaveText('Pared');
+  const doorGlyph = await drawingTools.nth(3).locator('svg path').getAttribute('d');
+  expect(doorGlyph, 'the prototype door has a rounded upper-left contour').toContain(
+    'a20 20 0 0 1 20-20'
+  );
+  expect(doorGlyph, 'the prototype door omits the door-swing arc').not.toContain('a17 17');
+  const windowGlyph = await drawingTools.nth(4).locator('svg path').getAttribute('d');
+  expect(windowGlyph, 'the prototype window divides only the center band vertically').toContain(
+    'M32 27v10'
+  );
+  expect(windowGlyph, 'the prototype window has a horizontal rail at the top band').toContain(
+    'M11 27h42'
+  );
+  expect(windowGlyph, 'the prototype window has a horizontal rail at the bottom band').toContain(
+    'M11 37h42'
+  );
   await page.locator('.plan-editor__advanced-settings > summary').click();
   const drawAreaMode = page.locator('[data-test="plan-draw-area"]');
   await expect(drawAreaMode).toBeVisible();
