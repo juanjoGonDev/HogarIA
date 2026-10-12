@@ -955,18 +955,20 @@
   display: inline-flex;
   min-width: 74px;
   min-height: 88px;
+  height: 88px;
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
   flex-direction: column;
   gap: var(--space-1);
-  padding: var(--space-2);
+  padding: 6px var(--space-2);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
   background: var(--bg-secondary);
   color: var(--text-primary);
   font: inherit;
   font-size: var(--text-sm);
+  line-height: var(--leading-tight);
   white-space: nowrap;
   cursor: pointer;
 }
@@ -980,8 +982,8 @@
 .plan-tool > span svg,
 .plan-room-chip svg {
   display: block;
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   stroke: currentColor;
   stroke-width: 3.2;
   stroke-linecap: round;
@@ -994,10 +996,6 @@
   border-color: var(--primary);
   background: var(--primary-subtle);
   color: var(--primary-dark);
-}
-
-.plan-tool.is-selected > span {
-  color: var(--primary);
 }
 
 .plan-room-chip {
@@ -2961,6 +2959,7 @@
   .plan-tool {
     min-width: 52px;
     min-height: 56px;
+    height: auto;
     flex-direction: column;
     gap: var(--space-1);
     padding: 4px;
@@ -2976,6 +2975,7 @@
   .plan-room-chip {
     min-width: 62px;
     min-height: 58px;
+    height: auto;
     max-width: 70px;
     flex: 0 0 62px;
     padding: 4px;

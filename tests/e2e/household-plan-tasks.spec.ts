@@ -1214,6 +1214,42 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   if (!mobile) {
     const wideDesktop = { width: 1920, height: 1032 };
     await page.setViewportSize(wideDesktop);
+    const drawingDockMetrics = await page.evaluate(() => {
+      const tiles = Array.from(
+        document.querySelectorAll<HTMLElement>(
+          '.plan-canvas-toolbar__tools > .plan-tool, .plan-canvas-toolbar__rooms > .plan-room-chip'
+        )
+      );
+      const icons = Array.from(
+        document.querySelectorAll<SVGSVGElement>(
+          '.plan-canvas-toolbar__tools > .plan-tool > span > svg, .plan-canvas-toolbar__rooms > .plan-room-chip > svg[householdAreaGlyph]'
+        )
+      );
+      const selectedTool = document.querySelector<HTMLElement>('.plan-tool.is-selected');
+      const selectedIcon = selectedTool?.querySelector('svg');
+      const unselectedTool = document.querySelector<HTMLElement>('.plan-tool:not(.is-selected)');
+      return {
+        tileHeights: tiles.map((tile) => Math.round(tile.getBoundingClientRect().height)),
+        iconSizes: icons.map((icon) => {
+          const bounds = icon.getBoundingClientRect();
+          return { width: bounds.width, height: bounds.height };
+        }),
+        selectedIconColor: selectedIcon ? getComputedStyle(selectedIcon).color : null,
+        selectedLabelColor: selectedTool ? getComputedStyle(selectedTool).color : null,
+        unselectedLabelColor: unselectedTool ? getComputedStyle(unselectedTool).color : null
+      };
+    });
+    expect(drawingDockMetrics.tileHeights).toHaveLength(11);
+    for (const tileHeight of drawingDockMetrics.tileHeights) {
+      expect(tileHeight, 'desktop tool and room cards match the 88px prototype row').toBe(88);
+    }
+    expect(drawingDockMetrics.iconSizes).toHaveLength(11);
+    for (const icon of drawingDockMetrics.iconSizes) {
+      expect(icon.width, 'desktop toolbar SVGs match the prototype 32px size').toBe(32);
+      expect(icon.height, 'desktop toolbar SVGs keep a square 32px box').toBe(32);
+    }
+    expect(drawingDockMetrics.selectedIconColor).toBe('rgb(32, 52, 73)');
+    expect(drawingDockMetrics.selectedLabelColor).not.toBe(drawingDockMetrics.unselectedLabelColor);
     const editorAlignment = await page.evaluate(() => {
       const editor = document.querySelector<HTMLElement>('.plan-editor');
       const pageContainer = document.querySelector<HTMLElement>(

@@ -382,6 +382,9 @@ mockups.
 - [ ] **Iconos del flujo:** calcar las formas de herramientas, estancias, puertas/ventanas, chat y
       asignación de los SVG del prototipo; ajustar trazo/color/tamaño además del contenedor. La E2E
       comprueba el set de iconos en PC y móvil y las capturas `02-plan-editor` se cotejan de nuevo.
+- [x] **Dock de dibujo en escritorio:** a 1920 px, las tarjetas de herramienta/estancia conservan
+      la medida de 88 px del prototipo y sus SVG 32×32 px. La selección resalta borde y rótulo, no
+      tiñe el glifo: el icono seleccionado sigue azul marino; Playwright mide los tres aspectos.
 - [ ] **Foto/propuesta:** cotejar tamaño y proporción de la foto original y el plano generado en
       ambos breakpoints, y la jerarquía cambiar/confirmar/continuar. Mantener una salida accesible
       para descartar el borrador como control de icono compacto en el encabezado de propuesta, no
@@ -487,6 +490,7 @@ Evidencia visual y regresión:
 - Entrega intermedia publicada sin cerrar la revisión: commit `89f26da` (`fix(household): polish floorplan editor flow`) en `feat/household-floorplan`. Lefthook pre-commit y pre-push pasaron sin bypass; el push ejecutó formato, `check:ui`, build, typecheck E2E y suite completa (config **11/11**, cliente **1406/1406**, servidor **1330 aprobadas + 1 omitida**). PR #47 permanece Draft; la fidelidad visual sigue abierta.
 
 - Auditoría de alineación de agenda PC (12-10-2026): rojo reproducido porque «Lunes, 12 oct» ocupaba varias líneas en la columna estrecha de día. Se muestran los nombres breves localizados del prototipo, se reduce la columna de etiqueta de 74 a 56 px para dar aire a cada asignación y la fecha larga continúa en `aria-label`. La E2E verifica los siete nombres visibles en una sola línea y las siete fechas completas accesibles; el primer pase también detectó una aserción previa que aún esperaba el texto largo visible y se actualizó al nuevo contrato. Ejecución final `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/household-plan-tasks.spec.ts` — **2/2, 52,1 s**. Se regeneró la comparación PC/móvil y se inspeccionó `05-weekly-tasks-{desktop,mobile}.png`, además de la captura sintética 1920×1032. La comparación móvil aún muestra diferencias de densidad y de alcance visible del checklist; la jerarquía global de Tareas sigue abierta.
+- TDD del dock de dibujo (12-10-2026): la E2E roja midió tarjetas de **100 px** frente a los **88 px** del prototipo y detectó el glifo seleccionado naranja. La causa era una regla de 100 px de mayor especificidad en el SCSS encapsulado del editor, que ocultaba la medida del estilo global. Se armonizaron ambas capas en tarjetas de 88 px, glifos 32×32 y glifo activo azul marino; los rótulos/borde conservan el énfasis del token naranja. La aserción a 1920 px mide las 11 tarjetas y sus 11 iconos y compara color del seleccionado. `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/household-plan-tasks.spec.ts` pasa **2/2 en 50,9 s**, incluidos 320×568/390×950/568×320; las comparaciones `02-plan-editor-{desktop,mobile}.png` se regeneraron e inspeccionaron, así como la captura de dibujo libre a 1920×1032. Se mantiene pendiente el cotejo de las formas SVG restantes contra el prototipo.
 
 ### Puertas generales
 

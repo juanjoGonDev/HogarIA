@@ -106,7 +106,7 @@
   .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-review, .plan-setup)) .plan-tool,
   .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-review, .plan-setup))
     .plan-room-chip {
-    min-height: 100px;
+    min-height: 88px;
   }
 
   .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-review, .plan-setup))
@@ -166,7 +166,7 @@
 
   .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-setup, .plan-review)) .plan-tool {
     min-width: 0;
-    min-height: 100px;
+    min-height: 88px;
     flex: 1 1 0;
     padding: var(--space-1) 4px;
     font-size: 0.72rem;
@@ -177,7 +177,7 @@
     .plan-room-chip {
     min-width: 0;
     max-width: none;
-    min-height: 100px;
+    min-height: 88px;
     flex: 1 1 0;
     padding: var(--space-1) 2px;
     font-size: 0.7rem;
