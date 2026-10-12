@@ -1,6 +1,6 @@
 # HogarIA — Plano interactivo del hogar y tareas por zonas
 
-Estado: **implementación y CI completados; comparación directa con prototipos pendiente de sus archivos originales · PR #47 listo para revisión · 2026-10-12**
+Estado: **implementación funcional y CI completados; ajuste de fidelidad visual en curso según cotejo directo · PR #47 en Draft · 2026-10-12**
 
 Este contrato concreta una nueva capacidad de HogarIA y complementa las reglas compartidas de
 `HOGARIA-SPEC.md` §12ap (aislamiento por hogar, membresía, permisos y proveedor de IA) y §13
@@ -287,39 +287,51 @@ La referencia es la secuencia de seis mockups aprobados en esta conversación (I
 `exec-3d60ee65-e311-4692-a979-b1f4564929a9.png`, `exec-3be5f6ed-8bd1-47a8-b708-35ab9452dff0.png`,
 `exec-9299b3b6-c022-4f96-b9c4-7eb0337afc28.png`, `exec-e2e39a1a-d995-4927-bc38-205c925ab781.png`,
 `exec-455e098e-dd5b-4600-b0aa-1c9939baf363.png` y `exec-042a1622-76b0-4f9a-87d6-bc7f4e404ba3.png`).
-Sus imágenes no están en el worktree ni en las carpetas locales de visualizaciones, adjuntos o
-temporales; no hay baseline con el que probar equivalencia exacta. Las capturas de la app se han
-inspeccionado, pero eso no sustituye la comparación lado a lado con los seis originales.
+Las seis imágenes originales ya se localizaron en
+`C:/Users/juanj/.codex/generated_images/01a11138-d990-7ed3-a48d-2681d285b3d7/`; cada una contiene
+la vista de escritorio junto a la vista móvil. La primera inspección directa confirmó diferencias
+visibles, así que los checks previos de la sección describen estructura funcional, no equivalencia
+visual, y no deben darse por terminados hasta cotejar cada vista con su referencia. Los marcos de
+teléfono y la navegación/shell dibujadas son parte del mockup; para la comparación se recortará el
+área de producto, respetando la shell real de HogarIA y midiendo su contenido, jerarquía y geometría.
 Mantener la shell y los tokens geométricos reales de HogarIA; fondo claro, superficies blancas,
 naranja para acción/selección, líneas azul marino y zonas pastel. Se evalúan la composición y
 jerarquía de la vista del producto, no las barras de navegador ni la shell dibujada dentro de los
 mockups.
 
-- [x] **Inicio:** vivienda seleccionada única, plantas separadas, tres métodos en tarjetas ilustradas
-      y CTA principal; escritorio en tres columnas y móvil apilado sin scroll horizontal.
-- [x] **Editor:** el plano ocupa el área principal; herramientas, pisos, cuadrícula, historial,
-      zoom y previsualización conservan la jerarquía del prototipo. En móvil el lienzo se mantiene
-      ancho entre el selector de plantas y el dock táctil/CTA.
-- [x] **Foto/propuesta:** original y plano generado se presentan como superficies comparables,
-      ofrecen cambiar/confirmar y mantienen continuar/descartar accesibles. En ≤359 px las vistas
-      se compactan; a 320×568 las acciones pasan al flujo desplazable para no cubrir la decisión.
-- [x] **Asignación:** vista dedicada sin herramientas de dibujo, con mapa, pisos, asignación
-      individual/compartida/sin asignar y leyenda en escritorio; mapa seguido por panel compacto
-      en móvil, sin superposición incluso en 320×568 y 568×320.
-- [x] **Tareas:** mapa y panel semanal en columnas relacionadas; móvil muestra primero el mapa y
-      después el editor/lista desplazable, sin que los controles inferiores tapen filas.
-- [x] **Ajuste por chat:** planos actual/propuesta, conversación, aplicar/descartar y subir boceto/
-      volver al lienzo; en móvil se alternan los planos y las acciones permanecen después del chat.
-      Una nueva foto conserva la geometría como borrador; no se guarda sin aplicar.
+- [ ] **Inicio:** dejar neutras las tarjetas de método antes de la elección explícita y cotejar
+      vivienda/plantas, tres métodos ilustrados, CTA y espaciado en escritorio y móvil.
+- [ ] **Editor:** agrupar pared/puerta/ventana y espacios en una sola barra coherente; conservar
+      piso/zoom/historial arriba del plano y dock táctil debajo en móvil. Reducir los rellenos
+      asignados del plano durante el dibujo (el prototipo reserva el naranja para la selección), y
+      plegar la lista de zonas para no añadir un panel visible ausente del mockup sin quitar acceso
+      por teclado/lector de pantalla.
+- [ ] **Foto/propuesta:** cotejar tamaño y proporción de la foto original y el plano generado en
+      ambos breakpoints, y la jerarquía cambiar/confirmar/continuar. El fixture de E2E debe parecer
+      un boceto real y generar una propuesta con el mismo número de zonas que la referencia; no usar
+      etiquetas de QA en imágenes.
+- [ ] **Asignación:** mantener mapa + selector lateral en escritorio. En móvil igualar la
+      prominencia vertical del mapa y presentar la edición en una hoja inferior con nombre/estado,
+      cuatro opciones y CTA visible, no una tarjeta compacta con estado guardado/Más acciones que
+      desplacen la decisión.
+- [ ] **Tareas:** cotejar el peso visual del plano y la jerarquía del panel semanal. Los controles
+      funcionales avanzados deben quedar accesibles sin sobrecargar la vista principal; las siete
+      asignaciones, el resumen de equidad y la acción de aplicar deben seguir visibles/alcanzables
+      en móvil.
+- [ ] **Ajuste por chat:** cotejar el tamaño de los planos actual/propuesta, conversación y decisión;
+      en móvil mostrar/alcanzar tras la respuesta las cuatro continuaciones del prototipo (seguir
+      chat, nuevo chat, subir foto, volver al lienzo) junto a aplicar/deshacer, sin comprometer el
+      estado de borrador ni guardar antes de la confirmación.
 - [x] E2E verifica interacción, permisos, persistencia, borradores, IA simulada, teclado/foco,
       labels, contraste AA en temas claro/oscuro, safe-area y ausencia de overflow; no hay fixtures
       personales ni llamadas reales a IA.
 - [x] Capturar e inspeccionar los seis estados sintéticos a 1440×900 y 390×844; verificar además
       breakpoints 320, 359, 360, 389, 390, 639, 640, 767, 768, 1023 y 1024 px y orientación 568×320.
-- [ ] Comparar directamente cada captura PC/móvil con el mockup aprobado correspondiente a
-      geometría y viewport equivalentes; guardar overlays/diffs reproducibles. Pendiente: recibir o
-      localizar los seis PNG originales identificados arriba. No declarar fidelidad visual exacta
-      hasta completar este cotejo.
+- [ ] Hacer capturas PC/móvil a la geometría visible del mockup, recortar las dos vistas del PNG
+      aprobado y generar seis comparaciones PC + seis móvil reproducibles en
+      `.e2e-screenshots/household-plan-comparison/`; inspeccionarlas y corregir diferencias de
+      composición, tamaño, jerarquía, color y espaciado. No marcar el flujo cerrado solo por pasar
+      pruebas de estructura ni declarar fidelidad visual exacta hasta inspeccionar las 12 vistas.
 - [x] Registrar comprobaciones y limitaciones reproducibles; no inferir fidelidad solo por tests
       unitarios, compilación o presencia de controles.
 
@@ -329,7 +341,7 @@ Evidencia visual y regresión:
 - El primer pase halló dos fallos visuales que no detectaba el simple `scrollWidth`: a 320 px las pestañas del hogar se montaban; y en pantalla baja la decisión de foto quedaba debajo de la barra fija (`bottom=729,89`, `sticky top=693`). Se compactaron las pestañas hasta 389 px, con scroll/foco por teclado, y a 320×568 las acciones de foto dejan de ser fijas y permanecen alcanzables al desplazar. E2E verifica 320, 359, 360, 389 y 390 px y ambos casos pasan.
 - El primer CI de esta revisión halló que las media queries nuevas no estaban cubiertas por la matriz global B−1/B/B+1. Se añadieron 388–390, 1198–1201 y 1278–1281 px a `tests/e2e/layout-gutters.spec.ts`; el test enfocado pasa 1/1 y el spec completo aislado pasa **7/7 en 1,3 min**.
 - Inspeccioné los seis estados `01-plan-start` a `06-chat-adjustment` de `.e2e-screenshots/household-plan-tasks/{chromium,mobile-chrome}/` a 1440×900 y 390×844; hay capturas adicionales 320×568 para cada flujo, una de las acciones de foto desplazadas y asignación/tareas en 568×320. También se comprueban 639, 640, 767, 768, 1023 y 1024 px.
-- Las capturas usan plan/foto sintéticos y no contienen datos personales. La emulación no sustituye un teléfono físico con notch. La shell real de HogarIA se conserva; el efecto de esa diferencia se debe evaluar al recibir los mockups originales, no asumir que la comparación está cerrada.
+- Las capturas usan plan/foto sintéticos y no contienen datos personales. La emulación no sustituye un teléfono físico con notch. La primera comparación directa, realizada al localizar las referencias, encontró que el inicio es cercano en estructura, pero el editor usa rellenos pasteles y una lista de zonas visibles que el prototipo no muestra; la asignación móvil comprime el mapa y agrega estados/acciones que desplazan el CTA; las tareas presentan más controles simultáneos que el mockup; y el chat móvil no deja visible toda la continuación. El fixture también exhibe «Cocina QA»/«Cocina ampliada», que son datos de prueba y no referencia visual válida. Corregir estos puntos y guardar comparaciones PC/móvil es el trabajo activo. La shell real de HogarIA se conserva.
 
 ### Puertas generales
 
