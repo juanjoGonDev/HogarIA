@@ -3026,12 +3026,16 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
       .evaluate((element) => Math.round(element.getBoundingClientRect().height));
     expect(
       firstTaskHeight,
-      'mobile checklist rows keep the compact target size shown in the approved prototype'
-    ).toBeGreaterThanOrEqual(24);
+      'mobile checklist rows remain easy to scan and tap'
+    ).toBeGreaterThanOrEqual(44);
     const completionTarget = await taskCards.first().locator('.task-card__complete').boundingBox();
     expect(completionTarget).not.toBeNull();
-    expect(completionTarget!.width).toBeGreaterThanOrEqual(24);
-    expect(completionTarget!.height).toBeGreaterThanOrEqual(24);
+    expect(completionTarget!.width).toBeGreaterThanOrEqual(44);
+    expect(completionTarget!.height).toBeGreaterThanOrEqual(44);
+    const editTarget = await taskCards.first().locator('.task-card__details summary').boundingBox();
+    expect(editTarget).not.toBeNull();
+    expect(editTarget!.width).toBeGreaterThanOrEqual(44);
+    expect(editTarget!.height).toBeGreaterThanOrEqual(44);
     await page.evaluate(() => window.scrollTo(0, 0));
     const firstTaskRow = await taskCards.first().boundingBox();
     const visibleNavigation = await page.locator('.bottom-nav').boundingBox();
@@ -3058,7 +3062,7 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
       taskRowsLayout.visibleCount,
       `the mobile checklist begins with unobscured rows above sticky actions: ${JSON.stringify(taskRowsLayout)}`
     ).toBeGreaterThanOrEqual(1);
-    await page.evaluate(() => window.scrollBy(0, 112));
+    await taskCards.last().evaluate((element) => element.scrollIntoView({ block: 'center' }));
     const lastTaskBounds = await taskCards.last().boundingBox();
     const scrolledWeekActions = await page.locator('.tasks-schedule__footer').boundingBox();
     const scrolledBottomNavigation = await page.locator('.bottom-nav').boundingBox();
