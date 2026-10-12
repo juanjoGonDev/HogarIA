@@ -379,12 +379,18 @@ mockups.
       resto de herramientas. En 320–359 px, la fila horizontal de zonas rápidas debe indicar que
       continúa, permitir llegar a todas por desplazamiento y teclado, mantener objetivos táctiles
       ≥44 px y no provocar overflow horizontal de página.
-- [ ] **Iconos del flujo:** calcar las formas de herramientas, estancias, puertas/ventanas, chat y
-      asignación de los SVG del prototipo; ajustar trazo/color/tamaño además del contenedor. La E2E
-      comprueba el set de iconos en PC y móvil y las capturas `02-plan-editor` se cotejan de nuevo.
-- [x] **Dock de dibujo en escritorio:** a 1920 px, las tarjetas de herramienta/estancia conservan
-      la medida de 88 px del prototipo y sus SVG 32×32 px. La selección resalta borde y rótulo, no
-      tiñe el glifo: el icono seleccionado sigue azul marino; Playwright mide los tres aspectos.
+  - [ ] **Iconos del flujo:** calcar las formas de herramientas, estancias, puertas/ventanas, chat y
+        asignación de los SVG del prototipo; ajustar trazo/color/tamaño además del contenedor. La E2E
+        comprueba el set de iconos en PC y móvil y las capturas `02-plan-editor` se cotejan de nuevo.
+        La auditoría visual detectó que la referencia colorea en naranja el cursor seleccionado y
+        etiqueta la pared como «Pared»; ambos detalles se corrigieron y verificaron. Sigue pendiente
+        cotejar las siluetas SVG restantes frente al recorte, no solo comprobar que cada botón tiene
+        un SVG.
+  - [x] **Dock de dibujo en escritorio:** a 1920 px, las tarjetas de herramienta/estancia conservan
+        la medida de 88 px del prototipo y sus SVG 32×32 px. Playwright mide esas geometrías.
+  - [x] **Selección y nombres del dock:** el cursor activo usa el naranja primario del prototipo
+        (`#f97316`), sin cambiar los glifos no seleccionados; la pared se rotula «Pared» en una línea.
+        Playwright comprueba el color exacto a 1920 px y el texto del control en PC/móvil.
 - [ ] **Foto/propuesta:** cotejar tamaño y proporción de la foto original y el plano generado en
       ambos breakpoints, y la jerarquía cambiar/confirmar/continuar. Mantener una salida accesible
       para descartar el borrador como control de icono compacto en el encabezado de propuesta, no
@@ -491,6 +497,7 @@ Evidencia visual y regresión:
 
 - Auditoría de alineación de agenda PC (12-10-2026): rojo reproducido porque «Lunes, 12 oct» ocupaba varias líneas en la columna estrecha de día. Se muestran los nombres breves localizados del prototipo, se reduce la columna de etiqueta de 74 a 56 px para dar aire a cada asignación y la fecha larga continúa en `aria-label`. La E2E verifica los siete nombres visibles en una sola línea y las siete fechas completas accesibles; el primer pase también detectó una aserción previa que aún esperaba el texto largo visible y se actualizó al nuevo contrato. Ejecución final `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/household-plan-tasks.spec.ts` — **2/2, 52,1 s**. Se regeneró la comparación PC/móvil y se inspeccionó `05-weekly-tasks-{desktop,mobile}.png`, además de la captura sintética 1920×1032. La comparación móvil aún muestra diferencias de densidad y de alcance visible del checklist; la jerarquía global de Tareas sigue abierta.
 - TDD del dock de dibujo (12-10-2026): la E2E roja midió tarjetas de **100 px** frente a los **88 px** del prototipo y detectó el glifo seleccionado naranja. La causa era una regla de 100 px de mayor especificidad en el SCSS encapsulado del editor, que ocultaba la medida del estilo global. Se armonizaron ambas capas en tarjetas de 88 px, glifos 32×32 y glifo activo azul marino; los rótulos/borde conservan el énfasis del token naranja. La aserción a 1920 px mide las 11 tarjetas y sus 11 iconos y compara color del seleccionado. `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/household-plan-tasks.spec.ts` pasa **2/2 en 50,9 s**, incluidos 320×568/390×950/568×320; las comparaciones `02-plan-editor-{desktop,mobile}.png` se regeneraron e inspeccionaron, así como la captura de dibujo libre a 1920×1032. Se mantiene pendiente el cotejo de las formas SVG restantes contra el prototipo.
+- Corrección del dock tras nueva crítica visual (13-10-2026): al enfrentar las capturas, la decisión anterior de mantener azul el cursor activo sí contradecía el prototipo; no bastaba con conservar un icono legible. TDD volvió a rojo (`rgb(194,65,12)` frente a `rgb(249,115,22)`), y el glifo seleccionado ahora usa `--primary` sin recolorear los demás. «Dibujar pared» también se partía y no coincidía con el rótulo del mockup; se cambió a «Pared» en ES/EN y se actualizaron los selectores E2E con coincidencia exacta. Verde: `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/household-plan-tasks.spec.ts` — **2/2 en 52,7 s**, servidor y DB aislados, IA simulada. Comparaciones `02-plan-editor-{desktop,mobile}.png` regeneradas e inspeccionadas; aún falta calcar y cotejar las siluetas SVG de puertas/ventanas/estancias/chat/asignación.
 
 ### Puertas generales
 

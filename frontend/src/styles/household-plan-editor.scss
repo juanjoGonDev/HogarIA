@@ -979,6 +979,10 @@
   line-height: 1;
 }
 
+.plan-tool.is-selected > span {
+  color: var(--primary);
+}
+
 .plan-tool > span svg,
 .plan-room-chip svg {
   display: block;

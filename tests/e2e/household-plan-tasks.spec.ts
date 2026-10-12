@@ -992,6 +992,7 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   await expect(zoneDisclosure).not.toHaveAttribute('open', '');
   const drawingTools = page.locator('.plan-canvas-toolbar__tools .plan-tool');
   await expect(drawingTools).toHaveCount(5);
+  await expect(drawingTools.nth(1)).toHaveText('Pared');
   await page.locator('.plan-editor__advanced-settings > summary').click();
   const drawAreaMode = page.locator('[data-test="plan-draw-area"]');
   await expect(drawAreaMode).toBeVisible();
@@ -1248,7 +1249,7 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
       expect(icon.width, 'desktop toolbar SVGs match the prototype 32px size').toBe(32);
       expect(icon.height, 'desktop toolbar SVGs keep a square 32px box').toBe(32);
     }
-    expect(drawingDockMetrics.selectedIconColor).toBe('rgb(32, 52, 73)');
+    expect(drawingDockMetrics.selectedIconColor).toBe('rgb(249, 115, 22)');
     expect(drawingDockMetrics.selectedLabelColor).not.toBe(drawingDockMetrics.unselectedLabelColor);
     const editorAlignment = await page.evaluate(() => {
       const editor = document.querySelector<HTMLElement>('.plan-editor');
@@ -1924,7 +1925,7 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   const assignmentClose = page.locator('[data-test="plan-selected-space"] .plan-details__close');
   if (await assignmentClose.isVisible()) await assignmentClose.click();
 
-  await page.getByRole('button', { name: 'Dibujar pared' }).click();
+  await page.getByRole('button', { name: 'Pared', exact: true }).click();
   await choosePickerOption(page, /Tipo de pared:/, 'Pared exterior');
   const canvas = page.locator('.plan-canvas');
   await canvas.scrollIntoViewIfNeeded();
