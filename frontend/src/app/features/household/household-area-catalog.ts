@@ -63,6 +63,7 @@ const shared = [
   { kind: 'common_area', labelKey: 'household.area_common_area' },
   { kind: 'shared_room', labelKey: 'household.area_shared_room' },
   { kind: 'storage_area', labelKey: 'household.area_storage_area' },
+  { kind: 'clothes_drying_area', labelKey: 'household.area_clothes_drying_area' },
   { kind: 'custom', labelKey: 'household.area_custom' }
 ] as const;
 
@@ -74,6 +75,7 @@ export type HouseholdAreaGlyph =
   | 'seating'
   | 'bedroom'
   | 'bathroom'
+  | 'hallway'
   | 'outdoors'
   | 'entry'
   | 'work'
@@ -101,7 +103,7 @@ const glyphByArea: Record<HouseholdAreaKind, HouseholdAreaGlyph> = {
   playroom: 'seating',
   gym: 'work',
   walk_in_closet: 'storage',
-  hallway: 'entry',
+  hallway: 'hallway',
   staircase: 'entry',
   landing: 'entry',
   elevator: 'entry',
@@ -138,6 +140,7 @@ const glyphByArea: Record<HouseholdAreaKind, HouseholdAreaGlyph> = {
   common_area: 'shared',
   shared_room: 'shared',
   storage_area: 'storage',
+  clothes_drying_area: 'storage',
   custom: 'generic'
 };
 

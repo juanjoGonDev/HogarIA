@@ -98,7 +98,10 @@ describe('HouseholdComponent', () => {
         {
           provide: HouseholdPlanService,
           useValue: {
-            load: jasmine.createSpy('loadPlan').and.returnValue(of({ version: 0, plan: null }))
+            load: jasmine.createSpy('loadPlan').and.returnValue(of({ version: 0, plan: null })),
+            loadAssignments: jasmine
+              .createSpy('loadPlanAssignments')
+              .and.returnValue(of({ planVersion: 0, version: 0, assignments: {} }))
           }
         },
         {
@@ -300,22 +303,50 @@ describe('HouseholdComponent', () => {
     });
   });
 
-  it('keeps the selected tab in view after a narrow-screen layout changes', () => {
+  it('keeps the selected tab in view after a narrow-screen layout changes', async () => {
     service.household.set(HOUSEHOLD);
     fixture.detectChanges();
     const settingsTab = fixture.nativeElement.querySelector(
       '#household-tab-settings'
     ) as HTMLButtonElement;
-    const scrollIntoView = jasmine.createSpy('scrollIntoView');
-    settingsTab.scrollIntoView = scrollIntoView;
+    const tabList = settingsTab.closest('.household-tabs') as HTMLElement;
+    Object.defineProperty(tabList, 'scrollWidth', { configurable: true, value: 620 });
+    Object.defineProperty(tabList, 'clientWidth', { configurable: true, value: 360 });
+    spyOn(tabList, 'getBoundingClientRect').and.returnValue({
+      left: 0,
+      right: 360,
+      top: 0,
+      bottom: 40,
+      width: 360,
+      height: 40,
+      x: 0,
+      y: 0,
+      toJSON: () => ({})
+    } as DOMRect);
+    spyOn(settingsTab, 'getBoundingClientRect').and.returnValue({
+      left: 330,
+      right: 420,
+      top: 0,
+      bottom: 40,
+      width: 90,
+      height: 40,
+      x: 330,
+      y: 0,
+      toJSON: () => ({})
+    } as DOMRect);
     spyOn(window, 'requestAnimationFrame').and.callFake((callback: FrameRequestCallback) => {
       callback(0);
       return 0;
     });
+    spyOn(window, 'setTimeout').and.callFake(((callback: TimerHandler) => {
+      if (typeof callback === 'function') callback();
+      return 0;
+    }) as typeof window.setTimeout);
 
     component.selectTab('settings');
+    await fixture.whenStable();
 
-    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest', inline: 'nearest' });
+    expect(tabList.scrollLeft).toBe(260);
   });
 
   it('cleans invalid tab URLs with replace while preserving other query parameters', () => {

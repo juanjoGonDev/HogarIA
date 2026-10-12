@@ -10,6 +10,7 @@ import {
   OnChanges,
   Output,
   SimpleChanges,
+  ViewEncapsulation,
   computed,
   inject,
   signal
@@ -53,15 +54,19 @@ import {
 import {
   cloneHouseholdPlan,
   clampCoordinate,
+  createHouseholdPlanPolygon,
   createHouseholdPlanFloor,
   createHouseholdPlanSpace,
   createHouseholdPlanWall,
   emptyHouseholdPlan,
   moveHouseholdPlanSpace,
-  openingSegment
+  openingSegment,
+  openingRails as makeOpeningRails,
+  doorSwing as makeDoorSwing,
+  polygonCentroid
 } from './household-plan-editor.utils';
 
-type PlanTool = 'select' | 'space' | 'wall' | 'door' | 'window';
+type PlanTool = 'select' | 'space' | 'freeform' | 'wall' | 'door' | 'window';
 type PlanPreview = 'current' | 'proposal';
 type PlanEntryMethod = 'canvas' | 'photo' | 'guided';
 type ProposalPresentation = 'photo' | 'chat';
@@ -101,6 +106,7 @@ const DWELLING_CARD_LABEL_KEYS: Record<
   ],
   templateUrl: './household-plan-editor.component.html',
   styleUrl: './household-plan-editor.component.scss',
+  encapsulation: ViewEncapsulation.None,
   changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class HouseholdPlanEditorComponent implements OnChanges, OnDestroy {
@@ -188,8 +194,10 @@ export class HouseholdPlanEditorComponent implements OnChanges, OnDestroy {
   readonly redoStack = signal<HouseholdPlan[]>([]);
   readonly drawingStart = signal<HouseholdPlanPoint | null>(null);
   readonly drawingEnd = signal<HouseholdPlanPoint | null>(null);
+  readonly freeformPoints = signal<HouseholdPlanPoint[]>([]);
   readonly snapToGrid = signal(true);
   readonly canvasZoom = signal(100);
+  readonly previewZoom = signal(100);
   readonly setupVisible = signal(false);
   readonly selectedEntryMethod = signal<PlanEntryMethod | null>(null);
   readonly setupFloorCount = signal(2);
@@ -347,6 +355,24 @@ export class HouseholdPlanEditorComponent implements OnChanges, OnDestroy {
 
   ngOnDestroy(): void {
     this.revokeAttachmentPreview();
+  }
+
+  closeAdvancedSettings(event: Event): void {
+    const target = event.target as HTMLElement | null;
+    const advancedSettings = target?.closest<HTMLDetailsElement>('.plan-editor__advanced-settings');
+    if (advancedSettings && target?.closest('[data-close-advanced-settings]')) {
+      advancedSettings.open = false;
+      return;
+    }
+    if (advancedSettings) {
+      return;
+    }
+
+    const trigger = event.currentTarget as HTMLElement | null;
+    const editorSettings = trigger
+      ?.closest('.plan-editor')
+      ?.querySelector<HTMLDetailsElement>('.plan-editor__advanced-settings');
+    if (editorSettings) editorSettings.open = false;
   }
 
   savePlan(): void {
@@ -571,6 +597,7 @@ export class HouseholdPlanEditorComponent implements OnChanges, OnDestroy {
     this.tool.set(tool);
     this.drawingStart.set(null);
     this.drawingEnd.set(null);
+    this.freeformPoints.set([]);
   }
 
   addGuidedSpace(): void {
@@ -609,6 +636,16 @@ export class HouseholdPlanEditorComponent implements OnChanges, OnDestroy {
     const svg = event.currentTarget as SVGSVGElement;
     const point = this.pointerPoint(event, svg);
     if (!point) return;
+    if (this.tool() === 'freeform') {
+      event.preventDefault();
+      if (this.freeformPoints().length >= 64) {
+        this.errorKey.set('household.plan_polygon_vertex_limit');
+        return;
+      }
+      this.freeformPoints.update((points) => [...points, point]);
+      this.resetMessages();
+      return;
+    }
     if (this.tool() === 'space' || this.tool() === 'wall') {
       event.preventDefault();
       svg.setPointerCapture(event.pointerId);
@@ -701,6 +738,51 @@ export class HouseholdPlanEditorComponent implements OnChanges, OnDestroy {
     };
   }
 
+  drawingPolygonPoints(): string {
+    return this.freeformPoints()
+      .map((point) => `${point.x},${point.y}`)
+      .join(' ');
+  }
+
+  removeLastFreeformPoint(): void {
+    this.freeformPoints.update((points) => points.slice(0, -1));
+  }
+
+  cancelFreeformDrawing(): void {
+    this.freeformPoints.set([]);
+    this.setTool('select');
+  }
+
+  finishFreeformSpace(): void {
+    const floor = this.activeFloor();
+    const points = this.freeformPoints();
+    if (!floor || !this.canEdit || this.proposal()) return;
+    if (points.length < 3) {
+      this.errorKey.set('household.plan_polygon_need_three_points');
+      return;
+    }
+    if (floor.spaces.length >= 80) {
+      this.errorKey.set('household.plan_area_limit');
+      return;
+    }
+    const space = createHouseholdPlanPolygon(
+      this.selectedKind(),
+      this.roomLabel(),
+      this.newId('space'),
+      points
+    );
+    if (!space) {
+      this.errorKey.set('household.plan_polygon_invalid');
+      return;
+    }
+    this.updateFloor(floor.id, (current) => ({ ...current, spaces: [...current.spaces, space] }));
+    this.freeformPoints.set([]);
+    this.selectedSpaceId.set(space.id);
+    this.selectedWallId.set(null);
+    this.selectedLabel.set(space.label);
+    this.tool.set('select');
+  }
+
   spacePoints(space: HouseholdPlanSpace): string {
     return space.polygon.map((point) => `${point.x},${point.y}`).join(' ');
   }
@@ -715,12 +797,7 @@ export class HouseholdPlanEditorComponent implements OnChanges, OnDestroy {
   }
 
   spaceCenter(space: HouseholdPlanSpace): HouseholdPlanPoint {
-    const xs = space.polygon.map((point) => point.x);
-    const ys = space.polygon.map((point) => point.y);
-    return {
-      x: (Math.min(...xs) + Math.max(...xs)) / 2,
-      y: (Math.min(...ys) + Math.max(...ys)) / 2
-    };
+    return polygonCentroid(space.polygon);
   }
 
   comparisonFloor(plan: HouseholdPlan | null): HouseholdPlanFloor | null {
@@ -761,20 +838,7 @@ export class HouseholdPlanEditorComponent implements OnChanges, OnDestroy {
   openingRails(
     opening: HouseholdPlanOpening
   ): Array<{ from: HouseholdPlanPoint; to: HouseholdPlanPoint }> {
-    const segment = this.openingLine(opening);
-    if (!segment || opening.kind !== 'window') return [];
-    const horizontal = segment.from.y === segment.to.y;
-    return [-70, 70].map((offset) =>
-      horizontal
-        ? {
-            from: { x: segment.from.x, y: segment.from.y + offset },
-            to: { x: segment.to.x, y: segment.to.y + offset }
-          }
-        : {
-            from: { x: segment.from.x + offset, y: segment.from.y },
-            to: { x: segment.to.x + offset, y: segment.to.y }
-          }
-    );
+    return makeOpeningRails(this.shownFloor()?.walls ?? [], opening);
   }
 
   doorSwing(opening: HouseholdPlanOpening): {
@@ -782,25 +846,7 @@ export class HouseholdPlanEditorComponent implements OnChanges, OnDestroy {
     leafTip: HouseholdPlanPoint;
     arc: string;
   } | null {
-    const segment = this.openingLine(opening);
-    if (!segment || opening.kind !== 'door') return null;
-    const width = Math.abs(segment.to.x - segment.from.x) + Math.abs(segment.to.y - segment.from.y);
-    if (segment.from.y === segment.to.y) {
-      const hinge = segment.to;
-      const leafTip = { x: hinge.x, y: hinge.y - width };
-      return {
-        hinge,
-        leafTip,
-        arc: `M ${leafTip.x} ${leafTip.y} A ${width} ${width} 0 0 0 ${segment.from.x} ${segment.from.y}`
-      };
-    }
-    const hinge = segment.from;
-    const leafTip = { x: hinge.x + width, y: hinge.y };
-    return {
-      hinge,
-      leafTip,
-      arc: `M ${leafTip.x} ${leafTip.y} A ${width} ${width} 0 0 1 ${segment.to.x} ${segment.to.y}`
-    };
+    return makeDoorSwing(this.shownFloor()?.walls ?? [], opening);
   }
 
   addOpening(kind: HouseholdPlanOpening['kind']): void {
@@ -812,7 +858,7 @@ export class HouseholdPlanEditorComponent implements OnChanges, OnDestroy {
       this.errorKey.set('household.plan_opening_limit');
       return;
     }
-    const length = Math.abs(wall.to.x - wall.from.x) + Math.abs(wall.to.y - wall.from.y);
+    const length = Math.hypot(wall.to.x - wall.from.x, wall.to.y - wall.from.y);
     const width = Math.min(900, Math.floor(length / 3));
     if (width < 100) return;
     const isMainEntrance =
@@ -885,6 +931,11 @@ export class HouseholdPlanEditorComponent implements OnChanges, OnDestroy {
     this.selectedLabel.set(space.label);
     this.assignmentDraftMemberIds.set([...(this.assignmentSnapshot().assignments[space.id] ?? [])]);
     this.assignmentNoticeKey.set(null);
+  }
+
+  selectSpaceFromCanvas(space: HouseholdPlanSpace): void {
+    if (this.tool() !== 'select') return;
+    this.selectSpace(space);
   }
 
   toggleAssignmentMember(memberId: string): void {
@@ -1060,7 +1111,7 @@ export class HouseholdPlanEditorComponent implements OnChanges, OnDestroy {
     this.confirmOrphanedTasks.set(false);
   }
 
-  continueEditingProposal(): void {
+  continueEditingProposal(preservePrompt = false): void {
     const proposal = this.proposal();
     if (!proposal || this.saving() || this.proposing()) return;
 
@@ -1072,7 +1123,7 @@ export class HouseholdPlanEditorComponent implements OnChanges, OnDestroy {
     this.previewMode.set('current');
     this.orphanedTaskIds.set([...proposal.orphanedTaskIds]);
     this.confirmOrphanedTasks.set(false);
-    this.prompt.set('');
+    if (!preservePrompt) this.prompt.set('');
     this.clearAttachment();
     this.proposalPresentation.set('chat');
     this.setupVisible.set(false);
@@ -1142,12 +1193,20 @@ export class HouseholdPlanEditorComponent implements OnChanges, OnDestroy {
     this.canvasZoom.update((zoom) => Math.min(150, Math.max(50, zoom + amount)));
   }
 
+  changePreviewZoom(amount: number): void {
+    this.previewZoom.update((zoom) => Math.min(150, Math.max(50, zoom + amount)));
+  }
+
+  resetPreviewZoom(): void {
+    this.previewZoom.set(100);
+  }
+
   groupLabel(group: 'interior' | 'exterior' | 'shared'): string {
     return getHouseholdAreaGroupLabel(group, this.i18n.resolved());
   }
 
   wallLength(wall: HouseholdPlanWall): number {
-    return Math.abs(wall.to.x - wall.from.x) + Math.abs(wall.to.y - wall.from.y);
+    return Math.hypot(wall.to.x - wall.from.x, wall.to.y - wall.from.y);
   }
 
   private finishSpace(start: HouseholdPlanPoint, end: HouseholdPlanPoint): void {
@@ -1272,22 +1331,47 @@ export class HouseholdPlanEditorComponent implements OnChanges, OnDestroy {
       ['patio', this.areaLabel('patio'), { x: 7_600, y: 1_400 }, { x: 9_700, y: 6_000 }],
       ['garden', this.areaLabel('garden'), { x: 7_600, y: 6_000 }, { x: 9_700, y: 8_600 }]
     ];
+    const irregularShapes: Partial<Record<HouseholdAreaKind, HouseholdPlanPoint[]>> = {
+      bedroom: [
+        { x: 300, y: 5_600 },
+        { x: 4_300, y: 5_600 },
+        { x: 4_300, y: 8_600 },
+        { x: 500, y: 8_600 }
+      ],
+      patio: [
+        { x: 7_600, y: 1_400 },
+        { x: 9_700, y: 1_700 },
+        { x: 9_700, y: 5_600 },
+        { x: 7_600, y: 6_000 }
+      ],
+      garden: [
+        { x: 7_600, y: 6_000 },
+        { x: 9_700, y: 5_600 },
+        { x: 9_700, y: 8_600 },
+        { x: 7_600, y: 8_600 }
+      ]
+    };
     const roomSpaces = spaces
-      .map(([kind, label, from, to]) =>
-        createHouseholdPlanSpace(kind, label, this.newId('space'), from, to)
-      )
+      .map(([kind, label, from, to]) => {
+        const id = this.newId('space');
+        const polygon = irregularShapes[kind];
+        return polygon
+          ? createHouseholdPlanPolygon(kind, label, id, polygon)
+          : createHouseholdPlanSpace(kind, label, id, from, to);
+      })
       .filter((space): space is HouseholdPlanSpace => space !== null);
     const wallSegments: Array<['interior' | 'exterior', HouseholdPlanPoint, HouseholdPlanPoint]> = [
       ['exterior', { x: 300, y: 1_400 }, { x: 7_600, y: 1_400 }],
-      ['exterior', { x: 300, y: 1_400 }, { x: 300, y: 8_600 }],
-      ['exterior', { x: 300, y: 8_600 }, { x: 7_600, y: 8_600 }],
+      ['exterior', { x: 300, y: 1_400 }, { x: 300, y: 5_600 }],
+      ['exterior', { x: 500, y: 8_600 }, { x: 7_600, y: 8_600 }],
       ['exterior', { x: 7_600, y: 1_400 }, { x: 7_600, y: 8_600 }],
       ['interior', { x: 3_600, y: 1_400 }, { x: 3_600, y: 4_000 }],
       ['interior', { x: 300, y: 4_000 }, { x: 3_600, y: 4_000 }],
       ['interior', { x: 3_000, y: 4_000 }, { x: 3_000, y: 5_600 }],
       ['interior', { x: 300, y: 5_600 }, { x: 4_300, y: 5_600 }],
       ['interior', { x: 4_300, y: 5_600 }, { x: 4_300, y: 8_600 }],
-      ['interior', { x: 3_600, y: 4_400 }, { x: 7_600, y: 4_400 }]
+      ['interior', { x: 3_600, y: 4_400 }, { x: 7_600, y: 4_400 }],
+      ['exterior', { x: 300, y: 5_600 }, { x: 500, y: 8_600 }]
     ];
     const walls = wallSegments.map(([kind, from, to]) => ({
       id: this.newId('wall'),

@@ -7,6 +7,7 @@ import {
   Input,
   OnChanges,
   SimpleChanges,
+  ViewEncapsulation,
   computed,
   inject,
   signal
@@ -37,7 +38,12 @@ import type {
 } from '../../shared/models/household-task.model';
 import { assignHouseholdTasksFairly } from './household-task-assignment';
 import { getHouseholdAreaLabel } from './household-area-catalog';
-import { openingSegment } from './household-plan-editor.utils';
+import {
+  doorSwing as makeDoorSwing,
+  openingRails as makeOpeningRails,
+  openingSegment,
+  polygonCentroid
+} from './household-plan-editor.utils';
 
 interface WeekDay {
   date: string;
@@ -51,6 +57,7 @@ interface WeekDay {
   imports: [CommonModule, FormsModule, TranslatePipe, PickerComponent, HouseholdAreaGlyphComponent],
   templateUrl: './household-tasks.component.html',
   styleUrl: './household-tasks.component.scss',
+  encapsulation: ViewEncapsulation.None,
   changeDetection: ChangeDetectionStrategy.OnPush
 })
 export class HouseholdTasksComponent implements OnChanges {
@@ -158,7 +165,7 @@ export class HouseholdTasksComponent implements OnChanges {
       minY = Math.min(minY, point.y);
       maxY = Math.max(maxY, point.y);
     }
-    const padding = Math.max(250, Math.round(Math.max(maxX - minX, maxY - minY) * 0.06));
+    const padding = Math.max(250, Math.round(Math.max(maxX - minX, maxY - minY) * 0.055));
     return `${minX - padding} ${minY - padding} ${maxX - minX + padding * 2} ${maxY - minY + padding * 2}`;
   });
   readonly isDirty = computed(
@@ -355,12 +362,7 @@ export class HouseholdTasksComponent implements OnChanges {
   }
 
   spaceCenter(space: HouseholdPlanSpace): HouseholdPlanPoint {
-    const totals = space.polygon.reduce(
-      (sum, point) => ({ x: sum.x + point.x, y: sum.y + point.y }),
-      { x: 0, y: 0 }
-    );
-    const count = Math.max(1, space.polygon.length);
-    return { x: totals.x / count, y: totals.y / count };
+    return polygonCentroid(space.polygon);
   }
 
   openingLine(
@@ -374,45 +376,14 @@ export class HouseholdTasksComponent implements OnChanges {
     floor: HouseholdPlanFloor,
     opening: HouseholdPlanOpening
   ): Array<{ from: HouseholdPlanPoint; to: HouseholdPlanPoint }> {
-    const segment = this.openingLine(floor, opening);
-    if (!segment || opening.kind !== 'window') return [];
-    const horizontal = segment.from.y === segment.to.y;
-    return [-70, 70].map((offset) =>
-      horizontal
-        ? {
-            from: { x: segment.from.x, y: segment.from.y + offset },
-            to: { x: segment.to.x, y: segment.to.y + offset }
-          }
-        : {
-            from: { x: segment.from.x + offset, y: segment.from.y },
-            to: { x: segment.to.x + offset, y: segment.to.y }
-          }
-    );
+    return makeOpeningRails(floor.walls, opening);
   }
 
   doorSwing(
     floor: HouseholdPlanFloor,
     opening: HouseholdPlanOpening
   ): { hinge: HouseholdPlanPoint; leafTip: HouseholdPlanPoint; arc: string } | null {
-    const segment = this.openingLine(floor, opening);
-    if (!segment || opening.kind !== 'door') return null;
-    const width = Math.abs(segment.to.x - segment.from.x) + Math.abs(segment.to.y - segment.from.y);
-    if (segment.from.y === segment.to.y) {
-      const hinge = segment.to;
-      const leafTip = { x: hinge.x, y: hinge.y - width };
-      return {
-        hinge,
-        leafTip,
-        arc: `M ${leafTip.x} ${leafTip.y} A ${width} ${width} 0 0 0 ${segment.from.x} ${segment.from.y}`
-      };
-    }
-    const hinge = segment.from;
-    const leafTip = { x: hinge.x + width, y: hinge.y };
-    return {
-      hinge,
-      leafTip,
-      arc: `M ${leafTip.x} ${leafTip.y} A ${width} ${width} 0 0 1 ${segment.to.x} ${segment.to.y}`
-    };
+    return makeDoorSwing(floor.walls, opening);
   }
 
   assignedMembers(spaceId: string): HouseholdMember[] {

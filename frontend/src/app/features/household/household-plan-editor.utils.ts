@@ -47,13 +47,47 @@ export function createHouseholdPlanSpace(
   const right = Math.max(x1, x2);
   const top = Math.min(y1, y2);
   const bottom = Math.max(y1, y2);
-  const normalizedLabel = label.trim();
+  return createHouseholdPlanPolygon(kind, label, id, [
+    { x: left, y: top },
+    { x: right, y: top },
+    { x: right, y: bottom },
+    { x: left, y: bottom }
+  ]);
+}
 
+export function createHouseholdPlanPolygon(
+  kind: HouseholdAreaKind,
+  label: string,
+  id: string,
+  inputPoints: readonly HouseholdPlanPoint[]
+): HouseholdPlanSpace | null {
+  const points = inputPoints.map((point) => ({
+    x: clampCoordinate(point.x),
+    y: clampCoordinate(point.y)
+  }));
+  if (points.length > 1 && samePoint(points[0], points[points.length - 1])) points.pop();
+  const normalizedPoints = points.filter(
+    (point, index) => index === 0 || !samePoint(point, points[index - 1])
+  );
+  const normalizedLabel = label.trim();
   if (
-    right - left < MIN_SHAPE_EDGE ||
-    bottom - top < MIN_SHAPE_EDGE ||
     !id.trim() ||
+    normalizedPoints.length < 3 ||
+    normalizedPoints.length > 64 ||
     (kind === 'custom' && !normalizedLabel)
+  ) {
+    return null;
+  }
+
+  const xs = normalizedPoints.map((point) => point.x);
+  const ys = normalizedPoints.map((point) => point.y);
+  if (
+    Math.max(...xs) - Math.min(...xs) < MIN_SHAPE_EDGE ||
+    Math.max(...ys) - Math.min(...ys) < MIN_SHAPE_EDGE ||
+    !hasNonZeroArea(normalizedPoints) ||
+    hasSelfIntersection(normalizedPoints) ||
+    new Set(normalizedPoints.map((point) => `${point.x},${point.y}`)).size !==
+      normalizedPoints.length
   ) {
     return null;
   }
@@ -63,12 +97,7 @@ export function createHouseholdPlanSpace(
     kind,
     label: normalizedLabel,
     parentSpaceId: null,
-    polygon: [
-      { x: left, y: top },
-      { x: right, y: top },
-      { x: right, y: bottom },
-      { x: left, y: bottom }
-    ]
+    polygon: normalizedPoints
   };
 }
 
@@ -82,11 +111,8 @@ export function createHouseholdPlanWall(
   const to = { x: clampCoordinate(end.x), y: clampCoordinate(end.y) };
   const deltaX = to.x - from.x;
   const deltaY = to.y - from.y;
-  const length = Math.max(Math.abs(deltaX), Math.abs(deltaY));
+  const length = Math.hypot(deltaX, deltaY);
   if (!id.trim() || length < MIN_SHAPE_EDGE) return null;
-
-  if (Math.abs(deltaX) >= Math.abs(deltaY)) to.y = from.y;
-  else to.x = from.x;
 
   return { id: id.trim(), kind, from, to };
 }
@@ -120,11 +146,11 @@ export function openingSegment(
   if (!wall || opening.offset < 0 || opening.width <= 0) return null;
   const deltaX = wall.to.x - wall.from.x;
   const deltaY = wall.to.y - wall.from.y;
-  const length = Math.abs(deltaX) + Math.abs(deltaY);
+  const length = Math.hypot(deltaX, deltaY);
   if (opening.offset + opening.width > length) return null;
 
-  const directionX = Math.sign(deltaX);
-  const directionY = Math.sign(deltaY);
+  const directionX = deltaX / length;
+  const directionY = deltaY / length;
   const from = {
     x: wall.from.x + directionX * opening.offset,
     y: wall.from.y + directionY * opening.offset
@@ -136,6 +162,142 @@ export function openingSegment(
       y: from.y + directionY * opening.width
     }
   };
+}
+
+export function openingRails(
+  walls: readonly HouseholdPlanWall[],
+  opening: HouseholdPlanOpening,
+  railOffset = 70
+): Array<{ from: HouseholdPlanPoint; to: HouseholdPlanPoint }> {
+  const segment = openingSegment(walls, opening);
+  if (!segment || opening.kind !== 'window') return [];
+  const deltaX = segment.to.x - segment.from.x;
+  const deltaY = segment.to.y - segment.from.y;
+  const length = Math.hypot(deltaX, deltaY);
+  if (segment.from.y === segment.to.y) {
+    return [-railOffset, railOffset].map((offset) => ({
+      from: { x: segment.from.x, y: segment.from.y + offset },
+      to: { x: segment.to.x, y: segment.to.y + offset }
+    }));
+  }
+  if (segment.from.x === segment.to.x) {
+    return [-railOffset, railOffset].map((offset) => ({
+      from: { x: segment.from.x + offset, y: segment.from.y },
+      to: { x: segment.to.x + offset, y: segment.to.y }
+    }));
+  }
+  const normalX = deltaY / length;
+  const normalY = -deltaX / length;
+  return [-railOffset, railOffset].map((offset) => ({
+    from: { x: segment.from.x + normalX * offset, y: segment.from.y + normalY * offset },
+    to: { x: segment.to.x + normalX * offset, y: segment.to.y + normalY * offset }
+  }));
+}
+
+export function doorSwing(
+  walls: readonly HouseholdPlanWall[],
+  opening: HouseholdPlanOpening
+): { hinge: HouseholdPlanPoint; leafTip: HouseholdPlanPoint; arc: string } | null {
+  const segment = openingSegment(walls, opening);
+  if (!segment || opening.kind !== 'door') return null;
+  const deltaX = segment.to.x - segment.from.x;
+  const deltaY = segment.to.y - segment.from.y;
+  const width = Math.hypot(deltaX, deltaY);
+  if (segment.from.y === segment.to.y) {
+    const hinge = segment.to;
+    const leafTip = { x: hinge.x, y: hinge.y - width };
+    return {
+      hinge,
+      leafTip,
+      arc: `M ${leafTip.x} ${leafTip.y} A ${width} ${width} 0 0 0 ${segment.from.x} ${segment.from.y}`
+    };
+  }
+  if (segment.from.x === segment.to.x) {
+    const hinge = segment.from;
+    const leafTip = { x: hinge.x + width, y: hinge.y };
+    return {
+      hinge,
+      leafTip,
+      arc: `M ${leafTip.x} ${leafTip.y} A ${width} ${width} 0 0 1 ${segment.to.x} ${segment.to.y}`
+    };
+  }
+  const hinge = segment.to;
+  const normalX = deltaY / width;
+  const normalY = -deltaX / width;
+  const leafTip = { x: hinge.x + normalX * width, y: hinge.y + normalY * width };
+  return {
+    hinge,
+    leafTip,
+    arc: `M ${leafTip.x} ${leafTip.y} A ${width} ${width} 0 0 0 ${segment.from.x} ${segment.from.y}`
+  };
+}
+
+export function polygonCentroid(points: readonly HouseholdPlanPoint[]): HouseholdPlanPoint {
+  let doubleArea = 0;
+  let xTotal = 0;
+  let yTotal = 0;
+  for (let index = 0; index < points.length; index += 1) {
+    const current = points[index];
+    const next = points[(index + 1) % points.length];
+    const cross = current.x * next.y - next.x * current.y;
+    doubleArea += cross;
+    xTotal += (current.x + next.x) * cross;
+    yTotal += (current.y + next.y) * cross;
+  }
+  if (!doubleArea) return { x: 0, y: 0 };
+  return { x: xTotal / (3 * doubleArea), y: yTotal / (3 * doubleArea) };
+}
+
+function samePoint(first: HouseholdPlanPoint, second: HouseholdPlanPoint): boolean {
+  return first.x === second.x && first.y === second.y;
+}
+
+function hasNonZeroArea(points: readonly HouseholdPlanPoint[]): boolean {
+  let doubleArea = 0;
+  for (let index = 0; index < points.length; index += 1) {
+    const current = points[index];
+    const next = points[(index + 1) % points.length];
+    doubleArea += current.x * next.y - next.x * current.y;
+  }
+  return doubleArea !== 0;
+}
+
+function hasSelfIntersection(points: readonly HouseholdPlanPoint[]): boolean {
+  for (let first = 0; first < points.length; first += 1) {
+    const firstEnd = (first + 1) % points.length;
+    for (let second = first + 1; second < points.length; second += 1) {
+      const secondEnd = (second + 1) % points.length;
+      if (first === second || firstEnd === second || secondEnd === first) continue;
+      if (segmentsIntersect(points[first], points[firstEnd], points[second], points[secondEnd])) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function segmentsIntersect(
+  a: HouseholdPlanPoint,
+  b: HouseholdPlanPoint,
+  c: HouseholdPlanPoint,
+  d: HouseholdPlanPoint
+): boolean {
+  const orient = (p1: HouseholdPlanPoint, p2: HouseholdPlanPoint, p3: HouseholdPlanPoint) =>
+    (p2.x - p1.x) * (p3.y - p1.y) - (p2.y - p1.y) * (p3.x - p1.x);
+  const onSegment = (p1: HouseholdPlanPoint, p2: HouseholdPlanPoint, p3: HouseholdPlanPoint) =>
+    p2.x >= Math.min(p1.x, p3.x) &&
+    p2.x <= Math.max(p1.x, p3.x) &&
+    p2.y >= Math.min(p1.y, p3.y) &&
+    p2.y <= Math.max(p1.y, p3.y);
+  const abC = orient(a, b, c);
+  const abD = orient(a, b, d);
+  const cdA = orient(c, d, a);
+  const cdB = orient(c, d, b);
+  if (abC === 0 && onSegment(a, c, b)) return true;
+  if (abD === 0 && onSegment(a, d, b)) return true;
+  if (cdA === 0 && onSegment(c, a, d)) return true;
+  if (cdB === 0 && onSegment(c, b, d)) return true;
+  return abC > 0 !== abD > 0 && cdA > 0 !== cdB > 0;
 }
 
 export function cloneHouseholdPlan(plan: HouseholdPlan): HouseholdPlan {

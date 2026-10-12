@@ -2465,3 +2465,37 @@ app-calendar {
     }
   }
 }
+
+/* Mirror the approved editor rhythm: tools, breathing space, broad drawing surface, tools. */
+@media (max-width: 767px) {
+  .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-review, .plan-setup)) {
+    margin-top: 14px;
+  }
+
+  .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-review, .plan-setup))
+    > .plan-editor__toolbar {
+    margin-top: 19px;
+  }
+
+  .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-review, .plan-setup))
+    .plan-canvas-column {
+    margin-top: 22px;
+  }
+
+  .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-review, .plan-setup))
+    .plan-canvas__viewport {
+    width: calc(100% + 20px);
+    max-width: none;
+    height: min(33vh, 310px);
+    min-height: 260px;
+    margin-inline: -10px;
+    border-right: 0;
+    border-left: 0;
+    border-radius: 0;
+  }
+
+  .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-review, .plan-setup))
+    .plan-canvas-toolbar {
+    margin-top: 33px;
+  }
+}

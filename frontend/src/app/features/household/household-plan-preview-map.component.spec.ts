@@ -65,6 +65,8 @@ describe('HouseholdPlanPreviewMapComponent', () => {
     expect(viewBox).toBeDefined();
     expect(viewBox![0]).toBeLessThan(1000);
     expect(viewBox![1]).toBeLessThan(1000);
+    expect(1000 - viewBox![0]).toBeGreaterThanOrEqual(74);
+    expect(1000 - viewBox![1]).toBeGreaterThanOrEqual(74);
     expect(viewBox![2]).toBeGreaterThan(3000);
     expect(viewBox![3]).toBeGreaterThan(3000);
     expect(fixture.nativeElement.querySelector('.plan-compare-canvas__paper')).not.toBeNull();
@@ -90,6 +92,18 @@ describe('HouseholdPlanPreviewMapComponent', () => {
     expect(
       fixture.nativeElement.querySelector('svg.plan-compare-canvas')?.getAttribute('viewBox')
     ).toBe('0 0 10000 10000');
+  });
+
+  it('zooms the plan geometry around the center while keeping the map frame fixed', () => {
+    fixture.componentRef.setInput('floor', null);
+    fixture.componentRef.setInput('zoom', 120);
+    fixture.detectChanges();
+
+    const map = fixture.nativeElement.querySelector('svg.plan-compare-canvas');
+    const drawing = fixture.nativeElement.querySelector('.plan-compare-canvas__drawing');
+    expect(map.getAttribute('viewBox')).toBe('0 0 10000 10000');
+    expect(drawing.getAttribute('transform')).toBe('translate(-1000 -1000) scale(1.2)');
+    expect(map.querySelector('.plan-compare-canvas__paper')).not.toBeNull();
   });
 
   it('draws vertical windows and horizontal doors and skips openings without a wall', () => {

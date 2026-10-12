@@ -58,6 +58,7 @@ export const HOUSEHOLD_AREA_KINDS = [
   'common_area',
   'shared_room',
   'storage_area',
+  'clothes_drying_area',
   'custom'
 ] as const;
 
@@ -204,10 +205,10 @@ export function findHouseholdPlanIssues(plan: HouseholdPlan): SemanticIssue[] {
 
     floor.walls.forEach((wall, wallIndex) => {
       addId(wall.id, ['floors', floorIndex, 'walls', wallIndex, 'id']);
-      if (!isOrthogonalNonZeroWall(wall.from, wall.to)) {
+      if (!isNonZeroWall(wall.from, wall.to)) {
         issues.push({
           path: ['floors', floorIndex, 'walls', wallIndex],
-          message: 'Walls must be non-zero and orthogonal.'
+          message: 'Walls must be non-zero.'
         });
       }
     });
@@ -222,7 +223,7 @@ export function findHouseholdPlanIssues(plan: HouseholdPlan): SemanticIssue[] {
           message: 'An opening must reference a wall on the same floor.'
         });
       } else if (
-        !isOrthogonalNonZeroWall(wall.from, wall.to) ||
+        !isNonZeroWall(wall.from, wall.to) ||
         opening.offset + opening.width > wallLength(wall.from, wall.to)
       ) {
         issues.push({
@@ -312,15 +313,15 @@ export function findHouseholdPlanIssues(plan: HouseholdPlan): SemanticIssue[] {
   return issues;
 }
 
-function isOrthogonalNonZeroWall(
+function isNonZeroWall(
   from: HouseholdPlan['floors'][number]['walls'][number]['from'],
   to: HouseholdPlan['floors'][number]['walls'][number]['to']
 ): boolean {
-  return (from.x === to.x || from.y === to.y) && (from.x !== to.x || from.y !== to.y);
+  return from.x !== to.x || from.y !== to.y;
 }
 
 function wallLength(from: { x: number; y: number }, to: { x: number; y: number }): number {
-  return Math.abs(to.x - from.x) + Math.abs(to.y - from.y);
+  return Math.hypot(to.x - from.x, to.y - from.y);
 }
 
 function isDegeneratePolygon(points: ReadonlyArray<{ x: number; y: number }>): boolean {

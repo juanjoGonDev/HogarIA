@@ -7,7 +7,10 @@ import type {
   HouseholdPlanPoint
 } from '../../frontend/src/app/shared/models/household-plan.model';
 
-function landscapePlan(source: HouseholdPlan): HouseholdPlan {
+function fitSyntheticPlan(
+  source: HouseholdPlan,
+  shape: 'landscape' | 'photo' | 'portrait' | 'task'
+): HouseholdPlan {
   const plan = structuredClone(source);
   for (const floor of plan.floors) {
     const points = [
@@ -20,8 +23,18 @@ function landscapePlan(source: HouseholdPlan): HouseholdPlan {
     const maxX = Math.max(...points.map((point) => point.x));
     const minY = Math.min(...points.map((point) => point.y));
     const maxY = Math.max(...points.map((point) => point.y));
-    const scaleX = Math.min(1.35, 9600 / Math.max(1, maxX - minX));
-    const scaleY = Math.min(1, 9000 / Math.max(1, maxY - minY));
+    const width = Math.max(1, maxX - minX);
+    const height = Math.max(1, maxY - minY);
+    const scaleX =
+      shape === 'portrait'
+        ? Math.min(0.75, 6500 / width)
+        : Math.min(shape === 'photo' ? 1.15 : shape === 'task' ? 1.3 : 1.25, 9600 / width);
+    const scaleY =
+      shape === 'portrait'
+        ? Math.min(9600 / height, (width * scaleX) / (height * 0.67))
+        : shape === 'task'
+          ? Math.min(1.05, 9600 / height, (width * scaleX) / (height * 1.3))
+          : Math.min(1.15, 9600 / height);
     const centerX = (minX + maxX) / 2;
     const centerY = (minY + maxY) / 2;
     const transformPoint = (point: HouseholdPlanPoint): HouseholdPlanPoint => ({
@@ -55,64 +68,307 @@ function landscapePlan(source: HouseholdPlan): HouseholdPlan {
   return plan;
 }
 
-async function syntheticPlanImage(page: Page): Promise<Buffer> {
-  const dataUrl = await page.evaluate(() => {
+function irregularSyntheticPlan(source: HouseholdPlan): HouseholdPlan {
+  const plan = structuredClone(source);
+  const floor = plan.floors[0];
+  if (!floor) throw new Error('The synthetic household plan needs a ground floor');
+
+  const kitchen = floor.spaces.find((space) => space.kind === 'kitchen');
+  const livingRoom = floor.spaces.find((space) => space.kind === 'living_room');
+  const garden = floor.spaces.find((space) => space.kind === 'garden');
+  if (!kitchen || !livingRoom || !garden)
+    throw new Error('The synthetic household plan needs a kitchen, living room, and garden');
+
+  const bounds = (space: HouseholdPlan['floors'][number]['spaces'][number]) => ({
+    minX: Math.min(...space.polygon.map((point) => point.x)),
+    maxX: Math.max(...space.polygon.map((point) => point.x)),
+    minY: Math.min(...space.polygon.map((point) => point.y)),
+    maxY: Math.max(...space.polygon.map((point) => point.y))
+  });
+  const kitchenBounds = bounds(kitchen);
+  const livingBounds = bounds(livingRoom);
+  const gardenBounds = bounds(garden);
+  const diagonalX = Math.round(
+    kitchenBounds.maxX + (kitchenBounds.maxX - kitchenBounds.minX) * 0.08
+  );
+  const diagonalWall = floor.walls.find(
+    (wall) =>
+      wall.kind === 'interior' &&
+      wall.from.x === wall.to.x &&
+      wall.from.x === kitchenBounds.maxX &&
+      wall.from.y === kitchenBounds.minY &&
+      wall.to.y === kitchenBounds.maxY
+  );
+  if (!diagonalWall) throw new Error('The synthetic kitchen needs its shared interior wall');
+
+  kitchen.polygon = [
+    { x: kitchenBounds.minX, y: kitchenBounds.minY },
+    { x: kitchenBounds.maxX, y: kitchenBounds.minY },
+    { x: diagonalX, y: kitchenBounds.maxY },
+    { x: kitchenBounds.minX, y: kitchenBounds.maxY }
+  ];
+  livingRoom.polygon = [
+    { x: livingBounds.minX, y: livingBounds.minY },
+    { x: livingBounds.maxX, y: livingBounds.minY },
+    { x: livingBounds.maxX, y: livingBounds.maxY },
+    { x: diagonalX, y: livingBounds.maxY },
+    { x: diagonalX, y: kitchenBounds.maxY }
+  ];
+  diagonalWall.to = { x: diagonalX, y: kitchenBounds.maxY };
+
+  const gardenWidth = gardenBounds.maxX - gardenBounds.minX;
+  const gardenHeight = gardenBounds.maxY - gardenBounds.minY;
+  const notchY = Math.round(gardenBounds.minY + gardenHeight * 0.62);
+  const notchX = Math.round(gardenBounds.minX + gardenWidth * 0.62);
+  garden.polygon = [
+    { x: gardenBounds.minX, y: gardenBounds.minY },
+    { x: gardenBounds.maxX, y: gardenBounds.minY },
+    { x: gardenBounds.maxX, y: gardenBounds.maxY },
+    { x: notchX, y: gardenBounds.maxY },
+    { x: Math.round(gardenBounds.minX + gardenWidth * 0.42), y: notchY },
+    { x: gardenBounds.minX, y: notchY }
+  ];
+
+  return fitSyntheticPlan(plan, 'photo');
+}
+
+function landscapePlan(source: HouseholdPlan): HouseholdPlan {
+  return fitSyntheticPlan(source, 'landscape');
+}
+
+function portraitPlan(source: HouseholdPlan): HouseholdPlan {
+  return fitSyntheticPlan(source, 'portrait');
+}
+
+function taskPlan(source: HouseholdPlan): HouseholdPlan {
+  return fitSyntheticPlan(source, 'task');
+}
+
+function addAseoByBedrooms(source: HouseholdPlan): HouseholdPlan {
+  const plan = structuredClone(source);
+  const floor = plan.floors[0];
+  if (!floor) throw new Error('The synthetic household plan needs a ground floor');
+
+  const bathroom = floor.spaces.find((space) => space.kind === 'bathroom');
+  const bedroom = floor.spaces.find((space) => space.kind === 'bedroom');
+  const livingRoom = floor.spaces.find((space) => space.kind === 'living_room');
+  if (!bathroom || !bedroom || !livingRoom)
+    throw new Error('The synthetic household plan needs a bathroom, bedroom, and living room');
+
+  const bounds = (space: HouseholdPlan['floors'][number]['spaces'][number]) => ({
+    minX: Math.min(...space.polygon.map((point) => point.x)),
+    maxX: Math.max(...space.polygon.map((point) => point.x)),
+    minY: Math.min(...space.polygon.map((point) => point.y)),
+    maxY: Math.max(...space.polygon.map((point) => point.y))
+  });
+  const bathroomBounds = bounds(bathroom);
+  const bedroomBounds = bounds(bedroom);
+  const livingBounds = bounds(livingRoom);
+  const aseoRight = bedroomBounds.maxX;
+  const aseoTop = bathroomBounds.minY;
+  const aseoBottom = bathroomBounds.maxY;
+
+  // Remove the lower-left overlap from the living area so the new washroom
+  // shares a real wall with the bedroom and hall instead of sitting on top.
+  livingRoom.polygon = [
+    { x: livingBounds.minX, y: livingBounds.minY },
+    { x: livingBounds.maxX, y: livingBounds.minY },
+    { x: livingBounds.maxX, y: livingBounds.maxY },
+    { x: aseoRight, y: livingBounds.maxY },
+    { x: aseoRight, y: aseoTop },
+    { x: livingBounds.minX, y: aseoTop }
+  ];
+
+  const topWall = floor.walls.find(
+    (wall) =>
+      wall.kind === 'interior' &&
+      wall.from.y === aseoTop &&
+      wall.to.y === aseoTop &&
+      Math.min(wall.from.x, wall.to.x) === bathroomBounds.minX
+  );
+  const rightWall = floor.walls.find(
+    (wall) =>
+      wall.kind === 'interior' &&
+      wall.from.x === aseoRight &&
+      wall.to.x === aseoRight &&
+      Math.min(wall.from.y, wall.to.y) === aseoBottom
+  );
+  const livingDivider = floor.walls.find(
+    (wall) =>
+      wall.kind === 'interior' &&
+      wall.from.y === livingBounds.maxY &&
+      wall.to.y === livingBounds.maxY &&
+      Math.max(wall.from.x, wall.to.x) === livingBounds.maxX
+  );
+  if (!topWall || !rightWall || !livingDivider)
+    throw new Error('The synthetic plan walls do not support the washroom adjustment');
+
+  const topWallFarX = Math.max(topWall.from.x, topWall.to.x);
+  if (topWall.from.x === topWallFarX) topWall.from.x = aseoRight;
+  else topWall.to.x = aseoRight;
+  const rightWallNearY = Math.min(rightWall.from.y, rightWall.to.y);
+  if (rightWall.from.y === rightWallNearY) rightWall.from.y = aseoTop;
+  else rightWall.to.y = aseoTop;
+  const dividerNearX = Math.min(livingDivider.from.x, livingDivider.to.x);
+  if (livingDivider.from.x === dividerNearX) livingDivider.from.x = aseoRight;
+  else livingDivider.to.x = aseoRight;
+
+  const aseoWallId = rightWall.id;
+  floor.openings.push({
+    id: 'opening-followup-aseo',
+    wallId: aseoWallId,
+    kind: 'door',
+    offset: 260,
+    width: 700,
+    isMainEntrance: false
+  });
+  floor.spaces.push({
+    id: 'space-followup-aseo',
+    kind: 'toilet',
+    label: 'Aseo',
+    polygon: [
+      { x: bathroomBounds.maxX, y: aseoTop },
+      { x: aseoRight, y: aseoTop },
+      { x: aseoRight, y: aseoBottom },
+      { x: bathroomBounds.maxX, y: aseoBottom }
+    ],
+    parentSpaceId: null
+  });
+
+  return plan;
+}
+
+async function syntheticPlanImage(page: Page, desktop = false): Promise<Buffer> {
+  const dataUrl = await page.evaluate((desktopPhoto) => {
     const canvas = document.createElement('canvas');
     canvas.width = 640;
-    canvas.height = 400;
+    canvas.height = desktopPhoto ? 660 : 400;
+    const paperTop = desktopPhoto ? -295 : -170;
+    const paperHeight = desktopPhoto ? 590 : 340;
     const context = canvas.getContext('2d');
     if (!context) throw new Error('Canvas context unavailable');
 
-    context.fillStyle = '#b99b79';
+    const desk = context.createLinearGradient(0, 0, 0, canvas.height);
+    desk.addColorStop(0, '#a9825e');
+    desk.addColorStop(0.5, '#bd9c78');
+    desk.addColorStop(1, '#96704f');
+    context.fillStyle = desk;
     context.fillRect(0, 0, canvas.width, canvas.height);
+    context.strokeStyle = 'rgba(79, 49, 27, 0.12)';
+    context.lineWidth = 2;
+    for (let y = 8; y < canvas.height; y += 17) {
+      context.beginPath();
+      context.moveTo(0, y);
+      context.bezierCurveTo(170, y - 5, 420, y + 5, canvas.width, y - 2);
+      context.stroke();
+    }
+
+    context.save();
+    context.translate(canvas.width / 2, canvas.height / 2);
+    context.rotate(-0.022);
+    context.shadowColor = 'rgba(35, 27, 20, 0.28)';
+    context.shadowBlur = 13;
+    context.shadowOffsetY = 7;
     context.fillStyle = '#f2eee4';
-    context.fillRect(22, 20, 596, 360);
-    context.strokeStyle = '#d8d0c2';
-    context.lineWidth = 1;
-    for (let x = 22; x <= 618; x += 24) {
-      context.beginPath();
-      context.moveTo(x, 20);
-      context.lineTo(x, 380);
-      context.stroke();
-    }
-    for (let y = 20; y <= 380; y += 24) {
-      context.beginPath();
-      context.moveTo(22, y);
-      context.lineTo(618, y);
-      context.stroke();
-    }
-
-    context.strokeStyle = '#26364b';
-    context.lineWidth = 7;
-    context.lineCap = 'round';
+    context.fillRect(-286, paperTop, 572, paperHeight);
+    context.shadowColor = 'transparent';
+    context.shadowBlur = 0;
+    context.shadowOffsetY = 0;
+    context.save();
     context.beginPath();
-    context.moveTo(78, 60);
-    context.lineTo(562, 60);
-    context.lineTo(562, 342);
-    context.lineTo(104, 342);
-    context.lineTo(78, 60);
-    context.moveTo(238, 60);
-    context.lineTo(238, 176);
-    context.lineTo(94, 176);
-    context.moveTo(238, 176);
-    context.lineTo(238, 342);
-    context.moveTo(238, 232);
-    context.lineTo(400, 232);
-    context.moveTo(400, 232);
-    context.lineTo(400, 342);
-    context.moveTo(400, 60);
-    context.lineTo(400, 232);
-    context.stroke();
+    context.rect(-286, paperTop, 572, paperHeight);
+    context.clip();
+    context.strokeStyle = 'rgba(89, 131, 163, 0.22)';
+    context.lineWidth = 1;
+    for (let x = -280; x <= 280; x += 18) {
+      context.beginPath();
+      context.moveTo(x, paperTop);
+      context.lineTo(x + 1, paperTop + paperHeight);
+      context.stroke();
+    }
+    for (let y = paperTop + 6; y <= paperTop + paperHeight; y += 18) {
+      context.beginPath();
+      context.moveTo(-286, y);
+      context.lineTo(286, y + 1);
+      context.stroke();
+    }
 
-    context.fillStyle = '#26364b';
-    context.font = '20px cursive';
-    context.fillText('COCINA', 130, 126);
-    context.fillText('SALÓN', 292, 147);
-    context.fillText('BAÑO', 132, 214);
-    context.fillText('DORMITORIO', 266, 299);
-    context.fillText('PATIO', 454, 180);
+    context.save();
+    if (desktopPhoto) context.scale(1, 1.8);
+    const walls = [
+      [
+        [-226, -122],
+        [214, -129],
+        [220, 116],
+        [-207, 126],
+        [-226, -122]
+      ],
+      [
+        [-88, -124],
+        [-84, -12],
+        [-222, -8]
+      ],
+      [
+        [-84, -8],
+        [-92, 126]
+      ],
+      [
+        [-88, 54],
+        [82, 48],
+        [80, 121]
+      ],
+      [
+        [82, -127],
+        [75, 48]
+      ],
+      [
+        [75, 48],
+        [218, 44]
+      ],
+      [
+        [-207, 20],
+        [-88, 18]
+      ],
+      [
+        [-88, -8],
+        [75, -4]
+      ]
+    ];
+    const drawWall = (offsetX = 0, offsetY = 0) => {
+      context.beginPath();
+      for (const [index, points] of walls.entries()) {
+        context.moveTo(points[0][0] + offsetX, points[0][1] + offsetY);
+        for (const point of points.slice(1)) {
+          context.lineTo(point[0] + offsetX, point[1] + offsetY);
+        }
+        if (index === 1) context.moveTo(-84 + offsetX, -8 + offsetY);
+      }
+      context.stroke();
+    };
+    context.strokeStyle = '#2c3b50';
+    context.lineWidth = 4.6;
+    context.lineCap = 'round';
+    context.lineJoin = 'round';
+    drawWall();
+    context.globalAlpha = 0.2;
+    context.lineWidth = 2;
+    drawWall(2, -1);
+    context.globalAlpha = 1;
+
+    context.fillStyle = '#30415a';
+    context.font = 'italic 17px cursive';
+    context.rotate(-0.015);
+    context.fillText('Cocina', -185, -62);
+    context.fillText('Salón', -23, -65);
+    context.fillText('Baño', -185, 42);
+    context.fillText('Dormitorio', -159, 101);
+    context.fillText('Patio', 122, -16);
+    context.fillText('Entrada', 11, 151);
+    context.restore();
+    context.restore();
+    context.restore();
     return canvas.toDataURL('image/png');
-  });
+  }, desktop);
   return Buffer.from(dataUrl.slice(dataUrl.indexOf(',') + 1), 'base64');
 }
 
@@ -141,6 +397,7 @@ async function screenshot(
   console.info(
     `[visual:${name}] ${JSON.stringify({ viewport: page.viewportSize(), ...viewportState })}`
   );
+  await page.mouse.move(-20, -20);
   const root = process.env.E2E_SCREENSHOT_DIR ?? join(process.cwd(), '.e2e-screenshots');
   const path = join(root, 'household-plan-tasks', test.info().project.name, `${name}.png`);
   await mkdir(dirname(path), { recursive: true });
@@ -160,6 +417,21 @@ async function captureResponsiveScreenshot(
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
     .toBeLessThanOrEqual(viewport.width);
   await screenshot(page, name, viewport);
+}
+
+async function openPlanZoneList(page: Page): Promise<void> {
+  const advancedSettings = page.locator('.plan-editor__advanced-settings');
+  const zoneDisclosure = page.locator('.plan-details__zones-disclosure');
+  if ((await zoneDisclosure.getAttribute('open')) === null) {
+    await expect(advancedSettings).toBeVisible();
+    if ((await advancedSettings.getAttribute('open')) === null)
+      await advancedSettings.locator('summary').click();
+    await expect(zoneDisclosure).toBeVisible();
+    await zoneDisclosure.locator('summary').click();
+  }
+  await expect(zoneDisclosure).toHaveAttribute('open', '');
+  await expect(advancedSettings).not.toHaveAttribute('open');
+  await expect(zoneDisclosure).toBeVisible();
 }
 
 async function primaryButtonContrast(page: Page, selector: string): Promise<number[]> {
@@ -235,10 +507,15 @@ async function choosePickerOption(
   const trigger = page.getByRole('button', { name: labelPattern });
   await trigger.scrollIntoViewIfNeeded();
   await trigger.click();
-  await page.getByRole('option', { name: optionName, exact: true }).click();
+  await page.getByRole('option', { name: optionName }).click();
 }
 
-async function assignZone(page: Page, zoneName: string, memberIndices: number[]): Promise<void> {
+async function assignZone(
+  page: Page,
+  zoneName: string,
+  memberIndices: number[],
+  persist = true
+): Promise<void> {
   const zone = page.locator('.plan-details__area').filter({ hasText: zoneName }).first();
   const mapZones = page.locator('.plan-canvas [data-space-id]');
   const mapZoneIndex = await mapZones.evaluateAll(
@@ -305,7 +582,7 @@ async function assignZone(page: Page, zoneName: string, memberIndices: number[])
   expect(selectedIndices).toEqual(wantsShared ? [] : memberIndices);
 
   const saveButton = assignment.locator('[data-test="plan-zone-assignment-save"]');
-  if (await saveButton.isEnabled()) {
+  if (persist && (await saveButton.isEnabled())) {
     const save = page.waitForResponse(
       (response) =>
         response.request().method() === 'PUT' &&
@@ -323,7 +600,7 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   browser
 }, testInfo) => {
   const mobile = testInfo.project.name === 'mobile-chrome';
-  const viewport = mobile ? { width: 390, height: 844 } : { width: 1440, height: 900 };
+  const viewport = mobile ? { width: 390, height: 950 } : { width: 1280, height: 970 };
 
   await registerUser(page, 'Ana');
   await createHousehold(page, 'Hogar sintético de plano y tareas');
@@ -373,23 +650,26 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
       const tabLayout = await householdTabs.evaluate((element) =>
         Array.from(element.querySelectorAll<HTMLButtonElement>('[role="tab"]')).map((tab) => {
           const bounds = tab.getBoundingClientRect();
+          const labelBounds = document.createRange();
+          labelBounds.selectNodeContents(tab);
+          const label = labelBounds.getBoundingClientRect();
           return {
+            text: tab.innerText,
             left: bounds.left,
             right: bounds.right,
-            scrollWidth: tab.scrollWidth,
-            clientWidth: tab.clientWidth
+            width: bounds.width,
+            labelLeft: label.left,
+            labelRight: label.right
           };
         })
       );
       expect(tabLayout, `all six household tabs exist at ${width}px`).toHaveLength(6);
-      for (const tab of tabLayout) {
-        expect(
-          tab.scrollWidth,
-          `household tab labels do not overlap at ${width}px`
-        ).toBeLessThanOrEqual(tab.clientWidth + 1);
-      }
       for (let index = 1; index < tabLayout.length; index += 1) {
         expect(tabLayout[index].left).toBeGreaterThanOrEqual(tabLayout[index - 1].right - 1);
+        expect(
+          tabLayout[index].labelLeft,
+          `household tab labels do not overlap at ${width}px: ${JSON.stringify(tabLayout)}`
+        ).toBeGreaterThanOrEqual(tabLayout[index - 1].labelRight - 1);
       }
     }
     await page.setViewportSize({ width: 320, height: 568 });
@@ -400,21 +680,21 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     await page.keyboard.press('End');
     await expect(settingsTab).toBeFocused();
     await expect(settingsTab).toHaveAttribute('aria-selected', 'true');
-    const [settingsBounds, tabsBounds] = await Promise.all([
-      settingsTab.boundingBox(),
-      householdTabs.boundingBox()
-    ]);
-    const tabsScrollLeft = await householdTabs.evaluate((element) => element.scrollLeft);
-    expect(settingsBounds).not.toBeNull();
-    expect(tabsBounds).not.toBeNull();
-    expect(settingsBounds!.x).toBeGreaterThanOrEqual(tabsBounds!.x - 1);
-    expect(settingsBounds!.x + settingsBounds!.width).toBeLessThanOrEqual(
-      tabsBounds!.x + tabsBounds!.width + 1
-    );
-    expect(
-      tabsScrollLeft,
-      'keyboard selection scrolls a narrow household tab into view'
-    ).toBeGreaterThan(0);
+    await expect(page).toHaveURL(/tab=settings/);
+    await expect
+      .poll(async () => {
+        return householdTabs.evaluate((element) => {
+          const selected = element.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+          const selectedBounds = selected?.getBoundingClientRect();
+          const listBounds = element.getBoundingClientRect();
+          return (
+            !!selectedBounds &&
+            selectedBounds.left >= listBounds.left - 1 &&
+            selectedBounds.right <= listBounds.right + 1
+          );
+        });
+      })
+      .toBe(true);
     await planTab.click();
     await expect(planTab).toHaveAttribute('aria-selected', 'true');
     await page.setViewportSize(viewport);
@@ -423,11 +703,29 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   await expect(page.locator('[data-test="plan-method-canvas"]')).toBeVisible();
   await expect(page.locator('[data-test="plan-method-photo"]')).toBeVisible();
   await expect(page.locator('[data-test="plan-method-guided"]')).toBeVisible();
+  await expect(
+    page.locator('.plan-method-card[aria-pressed="true"]'),
+    'the three entry methods stay neutral until the user chooses one'
+  ).toHaveCount(0);
   await page.locator('[data-test="plan-dwelling-house"]').click();
   await expect(
     page.locator('.plan-setup__dwelling-card[aria-pressed="true"]'),
     'only one dwelling type may appear selected'
   ).toHaveCount(1);
+  const selectedDwellingIcon = await page
+    .locator('.plan-setup__dwelling-card[aria-pressed="true"] svg path')
+    .first()
+    .evaluate((path) => {
+      const probe = document.createElement('span');
+      probe.style.color = 'var(--primary)';
+      document.body.append(probe);
+      const primary = getComputedStyle(probe).color;
+      probe.remove();
+      return { stroke: getComputedStyle(path).stroke, primary };
+    });
+  expect(selectedDwellingIcon.stroke, 'the chosen home type uses the prototype orange icon').toBe(
+    selectedDwellingIcon.primary
+  );
   const floorCountPicker = page.locator('[data-test="plan-floor-count"]');
   await expect(floorCountPicker.locator('button.picker__trigger')).toBeVisible();
   await floorCountPicker.locator('button.picker__trigger').click();
@@ -451,6 +749,23 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     expect(
       Math.abs(floorCountAlignment.labelCenter - floorCountAlignment.pickerCenter)
     ).toBeLessThanOrEqual(1);
+    const methodIcon = await page.locator('.plan-method-card__icon').first().boundingBox();
+    expect(
+      methodIcon?.width,
+      'mobile entry icons match the approved drawing scale'
+    ).toBeGreaterThanOrEqual(56);
+    const methodTitle = await page.locator('.plan-method-card strong').first().boundingBox();
+    expect(methodTitle).not.toBeNull();
+    expect(
+      (methodIcon?.x ?? 0) + (methodIcon?.width ?? 0),
+      'the enlarged method glyph keeps clear of its title'
+    ).toBeLessThanOrEqual(methodTitle!.x - 4);
+  } else {
+    const methodIcon = await page.locator('.plan-method-card__icon').first().boundingBox();
+    expect(
+      methodIcon?.width,
+      'desktop entry icons match the approved drawing scale'
+    ).toBeGreaterThanOrEqual(96);
   }
   for (const ratio of await primaryButtonContrast(page, '[data-test="plan-start"]')) {
     expect(ratio, 'primary plan actions meet WCAG AA in both themes').toBeGreaterThanOrEqual(4.5);
@@ -472,6 +787,8 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   await expect(page.locator('[data-test="plan-canvas-toolbar"]')).toBeVisible();
   await expect(page.locator('[data-test="plan-undo"]')).toBeVisible();
   await expect(page.locator('[data-test="plan-redo"]')).toBeVisible();
+  await expect(page.locator('[data-test="plan-undo"] svg')).toBeVisible();
+  await expect(page.locator('[data-test="plan-redo"] svg')).toBeVisible();
   await expect(page.locator('[data-test="plan-floor-tabs"] .plan-floor-tabs__tab')).toHaveCount(2);
   if (mobile) {
     await expect(page.locator('.plan-editor__toolbar-actions .plan-canvas__snap')).toBeHidden();
@@ -493,6 +810,14 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     );
   }
   await expect(page.locator('.plan-canvas')).toHaveAttribute('role', 'group');
+  const selectPointerFill = await page
+    .locator('.plan-tool')
+    .first()
+    .locator('svg path')
+    .evaluate((path) => getComputedStyle(path).fill);
+  expect(selectPointerFill, 'the selected pointer uses the prototype filled glyph').not.toBe(
+    'none'
+  );
   if (!mobile) {
     const starterCanvas = await page.locator('.plan-canvas').boundingBox();
     expect(starterCanvas?.width, 'desktop canvas uses the wide map area').toBeGreaterThanOrEqual(
@@ -501,10 +826,74 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   }
   await expect(page.locator('.plan-canvas [data-space-id]')).toHaveCount(7);
   await expect(page.locator('.plan-canvas svg[householdAreaGlyph]')).toHaveCount(7);
+  const starterGeometry = await page.locator('.plan-canvas').evaluate((svg) => {
+    const bedroom = svg.querySelector<SVGPolygonElement>(
+      '.plan-canvas__space[data-kind="bedroom"]'
+    );
+    const bedroomPoints = (bedroom?.getAttribute('points') ?? '')
+      .trim()
+      .split(/\s+/)
+      .map((point) => point.split(',').map(Number));
+    const nonRectangularRoom = bedroomPoints.some((point, index) => {
+      const next = bedroomPoints[(index + 1) % bedroomPoints.length];
+      return point[0] !== next[0] && point[1] !== next[1];
+    });
+    const angledWall = Array.from(svg.querySelectorAll<SVGLineElement>('.plan-canvas__wall')).some(
+      (wall) =>
+        wall.getAttribute('x1') !== wall.getAttribute('x2') &&
+        wall.getAttribute('y1') !== wall.getAttribute('y2')
+    );
+    return { nonRectangularRoom, angledWall };
+  });
+  expect(starterGeometry.nonRectangularRoom, 'the guided plan shows a non-rectangular room').toBe(
+    true
+  );
+  expect(starterGeometry.angledWall, 'the guided plan shows a diagonal wall').toBe(true);
   await expect(page.locator('.plan-canvas__door-leaf')).toHaveCount(4);
   await expect(page.locator('.plan-canvas__door-swing')).toHaveCount(4);
   await expect(page.locator('.plan-canvas__window-rail')).toHaveCount(6);
+  const kitchenFill = await page
+    .locator('.plan-canvas__space[data-kind="kitchen"]')
+    .first()
+    .evaluate((space) => getComputedStyle(space).fill);
+  expect(kitchenFill, 'unassigned indoor rooms stay white while drawing').toBe(
+    'rgb(255, 255, 255)'
+  );
+  const zoneDisclosure = page.locator('.plan-details__zones-disclosure');
+  await expect(page.locator('.plan-editor__advanced-settings')).toBeVisible();
+  await expect(zoneDisclosure, 'zone list is tucked into accessible More options').toBeHidden();
+  const prototypeGlyphSizes = await page.evaluate(() => ({
+    tool: document.querySelector('.plan-tool svg')?.getBoundingClientRect().width,
+    room: document.querySelector('.plan-room-chip svg')?.getBoundingClientRect().width
+  }));
+  expect(prototypeGlyphSizes).toEqual({ tool: 32, room: 32 });
   await screenshot(page, '02-plan-editor', viewport);
+  await openPlanZoneList(page);
+  for (const [label, kind] of [
+    ['Trastero', 'storage_room'],
+    ['Balcón', 'balcony'],
+    ['Tendedero', 'clothes_drying_area']
+  ] as const) {
+    await choosePickerOption(page, /Tipo de zona:/, label);
+    await page.locator('[data-test="plan-add-guided-space"]').click();
+    await expect(
+      page.locator(`.plan-canvas__space[data-kind="${kind}"]`),
+      `${label} catalogue option creates the expected area`
+    ).toHaveCount(1);
+    await page.locator('[data-test="plan-undo"]').click();
+    await expect(page.locator(`.plan-canvas__space[data-kind="${kind}"]`)).toHaveCount(0);
+  }
+  if ((await zoneDisclosure.getAttribute('open')) !== null)
+    await zoneDisclosure.locator('summary').click();
+  await expect(zoneDisclosure).not.toHaveAttribute('open', '');
+  const drawingTools = page.locator('.plan-canvas-toolbar__tools .plan-tool');
+  await expect(drawingTools).toHaveCount(4);
+  await page.locator('.plan-editor__advanced-settings > summary').click();
+  const drawAreaMode = page.locator('[data-test="plan-draw-area"]');
+  await expect(drawAreaMode).toBeVisible();
+  await drawAreaMode.click();
+  await expect(drawAreaMode).toHaveAttribute('aria-pressed', 'true');
+  await page.locator('.plan-canvas-toolbar__tools .plan-tool').first().click();
   if (mobile) {
     await captureResponsiveScreenshot(page, '02-plan-editor-320x568', {
       width: 320,
@@ -512,6 +901,78 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     });
     await page.setViewportSize(viewport);
   }
+  await openPlanZoneList(page);
+  await expect(zoneDisclosure).toHaveAttribute('open', '');
+  await choosePickerOption(page, /Tipo de zona:/, 'Otra zona personalizada');
+  const customAreaName = page.getByLabel('Nombre de la zona');
+  await customAreaName.fill('Sala de música');
+  await page.locator('[data-test="plan-add-guided-space"]').click();
+  const guidedCustomArea = page.locator(
+    '.plan-canvas__space[data-kind="custom"][aria-label="Sala de música"]'
+  );
+  await expect(guidedCustomArea).toBeVisible();
+  await expect(page.locator('[data-test="plan-selected-space"] h3')).toHaveText('Sala de música');
+
+  await page.locator('[data-test="plan-selected-space"] .plan-details__close').click();
+  await openPlanZoneList(page);
+  await choosePickerOption(page, /Tipo de zona:/, 'Otra zona personalizada');
+  await customAreaName.fill('Despacho en L');
+  await page.locator('.plan-editor__advanced-settings > summary').click();
+  await page.locator('[data-test="plan-draw-freeform"]').click();
+  await expect(page.locator('.plan-editor__advanced-settings')).not.toHaveAttribute('open', '');
+  const freeformCanvas = page.locator('.plan-canvas');
+  await freeformCanvas.scrollIntoViewIfNeeded();
+  const freeformTapPoints = await freeformCanvas.evaluate((element) => {
+    const svg = element as SVGSVGElement;
+    const matrix = svg.getScreenCTM();
+    if (!matrix) throw new Error('Plan SVG has no screen transform');
+    return [
+      [8200, 6800],
+      [9500, 6800],
+      [9500, 8300],
+      [8950, 8300],
+      [8950, 7500],
+      [8200, 7500]
+    ].map(([x, y]) => {
+      const point = svg.createSVGPoint();
+      point.x = x;
+      point.y = y;
+      const screen = point.matrixTransform(matrix);
+      return { x: screen.x, y: screen.y };
+    });
+  });
+  const freeformCanvasBounds = await freeformCanvas.boundingBox();
+  expect(freeformCanvasBounds).not.toBeNull();
+  for (const [index, point] of freeformTapPoints.entries()) {
+    if (mobile) {
+      await freeformCanvas.tap({
+        position: {
+          x: point.x - freeformCanvasBounds!.x,
+          y: point.y - freeformCanvasBounds!.y
+        }
+      });
+    } else {
+      await page.mouse.click(point.x, point.y);
+    }
+    await expect(
+      freeformCanvas.locator('.plan-canvas__drawing-outline, .plan-canvas__drawing-preview'),
+      `tap ${index + 1} must add a freeform vertex`
+    ).toHaveAttribute('points', /.+/);
+  }
+  await page.locator('[data-test="plan-freeform-finish"]').click();
+  const freeformArea = page.locator(
+    '.plan-canvas__space[data-kind="custom"][aria-label="Despacho en L"]'
+  );
+  await expect(freeformArea).toBeVisible();
+  const freeformVertexCount = await freeformArea.evaluate(
+    (element) => (element.getAttribute('points') ?? '').trim().split(/\s+/).length
+  );
+  expect(freeformVertexCount, 'a freeform zone keeps its concave six-corner shape').toBe(6);
+  await page.locator('[data-test="plan-undo"]').click();
+  await expect(freeformArea).toHaveCount(0);
+  await page.locator('[data-test="plan-undo"]').click();
+  await expect(guidedCustomArea).toHaveCount(0);
+
   const canvasAndDetails = await page.evaluate(() => {
     const canvas = document.querySelector('.plan-canvas__viewport')?.getBoundingClientRect();
     const details = document.querySelector('.plan-details')?.getBoundingClientRect();
@@ -556,10 +1017,21 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
 
   await page.locator('.plan-details__area').filter({ hasText: 'Cocina' }).first().click();
   await page.locator('.plan-details__selected-actions > summary').click();
-  await page.locator('.plan-details__rename summary').click();
+  const renameSummary = page.locator('.plan-details__rename summary');
+  const renameSummaryIsHitTarget = await renameSummary.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const hit = document.elementFromPoint(
+      bounds.x + bounds.width / 2,
+      bounds.y + bounds.height / 2
+    );
+    return hit === element || element.contains(hit);
+  });
+  expect(renameSummaryIsHitTarget, 'the actions menu is not obscured by the floor plan').toBe(true);
+  await renameSummary.click();
   const areaName = page.getByLabel('Nombre visible');
   await expect(areaName).toHaveValue('Cocina');
-  await areaName.fill('Cocina QA');
+  await areaName.fill('Cocina con isla');
+  await page.locator('.plan-details__selected-actions > summary').click();
   const selectedAreaClose = page.locator('[data-test="plan-selected-space"] .plan-details__close');
   await selectedAreaClose.click();
   const savePlan = page.locator('[data-test="plan-save"]');
@@ -574,22 +1046,37 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   expect(savedPlanResponse.status()).toBe(200);
   let savedPlanEnvelope = await savedPlanResponse.json();
   let savedPlan = savedPlanEnvelope.data.plan as HouseholdPlan;
-  const editedKitchen = savedPlan.floors[0].spaces.find((space) => space.label === 'Cocina QA');
+  const editedKitchen = savedPlan.floors[0].spaces.find(
+    (space) => space.label === 'Cocina con isla'
+  );
   expect(editedKitchen).toBeTruthy();
   const kitchenId = editedKitchen!.id;
-  if (mobile) {
-    await expect(
-      page.locator('.plan-details__area').filter({ hasText: 'Cocina QA' })
-    ).toBeVisible();
-  } else {
-    await expect(
-      page.locator('.plan-details__area').filter({ hasText: 'Cocina QA' })
-    ).toBeVisible();
-  }
+
+  // Keep the edited label verification, then restore the neutral fixture label for visual QA.
+  await openPlanZoneList(page);
+  await expect(
+    page.locator('.plan-details__area').filter({ hasText: 'Cocina con isla' })
+  ).toBeVisible();
+  await page.locator('.plan-details__area').filter({ hasText: 'Cocina con isla' }).click();
+  await page.locator('.plan-details__selected-actions > summary').click();
+  await page.locator('.plan-details__rename summary').click();
+  await page.getByLabel('Nombre visible').fill('Cocina');
+  await page.locator('.plan-details__selected-actions > summary').click();
+  await page.locator('[data-test="plan-selected-space"] .plan-details__close').click();
+  const restoreLabelResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'PUT' &&
+      new URL(response.url()).pathname.endsWith('/api/household/plan')
+  );
+  await page.locator('[data-test="plan-save"]').click();
+  savedPlanEnvelope = await (await restoreLabelResponse).json();
+  savedPlan = savedPlanEnvelope.data.plan as HouseholdPlan;
+  await openPlanZoneList(page);
+  await expect(page.locator('.plan-details__area').filter({ hasText: 'Cocina' })).toBeVisible();
   const floorTabs = page.locator('[data-test="plan-floor-tabs"]');
   await expect(floorTabs, 'floor switching should stay beside the drawing tools').toBeVisible();
   await expect(floorTabs.getByRole('button', { name: 'Planta baja' })).toBeVisible();
-  await page.locator('.plan-details__area').filter({ hasText: 'Cocina QA' }).click();
+  await page.locator('.plan-details__area').filter({ hasText: 'Cocina' }).first().click();
 
   const zoneAssignment = page.locator('[data-test="plan-zone-assignment"]');
   await expect(zoneAssignment).toBeVisible();
@@ -602,18 +1089,37 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     await expect(zoneAssignment.locator('.plan-zone-member--shared')).toBeVisible();
     await expect(page.locator('.plan-editor__header')).toBeVisible();
     await expect(page.locator('.plan-editor__header h2')).toHaveText('Plano de tu hogar');
+    const visibleAssignmentHeading = await page.locator('.plan-editor__header h2').boundingBox();
+    expect(
+      visibleAssignmentHeading?.width,
+      'the assignment title stays accessible without taking space absent from the approved screen'
+    ).toBeLessThanOrEqual(1);
+    const householdTabsBounds = await page.locator('.household-tabs').boundingBox();
+    expect(householdTabsBounds).not.toBeNull();
     await expect(page.locator('.plan-editor__toolbar')).toBeHidden();
     await expect(page.locator('.plan-editor__toolbar-actions')).toBeHidden();
     await expect(page.locator('.plan-canvas-toolbar')).toBeHidden();
     const floorTabsBounds = await page
       .locator('[data-test="plan-assignment-floor-tabs"]')
       .boundingBox();
+    const assignmentFloorTab = page
+      .locator('[data-test="plan-assignment-floor-tabs"] .plan-floor-tabs__tab')
+      .first();
+    await expect(assignmentFloorTab).toHaveCSS('border-top-width', '1px');
+    await expect(assignmentFloorTab).toHaveCSS('border-top-style', 'solid');
     const assignmentHeadingBounds = await page.locator('.plan-editor__header').boundingBox();
     const assignmentMapBounds = await page.locator('.plan-canvas__viewport').boundingBox();
     const assignmentSheetBounds = await page
       .locator('[data-test="plan-selected-space"]')
       .boundingBox();
     expect(floorTabsBounds).not.toBeNull();
+    expect(floorTabsBounds!.y).toBeGreaterThanOrEqual(
+      householdTabsBounds!.y + householdTabsBounds!.height
+    );
+    expect(
+      floorTabsBounds!.y,
+      'floor selection follows the household tabs without an extra heading block'
+    ).toBeLessThanOrEqual(householdTabsBounds!.y + householdTabsBounds!.height + 24);
     expect(assignmentHeadingBounds).not.toBeNull();
     expect(assignmentMapBounds).not.toBeNull();
     expect(assignmentSheetBounds).not.toBeNull();
@@ -623,6 +1129,10 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     expect(assignmentMapBounds!.y).toBeGreaterThanOrEqual(
       floorTabsBounds!.y + floorTabsBounds!.height
     );
+    expect(
+      assignmentMapBounds!.height,
+      'the floor plan remains the dominant visual in the mobile assignment view'
+    ).toBeGreaterThanOrEqual(350);
     expect(
       assignmentMapBounds!.y + assignmentMapBounds!.height,
       'the assignment sheet must not cover the floor plan'
@@ -679,7 +1189,8 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   expect((await zoneAssignmentSave).status()).toBe(200);
   await page.reload();
   await page.getByRole('tab', { name: 'Plano' }).click();
-  await page.locator('.plan-details__area').filter({ hasText: 'Cocina QA' }).click();
+  await openPlanZoneList(page);
+  await page.locator('.plan-details__area').filter({ hasText: 'Cocina' }).first().click();
   await expect(
     page.locator('[data-test="plan-zone-assignment"] [aria-pressed="true"]')
   ).toContainText(assignedMemberName ?? '');
@@ -688,7 +1199,7 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   await assignZone(page, 'Dormitorio', [2]);
   await assignZone(page, 'Patio', [0, 1, 2]);
   await assignZone(page, 'Jardín', [0, 1, 2]);
-  await assignZone(page, 'Cocina QA', [3]);
+  await assignZone(page, 'Cocina', [3], false);
   await expect(zoneAssignment.locator('[aria-pressed="true"]')).toHaveCount(1);
   await expect(zoneAssignment.locator('.plan-zone-member--shared')).toHaveAttribute(
     'aria-pressed',
@@ -696,11 +1207,18 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   );
   if (mobile) {
     const assignmentSheet = page.locator('[data-test="plan-selected-space"]');
-    await expect(assignmentSheet.locator('h3')).toHaveText('Cocina QA');
+    await expect(assignmentSheet.locator('h3')).toHaveText('Cocina');
+    const selectedState = assignmentSheet.locator('.plan-details__selected-state');
+    await expect(selectedState).toHaveText('Compartida');
     const memberButtons = assignmentSheet.locator(
       '[data-test="plan-zone-member"], .plan-zone-member--shared'
     );
     expect(await memberButtons.count()).toBe(4);
+    const memberButtonBounds = await memberButtons.first().boundingBox();
+    expect(
+      memberButtonBounds?.height,
+      'the mobile assignment sheet keeps the four member choices easy to scan and tap'
+    ).toBeGreaterThanOrEqual(100);
     const memberRows = await memberButtons.evaluateAll((elements) =>
       elements.map((element) => element.getBoundingClientRect().y)
     );
@@ -724,7 +1242,19 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     expect(detailsBounds).not.toBeNull();
     expect(detailsBounds!.x).toBeGreaterThanOrEqual(canvasBounds!.x + canvasBounds!.width);
   }
+  const selectedZone = page.locator('.plan-canvas__space--selected');
+  await expect(selectedZone).toHaveAttribute('aria-label', 'Cocina');
+  await expect(selectedZone).toHaveCSS('fill', 'rgb(255, 224, 204)');
+  // Force Chromium to rasterize the selected SVG path before the viewport capture.
+  await selectedZone.screenshot({ animations: 'disabled' });
   await screenshot(page, '04-zone-assignment', viewport);
+  const finalAssignmentSave = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'PUT' &&
+      new URL(response.url()).pathname.endsWith('/api/household/plan/assignments')
+  );
+  await page.locator('[data-test="plan-zone-assignment-save"]').click();
+  expect((await finalAssignmentSave).status()).toBe(200);
   const assignmentClose = page.locator('[data-test="plan-selected-space"] .plan-details__close');
   if (await assignmentClose.isVisible()) await assignmentClose.click();
 
@@ -746,7 +1276,7 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   await page.mouse.down();
   await page.mouse.move(wallEnd.x, wallEnd.y, { steps: 4 });
   await page.mouse.up();
-  await expect(canvas.locator('.plan-canvas__wall--exterior')).toHaveCount(5);
+  await expect(canvas.locator('.plan-canvas__wall--exterior')).toHaveCount(6);
   const wallDetails = page.locator('[data-test="plan-wall-details"]');
   await expect(wallDetails).toBeVisible();
   await wallDetails.getByRole('button', { name: 'Añadir puerta', exact: true }).click();
@@ -762,7 +1292,7 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   expect(vectorResponse.status()).toBe(200);
   savedPlanEnvelope = await vectorResponse.json();
   savedPlan = savedPlanEnvelope.data.plan;
-  expect(savedPlan.floors[0].walls).toHaveLength(11);
+  expect(savedPlan.floors[0].walls).toHaveLength(12);
   expect(savedPlan.floors[0].openings[0].isMainEntrance).toBe(true);
 
   const canvasSpace = canvas.locator('[data-space-id]').first();
@@ -775,8 +1305,9 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
 
   await screenshot(page, 'plan-desktop-or-mobile', viewport);
   if (mobile) await screenshot(page, 'plan-canvas-mobile', viewport);
-  if (mobile) await page.locator('[data-test="plan-selected-space"] .plan-details__close').click();
+  await page.locator('[data-test="plan-selected-space"] .plan-details__close').click();
 
+  await openPlanZoneList(page);
   await page.locator('.plan-editor__advanced-settings summary').click();
   await page.getByRole('button', { name: 'Añadir planta' }).click();
   const floorTab = page.locator('[data-test="plan-floor-tabs"]').getByRole('button', {
@@ -838,10 +1369,12 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
 
   // This browser-level stub exercises the upload/review UI without contacting an AI provider.
   // Real request_format, geometry validation, and persistence are covered by isolated server tests.
-  const proposedPlan = landscapePlan(savedPlan);
-  proposedPlan.floors[0].spaces.find((space) => space.id === kitchenId)!.label = 'Cocina con isla';
-  const followupPlan = structuredClone(proposedPlan);
-  followupPlan.floors[0].spaces.find((space) => space.id === kitchenId)!.label = 'Cocina ampliada';
+  const proposedPlan = irregularSyntheticPlan(savedPlan);
+  proposedPlan.floors[0].spaces.find((space) => space.id === kitchenId)!.label = 'Cocina';
+  const followupPlan = addAseoByBedrooms(proposedPlan);
+  const chatCurrentPlan = portraitPlan(savedPlan);
+  const chatDraftPlan = portraitPlan(proposedPlan);
+  const chatProposalPlan = portraitPlan(followupPlan);
   const proposalRequestBodies: string[] = [];
   await page.route('**/api/household/plan/proposal', async (route) => {
     const request = route.request();
@@ -851,9 +1384,18 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
         .postDataBuffer()
         ?.toString(contentType.includes('multipart/form-data') ? 'latin1' : 'utf8') ?? '';
     proposalRequestBodies.push(requestBody);
-    const isFollowup = proposalRequestBodies.length > 1;
-    const requestedDraft = isFollowup ? proposedPlan : savedPlan;
-    const result = isFollowup ? followupPlan : proposedPlan;
+    const requestNumber = proposalRequestBodies.length;
+    const requestedDraft =
+      requestNumber === 1 ? savedPlan : requestNumber === 2 ? chatDraftPlan : followupPlan;
+    const result =
+      requestNumber === 1
+        ? proposedPlan
+        : requestNumber === 2
+          ? chatProposalPlan
+          : taskPlan(followupPlan);
+    const modifiedLivingRoomId = proposedPlan.floors[0].spaces.find(
+      (space) => space.kind === 'living_room'
+    )!.id;
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -861,12 +1403,15 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
         success: true,
         data: {
           baseVersion: savedPlanEnvelope.data.version,
-          current: savedPlan,
+          current: requestNumber === 1 ? savedPlan : chatCurrentPlan,
           draft: requestedDraft,
           proposal: result,
           diff: {
-            addedSpaceIds: [],
-            modifiedSpaceIds: result.floors[0].spaces.map((space) => space.id),
+            addedSpaceIds: requestNumber === 2 ? ['space-followup-aseo'] : [],
+            modifiedSpaceIds:
+              requestNumber === 1
+                ? result.floors[0].spaces.map((space) => space.id)
+                : [requestNumber === 2 ? modifiedLivingRoomId : 'space-followup-aseo'],
             removedSpaceIds: []
           },
           orphanedTaskIds: []
@@ -883,13 +1428,13 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
       proposalWrites.push(request.url());
     }
   });
-  const planImage = await syntheticPlanImage(page);
+  const planImage = await syntheticPlanImage(page, !mobile);
   await page.locator('.plan-file input').setInputFiles({
-    name: 'plano-sintetico.png',
+    name: 'boceto-hogar.png',
     mimeType: 'image/png',
     buffer: planImage
   });
-  await page.getByLabel('¿Qué quieres cambiar?').fill('Amplía la cocina hacia el patio');
+  await page.getByLabel('¿Qué quieres cambiar?').fill('Convierte el boceto en un plano editable.');
   await page.getByRole('button', { name: 'Generar propuesta' }).click();
   await expect(page.locator('[data-test="plan-proposal-review"]')).toBeVisible();
   await expect(page.locator('.plan-editor__header h2')).toHaveText('Convertir boceto en plano');
@@ -898,6 +1443,10 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   await expect(page.getByRole('button', { name: 'Cambiar', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Continuar editando', exact: true })).toBeVisible();
   await expect(page.locator('[data-test="plan-attachment-preview"]')).toBeVisible();
+  await expect(
+    page.locator('.plan-review__photo-source-actions svg'),
+    'photo actions keep their upload and camera glyphs'
+  ).toHaveCount(2);
   await expect
     .poll(() =>
       page.locator('[data-test="plan-attachment-preview"]').evaluate((image) => {
@@ -907,26 +1456,35 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     )
     .toBeGreaterThan(300);
   if (mobile) {
-    const sourceImageWidth = await page
-      .locator('[data-test="plan-attachment-preview"]')
-      .evaluate((element) => {
-        const image = element as HTMLImageElement;
-        const bounds = image.getBoundingClientRect();
-        const scale = Math.min(
-          bounds.width / image.naturalWidth,
-          bounds.height / image.naturalHeight
-        );
-        return image.naturalWidth * scale;
-      });
+    const sourceImage = page.locator('[data-test="plan-attachment-preview"]');
+    const sourceImageWidth = await sourceImage.evaluate((element) => {
+      const image = element as HTMLImageElement;
+      const bounds = image.getBoundingClientRect();
+      const scale = Math.min(
+        bounds.width / image.naturalWidth,
+        bounds.height / image.naturalHeight
+      );
+      return image.naturalWidth * scale;
+    });
+    const sourceImageBounds = await sourceImage.boundingBox();
+    const sourceActionsBounds = await page
+      .locator('.plan-review__photo-source-actions')
+      .boundingBox();
     expect(
       sourceImageWidth,
       'the uploaded sketch should be readable at the same prominence as the reference'
     ).toBeGreaterThanOrEqual(260);
+    expect(sourceImageBounds).not.toBeNull();
+    expect(sourceActionsBounds).not.toBeNull();
+    expect(
+      sourceActionsBounds!.y - (sourceImageBounds!.y + sourceImageBounds!.height),
+      'photo source actions keep the breathing room shown in the approved mobile screen'
+    ).toBeGreaterThanOrEqual(8);
   }
   await expect.poll(() => proposalRequestBodies[0] ?? '').toContain('name="image"');
   expect(proposalRequestBodies[0]).toContain('name="draftPlan"');
   expect(proposalRequestBodies[0]).toContain('name="prompt"');
-  expect(proposalRequestBodies[0]).toContain('plano-sintetico.png');
+  expect(proposalRequestBodies[0]).toContain('boceto-hogar.png');
   await expect(page.locator('.plan-review__photo-result')).toContainText('Cocina');
   const proposalOutlineWidth = await page
     .locator('.plan-review__photo-result .plan-compare-canvas__space')
@@ -939,6 +1497,22 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   await expect(page.locator('[data-test="plan-proposal-chat"]')).toBeVisible();
   const proposedMap = page.locator('.plan-review__photo-result .plan-compare-canvas');
   await expect(proposedMap.locator('.plan-compare-canvas__wall--exterior')).not.toHaveCount(0);
+  const irregularGeometry = await proposedMap.evaluate((map) => {
+    const concaveSpace = map.querySelector<SVGPolygonElement>(
+      '.plan-compare-canvas__space[data-kind="garden"]'
+    );
+    const vertices = (concaveSpace?.getAttribute('points') ?? '').trim().split(/\s+/);
+    const diagonalWall = Array.from(
+      map.querySelectorAll<SVGLineElement>('.plan-compare-canvas__wall')
+    ).some(
+      (wall) =>
+        wall.getAttribute('x1') !== wall.getAttribute('x2') &&
+        wall.getAttribute('y1') !== wall.getAttribute('y2')
+    );
+    return { vertexCount: vertices.length, diagonalWall };
+  });
+  expect(irregularGeometry.vertexCount, 'photo proposal preserves the concave outline').toBe(6);
+  expect(irregularGeometry.diagonalWall, 'photo proposal preserves an oblique wall').toBe(true);
   await expect(proposedMap.locator('.plan-canvas__door-swing')).not.toHaveCount(0);
   await expect(proposedMap.locator('.plan-canvas__window-rail')).not.toHaveCount(0);
   if (mobile) {
@@ -948,6 +1522,14 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
       proposalMap!.width,
       'photo proposal should read as the main visual, not a thumbnail'
     ).toBeGreaterThan(200);
+    expect(
+      proposalMap!.height,
+      'the proposal map should have the same prominence as the uploaded sketch'
+    ).toBeGreaterThanOrEqual(205);
+    expect(
+      proposalMap!.height,
+      'the mobile proposal map should match the approved portrait proportion'
+    ).toBeLessThanOrEqual(220);
   }
   if (mobile) {
     await page.evaluate(() => window.scrollTo(0, 0));
@@ -958,6 +1540,7 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
       .boundingBox();
     const stickyActions = await page.locator('.plan-review__actions--photo').boundingBox();
     const initialBottomNavigation = await page.locator('.bottom-nav').boundingBox();
+    await screenshot(page, '03-photo-layout-audit', viewport);
     expect(initialApply).not.toBeNull();
     expect(initialChat).not.toBeNull();
     expect(initialContinue).not.toBeNull();
@@ -1080,11 +1663,105 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   }
   await page.locator('[data-test="plan-proposal-chat"]').click();
   await expect(page.locator('[data-test="plan-proposal-chat-view"]')).toBeVisible();
+  await expect(page.locator('[data-test="plan-chat-continuation"]')).toHaveCount(4);
   await expect(page.locator('.plan-editor__header h2')).toHaveText('Plano');
   await expect(page.locator('.plan-review__header-actions .plan-file')).toBeVisible();
+  await expect(
+    page.locator('.plan-chat__assistant-avatar svg'),
+    'the assistant reply retains its home mark'
+  ).toBeVisible();
+  await expect(
+    page.locator('[data-test="plan-proposal-discard"] svg'),
+    'undo is represented by its circular arrow icon'
+  ).toBeVisible();
+  const currentPlanCard = page.locator('.plan-review__compare-card--current');
+  const proposedPlanCard = page.locator('.plan-review__compare-card--proposal');
+  if (mobile) {
+    const comparisonTabs = page.locator('.plan-review__mobile-tabs');
+    await expect(comparisonTabs).toBeVisible();
+    await expect(comparisonTabs.locator('button')).toHaveCount(2);
+    await expect(proposedPlanCard).toBeVisible();
+    await expect(
+      currentPlanCard,
+      'the selected proposal tab shows one large plan, not two reduced thumbnails'
+    ).toBeHidden();
+    await expect(page.locator('.plan-compare-canvas')).toHaveCount(2);
+    const proposedCardBounds = await proposedPlanCard.boundingBox();
+    expect(proposedCardBounds).not.toBeNull();
+    const proposedCanvasBounds = await proposedPlanCard
+      .locator('.plan-compare-canvas')
+      .boundingBox();
+    expect(proposedCanvasBounds).not.toBeNull();
+    const comparisonTabsBounds = await comparisonTabs.boundingBox();
+    expect(comparisonTabsBounds).not.toBeNull();
+    expect(
+      proposedCardBounds!.y,
+      'the selected mobile plan sits below the before/after tabs'
+    ).toBeGreaterThanOrEqual(comparisonTabsBounds!.y + comparisonTabsBounds!.height);
+    expect(proposedCanvasBounds!.width).toBeGreaterThanOrEqual(viewport.width * 0.74);
+    expect(
+      proposedCanvasBounds!.height,
+      'the selected mobile comparison map matches the prototype size'
+    ).toBeGreaterThanOrEqual(260);
+    expect(proposedCanvasBounds!.height).toBeLessThanOrEqual(330);
+    const currentTab = comparisonTabs.locator('button').nth(0);
+    await currentTab.click();
+    await expect(currentPlanCard).toBeVisible();
+    await expect(proposedPlanCard).toBeHidden();
+    await expect(currentTab).toHaveAttribute('aria-pressed', 'true');
+    await comparisonTabs.locator('button').nth(1).click();
+    await expect(currentPlanCard).toBeHidden();
+    await expect(proposedPlanCard).toBeVisible();
+    await expect(comparisonTabs.locator('button').nth(1)).toHaveAttribute('aria-pressed', 'true');
+  } else {
+    await expect(page.locator('.plan-review__mobile-tabs')).toBeHidden();
+    await expect(currentPlanCard).toBeVisible();
+    await expect(proposedPlanCard).toBeVisible();
+    await expect(page.locator('.plan-compare-canvas')).toHaveCount(2);
+    const currentCardBounds = await currentPlanCard.boundingBox();
+    const proposedCardBounds = await proposedPlanCard.boundingBox();
+    const chatCardBounds = await page.locator('.plan-chat').boundingBox();
+    expect(currentCardBounds).not.toBeNull();
+    expect(proposedCardBounds).not.toBeNull();
+    expect(chatCardBounds).not.toBeNull();
+    expect(proposedCardBounds!.x).toBeGreaterThanOrEqual(
+      currentCardBounds!.x + currentCardBounds!.width
+    );
+    expect(chatCardBounds!.x).toBeGreaterThanOrEqual(
+      proposedCardBounds!.x + proposedCardBounds!.width
+    );
+    await expect(page.locator('.plan-chat__continuations-heading')).toHaveText(
+      '¿Cómo quieres seguir?'
+    );
+    const proposedCanvasBounds = await proposedPlanCard
+      .locator('.plan-compare-canvas')
+      .boundingBox();
+    expect(proposedCanvasBounds).not.toBeNull();
+    expect(
+      proposedCanvasBounds!.height,
+      'desktop before/after plans should match the prototype height'
+    ).toBeGreaterThanOrEqual(380);
+  }
   await expect(page.locator('[data-test="plan-return-to-canvas"]')).toHaveText('Volver al lienzo');
   if (mobile) {
     await page.evaluate(() => window.scrollTo(0, 0));
+    await expect(page.locator('.plan-review__mobile-tabs')).toBeVisible();
+    await expect(page.locator('.plan-review__compare-card')).toHaveCount(2);
+    const currentPlanCard = page.locator('.plan-review__compare-card--current');
+    const proposalPlanCard = page.locator('.plan-review__compare-card--proposal');
+    await expect(proposalPlanCard).toBeVisible();
+    await expect(currentPlanCard).toBeHidden();
+    const beforeBounds = await currentPlanCard.boundingBox();
+    const afterBounds = await proposalPlanCard.boundingBox();
+    expect(beforeBounds).toBeNull();
+    expect(afterBounds).not.toBeNull();
+    await expect(proposalPlanCard).toBeVisible();
+    await expect(currentPlanCard).toBeHidden();
+    const selectedMap = await proposalPlanCard.locator('.plan-compare-canvas').boundingBox();
+    expect(selectedMap).not.toBeNull();
+    expect(selectedMap!.width).toBeGreaterThanOrEqual(viewport.width * 0.74);
+    expect(selectedMap!.height).toBeGreaterThanOrEqual(260);
+    expect(selectedMap!.height).toBeLessThanOrEqual(280);
     const userMessage = await page.locator('.plan-chat__user-message').boundingBox();
     const assistantMessage = await page.locator('.plan-chat__assistant-message').boundingBox();
     const applyButton = await page
@@ -1100,7 +1777,72 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
       bottomNavigation!.y - 8
     );
     expect(applyButton!.y + applyButton!.height).toBeLessThanOrEqual(bottomNavigation!.y - 8);
+    const continuationButtons = await page
+      .locator('[data-test="plan-chat-continuation"]')
+      .evaluateAll((elements) =>
+        elements.map((element) => {
+          const bounds = element.getBoundingClientRect();
+          return { top: bounds.top, bottom: bounds.bottom };
+        })
+      );
+    expect(continuationButtons).toHaveLength(4);
+    expect(
+      continuationButtons.every(
+        (bounds) => bounds.top >= 0 && bounds.bottom <= bottomNavigation!.y - 8
+      ),
+      `all chat follow-up choices should be visible above mobile navigation: ${JSON.stringify({ continuationButtons, navigationTop: bottomNavigation!.y })}`
+    ).toBe(true);
   }
+  const previewControls = page.locator('[data-test="plan-chat-map-controls"]');
+  await expect(previewControls).toBeVisible();
+  await expect(previewControls.locator('button')).toHaveCount(3);
+  const previewControlsBounds = await previewControls.boundingBox();
+  const proposalPreviewBounds = await page
+    .locator('.plan-review__compare-card--proposal .plan-compare-canvas')
+    .boundingBox();
+  expect(previewControlsBounds).not.toBeNull();
+  expect(proposalPreviewBounds).not.toBeNull();
+  expect(previewControlsBounds!.y).toBeGreaterThanOrEqual(
+    proposalPreviewBounds!.y + proposalPreviewBounds!.height
+  );
+  await expect(page.locator('[data-test="plan-preview-zoom"]')).toHaveText('100%');
+  const proposalDrawing = page.locator(
+    '.plan-review__compare-card--proposal .plan-compare-canvas__drawing'
+  );
+  await previewControls.locator('[data-test="plan-chat-zoom-in"]').click();
+  await expect(page.locator('[data-test="plan-preview-zoom"]')).toHaveText('110%');
+  await expect(proposalDrawing).toHaveAttribute('transform', /scale\(1\.1\)/);
+  await previewControls.locator('[data-test="plan-chat-fit"]').click();
+  await expect(page.locator('[data-test="plan-preview-zoom"]')).toHaveText('100%');
+  await expect(proposalDrawing).toHaveAttribute('transform', /scale\(1\)/);
+  expect(proposalWrites).toHaveLength(0);
+
+  // Continue the proposal as a true text-only AI revision so the approved chat
+  // screen shows a before/after plan with a concrete added washroom.
+  await page.locator('[data-test="plan-return-to-canvas"]').click();
+  await expect(page.locator('[data-test="plan-proposal-review"]')).toBeHidden();
+  await expect(page.locator('.plan-editor__toolbar')).toBeVisible();
+  await page.locator('.plan-editor__advanced-settings > summary').click();
+  await page.getByLabel('¿Qué quieres cambiar?').fill('Añade un aseo junto a los dormitorios');
+  await page.locator('[data-test="plan-request-proposal"]').click();
+  await expect(page.locator('[data-test="plan-proposal-chat-view"]')).toBeVisible();
+  await expect.poll(() => proposalRequestBodies.length).toBe(2);
+  expect(proposalRequestBodies[1]).toContain('"draftPlan"');
+  expect(proposalRequestBodies[1]).toContain('"prompt"');
+  expect(proposalRequestBodies[1]).toContain('Añade un aseo junto a los dormitorios');
+  expect(proposalRequestBodies[1]).not.toContain('name="image"');
+  await expect(
+    page.locator('.plan-review__compare-card--proposal .plan-compare-canvas__label').filter({
+      hasText: 'Aseo'
+    })
+  ).toBeVisible();
+  await expect(page.locator('.plan-chat__user-message')).toContainText(
+    'Añade un aseo junto a los dormitorios'
+  );
+  await expect(page.locator('[data-test="plan-proposal-apply"]')).toBeVisible();
+  await expect(page.locator('[data-test="plan-chat-continuation"]')).toHaveCount(4);
+  if (mobile) await expect(page.locator('.plan-review__mobile-tabs')).toBeVisible();
+  expect(proposalWrites).toHaveLength(0);
   await screenshot(page, '06-chat-adjustment', viewport);
   if (mobile) {
     await captureResponsiveScreenshot(page, '06-chat-adjustment-320x568', {
@@ -1109,31 +1851,30 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     });
     await page.setViewportSize(viewport);
   }
-  expect(proposalWrites).toHaveLength(0);
 
   await page.locator('[data-test="plan-chat-photo-upload"]').setInputFiles({
-    name: 'seguimiento-sintetico.png',
+    name: 'boceto-ajuste.png',
     mimeType: 'image/png',
-    buffer: await syntheticPlanImage(page)
+    buffer: await syntheticPlanImage(page, !mobile)
   });
   await expect(page.locator('[data-test="plan-proposal-review"]')).toBeHidden();
   await expect(
-    page.locator('.plan-details__area').filter({ hasText: 'Cocina con isla' }),
+    page.locator('.plan-canvas__space-label').filter({ hasText: 'Cocina' }),
     'photo follow-up must keep the proposed geometry as an unsaved draft'
   ).toBeVisible();
-  await expect(page.locator('.plan-file__selected')).toContainText('seguimiento-sintetico.png');
+  await expect(page.locator('.plan-file__selected')).toContainText('boceto-ajuste.png');
   const followupPrompt = page.getByLabel('¿Qué quieres cambiar?');
   await expect(followupPrompt).toHaveValue('');
-  await followupPrompt.fill('Amplía la cocina hacia el patio');
+  await followupPrompt.fill('Mantén el aseo y ajusta el plano a este boceto');
   await page.getByRole('button', { name: 'Generar propuesta' }).click();
   await expect(page.locator('[data-test="plan-proposal-review"]')).toBeVisible();
   await expect(page.locator('.plan-editor__header h2')).toHaveText('Convertir boceto en plano');
-  await expect.poll(() => proposalRequestBodies.length).toBe(2);
-  expect(proposalRequestBodies[1]).toContain('"draftPlan"');
-  expect(proposalRequestBodies[1]).toContain('name="image"');
-  expect(proposalRequestBodies[1]).toContain('seguimiento-sintetico.png');
-  expect(proposalRequestBodies[1]).toContain('Cocina con isla');
-  expect(proposalRequestBodies[1]).toContain('la cocina hacia el patio');
+  await expect.poll(() => proposalRequestBodies.length).toBe(3);
+  expect(proposalRequestBodies[2]).toContain('"draftPlan"');
+  expect(proposalRequestBodies[2]).toContain('name="image"');
+  expect(proposalRequestBodies[2]).toContain('boceto-ajuste.png');
+  expect(proposalRequestBodies[2]).toContain('Cocina');
+  expect(proposalRequestBodies[2]).toContain('el aseo y ajusta el plano a este boceto');
   expect(proposalWrites).toHaveLength(0);
   if (mobile) await page.locator('[data-test="plan-proposal-review"]').scrollIntoViewIfNeeded();
   await screenshot(page, 'proposal-desktop-or-mobile', viewport);
@@ -1144,16 +1885,15 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   await expect.poll(() => proposalWrites.length).toBe(1);
   await page.reload();
   await page.getByRole('tab', { name: 'Plano' }).click();
-  await expect(
-    page.locator('.plan-details__area').filter({ hasText: 'Cocina ampliada' })
-  ).toBeVisible();
-  await assignZone(page, 'Cocina ampliada', [0]);
+  await openPlanZoneList(page);
+  await expect(page.locator('.plan-details__area').filter({ hasText: 'Cocina' })).toBeVisible();
+  await assignZone(page, 'Cocina', [0]);
   await assignZone(page, 'Salón', [0]);
   await assignZone(page, 'Baño', [1]);
   await assignZone(page, 'Dormitorio', [2]);
   await assignZone(page, 'Patio', [0, 1, 2]);
   await assignZone(page, 'Jardín', [0, 1, 2]);
-  await assignZone(page, 'Cocina ampliada', [0]);
+  await assignZone(page, 'Cocina', [0]);
   const kitchenAssignment = page.locator('[data-test="plan-zone-assignment"]');
   await expect(kitchenAssignment.locator('[data-test="plan-zone-member"]').first()).toHaveAttribute(
     'aria-pressed',
@@ -1171,8 +1911,8 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   await expect(page.locator('[data-test="household-panel-tasks"]')).toBeVisible();
   await expect(page.locator('[data-test="tasks-layout"]')).toBeVisible();
   await expect(page.locator('[data-test="tasks-plan-canvas"]')).toBeVisible();
-  await expect(page.locator('.tasks-plan-canvas svg[householdAreaGlyph]')).toHaveCount(7);
-  await expect(page.locator('.tasks-zone-heading h3')).toHaveText('Cocina ampliada');
+  await expect(page.locator('.tasks-plan-canvas svg[householdAreaGlyph]')).toHaveCount(8);
+  await expect(page.locator('.tasks-zone-heading h3')).toHaveText('Cocina');
   const fairAssignment = page.getByRole('radio', { name: 'Aleatoria y equitativa' });
   await fairAssignment.check();
   await expect(fairAssignment).toHaveAttribute('aria-describedby', 'tasks-random-mode-description');
@@ -1181,9 +1921,14 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   );
   await page.getByRole('radio', { name: 'Elegir persona' }).check();
   if (mobile) {
+    await expect(page.locator('.tasks-create__title-caption')).toHaveCSS('position', 'absolute');
+    await expect(page.locator('.tasks-assignment-settings h3')).toHaveCSS('position', 'static');
+    await expect(page.locator('.tasks-schedule__header')).toHaveCSS('position', 'static');
     const taskForm = await page.locator('.tasks-create').boundingBox();
     const assignmentSettings = await page.locator('.tasks-assignment-settings').boundingBox();
     const taskTitleRow = await page.locator('.tasks-create__primary-row').boundingBox();
+    const taskTitleCaption = await page.locator('.tasks-create__title-caption').boundingBox();
+    const taskTitleInput = await page.locator('.tasks-create__title input').boundingBox();
     const bottomNavigation = await page.locator('.bottom-nav').boundingBox();
     const scheduleTop = await page
       .locator('.tasks-schedule')
@@ -1199,7 +1944,13 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     expect(taskForm).not.toBeNull();
     expect(assignmentSettings).not.toBeNull();
     expect(taskTitleRow).not.toBeNull();
+    expect(taskTitleCaption).not.toBeNull();
+    expect(taskTitleInput).not.toBeNull();
     expect(bottomNavigation).not.toBeNull();
+    expect(
+      taskTitleCaption!.y + taskTitleCaption!.height,
+      'the visible task label sits above the input without adding a second flow row'
+    ).toBeLessThanOrEqual(taskTitleInput!.y + 1);
     expect(taskTitleRow!.y + taskTitleRow!.height).toBeLessThanOrEqual(assignmentSettings!.y);
     expect(assignmentSettings!.y + assignmentSettings!.height).toBeLessThanOrEqual(
       bottomNavigation!.y - 8
@@ -1215,15 +1966,46 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   }
   const taskMap = await page.locator('.tasks-map-viewport').boundingBox();
   expect(taskMap?.height).toBeLessThanOrEqual(mobile ? 350 : 700);
+  if (mobile) {
+    const renderedPlan = await page.locator('.tasks-plan-canvas').evaluate((svg) => {
+      const viewport = svg.parentElement?.getBoundingClientRect();
+      const regions = Array.from(svg.querySelectorAll('[data-space-id]')).map((space) =>
+        space.getBoundingClientRect()
+      );
+      if (!viewport || regions.length === 0) {
+        return { width: 0, height: 0, viewportWidth: 0 };
+      }
+      const left = Math.min(...regions.map((bounds) => bounds.left));
+      const right = Math.max(...regions.map((bounds) => bounds.right));
+      const top = Math.min(...regions.map((bounds) => bounds.top));
+      const bottom = Math.max(...regions.map((bounds) => bounds.bottom));
+      return { width: right - left, height: bottom - top, viewportWidth: viewport.width };
+    });
+    expect(renderedPlan.viewportWidth, 'mobile household map must render').toBeGreaterThan(0);
+    expect(
+      renderedPlan.width,
+      'mobile floor regions should use the map width instead of leaving a large empty frame'
+    ).toBeGreaterThanOrEqual(renderedPlan.viewportWidth * 0.84);
+  }
+  if (mobile) {
+    const floorTabs = page.locator('.tasks-floor-tabs');
+    if (await floorTabs.isVisible()) {
+      const floorTabsBounds = await floorTabs.boundingBox();
+      expect(floorTabsBounds).not.toBeNull();
+      expect(
+        floorTabsBounds!.y,
+        'floor selection must overlay the mobile map, not push the checklist down'
+      ).toBeGreaterThanOrEqual(taskMap!.y - 1);
+      expect(floorTabsBounds!.y + floorTabsBounds!.height).toBeLessThanOrEqual(taskMap!.y + 48);
+    }
+  }
   if (!mobile) {
     expect(
       taskMap?.height,
       'desktop household plan should keep the large canvas seen in the approved mockup'
     ).toBeGreaterThanOrEqual(560);
-    const footerButtons = page.locator(
-      '.tasks-schedule__footer > .tasks-button, .tasks-schedule__footer .tasks-editor__actions .tasks-button'
-    );
-    expect(await footerButtons.count()).toBeGreaterThanOrEqual(2);
+    const footerButtons = page.locator('.tasks-schedule__footer > .tasks-button');
+    await expect(footerButtons).toHaveCount(1);
     for (const button of await footerButtons.all()) {
       await expect(button).toHaveCSS('white-space', 'nowrap');
       const textBounds = await button.evaluate((element) => ({
@@ -1237,7 +2019,7 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     expect(
       taskMap?.height,
       'the interactive household plan should dominate mobile tasks'
-    ).toBeGreaterThanOrEqual(240);
+    ).toBeGreaterThanOrEqual(275);
     const assignmentMode = await page.locator('.tasks-assignment-mode').boundingBox();
     expect(assignmentMode).not.toBeNull();
     expect(assignmentMode!.height).toBeGreaterThanOrEqual(44);
@@ -1281,7 +2063,7 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     kitchenId
   );
   const kitchenTaskMapArea = page.locator(`.tasks-map__area[data-space-id="${kitchenId}"]`);
-  await expect(kitchenTaskMapArea).toHaveAttribute('aria-label', 'Cocina ampliada, Ana');
+  await expect(kitchenTaskMapArea).toHaveAttribute('aria-label', 'Cocina, Ana');
   await expect(kitchenTaskMapArea).not.toHaveClass(/tasks-map__area--shared/);
   const taskTabGeometry = await tabGeometry(page, 'Plano');
   for (const key of ['x', 'y', 'width', 'height'] as const) {
@@ -1301,9 +2083,9 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   await patioOnTaskMap.click();
   await expect(page.locator('.tasks-zone-heading h3')).toHaveText('Patio');
   await page.locator(`.tasks-map__area[data-space-id="${kitchenId}"]`).click();
-  await expect(page.locator('.tasks-zone-heading h3')).toHaveText('Cocina ampliada');
+  await expect(page.locator('.tasks-zone-heading h3')).toHaveText('Cocina');
 
-  const taskTitles = Array.from({ length: 7 }, (_, index) => `Limpieza cocina ${index + 1}`);
+  const taskTitles = Array.from({ length: 7 }, () => 'Limpieza de cocina');
   const createForm = page.locator('.tasks-create');
   const planningOptions = createForm.locator('.tasks-create__details');
   await expect(planningOptions.locator('.tasks-create__fields')).toBeHidden();
@@ -1319,7 +2101,9 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   }
   await planningOptions.locator('summary').click();
   await expect(page.locator('[data-test="tasks-save"]')).toBeEnabled();
+  await page.locator('[data-test="tasks-actions-menu"] summary').click();
   await page.getByRole('button', { name: 'Proponer reparto' }).click();
+  await page.locator('[data-test="tasks-actions-menu"] summary').click();
   const preview = page.locator('[data-test="tasks-random-preview"]');
   await expect(preview).toBeVisible();
   const previewRows = preview.locator('li');
@@ -1386,8 +2170,12 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
       .evaluate((element) => Math.round(element.getBoundingClientRect().height));
     expect(
       firstTaskHeight,
-      'mobile task rows retain a comfortable touch height'
-    ).toBeGreaterThanOrEqual(40);
+      'mobile checklist rows keep the compact target size shown in the approved prototype'
+    ).toBeGreaterThanOrEqual(24);
+    const completionTarget = await taskCards.first().locator('.task-card__complete').boundingBox();
+    expect(completionTarget).not.toBeNull();
+    expect(completionTarget!.width).toBeGreaterThanOrEqual(24);
+    expect(completionTarget!.height).toBeGreaterThanOrEqual(24);
     await page.evaluate(() => window.scrollTo(0, 0));
     const firstTaskRow = await taskCards.first().boundingBox();
     const visibleNavigation = await page.locator('.bottom-nav').boundingBox();
@@ -1395,7 +2183,25 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     expect(firstTaskRow).not.toBeNull();
     expect(visibleNavigation).not.toBeNull();
     expect(weekActions).not.toBeNull();
-    await expect(page.locator('.tasks-schedule__footer')).toHaveCSS('position', 'static');
+    await expect(page.locator('.tasks-schedule__footer')).toHaveCSS('position', 'sticky');
+    const taskRowsLayout = await taskCards.evaluateAll((cards) => {
+      const footerTop = document
+        .querySelector('.tasks-schedule__footer')!
+        .getBoundingClientRect().top;
+      const rows = cards.map((card) => {
+        const bounds = card.getBoundingClientRect();
+        return { top: Math.round(bounds.top), bottom: Math.round(bounds.bottom) };
+      });
+      return {
+        footerTop: Math.round(footerTop),
+        rows,
+        visibleCount: rows.filter((row) => row.bottom <= footerTop - 8).length
+      };
+    });
+    expect(
+      taskRowsLayout.visibleCount,
+      `all seven checklist rows should be visible above sticky weekly actions: ${JSON.stringify(taskRowsLayout)}`
+    ).toBe(7);
     expect(
       firstTaskRow!.y + firstTaskRow!.height,
       'at least one planned task should appear unobscured below the interactive plan without scrolling'
@@ -1409,10 +2215,8 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
       return hit instanceof HTMLElement && element.contains(hit);
     });
     expect(firstTaskHit, 'the visible planned task must not be covered by week actions').toBe(true);
-    const footerButtons = page.locator(
-      '.tasks-schedule__footer > .tasks-button, .tasks-schedule__footer .tasks-editor__actions .tasks-button'
-    );
-    await expect(footerButtons).toHaveCount(3);
+    const footerButtons = page.locator('.tasks-schedule__footer > .tasks-button');
+    await expect(footerButtons).toHaveCount(1);
     for (const button of await footerButtons.all()) {
       await expect(button).toHaveCSS('white-space', 'nowrap');
       const textBounds = await button.evaluate((element) => ({
@@ -1445,7 +2249,7 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
       response.request().method() === 'PUT' &&
       new URL(response.url()).pathname.endsWith('/api/household/tasks')
   );
-  await page.getByRole('button', { name: 'Guardar semana' }).click();
+  await page.locator('[data-test="tasks-save"]').click();
   const tasksResponse = await saveTasksResponse;
   expect(tasksResponse.status()).toBe(200);
   const savedTasksEnvelope = await tasksResponse.json();
@@ -1501,7 +2305,7 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
       response.request().method() === 'PUT' &&
       new URL(response.url()).pathname.endsWith('/api/household/tasks')
   );
-  await page.getByRole('button', { name: 'Guardar semana' }).click();
+  await page.locator('[data-test="tasks-save"]').click();
   expect((await editSave).status()).toBe(200);
   await page.reload();
   await page.getByRole('tab', { name: 'Tareas' }).click();
@@ -1601,9 +2405,7 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     await expect(page.locator('[data-test="household-panel-tasks"]')).toBeVisible();
     await expect(page.locator('[data-test="tasks-week"]')).toBeVisible();
     if (size.width <= 359) {
-      const footerButtons = page.locator(
-        '.tasks-schedule__footer > .tasks-button, .tasks-schedule__footer .tasks-editor__actions .tasks-button'
-      );
+      const footerButtons = page.locator('.tasks-schedule__footer > .tasks-button');
       for (const button of await footerButtons.all()) {
         const bounds = await button.evaluate((element) => ({
           scrollWidth: element.scrollWidth,

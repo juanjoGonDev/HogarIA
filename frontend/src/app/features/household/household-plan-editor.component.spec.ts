@@ -117,6 +117,23 @@ describe('HouseholdPlanEditorComponent', () => {
     expect(component.setupVisible()).toBeFalse();
     expect(component.draft().floors[0].spaces).toHaveSize(7);
     expect(component.draft().floors[0].walls.length).toBeGreaterThan(0);
+    expect(
+      component.draft().floors[0].spaces.some((space) =>
+        space.polygon.some((point, index) => {
+          const next = space.polygon[(index + 1) % space.polygon.length];
+          return point.x !== next.x && point.y !== next.y;
+        })
+      )
+    )
+      .withContext('the guided starter layout should demonstrate a non-rectangular room edge')
+      .toBeTrue();
+    expect(
+      component
+        .draft()
+        .floors[0].walls.some((wall) => wall.from.x !== wall.to.x && wall.from.y !== wall.to.y)
+    )
+      .withContext('the guided starter layout should demonstrate an angled wall')
+      .toBeTrue();
     expect(component.draft().floors[0].openings[0].isMainEntrance).toBeTrue();
     expect(
       component.draft().floors[0].openings.filter((opening) => opening.kind === 'door')
@@ -507,6 +524,75 @@ describe('HouseholdPlanEditorComponent', () => {
     component.onCanvasPointerMove(pointer(canvas, emptyTarget, 60, 70));
 
     expect(component.drawingRect()).toEqual({ x: 1_400, y: 2_300, width: 4_500, height: 4_500 });
+  });
+
+  it('draws a custom concave area with freeform taps and cancels an invalid crossing polygon', async () => {
+    await mount();
+    const canvas = fakeCanvas();
+    const target = document.createElement('div');
+    component.setSelectedKindFromPicker('custom');
+    component.selectedLabel.set('Trastero con rincón');
+    component.setTool('freeform');
+
+    for (const [x, y] of [
+      [10, 10],
+      [90, 10],
+      [90, 40],
+      [50, 40],
+      [50, 90],
+      [10, 90]
+    ]) {
+      const event = pointer(canvas, target, x, y);
+      component.onCanvasPointerDown(event);
+      component.onCanvasPointerUp(event);
+    }
+    expect(component.freeformPoints()).toHaveSize(6);
+    component.finishFreeformSpace();
+    const created = component.draft().floors[0].spaces[0];
+    expect(created.label).toBe('Trastero con rincón');
+    expect(created.polygon).toHaveSize(6);
+    expect(created.polygon[2]).toEqual({ x: 9_000, y: 4_000 });
+    expect(component.tool()).toBe('select');
+    expect(component.assignmentViewActive()).toBeFalse();
+
+    component.setSelectedKindFromPicker('kitchen');
+    component.setTool('freeform');
+    for (const [x, y] of [
+      [10, 10],
+      [90, 90],
+      [10, 90],
+      [90, 10]
+    ]) {
+      const event = pointer(canvas, target, x, y);
+      component.onCanvasPointerDown(event);
+      component.onCanvasPointerUp(event);
+    }
+    component.finishFreeformSpace();
+    expect(component.errorKey()).toBe('household.plan_polygon_invalid');
+    expect(component.draft().floors[0].spaces).toHaveSize(1);
+    component.cancelFreeformDrawing();
+    expect(component.freeformPoints()).toEqual([]);
+    expect(component.tool()).toBe('select');
+  });
+
+  it('does not switch to area assignment when a freeform tap lands on an existing space', async () => {
+    await mount();
+    component.selectEntryMethod('guided');
+    component.startPlan();
+    component.setSelectedKindFromPicker('kitchen');
+    component.addGuidedSpace();
+    fixture.detectChanges();
+    component.setTool('freeform');
+    fixture.detectChanges();
+
+    const spaceId = component.draft().floors[0].spaces[0].id;
+    const polygon = fixture.nativeElement.querySelector(
+      `[data-space-id="${spaceId}"]`
+    ) as SVGPolygonElement;
+    polygon.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+    expect(component.tool()).toBe('freeform');
+    expect(component.assignmentViewActive()).toBeFalse();
   });
 
   it('validates picker values, labels, floor/space limits and stale selections', async () => {

@@ -8,202 +8,202 @@
         </div>
       </header>
       <section class="tasks-plan-panel" aria-labelledby="tasks-plan-title">
-      <header class="tasks-plan-panel__header visually-hidden">
-        <div>
-          <h3 id="tasks-plan-title">{{ 'household.tasks_plan_title' | t }}</h3>
-          <p>{{ 'household.tasks_plan_hint' | t }}</p>
+        <header class="tasks-plan-panel__header visually-hidden">
+          <div>
+            <h3 id="tasks-plan-title">{{ 'household.tasks_plan_title' | t }}</h3>
+            <p>{{ 'household.tasks_plan_hint' | t }}</p>
+          </div>
+          <span class="tasks-plan-panel__count" *ngIf="spaces().length">
+            {{ spaces().length }}
+          </span>
+        </header>
+
+        <div
+          *ngIf="floors().length > 1"
+          class="tasks-floor-tabs"
+          role="tablist"
+          [attr.aria-label]="'household.plan_floor' | t"
+        >
+          <button
+            *ngFor="let floor of floors()"
+            type="button"
+            role="tab"
+            class="tasks-floor-tabs__tab"
+            [class.is-selected]="floor.id === activeFloor()?.id"
+            [attr.aria-selected]="floor.id === activeFloor()?.id"
+            [attr.data-test]="'tasks-floor-' + floor.id"
+            (click)="selectFloor(floor.id)"
+          >
+            {{ floor.name }}
+          </button>
         </div>
-        <span class="tasks-plan-panel__count" *ngIf="spaces().length">
-          {{ spaces().length }}
-        </span>
-      </header>
 
-      <div
-        *ngIf="floors().length > 1"
-        class="tasks-floor-tabs"
-        role="tablist"
-        [attr.aria-label]="'household.plan_floor' | t"
-      >
-        <button
-          *ngFor="let floor of floors()"
-          type="button"
-          role="tab"
-          class="tasks-floor-tabs__tab"
-          [class.is-selected]="floor.id === activeFloor()?.id"
-          [attr.aria-selected]="floor.id === activeFloor()?.id"
-          [attr.data-test]="'tasks-floor-' + floor.id"
-          (click)="selectFloor(floor.id)"
-        >
-          {{ floor.name }}
-        </button>
-      </div>
+        <div class="tasks-map-viewport" [class.tasks-map-viewport--empty]="!activeFloor()">
+          <svg
+            class="tasks-plan-canvas"
+            data-test="tasks-plan-canvas"
+            [attr.viewBox]="planViewBox()"
+            role="group"
+            [attr.aria-label]="'household.tasks_plan_title' | t"
+          >
+            <defs>
+              <pattern id="tasks-plan-grid" width="250" height="250" patternUnits="userSpaceOnUse">
+                <path d="M 250 0 L 0 0 0 250" class="tasks-plan-canvas__grid" fill="none" />
+              </pattern>
+            </defs>
+            <rect width="10000" height="10000" class="tasks-plan-canvas__paper" />
+            <rect width="10000" height="10000" fill="url(#tasks-plan-grid)" />
 
-      <div class="tasks-map-viewport" [class.tasks-map-viewport--empty]="!activeFloor()">
-        <svg
-          class="tasks-plan-canvas"
-          data-test="tasks-plan-canvas"
-          [attr.viewBox]="planViewBox()"
-          role="group"
-          [attr.aria-label]="'household.tasks_plan_title' | t"
-        >
-          <defs>
-            <pattern id="tasks-plan-grid" width="250" height="250" patternUnits="userSpaceOnUse">
-              <path d="M 250 0 L 0 0 0 250" class="tasks-plan-canvas__grid" fill="none" />
-            </pattern>
-          </defs>
-          <rect width="10000" height="10000" class="tasks-plan-canvas__paper" />
-          <rect width="10000" height="10000" fill="url(#tasks-plan-grid)" />
-
-          <ng-container *ngIf="activeFloor() as floor">
-            <polygon
-              *ngFor="let space of floor.spaces"
-              [attr.points]="spacePoints(space)"
-              [attr.data-space-id]="space.id"
-              [attr.data-kind]="space.kind"
-              class="tasks-map__area"
-              [ngClass]="assignmentClass(space.id)"
-              [class.is-selected]="activeSpaceId() === space.id"
-              [attr.aria-label]="areaLabel(space) + ', ' + spaceAssignmentLabel(space.id)"
-              [attr.aria-pressed]="activeSpaceId() === space.id"
-              role="button"
-              tabindex="0"
-              (click)="selectMapSpace(space.id)"
-              (keydown.enter)="selectMapSpace(space.id)"
-              (keydown.space)="$event.preventDefault(); selectMapSpace(space.id)"
-            />
-            <line
-              *ngFor="let wall of floor.walls"
-              [attr.x1]="wall.from.x"
-              [attr.y1]="wall.from.y"
-              [attr.x2]="wall.to.x"
-              [attr.y2]="wall.to.y"
-              [class.tasks-plan-canvas__wall--exterior]="wall.kind === 'exterior'"
-              class="tasks-plan-canvas__wall"
-              aria-hidden="true"
-            />
-            <ng-container *ngFor="let opening of floor.openings">
-              <ng-container *ngIf="openingLine(floor, opening) as segment">
-                <line
-                  [attr.x1]="segment.from.x"
-                  [attr.y1]="segment.from.y"
-                  [attr.x2]="segment.to.x"
-                  [attr.y2]="segment.to.y"
-                  class="tasks-plan-canvas__opening"
-                  [class.tasks-plan-canvas__opening--main]="opening.isMainEntrance"
-                  aria-hidden="true"
-                />
-                <ng-container *ngIf="doorSwing(floor, opening) as swing">
+            <ng-container *ngIf="activeFloor() as floor">
+              <polygon
+                *ngFor="let space of floor.spaces"
+                [attr.points]="spacePoints(space)"
+                [attr.data-space-id]="space.id"
+                [attr.data-kind]="space.kind"
+                class="tasks-map__area"
+                [ngClass]="assignmentClass(space.id)"
+                [class.is-selected]="activeSpaceId() === space.id"
+                [attr.aria-label]="areaLabel(space) + ', ' + spaceAssignmentLabel(space.id)"
+                [attr.aria-pressed]="activeSpaceId() === space.id"
+                role="button"
+                tabindex="0"
+                (click)="selectMapSpace(space.id)"
+                (keydown.enter)="selectMapSpace(space.id)"
+                (keydown.space)="$event.preventDefault(); selectMapSpace(space.id)"
+              />
+              <line
+                *ngFor="let wall of floor.walls"
+                [attr.x1]="wall.from.x"
+                [attr.y1]="wall.from.y"
+                [attr.x2]="wall.to.x"
+                [attr.y2]="wall.to.y"
+                [class.tasks-plan-canvas__wall--exterior]="wall.kind === 'exterior'"
+                class="tasks-plan-canvas__wall"
+                aria-hidden="true"
+              />
+              <ng-container *ngFor="let opening of floor.openings">
+                <ng-container *ngIf="openingLine(floor, opening) as segment">
                   <line
-                    [attr.x1]="swing.hinge.x"
-                    [attr.y1]="swing.hinge.y"
-                    [attr.x2]="swing.leafTip.x"
-                    [attr.y2]="swing.leafTip.y"
-                    class="tasks-plan-canvas__door-leaf"
+                    [attr.x1]="segment.from.x"
+                    [attr.y1]="segment.from.y"
+                    [attr.x2]="segment.to.x"
+                    [attr.y2]="segment.to.y"
+                    class="tasks-plan-canvas__opening"
+                    [class.tasks-plan-canvas__opening--main]="opening.isMainEntrance"
                     aria-hidden="true"
                   />
-                  <path
-                    [attr.d]="swing.arc"
-                    class="tasks-plan-canvas__door-swing"
+                  <ng-container *ngIf="doorSwing(floor, opening) as swing">
+                    <line
+                      [attr.x1]="swing.hinge.x"
+                      [attr.y1]="swing.hinge.y"
+                      [attr.x2]="swing.leafTip.x"
+                      [attr.y2]="swing.leafTip.y"
+                      class="tasks-plan-canvas__door-leaf"
+                      aria-hidden="true"
+                    />
+                    <path
+                      [attr.d]="swing.arc"
+                      class="tasks-plan-canvas__door-swing"
+                      aria-hidden="true"
+                    />
+                  </ng-container>
+                  <line
+                    *ngFor="let rail of openingRails(floor, opening)"
+                    [attr.x1]="rail.from.x"
+                    [attr.y1]="rail.from.y"
+                    [attr.x2]="rail.to.x"
+                    [attr.y2]="rail.to.y"
+                    class="tasks-plan-canvas__window-rail"
+                    aria-hidden="true"
+                  />
+                  <circle
+                    *ngIf="opening.isMainEntrance"
+                    [attr.cx]="segment.from.x"
+                    [attr.cy]="segment.from.y"
+                    r="150"
+                    class="tasks-plan-canvas__entrance-mark"
                     aria-hidden="true"
                   />
                 </ng-container>
-                <line
-                  *ngFor="let rail of openingRails(floor, opening)"
-                  [attr.x1]="rail.from.x"
-                  [attr.y1]="rail.from.y"
-                  [attr.x2]="rail.to.x"
-                  [attr.y2]="rail.to.y"
-                  class="tasks-plan-canvas__window-rail"
-                  aria-hidden="true"
-                />
-                <circle
-                  *ngIf="opening.isMainEntrance"
-                  [attr.cx]="segment.from.x"
-                  [attr.cy]="segment.from.y"
-                  r="150"
-                  class="tasks-plan-canvas__entrance-mark"
-                  aria-hidden="true"
-                />
               </ng-container>
-            </ng-container>
-            <g *ngFor="let space of floor.spaces" class="tasks-map__label" aria-hidden="true">
-              <svg
-                householdAreaGlyph
-                [kind]="space.kind"
-                [attr.x]="spaceCenter(space).x - 400"
-                [attr.y]="spaceCenter(space).y - 1_050"
-                width="800"
-                height="800"
-                viewBox="0 0 64 64"
-                class="tasks-map__glyph"
-                aria-hidden="true"
-              ></svg>
-              <text
-                [attr.x]="spaceCenter(space).x"
-                [attr.y]="spaceCenter(space).y - 120"
-                class="tasks-map__name"
-              >
-                {{ areaLabel(space) }}
-              </text>
-              <g *ngFor="let member of assignedMembers(space.id); let memberIndex = index">
-                <circle
-                  [attr.cx]="
-                    spaceCenter(space).x +
-                    (memberIndex - (assignedMembers(space.id).length - 1) / 2) * 520
-                  "
-                  [attr.cy]="spaceCenter(space).y + 280"
-                  r="260"
-                  [attr.data-owner-index]="memberColorIndex(member.userId)"
-                  class="tasks-map__avatar"
-                />
+              <g *ngFor="let space of floor.spaces" class="tasks-map__label" aria-hidden="true">
+                <svg
+                  householdAreaGlyph
+                  [kind]="space.kind"
+                  [attr.x]="spaceCenter(space).x - 400"
+                  [attr.y]="spaceCenter(space).y - 1_050"
+                  width="800"
+                  height="800"
+                  viewBox="0 0 64 64"
+                  class="tasks-map__glyph"
+                  aria-hidden="true"
+                ></svg>
                 <text
-                  [attr.x]="
-                    spaceCenter(space).x +
-                    (memberIndex - (assignedMembers(space.id).length - 1) / 2) * 520
-                  "
-                  [attr.y]="spaceCenter(space).y + 280"
-                  [attr.data-owner-index]="memberColorIndex(member.userId)"
-                  class="tasks-map__avatar-initials"
+                  [attr.x]="spaceCenter(space).x"
+                  [attr.y]="spaceCenter(space).y - 120"
+                  class="tasks-map__name"
                 >
-                  {{ memberInitials(member) }}
+                  {{ areaLabel(space) }}
+                </text>
+                <g *ngFor="let member of assignedMembers(space.id); let memberIndex = index">
+                  <circle
+                    [attr.cx]="
+                      spaceCenter(space).x +
+                      (memberIndex - (assignedMembers(space.id).length - 1) / 2) * 520
+                    "
+                    [attr.cy]="spaceCenter(space).y + 280"
+                    r="260"
+                    [attr.data-owner-index]="memberColorIndex(member.userId)"
+                    class="tasks-map__avatar"
+                  />
+                  <text
+                    [attr.x]="
+                      spaceCenter(space).x +
+                      (memberIndex - (assignedMembers(space.id).length - 1) / 2) * 520
+                    "
+                    [attr.y]="spaceCenter(space).y + 280"
+                    [attr.data-owner-index]="memberColorIndex(member.userId)"
+                    class="tasks-map__avatar-initials"
+                  >
+                    {{ memberInitials(member) }}
+                  </text>
+                </g>
+                <text
+                  [attr.x]="spaceCenter(space).x"
+                  [attr.y]="spaceCenter(space).y + 680"
+                  class="tasks-map__owner"
+                >
+                  {{ spaceMapAssigneeLabel(space.id) }}
                 </text>
               </g>
-              <text
-                [attr.x]="spaceCenter(space).x"
-                [attr.y]="spaceCenter(space).y + 680"
-                class="tasks-map__owner"
-              >
-                {{ spaceMapAssigneeLabel(space.id) }}
-              </text>
-            </g>
-          </ng-container>
-        </svg>
+            </ng-container>
+          </svg>
 
-        <div
-          *ngIf="!activeFloor() && !loadingSpaces()"
-          class="tasks-map-empty"
-          data-test="tasks-plan-empty"
-        >
-          <span class="tasks-map-empty__icon" aria-hidden="true">⌂</span>
-          <h4>{{ 'household.tasks_plan_empty_title' | t }}</h4>
-          <p>{{ 'household.tasks_plan_empty' | t }}</p>
+          <div
+            *ngIf="!activeFloor() && !loadingSpaces()"
+            class="tasks-map-empty"
+            data-test="tasks-plan-empty"
+          >
+            <span class="tasks-map-empty__icon" aria-hidden="true">⌂</span>
+            <h4>{{ 'household.tasks_plan_empty_title' | t }}</h4>
+            <p>{{ 'household.tasks_plan_empty' | t }}</p>
+          </div>
         </div>
-      </div>
 
-      <div class="tasks-map-legend" [attr.aria-label]="'household.tasks_plan_legend' | t">
-        <span
-          ><i class="tasks-map-legend__swatch tasks-map-legend__swatch--assigned"></i
-          >{{ 'household.plan_zone_assigned' | t }}</span
-        >
-        <span
-          ><i class="tasks-map-legend__swatch tasks-map-legend__swatch--shared"></i
-          >{{ 'household.plan_zone_shared' | t }}</span
-        >
-        <span
-          ><i class="tasks-map-legend__swatch tasks-map-legend__swatch--unassigned"></i
-          >{{ 'household.plan_zone_unassigned' | t }}</span
-        >
-      </div>
+        <div class="tasks-map-legend" [attr.aria-label]="'household.tasks_plan_legend' | t">
+          <span
+            ><i class="tasks-map-legend__swatch tasks-map-legend__swatch--assigned"></i
+            >{{ 'household.plan_zone_assigned' | t }}</span
+          >
+          <span
+            ><i class="tasks-map-legend__swatch tasks-map-legend__swatch--shared"></i
+            >{{ 'household.plan_zone_shared' | t }}</span
+          >
+          <span
+            ><i class="tasks-map-legend__swatch tasks-map-legend__swatch--unassigned"></i
+            >{{ 'household.plan_zone_unassigned' | t }}</span
+          >
+        </div>
       </section>
     </main>
 
@@ -232,7 +232,9 @@
               {{ 'household.tasks_selected_zone' | t }}
             </span>
             <h3>
-              {{ activeSpaceId() ? areaName(activeSpaceId()) : ('household.tasks_select_zone' | t) }}
+              {{
+                activeSpaceId() ? areaName(activeSpaceId()) : ('household.tasks_select_zone' | t)
+              }}
             </h3>
           </div>
           <div class="tasks-zone-heading__controls" *ngIf="spaces().length">
@@ -278,11 +280,7 @@
         </div>
       </div>
 
-      <section
-        *ngIf="canEdit"
-        class="tasks-create"
-        [attr.aria-label]="'household.tasks_add' | t"
-      >
+      <section *ngIf="canEdit" class="tasks-create" [attr.aria-label]="'household.tasks_add' | t">
         <div class="tasks-create__primary-row">
           <label class="tasks-create__title">
             <span class="tasks-create__title-caption">
@@ -298,7 +296,7 @@
           </label>
           <button
             type="button"
-            class="tasks-button tasks-button--primary tasks-create__submit"
+            class="tasks-button tasks-create__submit"
             data-test="tasks-add"
             [disabled]="!newTitle().trim() || draftTasks().length >= 200 || loading() || saving()"
             (click)="addTask()"
@@ -343,52 +341,56 @@
           </p>
           <label class="tasks-repeat-rule">
             <input type="checkbox" checked disabled />
-            <span>{{ 'household.tasks_nonconsecutive_rule' | t }}</span>
+            <span aria-hidden="true">{{ 'household.tasks_nonconsecutive_rule_short' | t }}</span>
+            <span class="visually-hidden">{{ 'household.tasks_nonconsecutive_rule' | t }}</span>
           </label>
+          <details class="tasks-create__details">
+            <summary>
+              <span aria-hidden="true">{{ 'household.tasks_create_advanced_short' | t }}</span>
+              <span class="visually-hidden">{{ 'household.tasks_create_advanced' | t }}</span>
+            </summary>
+            <div class="tasks-create__fields">
+              <div class="tasks-editor__field">
+                <span>{{ 'household.tasks_day' | t }}</span>
+                <app-picker
+                  id="household-tasks-new-day"
+                  [label]="'household.tasks_day' | t"
+                  [options]="dayOptions()"
+                  [value]="newDate()"
+                  (valueChange)="newDate.set($event || weekStart())"
+                />
+              </div>
+              <div class="tasks-editor__field">
+                <span>{{ 'household.tasks_area' | t }}</span>
+                <app-picker
+                  id="household-tasks-new-area"
+                  [label]="'household.tasks_area' | t"
+                  [options]="spaceOptions()"
+                  [value]="newSpaceId()"
+                  (valueChange)="newSpaceId.set($event ?? '')"
+                />
+              </div>
+              <div class="tasks-editor__field" *ngIf="!randomAssignmentMode()">
+                <span>{{ 'household.tasks_assignee' | t }}</span>
+                <app-picker
+                  id="household-tasks-new-assignee"
+                  [label]="'household.tasks_assignee' | t"
+                  [options]="memberOptions()"
+                  [value]="newMemberId()"
+                  (valueChange)="newMemberId.set($event ?? '')"
+                />
+              </div>
+            </div>
+            <label>
+              <span>{{ 'household.tasks_details' | t }}</span>
+              <input
+                [ngModel]="newDetails()"
+                (ngModelChange)="newDetails.set($event)"
+                maxlength="500"
+              />
+            </label>
+          </details>
         </section>
-        <details class="tasks-create__details">
-          <summary>{{ 'household.tasks_create_advanced' | t }}</summary>
-          <div class="tasks-create__fields">
-            <div class="tasks-editor__field">
-              <span>{{ 'household.tasks_day' | t }}</span>
-              <app-picker
-                id="household-tasks-new-day"
-                [label]="'household.tasks_day' | t"
-                [options]="dayOptions()"
-                [value]="newDate()"
-                (valueChange)="newDate.set($event || weekStart())"
-              />
-            </div>
-            <div class="tasks-editor__field">
-              <span>{{ 'household.tasks_area' | t }}</span>
-              <app-picker
-                id="household-tasks-new-area"
-                [label]="'household.tasks_area' | t"
-                [options]="spaceOptions()"
-                [value]="newSpaceId()"
-                (valueChange)="newSpaceId.set($event ?? '')"
-              />
-            </div>
-            <div class="tasks-editor__field" *ngIf="!randomAssignmentMode()">
-              <span>{{ 'household.tasks_assignee' | t }}</span>
-              <app-picker
-                id="household-tasks-new-assignee"
-                [label]="'household.tasks_assignee' | t"
-                [options]="memberOptions()"
-                [value]="newMemberId()"
-                (valueChange)="newMemberId.set($event ?? '')"
-              />
-            </div>
-          </div>
-          <label>
-            <span>{{ 'household.tasks_details' | t }}</span>
-            <input
-              [ngModel]="newDetails()"
-              (ngModelChange)="newDetails.set($event)"
-              maxlength="500"
-            />
-          </label>
-        </details>
       </section>
 
       <section
@@ -571,35 +573,38 @@
           [class.tasks-schedule__footer--has-randomizer]="canEdit && draftTasks().length > 0"
         >
           <p class="tasks-schedule__summary">{{ assignmentSummary() }}</p>
+          <details class="tasks-schedule__more-actions" data-test="tasks-actions-menu">
+            <summary [attr.aria-label]="'household.tasks_more_actions' | t">•••</summary>
+            <div>
+              <button
+                *ngIf="canEdit && draftTasks().length"
+                type="button"
+                class="tasks-button"
+                data-test="tasks-randomize"
+                [disabled]="loading() || saving() || !!randomPreview()"
+                (click)="createRandomPreview()"
+              >
+                {{ 'household.tasks_randomize' | t }}
+              </button>
+              <button
+                type="button"
+                class="tasks-button tasks-button--quiet"
+                [disabled]="!canEdit || !isDirty() || saving()"
+                (click)="discardChanges()"
+              >
+                {{ 'household.tasks_discard' | t }}
+              </button>
+            </div>
+          </details>
           <button
-            *ngIf="canEdit && draftTasks().length"
             type="button"
             class="tasks-button tasks-button--primary"
-            data-test="tasks-randomize"
-            [disabled]="loading() || saving() || !!randomPreview()"
-            (click)="createRandomPreview()"
+            data-test="tasks-save"
+            [disabled]="!canEdit || !isDirty() || saving() || !!randomPreview()"
+            (click)="saveWeek()"
           >
-            {{ 'household.tasks_randomize' | t }}
+            {{ saving() ? ('household.tasks_saving' | t) : ('household.tasks_save' | t) }}
           </button>
-          <div class="tasks-editor__actions">
-            <button
-              type="button"
-              class="tasks-button tasks-button--quiet"
-              [disabled]="!canEdit || !isDirty() || saving()"
-              (click)="discardChanges()"
-            >
-              {{ 'household.tasks_discard' | t }}
-            </button>
-            <button
-              type="button"
-              class="tasks-button tasks-button--primary"
-              data-test="tasks-save"
-              [disabled]="!canEdit || !isDirty() || saving() || !!randomPreview()"
-              (click)="saveWeek()"
-            >
-              {{ saving() ? ('household.tasks_saving' | t) : ('household.tasks_save' | t) }}
-            </button>
-          </div>
         </div>
       </section>
     </aside>

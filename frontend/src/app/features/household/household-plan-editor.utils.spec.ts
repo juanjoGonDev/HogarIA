@@ -1,11 +1,15 @@
 import {
   createHouseholdPlanSpace,
+  createHouseholdPlanPolygon,
   createHouseholdPlanWall,
   cloneHouseholdPlan,
   createHouseholdPlanFloor,
   emptyHouseholdPlan,
   moveHouseholdPlanSpace,
-  openingSegment
+  openingSegment,
+  openingRails,
+  doorSwing,
+  polygonCentroid
 } from './household-plan-editor.utils';
 import type {
   HouseholdPlanFloor,
@@ -75,14 +79,14 @@ describe('household plan editor geometry helpers', () => {
     ).toBeNull();
   });
 
-  it('creates a wall on its dominant axis, clamps coordinates, and rejects a zero-length line', () => {
+  it('preserves diagonal walls, clamps coordinates, and rejects a zero-length line', () => {
     expect(
       createHouseholdPlanWall('wall-1', 'interior', { x: -100, y: 500 }, { x: 900, y: 520 })
     ).toEqual({
       id: 'wall-1',
       kind: 'interior',
       from: { x: 0, y: 500 },
-      to: { x: 900, y: 500 }
+      to: { x: 900, y: 520 }
     });
     expect(
       createHouseholdPlanWall('wall-2', 'exterior', { x: 200, y: 900 }, { x: 210, y: 100 })
@@ -90,9 +94,59 @@ describe('household plan editor geometry helpers', () => {
       id: 'wall-2',
       kind: 'exterior',
       from: { x: 200, y: 900 },
-      to: { x: 200, y: 100 }
+      to: { x: 210, y: 100 }
     });
     expect(createHouseholdPlanWall('zero', 'interior', { x: 5, y: 5 }, { x: 5, y: 5 })).toBeNull();
+  });
+
+  it('creates valid freeform concave and custom polygons but rejects malformed or tiny shapes', () => {
+    const points = [
+      { x: 100, y: 100 },
+      { x: 900, y: 100 },
+      { x: 900, y: 400 },
+      { x: 500, y: 400 },
+      { x: 500, y: 900 },
+      { x: 100, y: 900 }
+    ];
+    expect(createHouseholdPlanPolygon('bedroom', 'Dormitorio', 'bedroom-freeform', points)).toEqual(
+      {
+        id: 'bedroom-freeform',
+        kind: 'bedroom',
+        label: 'Dormitorio',
+        parentSpaceId: null,
+        polygon: points
+      }
+    );
+    expect(
+      createHouseholdPlanPolygon('custom', 'Trastero exterior', 'custom-1', [
+        { x: 0, y: 0 },
+        { x: 800, y: 0 },
+        { x: 300, y: 800 }
+      ])?.label
+    ).toBe('Trastero exterior');
+    expect(
+      createHouseholdPlanPolygon('custom', '', 'custom-1', [
+        { x: 0, y: 0 },
+        { x: 800, y: 0 },
+        { x: 300, y: 800 }
+      ])
+    ).toBeNull();
+    expect(
+      createHouseholdPlanPolygon('kitchen', 'Cocina', 'bow-tie', [
+        { x: 100, y: 100 },
+        { x: 900, y: 900 },
+        { x: 100, y: 900 },
+        { x: 900, y: 100 }
+      ])
+    ).toBeNull();
+    expect(
+      createHouseholdPlanPolygon('kitchen', 'Cocina', 'tiny', [
+        { x: 100, y: 100 },
+        { x: 150, y: 100 },
+        { x: 150, y: 180 },
+        { x: 100, y: 180 }
+      ])
+    ).toBeNull();
   });
 
   it('moves a space as one polygon and clamps it inside the normalized canvas', () => {
@@ -141,6 +195,50 @@ describe('household plan editor geometry helpers', () => {
       to: { x: 300, y: 700 }
     });
     expect(openingSegment([], door)).toBeNull();
+  });
+
+  it('positions openings, window rails and door swings on diagonal walls by Euclidean distance', () => {
+    const diagonal: HouseholdPlanWall = {
+      id: 'diagonal',
+      kind: 'exterior',
+      from: { x: 100, y: 100 },
+      to: { x: 400, y: 500 }
+    };
+    const opening: HouseholdPlanOpening = {
+      id: 'window',
+      wallId: 'diagonal',
+      kind: 'window',
+      offset: 100,
+      width: 250,
+      isMainEntrance: false
+    };
+    const segment = openingSegment([diagonal], opening);
+    expect(segment).not.toBeNull();
+    const diagonalSegment = segment!;
+    expect(diagonalSegment).toEqual({ from: { x: 160, y: 180 }, to: { x: 310, y: 380 } });
+    const rails = openingRails([diagonal], opening);
+    expect(rails).toHaveSize(2);
+    expect(rails[0].from.x).not.toBe(diagonalSegment.from.x);
+    expect(rails[0].from.y).not.toBe(diagonalSegment.from.y);
+
+    const swing = doorSwing([diagonal], { ...opening, kind: 'door' });
+    expect(swing).not.toBeNull();
+    expect(
+      Math.hypot(swing!.hinge.x - swing!.leafTip.x, swing!.hinge.y - swing!.leafTip.y)
+    ).toBeCloseTo(250);
+  });
+
+  it('returns an area-weighted center for irregular polygons', () => {
+    const center = polygonCentroid([
+      { x: 0, y: 0 },
+      { x: 800, y: 0 },
+      { x: 800, y: 300 },
+      { x: 400, y: 300 },
+      { x: 400, y: 800 },
+      { x: 0, y: 800 }
+    ]);
+    expect(center.x).toBeCloseTo(309.09, 1);
+    expect(center.y).toBeCloseTo(331.82, 1);
   });
 
   it('creates only supported additional floors and deep-clones drafts', () => {

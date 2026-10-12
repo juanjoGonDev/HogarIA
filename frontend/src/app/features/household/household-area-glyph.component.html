@@ -6,34 +6,36 @@
     stroke-linecap="round"
     stroke-linejoin="round"
   >
-    <g *ngSwitchCase="'kitchen'" stroke-width="3">
-      <path d="M9 12h46v12H9zM9 29h46v24H9zM15 35h7m-7 7h7m-7 7h7" />
-      <circle cx="37" cy="37" r="3" />
-      <circle cx="47" cy="37" r="3" />
-      <circle cx="37" cy="46" r="3" />
-      <circle cx="47" cy="46" r="3" />
+    <g *ngSwitchCase="'kitchen'" stroke-width="3.5">
+      <rect x="17" y="10" width="30" height="44" rx="2" />
+      <circle cx="26" cy="21" r="3" />
+      <circle cx="38" cy="21" r="3" />
+      <circle cx="26" cy="33" r="3" />
+      <circle cx="38" cy="33" r="3" />
+      <path d="M23 43h18v7H23z" />
     </g>
-    <g *ngSwitchCase="'seating'" stroke-width="3">
-      <path d="M12 15v-3h40v3m-42 1v19h44V16M10 27h44M16 35v6m32-6v6M20 43h24v9H20z" />
-      <path d="M17 19h10v7H17zm20 0h10v7H37z" />
+    <g *ngSwitchCase="'seating'" stroke-width="3.5">
+      <path d="M16 31V21a4 4 0 0 1 4-4h9v15m6 0V17h9a4 4 0 0 1 4 4v10" />
+      <path d="M18 31V22h10v9m8 0v-9h10v9M14 30a4 4 0 0 0-4 4v10h44V34a4 4 0 0 0-4-4M13 38h38M17 44v7m30-7v7" />
     </g>
-    <g *ngSwitchCase="'bedroom'" stroke-width="3">
-      <path d="M10 13v39m44-39v39M10 35h44M10 45h44M13 18h17v13H13zm21 0h17v13H34z" />
-      <path d="M30 18v13m4-13v13M14 52v4m36-4v4" />
+    <g *ngSwitchCase="'bedroom'" stroke-width="3.5">
+      <path d="M11 15v39m42-39v39M11 35h42M11 44h42M15 24h14v11H15zM35 24h14v11H35zM14 54v4m36-4v4" />
     </g>
-    <g *ngSwitchCase="'bathroom'" stroke-width="3">
-      <path d="M10 29h44v8a14 14 0 0 1-14 14H24a14 14 0 0 1-14-14zM16 29V17a7 7 0 0 1 14 0v4" />
-      <circle cx="47" cy="18" r="7" />
-      <path d="M20 51v4m24-4v4M47 11v7h7" />
+    <g *ngSwitchCase="'bathroom'" stroke-width="3.5">
+      <path d="M19 10h19v16H19zM38 16h6v10h-6M16 26h32l-3 10a14 14 0 0 1-13 10h-2a14 14 0 0 1-13-10zM24 46v6m16-6v6" />
+    </g>
+    <g *ngSwitchCase="'hallway'" stroke-width="3.5">
+      <path d="M12 18h40M12 32h40M12 46h40" />
     </g>
     <g *ngSwitchCase="'outdoors'" stroke-width="3">
-      <path d="M32 49V28m0 8-11-8m11 3 10-9m-10 20 12-6M18 52h28" />
-      <path d="M32 10c-8 0-13 6-13 13s6 12 13 12 13-5 13-12S40 10 32 10z" />
+      <path d="M32 45V24m0 14L20 29m12-1 12-11m-12 21 12-7" />
+      <path d="M20 29c0-7 5-11 12-12 0 7-4 12-12 12Zm24-11c-7 0-11 5-12 12 7 0 12-4 12-12Zm-24 0c7 0 11 5 12 12-7 0-12-4-12-12Z" />
+      <path d="M22 46h20l-3 10H25z" />
     </g>
-    <g *ngSwitchCase="'entry'" stroke-width="3">
-      <path d="M15 54V10h29v44M15 54h37M22 54V17h22" />
-      <circle cx="37" cy="36" r="1.5" fill="currentColor" />
-      <path d="M45 18a18 18 0 0 1 9 15" />
+    <g *ngSwitchCase="'entry'" stroke-width="3.5">
+      <path d="M17 54V10h29v44M17 54h34M25 54V17h21" />
+      <circle cx="39" cy="36" r="1.5" fill="currentColor" />
+      <path d="M47 18a18 18 0 0 1 9 15" />
     </g>
     <g *ngSwitchCase="'work'" stroke-width="3">
       <path d="M10 18h44v23H10zM15 48h34M21 41v7m22-7v7M25 12h14v6H25z" />

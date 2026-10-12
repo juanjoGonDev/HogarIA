@@ -139,6 +139,32 @@ describe('HouseholdTasksComponent', () => {
     expect(component.planViewBox()).toBe('0 0 10000 10000');
   });
 
+  it('keeps a wide floor plan large in the mobile map while retaining a safety margin', async () => {
+    await mount();
+    const floor = plan.floors[0];
+    component.plan.set({
+      ...plan,
+      floors: [
+        {
+          ...floor,
+          spaces: [
+            {
+              ...floor.spaces[0],
+              polygon: [
+                { x: 100, y: 100 },
+                { x: 9_900, y: 100 },
+                { x: 9_900, y: 900 },
+                { x: 100, y: 900 }
+              ]
+            }
+          ]
+        }
+      ]
+    });
+
+    expect(component.planViewBox().split(' ').map(Number)).toEqual([-439, -439, 10_878, 1_878]);
+  });
+
   it('adds and edits a household-week task locally and saves it with the versioned API', async () => {
     await mount();
     component.newTitle.set('Barrer cocina');

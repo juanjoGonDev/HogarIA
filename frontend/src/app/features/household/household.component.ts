@@ -655,36 +655,8 @@ function completeMemberPermissions(value: unknown, role: MemberRole): MemberPerm
       }
 
       @media (max-width: 767px) {
-        .household__content--plan-flow .household-tabs {
-          margin-bottom: var(--space-3);
-          gap: 0;
-          overflow-x: hidden;
-        }
-
-        .household__content--plan-flow .household-tabs__tab {
-          min-width: 0;
-          flex: 1 1 0;
-          padding-right: 2px;
-          padding-left: 2px;
-          font-size: 0.7rem;
-          text-align: center;
-        }
-      }
-
-      @media (max-width: 389px) {
-        .household__content--plan-flow .household-tabs,
-        .household-tabs {
-          gap: 0;
-          justify-content: flex-start;
-          overflow-x: auto;
-        }
-
-        .household__content--plan-flow .household-tabs__tab,
-        .household-tabs__tab {
-          flex: 0 0 auto;
-          padding-right: 4px;
-          padding-left: 4px;
-          font-size: 0.62rem;
+        .household__content--plan-flow {
+          margin-inline: -6px;
         }
       }
 
@@ -729,6 +701,54 @@ function completeMemberPermissions(value: unknown, role: MemberRole): MemberPerm
       .household-tab-panel:focus-visible {
         outline: 2px solid var(--primary);
         outline-offset: 2px;
+      }
+
+      @media (max-width: 767px) {
+        .household__content--plan-flow .household-tabs {
+          margin-bottom: var(--space-3);
+          gap: 0;
+          overflow-x: hidden;
+        }
+
+        .household__content--plan-flow .household-tabs__tab {
+          min-width: 0;
+          flex: 1 1 0;
+          padding-right: 2px;
+          padding-left: 2px;
+          font-size: 0.7rem;
+          text-align: center;
+        }
+      }
+
+      @media (max-width: 389px) {
+        .household__content--plan-flow .household-tabs,
+        .household-tabs {
+          gap: 0;
+          justify-content: flex-start;
+          overflow-x: auto;
+        }
+
+        .household__content--plan-flow .household-tabs::after,
+        .household-tabs::after {
+          content: '';
+          flex: 0 0 20px;
+        }
+
+        .household__content--plan-flow .household-tabs__tab,
+        .household-tabs__tab {
+          min-width: 0;
+          flex: 0 0 auto;
+          padding-right: 3px;
+          padding-left: 3px;
+          font-size: 0.62rem;
+        }
+      }
+
+      @media (max-width: 339px) {
+        .household__content--plan-flow .household-tabs,
+        .household-tabs {
+          gap: 4px;
+        }
       }
 
       .household-tab-panel {
@@ -1245,17 +1265,34 @@ export class HouseholdComponent implements OnInit {
 
   selectTab(tab: HouseholdTab): void {
     this.activeTab.set(tab);
-    void this.router.navigate([], {
-      relativeTo: this.route,
-      queryParams: { tab: householdTabQueryValue(tab) },
-      queryParamsHandling: 'merge'
-    });
-    requestAnimationFrame(() => {
-      document.getElementById(`household-tab-${tab}`)?.scrollIntoView({
-        block: 'nearest',
-        inline: 'nearest'
+    void this.router
+      .navigate([], {
+        relativeTo: this.route,
+        queryParams: { tab: householdTabQueryValue(tab) },
+        queryParamsHandling: 'merge'
+      })
+      .then(() => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            this.revealHouseholdTab(tab);
+            window.setTimeout(() => this.revealHouseholdTab(tab), 80);
+          });
+        });
       });
-    });
+  }
+
+  private revealHouseholdTab(tab: HouseholdTab): void {
+    const tabElement = document.getElementById(`household-tab-${tab}`);
+    const tabList = tabElement?.closest<HTMLElement>('.household-tabs');
+    if (!tabElement || !tabList) return;
+
+    tabList.style.scrollBehavior = 'auto';
+    const listBounds = tabList.getBoundingClientRect();
+    const tabBounds = tabElement.getBoundingClientRect();
+    const leftOverflow = Math.max(0, listBounds.left - tabBounds.left);
+    const rightOverflow = Math.max(0, tabBounds.right - listBounds.right);
+    if (leftOverflow > 1) tabList.scrollLeft = 0;
+    else if (rightOverflow > 1) tabList.scrollLeft = tabList.scrollWidth - tabList.clientWidth;
   }
 
   openTasksForZone(spaceId: string): void {
@@ -1284,10 +1321,10 @@ export class HouseholdComponent implements OnInit {
           : (currentIndex + (event.key === 'ArrowRight' ? 1 : -1) + this.tabOptions.length) %
             this.tabOptions.length;
     const next = this.tabOptions[nextIndex];
-    (event.currentTarget as HTMLElement | null)?.parentElement
+    const nextTab = (event.currentTarget as HTMLElement | null)?.parentElement
       ?.querySelectorAll<HTMLButtonElement>('[role="tab"]')
-      .item(nextIndex)
-      ?.focus();
+      .item(nextIndex);
+    nextTab?.focus({ preventScroll: true });
     this.selectTab(next.value);
   }
 

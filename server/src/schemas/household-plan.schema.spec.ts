@@ -132,6 +132,7 @@ describe('household plan schema and geometry contract', () => {
         'garage',
         'outdoor_kitchen',
         'pet_area',
+        'clothes_drying_area',
         'custom'
       ])
     );
@@ -207,11 +208,36 @@ describe('household plan schema and geometry contract', () => {
     expect(messagesFor(plan)).toContain('Floor levels must be unique.');
   });
 
-  it('rejects zero-length and diagonal walls', () => {
+  it('rejects zero-length walls but accepts diagonal walls and irregular spaces', () => {
     const plan = makeValidPlan();
     plan.floors[0].walls[0].to = { x: 100, y: 100 };
-    plan.floors[0].walls[1].to = { x: 700, y: 700 };
-    expect(messagesFor(plan)).toContain('Walls must be non-zero and orthogonal.');
+    expect(messagesFor(plan)).toContain('Walls must be non-zero.');
+
+    plan.floors[0].walls[0] = {
+      id: 'wall-diagonal',
+      kind: 'exterior',
+      from: { x: 100, y: 100 },
+      to: { x: 400, y: 500 }
+    };
+    plan.floors[0].spaces[0].polygon = [
+      { x: 150, y: 150 },
+      { x: 850, y: 150 },
+      { x: 850, y: 350 },
+      { x: 550, y: 350 },
+      { x: 550, y: 850 },
+      { x: 150, y: 850 }
+    ];
+    plan.floors[0].openings[0] = {
+      id: 'opening-main',
+      wallId: 'wall-diagonal',
+      kind: 'door',
+      offset: 100,
+      width: 400,
+      isMainEntrance: true
+    };
+    expect(householdPlanSchema.safeParse(plan).success).toBe(true);
+    plan.floors[0].openings[0].width = 401;
+    expect(messagesFor(plan)).toContain('An opening must fit within its wall.');
   });
 
   it('rejects degenerate and self-intersecting space polygons', () => {

@@ -54,6 +54,7 @@ export const HOUSEHOLD_AREA_KINDS = [
   'common_area',
   'shared_room',
   'storage_area',
+  'clothes_drying_area',
   'custom'
 ] as const;
 

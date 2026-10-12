@@ -6,7 +6,12 @@ import type {
   HouseholdPlanPoint,
   HouseholdPlanSpace
 } from '../../shared/models/household-plan.model';
-import { openingSegment } from './household-plan-editor.utils';
+import {
+  doorSwing as makeDoorSwing,
+  openingRails as makeOpeningRails,
+  openingSegment,
+  polygonCentroid
+} from './household-plan-editor.utils';
 import { HouseholdAreaGlyphComponent } from './household-area-glyph.component';
 
 @Component({
@@ -31,6 +36,7 @@ export class HouseholdPlanPreviewMapComponent {
   }
 
   @Input() ariaLabel = '';
+  @Input() zoom = 100;
 
   canvasBounds = { x: 0, y: 0, width: 10000, height: 10000 };
 
@@ -39,17 +45,21 @@ export class HouseholdPlanPreviewMapComponent {
     return `${x} ${y} ${width} ${height}`;
   }
 
+  get drawingTransform(): string {
+    const { x, y, width, height } = this.canvasBounds;
+    const scale = Math.min(150, Math.max(50, this.zoom)) / 100;
+    const centerX = x + width / 2;
+    const centerY = y + height / 2;
+    const format = (value: number): number => Number(value.toFixed(6));
+    return `translate(${format(centerX * (1 - scale))} ${format(centerY * (1 - scale))}) scale(${format(scale)})`;
+  }
+
   spacePoints(space: HouseholdPlanSpace): string {
     return space.polygon.map((point) => `${point.x},${point.y}`).join(' ');
   }
 
   spaceCenter(space: HouseholdPlanSpace): HouseholdPlanPoint {
-    const xs = space.polygon.map((point) => point.x);
-    const ys = space.polygon.map((point) => point.y);
-    return {
-      x: (Math.min(...xs) + Math.max(...xs)) / 2,
-      y: (Math.min(...ys) + Math.max(...ys)) / 2
-    };
+    return polygonCentroid(space.polygon);
   }
 
   openingLine(
@@ -61,20 +71,7 @@ export class HouseholdPlanPreviewMapComponent {
   openingRails(
     opening: HouseholdPlanOpening
   ): Array<{ from: HouseholdPlanPoint; to: HouseholdPlanPoint }> {
-    const segment = this.openingLine(opening);
-    if (!segment || opening.kind !== 'window') return [];
-    const horizontal = segment.from.y === segment.to.y;
-    return [-70, 70].map((offset) =>
-      horizontal
-        ? {
-            from: { x: segment.from.x, y: segment.from.y + offset },
-            to: { x: segment.to.x, y: segment.to.y + offset }
-          }
-        : {
-            from: { x: segment.from.x + offset, y: segment.from.y },
-            to: { x: segment.to.x + offset, y: segment.to.y }
-          }
-    );
+    return makeOpeningRails(this.floor?.walls ?? [], opening);
   }
 
   doorSwing(opening: HouseholdPlanOpening): {
@@ -82,25 +79,7 @@ export class HouseholdPlanPreviewMapComponent {
     leafTip: HouseholdPlanPoint;
     arc: string;
   } | null {
-    const segment = this.openingLine(opening);
-    if (!segment || opening.kind !== 'door') return null;
-    const width = Math.abs(segment.to.x - segment.from.x) + Math.abs(segment.to.y - segment.from.y);
-    if (segment.from.y === segment.to.y) {
-      const hinge = segment.to;
-      const leafTip = { x: hinge.x, y: hinge.y - width };
-      return {
-        hinge,
-        leafTip,
-        arc: `M ${leafTip.x} ${leafTip.y} A ${width} ${width} 0 0 0 ${segment.from.x} ${segment.from.y}`
-      };
-    }
-    const hinge = segment.from;
-    const leafTip = { x: hinge.x + width, y: hinge.y };
-    return {
-      hinge,
-      leafTip,
-      arc: `M ${leafTip.x} ${leafTip.y} A ${width} ${width} 0 0 1 ${segment.to.x} ${segment.to.y}`
-    };
+    return makeDoorSwing(this.floor?.walls ?? [], opening);
   }
 
   private boundsFor(floor: HouseholdPlanFloor | null): {
@@ -149,7 +128,7 @@ export class HouseholdPlanPreviewMapComponent {
     if (![minX, minY, maxX, maxY].every(Number.isFinite)) {
       return { x: 0, y: 0, width: 10000, height: 10000 };
     }
-    const padding = Math.max(400, Math.max(maxX - minX, maxY - minY) * 0.08);
+    const padding = Math.max(120, Math.max(maxX - minX, maxY - minY) * 0.01);
     return {
       x: minX - padding,
       y: minY - padding,

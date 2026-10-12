@@ -24,7 +24,7 @@ tipologías no previstas y conserva una etiqueta escrita por el hogar.
 | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Interior                | `entrance` (entrada), `foyer` (recibidor), `living_room` (salón), `dining_room` (comedor), `kitchen` (cocina), `pantry` (despensa), `bedroom` (dormitorio), `primary_bedroom` (dormitorio principal), `guest_bedroom` (habitación de invitados), `bathroom` (baño), `toilet` (aseo), `laundry_room` (lavadero), `home_office` (despacho), `studio_room` (estudio), `library` (biblioteca), `playroom` (sala de juegos), `gym` (gimnasio), `walk_in_closet` (vestidor), `hallway` (pasillo), `staircase` (escalera), `landing` (rellano), `elevator` (ascensor), `storage_room` (trastero), `basement` (sótano), `wine_cellar` (bodega), `attic` (buhardilla/ático), `garage` (garaje), `parking_space` (plaza de aparcamiento), `utility_room` (cuarto de instalaciones), `workshop` (taller) y `sunroom` (galería acristalada). |
 | Exterior o semiexterior | `garden` (jardín), `vegetable_garden` (huerto), `plot` (parcela), `balcony` (balcón), `terrace` (terraza), `patio` (patio), `courtyard` (patio interior), `porch` (porche), `veranda` (galería cubierta), `gallery` (galería), `roof_terrace` (azotea), `solarium` (solárium), `pool` (piscina), `outdoor_kitchen` (cocina exterior), `shed` (cobertizo/caseta), `greenhouse` (invernadero), `driveway` (entrada de vehículos), `outdoor_parking` (aparcamiento exterior), `path` (camino), `pet_area` (zona de mascotas) y `sports_area` (zona deportiva).                                                                                                                                                                                                                                                                      |
-| Compartido o auxiliar   | `common_area` (zona común), `shared_room` (cuarto comunitario), `storage_area` (zona de almacenamiento) y `custom` (nombre libre).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Compartido o auxiliar   | `common_area` (zona común), `shared_room` (cuarto comunitario), `storage_area` (zona de almacenamiento), `clothes_drying_area` (tendedero) y `custom` (nombre libre).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
 El tipo de vivienda inicial también admite `apartment`, `studio`, `detached_house`,
 `semi_detached_house`, `terraced_house`, `townhouse`, `duplex`, `shared_home`, `mobile_home` y
@@ -34,11 +34,11 @@ Una zona personalizada puede tener cualquier nombre no vacío y queda marcada co
 pretende que el enum sea infinito. Las estancias anidadas válidas —por ejemplo, una piscina dentro
 del jardín— pueden declararse como zona hija.
 
-En el editor deben ser fáciles de encontrar las zonas habituales de una vivienda española:
+En el selector agrupado deben estar disponibles las zonas habituales de una vivienda española:
 recibidor, salón, comedor, cocina, despensa, dormitorios, baño, aseo, pasillo, escaleras,
-lavadero, despacho, garaje, **trastero**, **balcón**, terraza, patio y jardín. Las demás siguen
-disponibles en el selector agrupado; `custom` permite escribir cualquier otro nombre sin modificar
-el enum compartido.
+lavadero, tendedero, despacho, garaje, **trastero**, **balcón**, terraza, patio y jardín. La barra
+de acceso rápido conserva los seis tipos del prototipo; las demás zonas se eligen desde el selector
+completo. `custom` permite escribir cualquier otro nombre sin modificar el enum compartido.
 
 ## Flujo y alcance de producto
 
@@ -285,27 +285,33 @@ rollback. Las tablas se crean con `CREATE TABLE IF NOT EXISTS`; las pruebas se e
 
 ### QA-HOUSEHOLD.PLAN.AREAS-AND-FREEFORM.1 — zonas habituales y geometría irregular
 
-- [ ] Las opciones rápidas incluyen al menos las estancias frecuentes en España, con los nombres
-      visibles «Trastero» y «Balcón»; el selector completo conserva zonas menos frecuentes agrupadas.
-- [ ] «Personalizada» permite añadir una estancia con cualquier nombre no vacío y ese nombre se
+- [x] El selector agrupado permite elegir las estancias frecuentes en España, con los nombres
+      visibles «Trastero», «Balcón» y «Tendedero»; mantiene las zonas menos frecuentes agrupadas y
+      la barra de seis accesos rápidos sigue igual al prototipo.
+- [x] «Personalizada» permite añadir una estancia con cualquier nombre no vacío y ese nombre se
       conserva en el borrador, la propuesta AI y la persistencia.
-- [ ] Crear una zona dibujando admite un polígono libre con tres o más vértices, sin restringir a
+- [x] Crear una zona dibujando admite un polígono libre con tres o más vértices, sin restringir a
       rectángulos; sigue siendo posible dibujar la forma rectangular con arrastre.
-- [ ] Foto/boceto con contorno cóncavo y pared oblicua produce una propuesta con geometría irregular
+- [x] Foto/boceto con contorno cóncavo y pared oblicua produce una propuesta con geometría irregular
       equivalente en el preview; las paredes diagonales, sus aberturas y tareas/selecciones mantienen
       comportamiento válido.
-- [ ] TDD: schema/UI prueban zonas españolas, nombre custom, cierre de polígono, cancelar/deshacer,
+- [x] TDD: schema/UI prueban zonas españolas, nombre custom, cierre de polígono, cancelar/deshacer,
       autointersección, aristas diagonales y abertura en pared diagonal. La prueba AI comprueba que
       el prompt pide respetar el contorno y que no se sustituye por una caja rectangular.
-- [ ] E2E sintética en PC y móvil, aislamiento de DB/proveedor, capturas, validación visual y
+- [x] E2E sintética en PC y móvil, aislamiento de DB/proveedor, capturas, validación visual y
       cobertura ≥70 % de los archivos afectados; sin usar planos ni hogares reales.
 
 Evidencia del editor y tareas:
 
-- `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/household-plan-tasks.spec.ts` — 2/2 pasan (repetición final: 41,6 s). Usa DB y usuarios sintéticos temporales; la propuesta de foto se stubbea en el navegador, no llama a IA real, guarda solo al aplicar y el runner elimina DB/artefactos temporales propios al terminar.
+- `pnpm --filter @hogaria/web exec ng test --no-watch --include=src/app/features/household/household-area-catalog.spec.ts` — 4/4.
+- `pnpm --filter @hogaria/server exec vitest run src/schemas/household-plan.schema.spec.ts src/utils/household-plan-ai.spec.ts` — 19/19.
+- `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/household-plan-tasks.spec.ts` — 2/2 pasan en 50,7 s (12-10-2026). Usa DB/usuarios temporales sintéticos; la IA se stubbea en el navegador y no se llama al proveedor. El runner limpia solo los artefactos temporales que crea.
+- `$env:DATABASE_PATH=':memory:'; pnpm run test:coverage` — cliente 1396/1396 y servidor 1330/1331 (1 omitida); cobertura cliente 93,89/84,75/93,62/95,59 % y servidor 91,76/83,51/95,56/94,27 % (statements/branches/functions/lines). Sin errores de umbral.
+- `pnpm run check:ui`, `pnpm run typecheck:e2e` y `pnpm run build` — pasan. Build conserva avisos preexistentes de Angular/presupuesto y no informa exceso CSS del editor del plano.
 - El flujo verifica lienzo/zonas, pared exterior/puerta principal, pisos y confirmación al borrarlos, carga de imagen, propuesta sin escritura prematura, cambio de pestaña con borrador conservado, tarea por zona, preview equitativo/no consecutivo, persistencia y edición tras recargar.
 - Viewports probados: 320, 359, 360, 639, 640, 767, 768, 1023 y 1024 px, además de 568×320; la pestaña conserva geometría/tipografía/espaciado equivalente con tolerancia ≤1 px y no hay overflow horizontal. Mobile Chrome usa `tap` en el plano y teclado; los componentes aplican `env(safe-area-inset-bottom, 0px)`. La emulación no sustituye comprobación en hardware físico con recorte/notch.
 - Capturas PC/móvil sintéticas inspeccionadas en `.e2e-screenshots/household-plan-tasks/{chromium,mobile-chrome}/` (los seis pasos `01-plan-start` a `06-chat-adjustment`; también propuesta, previsualización aleatoria y semana guardada). Se excluyen de Git.
+- La API/schema admite polígonos no rectangulares y segmentos diagonales; el prompt pide trazarlos en `polygon`/`walls`, y el test E2E demuestra que el preview mantiene una respuesta sintética cóncava con pared oblicua. No se hizo smoke con proveedor real: la calidad de la IA ante bocetos arbitrarios sigue sin validación real y no se afirma que el proveedor reproduzca toda geometría de forma exacta.
 
 ### QA-HOUSEHOLD.PLAN.VISUAL-FIDELITY.1 — interfaz según los prototipos aprobados
 

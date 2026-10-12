@@ -213,6 +213,27 @@ describe('household plan persistence routes', () => {
     });
   });
 
+  it('persists and reloads the user-defined name of a custom household area', async () => {
+    makeHousehold('home-custom');
+    const owner = makeUser('owner-custom', 'home-custom', true);
+    const plan = validPlan();
+    plan.floors[0].spaces[0].kind = 'custom';
+    plan.floors[0].spaces[0].label = 'Sala de música';
+
+    const saved = await call(owner, 'PUT', { baseVersion: 0, plan });
+    expect(saved.status).toBe(200);
+    expect(await saved.json()).toMatchObject({
+      success: true,
+      data: { plan: { floors: [{ spaces: [{ kind: 'custom', label: 'Sala de música' }] }] } }
+    });
+
+    const loaded = await call(owner, 'GET');
+    expect(await loaded.json()).toMatchObject({
+      success: true,
+      data: { plan: { floors: [{ spaces: [{ kind: 'custom', label: 'Sala de música' }] }] } }
+    });
+  });
+
   it('persists household-scoped zone responsibility with membership and plan version checks', async () => {
     makeHousehold('home-a');
     makeHousehold('home-b');
@@ -612,7 +633,7 @@ describe('household plan persistence routes', () => {
       id: 'diagonal',
       kind: 'interior',
       from: { x: 0, y: 0 },
-      to: { x: 200, y: 200 }
+      to: { x: 0, y: 0 }
     });
     vi.stubGlobal(
       'fetch',
