@@ -1,6 +1,6 @@
 # HogarIA — Plano interactivo del hogar y tareas por zonas
 
-Estado: **implementación, pase visual y CI completados · PR #47 listo para revisión · 2026-10-12**
+Estado: **implementación y CI completados; comparación directa con prototipos pendiente de sus archivos originales · PR #47 listo para revisión · 2026-10-12**
 
 Este contrato concreta una nueva capacidad de HogarIA y complementa las reglas compartidas de
 `HOGARIA-SPEC.md` §12ap (aislamiento por hogar, membresía, permisos y proveedor de IA) y §13
@@ -283,10 +283,13 @@ Evidencia del editor y tareas:
 
 ### QA-HOUSEHOLD.PLAN.VISUAL-FIDELITY.1 — interfaz según los prototipos aprobados
 
-La referencia es la secuencia de seis mockups aprobados en esta conversación (archivos
+La referencia es la secuencia de seis mockups aprobados en esta conversación (IDs de archivo
 `exec-3d60ee65-e311-4692-a979-b1f4564929a9.png`, `exec-3be5f6ed-8bd1-47a8-b708-35ab9452dff0.png`,
 `exec-9299b3b6-c022-4f96-b9c4-7eb0337afc28.png`, `exec-e2e39a1a-d995-4927-bc38-205c925ab781.png`,
 `exec-455e098e-dd5b-4600-b0aa-1c9939baf363.png` y `exec-042a1622-76b0-4f9a-87d6-bc7f4e404ba3.png`).
+Sus imágenes no están en el worktree ni en las carpetas locales de visualizaciones, adjuntos o
+temporales; no hay baseline con el que probar equivalencia exacta. Las capturas de la app se han
+inspeccionado, pero eso no sustituye la comparación lado a lado con los seis originales.
 Mantener la shell y los tokens geométricos reales de HogarIA; fondo claro, superficies blancas,
 naranja para acción/selección, líneas azul marino y zonas pastel. Se evalúan la composición y
 jerarquía de la vista del producto, no las barras de navegador ni la shell dibujada dentro de los
@@ -311,8 +314,12 @@ mockups.
 - [x] E2E verifica interacción, permisos, persistencia, borradores, IA simulada, teclado/foco,
       labels, contraste AA en temas claro/oscuro, safe-area y ausencia de overflow; no hay fixtures
       personales ni llamadas reales a IA.
-- [x] Inspeccionar las seis capturas sintéticas de Playwright a 1440×900 y 390×844; verificar además
+- [x] Capturar e inspeccionar los seis estados sintéticos a 1440×900 y 390×844; verificar además
       breakpoints 320, 359, 360, 389, 390, 639, 640, 767, 768, 1023 y 1024 px y orientación 568×320.
+- [ ] Comparar directamente cada captura PC/móvil con el mockup aprobado correspondiente a
+      geometría y viewport equivalentes; guardar overlays/diffs reproducibles. Pendiente: recibir o
+      localizar los seis PNG originales identificados arriba. No declarar fidelidad visual exacta
+      hasta completar este cotejo.
 - [x] Registrar comprobaciones y limitaciones reproducibles; no inferir fidelidad solo por tests
       unitarios, compilación o presencia de controles.
 
@@ -322,7 +329,7 @@ Evidencia visual y regresión:
 - El primer pase halló dos fallos visuales que no detectaba el simple `scrollWidth`: a 320 px las pestañas del hogar se montaban; y en pantalla baja la decisión de foto quedaba debajo de la barra fija (`bottom=729,89`, `sticky top=693`). Se compactaron las pestañas hasta 389 px, con scroll/foco por teclado, y a 320×568 las acciones de foto dejan de ser fijas y permanecen alcanzables al desplazar. E2E verifica 320, 359, 360, 389 y 390 px y ambos casos pasan.
 - El primer CI de esta revisión halló que las media queries nuevas no estaban cubiertas por la matriz global B−1/B/B+1. Se añadieron 388–390, 1198–1201 y 1278–1281 px a `tests/e2e/layout-gutters.spec.ts`; el test enfocado pasa 1/1 y el spec completo aislado pasa **7/7 en 1,3 min**.
 - Inspeccioné los seis estados `01-plan-start` a `06-chat-adjustment` de `.e2e-screenshots/household-plan-tasks/{chromium,mobile-chrome}/` a 1440×900 y 390×844; hay capturas adicionales 320×568 para cada flujo, una de las acciones de foto desplazadas y asignación/tareas en 568×320. También se comprueban 639, 640, 767, 768, 1023 y 1024 px.
-- Las capturas usan plan/foto sintéticos y no contienen datos personales. La emulación no sustituye un teléfono físico con notch. El mockup y la aplicación tienen shells distintas; por ello no se afirma igualdad raster píxel a píxel fuera del contenido de la vista Hogar.
+- Las capturas usan plan/foto sintéticos y no contienen datos personales. La emulación no sustituye un teléfono físico con notch. La shell real de HogarIA se conserva; el efecto de esa diferencia se debe evaluar al recibir los mockups originales, no asumir que la comparación está cerrada.
 
 ### Puertas generales
 
