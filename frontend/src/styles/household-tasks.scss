@@ -829,7 +829,7 @@
 
 .tasks-day {
   display: grid;
-  grid-template-columns: minmax(74px, 0.24fr) minmax(0, 1fr);
+  grid-template-columns: minmax(56px, 0.2fr) minmax(0, 1fr);
   align-items: start;
   gap: var(--space-3);
   min-width: 0;
@@ -856,8 +856,12 @@
   text-transform: capitalize;
 }
 
-.tasks-day__label-short {
+.tasks-day__label-full {
   display: none;
+}
+
+.tasks-day__label-short {
+  display: inline;
 }
 
 .tasks-day__count {
@@ -1395,14 +1399,6 @@
   .tasks-day__header {
     min-height: 24px;
     padding-top: 0;
-  }
-
-  .tasks-day__label-full {
-    display: none;
-  }
-
-  .tasks-day__label-short {
-    display: inline;
   }
 
   .tasks-day__header {

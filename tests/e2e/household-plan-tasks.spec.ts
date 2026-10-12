@@ -2987,9 +2987,7 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   await createForm.getByLabel('Nombre de la tarea').fill('Limpiar cocina');
   await fairAssignment.check();
   await expect(page.locator('.tasks-day__count').first()).toBeHidden();
-  await expect(
-    page.locator(mobile ? '.tasks-day__label-short' : '.tasks-day__label-full').first()
-  ).toBeVisible();
+  await expect(page.locator('.tasks-day__label-short').first()).toBeVisible();
   const firstTaskDetails = taskCards.first().locator('.task-card__details');
   await firstTaskDetails.locator('summary').click();
   await expect(firstTaskDetails.locator('.tasks-link--danger')).toBeVisible();
@@ -3012,6 +3010,28 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     taskCardsFit.visibleCount,
     `the weekly list should begin on screen below the plan and task controls: ${JSON.stringify(taskCardsFit)}`
   ).toBeGreaterThanOrEqual(mobile ? 1 : 7);
+  if (!mobile) {
+    const weekdayLabels = await page.locator('.tasks-day__header h4').evaluateAll((headers) =>
+      headers.map((header) => ({
+        fullDisplay: getComputedStyle(header.querySelector('.tasks-day__label-full')!).display,
+        shortDisplay: getComputedStyle(header.querySelector('.tasks-day__label-short')!).display,
+        shortText: header.querySelector('.tasks-day__label-short')!.textContent?.trim(),
+        height: Math.round(header.getBoundingClientRect().height),
+        accessibleDate: header.getAttribute('aria-label')
+      }))
+    );
+    expect(weekdayLabels).toHaveLength(7);
+    for (const weekday of weekdayLabels) {
+      expect(
+        weekday.fullDisplay,
+        'desktop checklist matches the prototype with a compact one-line weekday label'
+      ).toBe('none');
+      expect(weekday.shortDisplay).not.toBe('none');
+      expect(weekday.shortText).toBeTruthy();
+      expect(weekday.height, 'weekday labels fit a single line').toBeLessThanOrEqual(20);
+      expect(weekday.accessibleDate?.length ?? 0).toBeGreaterThan(weekday.shortText?.length ?? 0);
+    }
+  }
   if (!mobile) {
     const saveActionBottom = await page
       .locator('[data-test="tasks-save"]')

@@ -401,6 +401,10 @@ mockups.
       conserva una aserción de color para la selección.
 - [ ] **Tareas:** cotejar el peso visual del plano y la jerarquía del panel semanal. Los controles
       funcionales avanzados deben quedar accesibles sin sobrecargar la vista principal.
+- [x] **Agenda de escritorio:** usar los nombres breves de día del prototipo en una sola línea y
+      reservar más ancho para las tarjetas de asignación, sin perder la fecha larga para lectores de
+      pantalla. Playwright verifica los siete encabezados, su alineación, el formato visible y el
+      `aria-label` completo.
 - [x] **Checklist semanal:** las siete asignaciones, el resumen de equidad y la acción de aplicar
       siguen alcanzables en móvil. Cuando hay una sola tarea diaria, la fila muestra día + persona
       sin repetir el título; nombre, fecha/zona y completado siguen accesibles en la edición. Si un
@@ -481,6 +485,8 @@ Evidencia visual y regresión:
 - Auditoría de checklist móvil (12-10-2026): la prueba roja midió filas de **24 px**, con acciones imposibles de tocar con precisión. El E2E exige ahora fila, completado y edición ≥**44×44 px**, y comprueba que la última tarea se puede desplazar completa encima del footer fijo, separado de la navegación inferior. La posición del footer conserva `env(safe-area-inset-bottom, 0px)` en la hoja de estilos compartida. Tras ampliar filas y objetivos, `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/household-plan-tasks.spec.ts` pasa **2/2 en 51,9 s**; el test cubre además 320×568, 390×950 y 568×320 en Mobile Chrome. Capturas sintéticas PC/móvil regeneradas con `scripts/create-household-plan-comparison.ps1` e inspeccionadas; mobile 05 confirma targets y última tarea sin quedar bajo el CTA. Prettier, `check:ui` (228 archivos/21 reglas), `typecheck:e2e` y `pnpm run build` pasan (warnings Angular/bundles preexistentes). El peso visual del panel semanal permanece abierto; este ajuste táctil no declara fidelidad global.
 - Después de esa revisión: `pnpm run check:ui` (228 archivos/21 reglas) y `pnpm run typecheck:e2e` pasan; `pnpm run build` pasa con warnings preexistentes de Angular/presupuesto de bundles y estilos. No se volvió a ejecutar coverage porque las últimas modificaciones fueron solo de estilos y E2E; la última cobertura registrada sigue por encima de 70 % por métrica y archivo del alcance.
 - Entrega intermedia publicada sin cerrar la revisión: commit `89f26da` (`fix(household): polish floorplan editor flow`) en `feat/household-floorplan`. Lefthook pre-commit y pre-push pasaron sin bypass; el push ejecutó formato, `check:ui`, build, typecheck E2E y suite completa (config **11/11**, cliente **1406/1406**, servidor **1330 aprobadas + 1 omitida**). PR #47 permanece Draft; la fidelidad visual sigue abierta.
+
+- Auditoría de alineación de agenda PC (12-10-2026): rojo reproducido porque «Lunes, 12 oct» ocupaba varias líneas en la columna estrecha de día. Se muestran los nombres breves localizados del prototipo, se reduce la columna de etiqueta de 74 a 56 px para dar aire a cada asignación y la fecha larga continúa en `aria-label`. La E2E verifica los siete nombres visibles en una sola línea y las siete fechas completas accesibles; el primer pase también detectó una aserción previa que aún esperaba el texto largo visible y se actualizó al nuevo contrato. Ejecución final `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/household-plan-tasks.spec.ts` — **2/2, 52,1 s**. Se regeneró la comparación PC/móvil y se inspeccionó `05-weekly-tasks-{desktop,mobile}.png`, además de la captura sintética 1920×1032. La comparación móvil aún muestra diferencias de densidad y de alcance visible del checklist; la jerarquía global de Tareas sigue abierta.
 
 ### Puertas generales
 
