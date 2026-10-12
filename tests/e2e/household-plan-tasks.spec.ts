@@ -815,6 +815,24 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   await expect(page.locator('[data-test="plan-floor-tabs"] .plan-floor-tabs__tab')).toHaveCount(2);
   const floorTabsControl = page.locator('[data-test="plan-floor-tabs"] .plan-floor-tabs__tab');
   const emptyCanvasState = page.locator('[data-test="plan-canvas-empty"]');
+  await expect(
+    page.locator('.plan-canvas__grid'),
+    'the canvas must not layer a second grid over the viewport grid'
+  ).toHaveCount(0);
+  await expect(
+    page.locator('.plan-canvas__paper'),
+    'the drawing surface must stay transparent over the single canvas grid'
+  ).toHaveCount(0);
+  const canvasSurfaceStyle = await page.locator('.plan-canvas__viewport').evaluate((viewport) => ({
+    grid: getComputedStyle(viewport).backgroundImage,
+    drawingSurface: getComputedStyle(viewport.querySelector('.plan-canvas')!).backgroundColor
+  }));
+  expect(canvasSurfaceStyle.grid, 'the viewport owns one continuous grid').toContain(
+    'radial-gradient'
+  );
+  expect(canvasSurfaceStyle.drawingSurface, 'the SVG does not mask that grid with a paper').toBe(
+    'rgba(0, 0, 0, 0)'
+  );
   await floorTabsControl.nth(1).click();
   await expect(emptyCanvasState, 'a blank floor gets one clear start hint').toBeVisible();
   await expect(
@@ -1181,6 +1199,43 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   for (const action of alignedFreeformActions) {
     expect(action.iconWidth, 'action icon width stays consistent').toBe(18);
     expect(action.iconHeight, 'action icon height stays consistent').toBe(18);
+  }
+  const freeformContentAlignment = await freeformActionButtons.evaluateAll((elements) =>
+    elements.map((element) => {
+      const button = element.getBoundingClientRect();
+      const icon = element.querySelector('svg')?.getBoundingClientRect();
+      const label = Array.from(element.querySelectorAll('span'))
+        .find((candidate) => {
+          const bounds = candidate.getBoundingClientRect();
+          return getComputedStyle(candidate).display !== 'none' && bounds.width > 0;
+        })
+        ?.getBoundingClientRect();
+      if (!icon || !label) throw new Error('Freeform action requires a visible icon and label');
+      const content = {
+        left: Math.min(icon.left, label.left),
+        right: Math.max(icon.right, label.right),
+        top: Math.min(icon.top, label.top),
+        bottom: Math.max(icon.bottom, label.bottom)
+      };
+      return {
+        horizontalCenterOffset: Math.abs(
+          (content.left + content.right) / 2 - (button.left + button.right) / 2
+        ),
+        verticalCenterOffset: Math.abs(
+          (content.top + content.bottom) / 2 - (button.top + button.bottom) / 2
+        )
+      };
+    })
+  );
+  for (const alignment of freeformContentAlignment) {
+    expect(
+      alignment.horizontalCenterOffset,
+      'the icon and label are centered as one action'
+    ).toBeLessThanOrEqual(1);
+    expect(
+      alignment.verticalCenterOffset,
+      'the icon and label share the action centerline'
+    ).toBeLessThanOrEqual(1);
   }
   await expect(
     page.locator('.plan-canvas__preview-action svg'),

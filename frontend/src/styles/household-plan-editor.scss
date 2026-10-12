@@ -1219,7 +1219,7 @@
   height: 100%;
   aspect-ratio: 1 / 1;
   border-radius: var(--radius-md);
-  background: var(--bg-secondary);
+  background: transparent;
   touch-action: pan-y;
   user-select: none;
 }
@@ -1229,15 +1229,8 @@
   touch-action: none;
 }
 
-.plan-canvas__paper,
 .plan-compare-canvas__paper {
   fill: color-mix(in srgb, var(--bg-secondary) 94%, var(--bg-primary));
-}
-
-.plan-canvas__grid {
-  stroke: var(--border-default);
-  stroke-opacity: 0.58;
-  stroke-width: 16;
 }
 
 .plan-canvas__space,

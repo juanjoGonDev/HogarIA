@@ -1072,18 +1072,6 @@
                 (pointerup)="onCanvasPointerUp($event)"
                 (pointercancel)="onCanvasPointerUp($event)"
               >
-                <defs>
-                  <pattern
-                    id="household-plan-grid"
-                    width="250"
-                    height="250"
-                    patternUnits="userSpaceOnUse"
-                  >
-                    <path d="M 250 0 L 0 0 0 250" class="plan-canvas__grid" fill="none" />
-                  </pattern>
-                </defs>
-                <rect x="0" y="0" width="10000" height="10000" class="plan-canvas__paper" />
-                <rect x="0" y="0" width="10000" height="10000" fill="url(#household-plan-grid)" />
                 <g *ngFor="let wall of shownFloor()?.walls">
                   <line
                     [attr.x1]="wall.from.x"
