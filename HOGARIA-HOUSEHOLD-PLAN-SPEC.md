@@ -444,7 +444,11 @@ mockups.
       conversación y decisión contra el mockup; en escritorio el plano debe ocupar al menos el 74 %
       de la altura útil de su marco sin deformar su geometría. Mantener el fixture móvil casi
       cuadrado y uno vertical en escritorio para que ambas comparaciones correspondan a sus
-      referencias; no ocultar diferencias de tipografía/respiración.
+      referencias; no ocultar diferencias de tipografía/respiración. En el encabezado de escritorio,
+      «Volver al lienzo» debe permanecer en una línea con su icono, sin desbordarse ni comprimir el
+      control de subir foto.
+  - [x] **Acciones del encabezado desktop:** «Volver al lienzo» y «Subir nueva foto o boceto» se
+        muestran completos en una línea con iconos y centrado vertical; E2E comprueba 1280/1920 px.
 - [x] **Ajuste por chat, alineación PC:** los controles de zoom/encaje quedan ≤24 px bajo las
       tarjetas comparadas y no se desplazan con la altura de la conversación; E2E reproduce primero
       el desfase de 103 px y verifica la separación corregida.
@@ -513,6 +517,7 @@ Evidencia visual y regresión:
 - Calco incremental de pictogramas (13-10-2026): rojo E2E confirmó que la ventana carecía del parteluz solo en la franja central y que la puerta aún representaba un arco de giro ausente en el mockup. Una ampliación visual evitó sobrecorregir la ventana a cuatro paños. Se corrigieron la división central y el contorno arqueado de puerta. Verde: `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/household-plan-tasks.spec.ts` — **2/2 en 53,5 s** con aislamiento/IA simulada. `scripts/create-household-plan-comparison.ps1` regeneró las 12 comparaciones; se inspeccionó `02-plan-editor-{desktop,mobile}.png`. Los pictogramas de estancias, chat y asignación siguen en auditoría.
 - Calco de estancias (13-10-2026): la ampliación en seis símbolos mostró diferencias internas claras aunque todas las cajas SVG fueran correctas. Se ajustaron cocina, sofá, WC, cama y planta de patio; el pasillo ya coincidía. El test de componente fue primero rojo en ambos casos y luego `pnpm --filter @hogaria/web exec ng test --no-watch --include=src/app/features/household/household-area-glyph.component.spec.ts` — **2/2**. Regresión de flujo `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/household-plan-tasks.spec.ts` — **2/2 en 52,7 s** con DB aislada/IA simulada. Se regeneraron las 12 comparaciones y se inspeccionó `02-plan-editor-{desktop,mobile}.png`; aún quedan iconos de chat/asignación.
 - Ajuste del inicio desktop (13-10-2026): Playwright rojo midió el rótulo «Plantas» **42 px** más abajo que «Tipo de vivienda» y el selector en **148,39 px** frente a 168. La causa fue el centrado vertical de la segunda columna y su track mínimo de 150 px, que junto al divisor/padding encogía el picker. Se ancló arriba y se reservó el ancho interno preciso (track 190, picker 168) solo desde 768 px. Verde: E2E `chromium` + `mobile-chrome` **2/2 en 52,2 s**; escritorio comprueba alineación ≤1 px/168 px exactos y la aserción móvil de centrado/ancho compacto sigue pasando. Se regeneraron e inspeccionaron `01-plan-start-{desktop,mobile}.png`.
+- Corrección del encabezado de propuesta por chat (13-10-2026): el cotejo 06 reveló que «Volver al lienzo» se partía en dos y «Subir nueva foto o boceto» también se partía al dar ancho al primer botón. El E2E falló primero con dos líneas en el regreso; se redistribuyó el grupo sin tapar subtítulo y se compactó solo el padding horizontal de subida. Verde: Playwright verifica ambos rótulos en una línea, icono/texto centrados y ancho ≥164 px en escritorio a 1280 y 1920, y mantiene el layout móvil. La ejecución aislada `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/household-plan-tasks.spec.ts` pasa **2/2 en 54,9 s**; se regeneraron y revisaron `06-chat-adjustment-{desktop,mobile}.png`.
 
 ### Puertas generales
 

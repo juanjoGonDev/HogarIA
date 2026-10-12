@@ -2482,6 +2482,71 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
       headerCollision,
       'the desktop subtitle never runs beneath the photo/canvas actions'
     ).toBe(false);
+    const returnActionGeometry = await page
+      .locator('[data-test="plan-return-to-canvas"]')
+      .evaluate((button) => {
+        const labelNode = Array.from(button.childNodes).find(
+          (node): node is Text => node.nodeType === Node.TEXT_NODE && !!node.textContent?.trim()
+        );
+        const icon = button.querySelector('svg')?.getBoundingClientRect();
+        const bounds = button.getBoundingClientRect();
+        if (!labelNode || !icon) throw new Error('The return action needs a label and icon');
+        const label = labelNode.textContent?.trim() ?? '';
+        const start = labelNode.textContent?.indexOf(label) ?? 0;
+        const range = document.createRange();
+        range.setStart(labelNode, start);
+        range.setEnd(labelNode, start + label.length);
+        const labelLines = Array.from(range.getClientRects());
+        return {
+          labelLines: labelLines.length,
+          iconCenter: icon.top + icon.height / 2,
+          labelCenter: labelLines[0] ? labelLines[0].top + labelLines[0].height / 2 : -1,
+          buttonWidth: bounds.width
+        };
+      });
+    const uploadActionGeometry = await page
+      .locator('.plan-review__header-actions .plan-file')
+      .evaluate((button) => {
+        const label = button.querySelector(':scope > span');
+        if (!label) throw new Error('The upload action needs a visible label');
+        const range = document.createRange();
+        range.selectNodeContents(label);
+        return {
+          labelLines: range.getClientRects().length,
+          width: button.getBoundingClientRect().width
+        };
+      });
+    expect(
+      returnActionGeometry.labelLines,
+      'the desktop return action label stays on one line beside its icon'
+    ).toBe(1);
+    expect(
+      uploadActionGeometry.labelLines,
+      `the desktop upload label stays on one line in ${uploadActionGeometry.width}px`
+    ).toBe(1);
+    expect(
+      Math.abs(returnActionGeometry.iconCenter - returnActionGeometry.labelCenter),
+      'the desktop return label and icon share a visual centerline'
+    ).toBeLessThanOrEqual(1);
+    expect(returnActionGeometry.buttonWidth).toBeGreaterThanOrEqual(164);
+    await page.setViewportSize({ width: 1920, height: viewport.height });
+    await expect
+      .poll(() =>
+        page.locator('[data-test="plan-return-to-canvas"]').evaluate((button) => {
+          const labelNode = Array.from(button.childNodes).find(
+            (node): node is Text => node.nodeType === Node.TEXT_NODE && !!node.textContent?.trim()
+          );
+          if (!labelNode) return 0;
+          const label = labelNode.textContent?.trim() ?? '';
+          const range = document.createRange();
+          const start = labelNode.textContent?.indexOf(label) ?? 0;
+          range.setStart(labelNode, start);
+          range.setEnd(labelNode, start + label.length);
+          return range.getClientRects().length;
+        })
+      )
+      .toBe(1);
+    await page.setViewportSize(viewport);
   }
   await expect(
     page.locator('.plan-chat__assistant-avatar svg'),

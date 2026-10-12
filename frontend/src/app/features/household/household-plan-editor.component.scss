@@ -83,10 +83,20 @@
   }
 
   .plan-editor:has(.plan-review__chat-view) .plan-review__header-actions {
-    width: 380px;
-    flex: 0 1 380px;
-    grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+    width: 388px;
+    flex: 0 1 388px;
+    grid-template-columns: minmax(0, 1fr) minmax(164px, max-content);
     margin-top: 9px;
+  }
+
+  .plan-editor:has(.plan-review__chat-view)
+    .plan-review__header-actions
+    > [data-test='plan-return-to-canvas'] {
+    white-space: nowrap;
+  }
+
+  .plan-editor:has(.plan-review__chat-view) .plan-review__header-actions .plan-file {
+    padding-inline: var(--space-2);
   }
 
   .plan-editor:has(.plan-review__chat-view) .plan-review {
