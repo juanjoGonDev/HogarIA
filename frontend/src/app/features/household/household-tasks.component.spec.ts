@@ -6,7 +6,11 @@ import { I18nService } from '../../core/services/i18n.service';
 import { HouseholdPlanService } from '../../core/services/household-plan.service';
 import { HouseholdTasksService } from '../../core/services/household-tasks.service';
 import type { HouseholdMember } from '../../shared/models/household.model';
-import type { HouseholdPlan } from '../../shared/models/household-plan.model';
+import type {
+  HouseholdPlan,
+  HouseholdPlanFloor,
+  HouseholdPlanOpening
+} from '../../shared/models/household-plan.model';
 import type {
   HouseholdTaskOccurrence,
   VersionedHouseholdTaskWeek
@@ -18,6 +22,11 @@ describe('HouseholdTasksComponent', () => {
   let component: HouseholdTasksComponent;
   let tasksService: jasmine.SpyObj<HouseholdTasksService>;
   let planService: jasmine.SpyObj<HouseholdPlanService>;
+  let assignmentResponse = {
+    planVersion: 0,
+    version: 0,
+    assignments: {} as Record<string, string[]>
+  };
 
   const members: HouseholdMember[] = [
     {
@@ -88,8 +97,12 @@ describe('HouseholdTasksComponent', () => {
     tasksService.save.and.callFake((_householdId, weekStart, baseVersion, tasks) =>
       of({ weekStart, version: baseVersion + 1, tasks })
     );
-    planService = jasmine.createSpyObj<HouseholdPlanService>('HouseholdPlanService', ['load']);
+    planService = jasmine.createSpyObj<HouseholdPlanService>('HouseholdPlanService', [
+      'load',
+      'loadAssignments'
+    ]);
     planService.load.and.returnValue(of({ version: 0, plan }));
+    planService.loadAssignments.and.returnValue(of(assignmentResponse));
 
     await TestBed.configureTestingModule({
       imports: [HouseholdTasksComponent],
@@ -108,7 +121,23 @@ describe('HouseholdTasksComponent', () => {
     fixture.detectChanges();
   }
 
-  beforeEach(() => TestBed.resetTestingModule());
+  beforeEach(() => {
+    assignmentResponse = { planVersion: 0, version: 0, assignments: {} };
+    TestBed.resetTestingModule();
+  });
+
+  it('frames the task map around the active floor geometry with safe padding', async () => {
+    await mount();
+    const viewBox = component.planViewBox().split(' ').map(Number);
+    const canvas = fixture.nativeElement.querySelector(
+      '[data-test="tasks-plan-canvas"]'
+    ) as SVGSVGElement;
+
+    expect(viewBox).toEqual([-150, -150, 1300, 1300]);
+    expect(canvas.getAttribute('viewBox')).toBe(component.planViewBox());
+    component.plan.set(null);
+    expect(component.planViewBox()).toBe('0 0 10000 10000');
+  });
 
   it('adds and edits a household-week task locally and saves it with the versioned API', async () => {
     await mount();
@@ -146,6 +175,54 @@ describe('HouseholdTasksComponent', () => {
     expect(component.isDirty()).toBeFalse();
   });
 
+  it('renders door swing arcs and double window rails from each opening wall', async () => {
+    await mount();
+    const floor: HouseholdPlanFloor = {
+      ...plan.floors[0],
+      walls: [
+        {
+          id: 'horizontal-wall',
+          kind: 'exterior',
+          from: { x: 1_000, y: 1_000 },
+          to: { x: 9_000, y: 1_000 }
+        },
+        {
+          id: 'vertical-wall',
+          kind: 'exterior',
+          from: { x: 9_000, y: 1_000 },
+          to: { x: 9_000, y: 9_000 }
+        }
+      ]
+    };
+    const door: HouseholdPlanOpening = {
+      id: 'front-door',
+      wallId: 'horizontal-wall',
+      kind: 'door',
+      offset: 2_000,
+      width: 900,
+      isMainEntrance: true
+    };
+    const window: HouseholdPlanOpening = {
+      id: 'side-window',
+      wallId: 'vertical-wall',
+      kind: 'window',
+      offset: 2_000,
+      width: 1_200,
+      isMainEntrance: false
+    };
+
+    expect(component.doorSwing(floor, door)).toEqual({
+      hinge: { x: 3_900, y: 1_000 },
+      leafTip: { x: 3_900, y: 100 },
+      arc: 'M 3900 100 A 900 900 0 0 0 3000 1000'
+    });
+    expect(component.openingRails(floor, window)).toEqual([
+      { from: { x: 8_930, y: 3_000 }, to: { x: 8_930, y: 4_200 } },
+      { from: { x: 9_070, y: 3_000 }, to: { x: 9_070, y: 4_200 } }
+    ]);
+    expect(component.openingRails(floor, door)).toEqual([]);
+  });
+
   it('filters by a selected plan zone while keeping the full schedule unchanged', async () => {
     await mount();
     const date = component.weekStart();
@@ -164,6 +241,29 @@ describe('HouseholdTasksComponent', () => {
 
     expect(component.visibleTasks()).toEqual([kitchenTask]);
     expect(component.draftTasks()).toHaveSize(2);
+  });
+
+  it('loads version-matched zone responsibility for the interactive task map', async () => {
+    assignmentResponse = { planVersion: 0, version: 3, assignments: { kitchen: ['ada', 'lin'] } };
+    await mount();
+
+    expect(component.activeFloor()?.id).toBe('floor-0');
+    expect(component.mapSpaces().map((space) => space.id)).toEqual(['kitchen']);
+    expect(component.assignmentClass('kitchen')).toBe('tasks-map__area--shared');
+    expect(component.spaceAssignmentLabel('kitchen')).toBe('household.plan_zone_shared');
+
+    component.selectMapSpace('kitchen');
+    expect(component.activeSpaceId()).toBe('kitchen');
+    expect(component.filterSpaceId()).toBe('kitchen');
+    expect(component.newSpaceId()).toBe('kitchen');
+  });
+
+  it('ignores zone responsibility tied to an obsolete plan version', async () => {
+    assignmentResponse = { planVersion: 9, version: 4, assignments: { kitchen: ['ada'] } };
+    await mount();
+
+    expect(component.assignments()).toEqual({});
+    expect(component.assignmentClass('kitchen')).toBe('tasks-map__area--unassigned');
   });
 
   it('previews a fair, non-consecutive assignment and only applies it to the draft after confirmation', async () => {
@@ -244,8 +344,14 @@ describe('HouseholdTasksComponent', () => {
     ]);
     tasksService.load.and.returnValues(first, second);
     tasksService.save.and.returnValue(of({ weekStart: '2026-10-05', version: 1, tasks: [] }));
-    planService = jasmine.createSpyObj<HouseholdPlanService>('HouseholdPlanService', ['load']);
+    planService = jasmine.createSpyObj<HouseholdPlanService>('HouseholdPlanService', [
+      'load',
+      'loadAssignments'
+    ]);
     planService.load.and.returnValue(of({ version: 0, plan: null }));
+    planService.loadAssignments.and.returnValue(
+      of({ planVersion: 0, version: 0, assignments: {} })
+    );
     await TestBed.configureTestingModule({
       imports: [HouseholdTasksComponent],
       providers: [
@@ -334,6 +440,7 @@ describe('HouseholdTasksComponent', () => {
     );
     expect(component.areaFilterOptions()[0].value).toBe('');
 
+    component.weekStart.set('2026-10-05');
     component.shiftWeek(-1);
     expect(component.weekStart()).toBe('2026-09-28');
     expect(component.newDate()).toBe('2026-09-28');

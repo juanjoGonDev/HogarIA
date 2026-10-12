@@ -300,6 +300,24 @@ describe('HouseholdComponent', () => {
     });
   });
 
+  it('keeps the selected tab in view after a narrow-screen layout changes', () => {
+    service.household.set(HOUSEHOLD);
+    fixture.detectChanges();
+    const settingsTab = fixture.nativeElement.querySelector(
+      '#household-tab-settings'
+    ) as HTMLButtonElement;
+    const scrollIntoView = jasmine.createSpy('scrollIntoView');
+    settingsTab.scrollIntoView = scrollIntoView;
+    spyOn(window, 'requestAnimationFrame').and.callFake((callback: FrameRequestCallback) => {
+      callback(0);
+      return 0;
+    });
+
+    component.selectTab('settings');
+
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest', inline: 'nearest' });
+  });
+
   it('cleans invalid tab URLs with replace while preserving other query parameters', () => {
     queryParams.next(convertToParamMap({ tab: 'unknown', source: 'bookmark' }));
     fixture.detectChanges();

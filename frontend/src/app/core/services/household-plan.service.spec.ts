@@ -3,7 +3,8 @@ import { TestBed } from '@angular/core/testing';
 import type {
   HouseholdPlan,
   HouseholdPlanProposal,
-  VersionedHouseholdPlan
+  VersionedHouseholdPlan,
+  VersionedHouseholdPlanAssignments
 } from '../../shared/models/household-plan.model';
 import { SILENT_TOAST } from '../interceptors/error.interceptor';
 import { HouseholdPlanService } from './household-plan.service';
@@ -97,6 +98,38 @@ describe('HouseholdPlanService', () => {
     post.flush({ success: true, data: proposal });
     expect(result).toEqual(proposal);
     http.expectNone(API_URL);
+  });
+
+  it('loads and version-checks persisted zone responsibility per household', () => {
+    const assignments: VersionedHouseholdPlanAssignments = {
+      planVersion: 4,
+      version: 2,
+      assignments: { kitchen: ['member-a', 'member-b'] }
+    };
+    let loaded: VersionedHouseholdPlanAssignments | undefined;
+    service.loadAssignments('home-a').subscribe((result) => (loaded = result));
+    const get = http.expectOne(`${API_URL}/assignments`);
+    expect(get.request.method).toBe('GET');
+    expect(get.request.headers.get('x-household-id')).toBe('home-a');
+    get.flush({ success: true, data: assignments });
+    expect(loaded).toEqual(assignments);
+
+    let saved: VersionedHouseholdPlanAssignments | undefined;
+    service
+      .saveAssignment('home-a', 2, 4, 'kitchen', ['member-a', 'member-b'])
+      .subscribe((result) => (saved = result));
+    const put = http.expectOne(`${API_URL}/assignments`);
+    expect(put.request.method).toBe('PUT');
+    expect(put.request.headers.get('x-household-id')).toBe('home-a');
+    expect(put.request.body).toEqual({
+      baseVersion: 2,
+      basePlanVersion: 4,
+      spaceId: 'kitchen',
+      memberIds: ['member-a', 'member-b']
+    });
+    const next = { ...assignments, version: 3 };
+    put.flush({ success: true, data: next });
+    expect(saved).toEqual(next);
   });
 
   it('sends the exact task occurrences the user confirmed before removing their zones', () => {

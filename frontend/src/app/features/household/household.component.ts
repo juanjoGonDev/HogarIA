@@ -107,7 +107,10 @@ function completeMemberPermissions(value: unknown, role: MemberRole): MemberPerm
   template: `
     <div class="household">
       <!-- Header -->
-      <div class="household__header">
+      <div
+        class="household__header"
+        [class.household__header--plan-flow]="activeTab() === 'plan' || activeTab() === 'tasks'"
+      >
         <h1 class="household__title">
           <app-icon name="group" [size]="24" [label]="null" />
           <span>{{ 'household.hogar' | t }}</span>
@@ -166,6 +169,7 @@ function completeMemberPermissions(value: unknown, role: MemberRole): MemberPerm
         *ngIf="householdService.household() as household"
         class="household__content"
         [class.household--wide]="activeTab() === 'plan' || activeTab() === 'tasks'"
+        [class.household__content--plan-flow]="activeTab() === 'plan' || activeTab() === 'tasks'"
       >
         <nav class="household-tabs" role="tablist" [attr.aria-label]="'household.hogar' | t">
           <button
@@ -466,7 +470,9 @@ function completeMemberPermissions(value: unknown, role: MemberRole): MemberPerm
           <app-household-plan-editor
             [householdId]="household.id"
             [canEdit]="household.myPermissions?.settings ?? household.myRole === 'admin'"
-            (planSaved)="refreshTasksAfterPlanSave()"
+            [members]="household.members"
+            (planSaved)="refreshTasksAfterPlanOrAssignmentSave()"
+            (assignmentSaved)="refreshTasksAfterPlanOrAssignmentSave()"
             (zoneTasksSelected)="openTasksForZone($event)"
           />
         </section>
@@ -617,6 +623,22 @@ function completeMemberPermissions(value: unknown, role: MemberRole): MemberPerm
         margin-bottom: var(--space-6);
       }
 
+      .household__header--plan-flow {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+
+      .household__content--plan-flow {
+        padding-top: 0;
+      }
+
       .household__header-actions {
         display: flex;
         align-items: center;
@@ -626,9 +648,43 @@ function completeMemberPermissions(value: unknown, role: MemberRole): MemberPerm
 
       @media (max-width: 480px) {
         .household__header-actions {
-          flex-direction: column;
-          align-items: stretch;
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
           width: 100%;
+        }
+      }
+
+      @media (max-width: 767px) {
+        .household__content--plan-flow .household-tabs {
+          margin-bottom: var(--space-3);
+          gap: 0;
+          overflow-x: hidden;
+        }
+
+        .household__content--plan-flow .household-tabs__tab {
+          min-width: 0;
+          flex: 1 1 0;
+          padding-right: 2px;
+          padding-left: 2px;
+          font-size: 0.7rem;
+          text-align: center;
+        }
+      }
+
+      @media (max-width: 389px) {
+        .household__content--plan-flow .household-tabs,
+        .household-tabs {
+          gap: 0;
+          justify-content: flex-start;
+          overflow-x: auto;
+        }
+
+        .household__content--plan-flow .household-tabs__tab,
+        .household-tabs__tab {
+          flex: 0 0 auto;
+          padding-right: 4px;
+          padding-left: 4px;
+          font-size: 0.62rem;
         }
       }
 
@@ -1194,6 +1250,12 @@ export class HouseholdComponent implements OnInit {
       queryParams: { tab: householdTabQueryValue(tab) },
       queryParamsHandling: 'merge'
     });
+    requestAnimationFrame(() => {
+      document.getElementById(`household-tab-${tab}`)?.scrollIntoView({
+        block: 'nearest',
+        inline: 'nearest'
+      });
+    });
   }
 
   openTasksForZone(spaceId: string): void {
@@ -1206,7 +1268,7 @@ export class HouseholdComponent implements OnInit {
     });
   }
 
-  refreshTasksAfterPlanSave(): void {
+  refreshTasksAfterPlanOrAssignmentSave(): void {
     this.tasksRefreshToken.update((token) => token + 1);
   }
 

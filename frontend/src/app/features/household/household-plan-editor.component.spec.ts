@@ -11,6 +11,7 @@ import type {
   HouseholdPlanProposal,
   VersionedHouseholdPlan
 } from '../../shared/models/household-plan.model';
+import type { HouseholdMember } from '../../shared/models/household.model';
 import { emptyHouseholdPlan } from './household-plan-editor.utils';
 import { HouseholdPlanEditorComponent } from './household-plan-editor.component';
 
@@ -27,9 +28,14 @@ describe('HouseholdPlanEditorComponent', () => {
     t: (key: string) => key
   };
 
-  function fakeCanvas(width = 100, height = 100): SVGSVGElement {
+  function fakeCanvas(
+    width = 100,
+    height = 100,
+    viewBox = { x: 0, y: 0, width: 10_000, height: 10_000 }
+  ): SVGSVGElement {
     return {
       getBoundingClientRect: () => ({ left: 0, top: 0, width, height }),
+      viewBox: { baseVal: viewBox },
       setPointerCapture: jasmine.createSpy('setPointerCapture'),
       hasPointerCapture: jasmine.createSpy('hasPointerCapture').and.returnValue(true),
       releasePointerCapture: jasmine.createSpy('releasePointerCapture')
@@ -56,11 +62,17 @@ describe('HouseholdPlanEditorComponent', () => {
     planService = jasmine.createSpyObj<HouseholdPlanService>('HouseholdPlanService', [
       'load',
       'save',
-      'propose'
+      'propose',
+      'loadAssignments',
+      'saveAssignment'
     ]);
     planService.load.and.returnValue(of(emptySnapshot));
     planService.save.and.returnValue(of(emptySnapshot));
     planService.propose.and.returnValue(throwError(() => new Error('unexpected proposal')));
+    planService.loadAssignments.and.returnValue(
+      of({ planVersion: 0, version: 0, assignments: {} })
+    );
+    planService.saveAssignment.and.returnValue(of({ planVersion: 0, version: 1, assignments: {} }));
     confirmService = jasmine.createSpyObj<ConfirmService>('ConfirmService', ['confirm']);
     confirmService.confirm.and.returnValue(Promise.resolve(true));
 
@@ -94,6 +106,168 @@ describe('HouseholdPlanEditorComponent', () => {
     expect(planService.save).not.toHaveBeenCalled();
   });
 
+  it('starts a starter layout as a local draft and never writes it without an explicit save', async () => {
+    await mount();
+
+    expect(component.setupVisible()).toBeTrue();
+    component.selectEntryMethod('guided');
+    component.setSetupFloorCount(1);
+    component.startPlan();
+
+    expect(component.setupVisible()).toBeFalse();
+    expect(component.draft().floors[0].spaces).toHaveSize(7);
+    expect(component.draft().floors[0].walls.length).toBeGreaterThan(0);
+    expect(component.draft().floors[0].openings[0].isMainEntrance).toBeTrue();
+    expect(
+      component.draft().floors[0].openings.filter((opening) => opening.kind === 'door')
+    ).toHaveSize(4);
+    expect(
+      component.draft().floors[0].openings.filter((opening) => opening.kind === 'window')
+    ).toHaveSize(3);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelectorAll('.plan-canvas__door-leaf').length).toBe(4);
+    expect(fixture.nativeElement.querySelectorAll('.plan-canvas__door-swing').length).toBe(4);
+    expect(fixture.nativeElement.querySelectorAll('.plan-canvas__window-rail').length).toBe(6);
+    expect(component.snapshot()).toEqual(emptySnapshot);
+    expect(planService.save).not.toHaveBeenCalled();
+    expect(component.isDirty()).toBeTrue();
+  });
+
+  it('uses a landscape starter floor proportioned for the plan canvas reference', async () => {
+    await mount();
+    component.selectEntryMethod('guided');
+    component.startPlan();
+
+    const floor = component.draft().floors[0];
+    const xs = [
+      ...floor.spaces.flatMap((space) => space.polygon.map((point) => point.x)),
+      ...floor.walls.flatMap((wall) => [wall.from.x, wall.to.x])
+    ];
+    const ys = [
+      ...floor.spaces.flatMap((space) => space.polygon.map((point) => point.y)),
+      ...floor.walls.flatMap((wall) => [wall.from.y, wall.to.y])
+    ];
+    const width = Math.max(...xs) - Math.min(...xs);
+    const height = Math.max(...ys) - Math.min(...ys);
+    const [viewX, viewY, viewWidth, viewHeight] = component.canvasViewBox.split(' ').map(Number);
+
+    expect(width / height).toBeGreaterThanOrEqual(1.25);
+    expect(viewX).toBeLessThan(Math.min(...xs));
+    expect(viewY).toBeLessThan(Math.min(...ys));
+    expect(viewX + viewWidth).toBeGreaterThan(Math.max(...xs));
+    expect(viewY + viewHeight).toBeGreaterThan(Math.max(...ys));
+    expect(viewWidth / viewHeight).toBeCloseTo(1.25, 1);
+  });
+
+  it('uses the illustrated method and dwelling icons from the plan setup design', async () => {
+    await mount();
+    const nativeElement = fixture.nativeElement as HTMLElement;
+
+    const dwellingIcons = nativeElement.querySelectorAll<SVGSVGElement>(
+      '.plan-setup__dwelling-icon svg'
+    );
+    const methodIcons = nativeElement.querySelectorAll<SVGSVGElement>(
+      '.plan-method-card__icon svg'
+    );
+
+    expect(dwellingIcons.length).toBe(4);
+    expect(methodIcons.length).toBe(3);
+    expect(
+      Array.from(methodIcons).every(
+        (icon) => icon.parentElement?.getAttribute('aria-hidden') === 'true'
+      )
+    ).toBeTrue();
+    expect(component.dwellingCardLabel('apartment')).toBe(
+      'household.plan_dwelling_short_apartment'
+    );
+  });
+
+  it('colors assigned, shared, and unassigned zones consistently and closes zone details', async () => {
+    await mount();
+    component.selectEntryMethod('guided');
+    component.startPlan();
+    component.members = [
+      { userId: 'member-a', name: 'Ana', isActive: true } as HouseholdMember,
+      { userId: 'member-b', name: 'Bea', isActive: true } as HouseholdMember
+    ];
+    component.assignmentSnapshot.set({
+      planVersion: 0,
+      version: 1,
+      assignments: {
+        kitchen: ['member-a'],
+        living: ['member-a', 'member-b'],
+        bath: ['member-b']
+      }
+    });
+
+    expect(component.memberIndexForId('member-a')).toBe(0);
+    expect(component.spaceResponsibilityClass('kitchen')).toBe('plan-canvas__space--member-0');
+    expect(component.spaceResponsibilityClass('bath')).toBe('plan-canvas__space--member-1');
+    expect(component.spaceResponsibilityClass('living')).toBe('plan-canvas__space--shared');
+    expect(component.spaceResponsibilityClass('unassigned')).toBe('');
+
+    component.selectSpace(component.draft().floors[0].spaces[0]);
+    expect(component.selectedSpace()).not.toBeNull();
+    expect(component.assignmentViewActive()).toBeTrue();
+    component.closeSpaceDetails();
+    expect(component.selectedSpace()).toBeNull();
+    expect(component.assignmentViewActive()).toBeFalse();
+    expect(component.assignmentDraftMemberIds()).toEqual([]);
+  });
+
+  it('marks a zone shared only when every active household member is assigned', async () => {
+    await mount();
+    component.members = [
+      { userId: 'member-a', name: 'Ana', isActive: true } as HouseholdMember,
+      { userId: 'member-b', name: 'Bea', isActive: true } as HouseholdMember,
+      { userId: 'member-c', name: 'Cris', isActive: true } as HouseholdMember
+    ];
+
+    component.assignmentDraftMemberIds.set(['member-a', 'member-b', 'member-c']);
+    expect(component.assignmentDraftIsShared()).toBeTrue();
+
+    component.assignmentDraftMemberIds.set(['member-a', 'member-b']);
+    expect(component.assignmentDraftIsShared()).toBeFalse();
+
+    component.assignmentDraftMemberIds.set(['inactive-member', 'member-a', 'member-b', 'member-c']);
+    expect(component.assignmentDraftIsShared()).toBeFalse();
+
+    component.assignmentDraftMemberIds.set(['member-a', 'member-b', 'member-c']);
+    component.toggleAssignmentMember('member-a');
+    expect(component.assignmentDraftMemberIds()).toEqual(['member-a']);
+    expect(component.assignmentDraftIsShared()).toBeFalse();
+  });
+
+  it('notifies the household task view after a zone assignment is persisted', async () => {
+    await mount();
+    component.selectEntryMethod('guided');
+    component.startPlan();
+    component.members = [{ userId: 'member-a', name: 'Ana', isActive: true } as HouseholdMember];
+    const space = component.draft().floors[0].spaces[0];
+    component.selectSpace(space);
+    component.toggleAssignmentMember('member-a');
+    const assignment = {
+      planVersion: component.snapshot().version,
+      version: 1,
+      assignments: { [space.id]: ['member-a'] }
+    };
+    planService.saveAssignment.and.returnValue(of(assignment));
+    const assignmentSaved = jasmine.createSpy('assignmentSaved');
+    component.assignmentSaved.subscribe(assignmentSaved);
+    const assignmentVersion = component.assignmentSnapshot().version;
+
+    component.saveZoneAssignment();
+
+    expect(planService.saveAssignment).toHaveBeenCalledOnceWith(
+      'synthetic-home',
+      assignmentVersion,
+      component.snapshot().version,
+      space.id,
+      ['member-a']
+    );
+    expect(assignmentSaved).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps edits local, supports undo and only persists after an explicit save', async () => {
     await mount();
     planService.save.and.callFake((_householdId, _version, plan) => of({ version: 1, plan }));
@@ -104,12 +278,19 @@ describe('HouseholdPlanEditorComponent', () => {
 
     component.undo();
     expect(component.draft().floors[0].spaces).toHaveSize(0);
+    component.redo();
+    expect(component.draft().floors[0].spaces).toHaveSize(1);
+    component.undo();
+    component.selectedKind.set('kitchen');
     component.addGuidedSpace();
+    const replacement = structuredClone(component.draft());
+    component.redo();
+    expect(component.draft()).toEqual(replacement);
     const editedPlan = structuredClone(component.draft());
     component.savePlan();
 
     expect(planService.save).toHaveBeenCalledOnceWith('synthetic-home', 0, editedPlan, []);
-    expect(editedPlan.floors[0].spaces[0].label).toBe('Salón');
+    expect(editedPlan.floors[0].spaces[0].label).toBe('Cocina');
     expect(component.snapshot()).toEqual({ version: 1, plan: editedPlan });
     expect(component.isDirty()).toBeFalse();
   });
@@ -211,11 +392,17 @@ describe('HouseholdPlanEditorComponent', () => {
     planService = jasmine.createSpyObj<HouseholdPlanService>('HouseholdPlanService', [
       'load',
       'save',
-      'propose'
+      'propose',
+      'loadAssignments',
+      'saveAssignment'
     ]);
     planService.load.and.returnValues(first, second);
     planService.save.and.returnValue(of(emptySnapshot));
     planService.propose.and.returnValue(throwError(() => new Error('unused')));
+    planService.loadAssignments.and.returnValue(
+      of({ planVersion: 0, version: 0, assignments: {} })
+    );
+    planService.saveAssignment.and.returnValue(of({ planVersion: 0, version: 1, assignments: {} }));
     await TestBed.configureTestingModule({
       imports: [HouseholdPlanEditorComponent],
       providers: [
@@ -257,7 +444,7 @@ describe('HouseholdPlanEditorComponent', () => {
     component.onCanvasPointerDown(pointer(canvas, emptyTarget, 10, 10));
     expect(component.drawingRect()).toEqual({ x: 1000, y: 1000, width: 0, height: 0 });
     component.onCanvasPointerMove(pointer(canvas, emptyTarget, 60, 55));
-    expect(component.drawingRect()).toEqual({ x: 1000, y: 1000, width: 5000, height: 4500 });
+    expect(component.drawingRect()).toEqual({ x: 1000, y: 1000, width: 5000, height: 4600 });
     component.onCanvasPointerUp(pointer(canvas, emptyTarget, 60, 55));
     expect(component.draft().floors[0].spaces).toHaveSize(2);
     expect(component.tool()).toBe('select');
@@ -292,7 +479,7 @@ describe('HouseholdPlanEditorComponent', () => {
     component.onCanvasPointerMove(pointer(canvas, areaTarget, 25, 25));
     component.onCanvasPointerUp(pointer(canvas, areaTarget, 25, 25));
     expect(component.selectedSpace()?.id).toBe(area.id);
-    expect(component.draft().floors[0].spaces[1].polygon[0]).toEqual({ x: 1500, y: 1500 });
+    expect(component.draft().floors[0].spaces[1].polygon[0]).toEqual({ x: 1600, y: 1600 });
     expect(component.undoStack().length).toBeGreaterThan(0);
 
     component.onCanvasPointerDown(pointer(canvas, emptyTarget, 5, 5));
@@ -306,6 +493,20 @@ describe('HouseholdPlanEditorComponent', () => {
         to: { x: 0, y: 500 }
       })
     ).toBe(500);
+  });
+
+  it('maps pointer positions through the cropped plan viewBox without shifting model coordinates', async () => {
+    await mount();
+    const canvas = fakeCanvas(100, 100, { x: 500, y: 500, width: 9_000, height: 9_000 });
+    const emptyTarget = document.createElement('div');
+    component.snapToGrid.set(false);
+    component.setSelectedKindFromPicker('kitchen');
+    component.setTool('space');
+
+    component.onCanvasPointerDown(pointer(canvas, emptyTarget, 10, 20));
+    component.onCanvasPointerMove(pointer(canvas, emptyTarget, 60, 70));
+
+    expect(component.drawingRect()).toEqual({ x: 1_400, y: 2_300, width: 4_500, height: 4_500 });
   });
 
   it('validates picker values, labels, floor/space limits and stale selections', async () => {
@@ -373,6 +574,20 @@ describe('HouseholdPlanEditorComponent', () => {
     component.selectedFloorId.set('floor-11');
     component.addFloor();
     expect(component.errorKey()).toBe('household.plan_floor_limit');
+  });
+
+  it('falls back safely when the selected floor or every floor is missing', async () => {
+    await mount();
+    const firstFloorId = component.draft().floors[0].id;
+    component.selectedFloorId.set('stale-floor');
+
+    expect(component.activeFloor()).toBeNull();
+    expect(component.shownFloor()?.id).toBe(firstFloorId);
+
+    const planWithoutFloors = structuredClone(component.draft());
+    planWithoutFloors.floors = [];
+    component.draft.set(planWithoutFloors);
+    expect(component.shownFloor()).toBeNull();
   });
 
   it('reports load/save errors and maps every recoverable AI proposal error', async () => {
@@ -469,5 +684,102 @@ describe('HouseholdPlanEditorComponent', () => {
     component.discardProposal();
     expect(component.proposal()).toBeNull();
     expect(component.previewMode()).toBe('current');
+  });
+
+  it('keeps an AI proposal as an unsaved draft when continuing to request another change', async () => {
+    await mount();
+    component.setSelectedKind('kitchen');
+    component.addGuidedSpace();
+    const startingDraft = structuredClone(component.draft());
+    const proposedPlan = structuredClone(startingDraft);
+    proposedPlan.floors[0].spaces[0].label = 'Cocina con isla';
+    const file = new File(['synthetic'], 'sketch.png', { type: 'image/png' });
+    component.attachment.set(file);
+    component.prompt.set('Primer cambio');
+    component.proposal.set({
+      baseVersion: component.snapshot().version,
+      current: component.snapshot().plan,
+      draft: startingDraft,
+      proposal: proposedPlan,
+      diff: { addedSpaceIds: [], modifiedSpaceIds: [], removedSpaceIds: [] },
+      orphanedTaskIds: ['orphaned-task']
+    });
+    component.previewMode.set('proposal');
+
+    component.continueEditingProposal();
+
+    expect(component.proposal()).toBeNull();
+    expect(component.draft()).toEqual(proposedPlan);
+    expect(component.snapshot().version).toBe(0);
+    expect(component.isDirty()).toBeTrue();
+    expect(component.previewMode()).toBe('current');
+    expect(component.prompt()).toBe('');
+    expect(component.attachment()).toBeNull();
+    expect(component.orphanedTaskIds()).toEqual(['orphaned-task']);
+    component.undo();
+    expect(component.draft()).toEqual(startingDraft);
+  });
+
+  it('starts a photo follow-up from the proposal without persisting the proposed plan', async () => {
+    await mount();
+    component.setSelectedKind('kitchen');
+    component.addGuidedSpace();
+    const startingDraft = structuredClone(component.draft());
+    const proposedPlan = structuredClone(startingDraft);
+    proposedPlan.floors[0].spaces[0].label = 'Cocina con isla';
+    component.proposal.set({
+      baseVersion: component.snapshot().version,
+      current: component.snapshot().plan,
+      draft: startingDraft,
+      proposal: proposedPlan,
+      diff: { addedSpaceIds: [], modifiedSpaceIds: [], removedSpaceIds: [] },
+      orphanedTaskIds: ['orphaned-task']
+    });
+    component.previewMode.set('proposal');
+    const file = new File(['synthetic-photo'], 'follow-up.png', { type: 'image/png' });
+    const input = document.createElement('input');
+    Object.defineProperty(input, 'files', { value: [file] });
+
+    component.startPhotoFollowup({ target: input } as unknown as Event);
+
+    expect(component.proposal()).toBeNull();
+    expect(component.draft()).toEqual(proposedPlan);
+    expect(component.snapshot().version).toBe(0);
+    expect(component.isDirty()).toBeTrue();
+    expect(component.attachment()).toBe(file);
+    expect(component.prompt()).toBe('');
+    expect(component.orphanedTaskIds()).toEqual(['orphaned-task']);
+    expect(component.confirmOrphanedTasks()).toBeFalse();
+    expect(planService.propose).not.toHaveBeenCalled();
+    expect(planService.save).not.toHaveBeenCalled();
+  });
+
+  it('keeps the current proposal when a photo follow-up exceeds the upload limit', async () => {
+    await mount();
+    const plan = structuredClone(component.draft());
+    component.proposal.set({
+      baseVersion: 0,
+      current: null,
+      draft: plan,
+      proposal: plan,
+      diff: { addedSpaceIds: [], modifiedSpaceIds: [], removedSpaceIds: [] },
+      orphanedTaskIds: []
+    });
+    const input = document.createElement('input');
+    input.type = 'file';
+    Object.defineProperty(input, 'files', {
+      value: [new File([new Uint8Array(10 * 1024 * 1024 + 1)], 'too-large.png')],
+      configurable: true
+    });
+
+    component.startPhotoFollowup({ target: input } as unknown as Event);
+
+    expect(component.proposal()).not.toBeNull();
+    expect(component.draft()).toEqual(plan);
+    expect(component.errorKey()).toBe('household.plan_file_too_large');
+    expect(input.value).toBe('');
+    expect(component.attachment()).toBeNull();
+    expect(planService.propose).not.toHaveBeenCalled();
+    expect(planService.save).not.toHaveBeenCalled();
   });
 });

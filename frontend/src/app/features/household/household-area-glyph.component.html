@@ -1,0 +1,62 @@
+<svg viewBox="0 0 64 64" width="100%" height="100%">
+  <g
+    [ngSwitch]="glyph"
+    fill="none"
+    stroke="currentColor"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <g *ngSwitchCase="'kitchen'" stroke-width="3">
+      <path d="M9 12h46v12H9zM9 29h46v24H9zM15 35h7m-7 7h7m-7 7h7" />
+      <circle cx="37" cy="37" r="3" />
+      <circle cx="47" cy="37" r="3" />
+      <circle cx="37" cy="46" r="3" />
+      <circle cx="47" cy="46" r="3" />
+    </g>
+    <g *ngSwitchCase="'seating'" stroke-width="3">
+      <path d="M12 15v-3h40v3m-42 1v19h44V16M10 27h44M16 35v6m32-6v6M20 43h24v9H20z" />
+      <path d="M17 19h10v7H17zm20 0h10v7H37z" />
+    </g>
+    <g *ngSwitchCase="'bedroom'" stroke-width="3">
+      <path d="M10 13v39m44-39v39M10 35h44M10 45h44M13 18h17v13H13zm21 0h17v13H34z" />
+      <path d="M30 18v13m4-13v13M14 52v4m36-4v4" />
+    </g>
+    <g *ngSwitchCase="'bathroom'" stroke-width="3">
+      <path d="M10 29h44v8a14 14 0 0 1-14 14H24a14 14 0 0 1-14-14zM16 29V17a7 7 0 0 1 14 0v4" />
+      <circle cx="47" cy="18" r="7" />
+      <path d="M20 51v4m24-4v4M47 11v7h7" />
+    </g>
+    <g *ngSwitchCase="'outdoors'" stroke-width="3">
+      <path d="M32 49V28m0 8-11-8m11 3 10-9m-10 20 12-6M18 52h28" />
+      <path d="M32 10c-8 0-13 6-13 13s6 12 13 12 13-5 13-12S40 10 32 10z" />
+    </g>
+    <g *ngSwitchCase="'entry'" stroke-width="3">
+      <path d="M15 54V10h29v44M15 54h37M22 54V17h22" />
+      <circle cx="37" cy="36" r="1.5" fill="currentColor" />
+      <path d="M45 18a18 18 0 0 1 9 15" />
+    </g>
+    <g *ngSwitchCase="'work'" stroke-width="3">
+      <path d="M10 18h44v23H10zM15 48h34M21 41v7m22-7v7M25 12h14v6H25z" />
+      <circle cx="32" cy="29" r="5" />
+      <path d="M22 37a10 10 0 0 1 20 0" />
+    </g>
+    <g *ngSwitchCase="'vehicle'" stroke-width="3">
+      <path d="m15 38 4-16h26l4 16v12H15zm0-2h34M20 22l4-9h16l4 9M20 42h7m10 0h7" />
+      <circle cx="21" cy="50" r="3" />
+      <circle cx="43" cy="50" r="3" />
+    </g>
+    <g *ngSwitchCase="'storage'" stroke-width="3">
+      <path
+        d="M11 12h42v42H11zM11 26h42M11 40h42M22 12v14m19-14v14M18 30h7m13 0h10M19 45h9m7 0h12"
+      />
+    </g>
+    <g *ngSwitchCase="'shared'" stroke-width="3">
+      <circle cx="23" cy="20" r="7" />
+      <circle cx="42" cy="20" r="7" />
+      <path d="M9 49a14 14 0 0 1 28 0m-8 0a13 13 0 0 1 26 0z" />
+    </g>
+    <g *ngSwitchDefault stroke-width="3">
+      <path d="M11 11h17v17H11zm25 0h17v17H36zM11 36h17v17H11zm25 0h17v17H36z" />
+    </g>
+  </g>
+</svg>

@@ -126,6 +126,12 @@ export interface VersionedHouseholdPlan {
   plan: HouseholdPlan | null;
 }
 
+export interface VersionedHouseholdPlanAssignments {
+  planVersion: number;
+  version: number;
+  assignments: Record<string, string[]>;
+}
+
 export interface HouseholdPlanProposalDiff {
   addedSpaceIds: string[];
   modifiedSpaceIds: string[];

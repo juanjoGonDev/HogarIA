@@ -5,6 +5,7 @@ import { environment } from '../../../environments/environment';
 import type {
   HouseholdPlan,
   HouseholdPlanProposal,
+  VersionedHouseholdPlanAssignments,
   VersionedHouseholdPlan
 } from '../../shared/models/household-plan.model';
 import { SILENT_TOAST } from '../interceptors/error.interceptor';
@@ -45,6 +46,31 @@ export class HouseholdPlanService {
         headers: this.householdHeaders(householdId),
         context: this.silentContext
       })
+      .pipe(map((response) => response.data));
+  }
+
+  loadAssignments(householdId: string): Observable<VersionedHouseholdPlanAssignments> {
+    return this.http
+      .get<ApiEnvelope<VersionedHouseholdPlanAssignments>>(`${this.apiUrl}/assignments`, {
+        headers: this.householdHeaders(householdId),
+        context: this.silentContext
+      })
+      .pipe(map((response) => response.data));
+  }
+
+  saveAssignment(
+    householdId: string,
+    baseVersion: number,
+    basePlanVersion: number,
+    spaceId: string,
+    memberIds: readonly string[]
+  ): Observable<VersionedHouseholdPlanAssignments> {
+    return this.http
+      .put<ApiEnvelope<VersionedHouseholdPlanAssignments>>(
+        `${this.apiUrl}/assignments`,
+        { baseVersion, basePlanVersion, spaceId, memberIds },
+        { headers: this.householdHeaders(householdId), context: this.silentContext }
+      )
       .pipe(map((response) => response.data));
   }
 

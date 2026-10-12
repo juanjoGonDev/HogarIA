@@ -22,24 +22,33 @@ import {
   PickerComponent,
   type PickerOption
 } from '../../shared/components/ui/picker/picker.component';
+import { HouseholdAreaGlyphComponent } from './household-area-glyph.component';
 import type { HouseholdMember } from '../../shared/models/household.model';
-import type { HouseholdPlanSpace } from '../../shared/models/household-plan.model';
+import type {
+  HouseholdPlan,
+  HouseholdPlanFloor,
+  HouseholdPlanOpening,
+  HouseholdPlanPoint,
+  HouseholdPlanSpace
+} from '../../shared/models/household-plan.model';
 import type {
   HouseholdTaskOccurrence,
   VersionedHouseholdTaskWeek
 } from '../../shared/models/household-task.model';
 import { assignHouseholdTasksFairly } from './household-task-assignment';
 import { getHouseholdAreaLabel } from './household-area-catalog';
+import { openingSegment } from './household-plan-editor.utils';
 
 interface WeekDay {
   date: string;
   label: string;
+  shortLabel: string;
 }
 
 @Component({
   selector: 'app-household-tasks',
   standalone: true,
-  imports: [CommonModule, FormsModule, TranslatePipe, PickerComponent],
+  imports: [CommonModule, FormsModule, TranslatePipe, PickerComponent, HouseholdAreaGlyphComponent],
   templateUrl: './household-tasks.component.html',
   styleUrl: './household-tasks.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush
@@ -57,6 +66,7 @@ export class HouseholdTasksComponent implements OnChanges {
   private readonly destroyRef = inject(DestroyRef);
   private requestGeneration = 0;
   private planGeneration = 0;
+  private assignmentGeneration = 0;
 
   readonly weekStart = signal(getMondayIsoDate(new Date()));
   readonly snapshot = signal<VersionedHouseholdTaskWeek>({
@@ -66,12 +76,18 @@ export class HouseholdTasksComponent implements OnChanges {
   });
   readonly draftTasks = signal<HouseholdTaskOccurrence[]>([]);
   readonly spaces = signal<HouseholdPlanSpace[]>([]);
+  readonly plan = signal<HouseholdPlan | null>(null);
+  readonly planVersion = signal(0);
+  readonly assignments = signal<Record<string, string[]>>({});
+  readonly activeSpaceId = signal<string | null>(null);
+  readonly selectedFloorId = signal('');
   readonly filterSpaceId = signal('');
   readonly newTitle = signal('');
   readonly newDetails = signal('');
   readonly newDate = signal(this.weekStart());
   readonly newSpaceId = signal('');
   readonly newMemberId = signal('');
+  readonly randomAssignmentMode = signal(false);
   readonly randomPreview = signal<HouseholdTaskOccurrence[] | null>(null);
   readonly loading = signal(false);
   readonly saving = signal(false);
@@ -87,6 +103,11 @@ export class HouseholdTasksComponent implements OnChanges {
       return {
         date,
         label: new Intl.DateTimeFormat(locale, { weekday: 'long', day: 'numeric', month: 'short' })
+          .format(localDate)
+          .replace(/^\p{L}/u, (first) => first.toLocaleUpperCase(locale)),
+        shortLabel: new Intl.DateTimeFormat(locale, {
+          weekday: 'short'
+        })
           .format(localDate)
           .replace(/^\p{L}/u, (first) => first.toLocaleUpperCase(locale))
       } satisfies WeekDay;
@@ -112,6 +133,34 @@ export class HouseholdTasksComponent implements OnChanges {
         (a, b) => a.scheduledDate.localeCompare(b.scheduledDate) || a.title.localeCompare(b.title)
       );
   });
+  readonly floors = computed(() => this.plan()?.floors ?? []);
+  readonly activeFloor = computed<HouseholdPlanFloor | null>(
+    () =>
+      this.floors().find((floor) => floor.id === this.selectedFloorId()) ?? this.floors()[0] ?? null
+  );
+  readonly mapSpaces = computed(() => this.activeFloor()?.spaces ?? []);
+  readonly planViewBox = computed(() => {
+    const floor = this.activeFloor();
+    if (!floor) return '0 0 10000 10000';
+    const points: HouseholdPlanPoint[] = [
+      ...floor.spaces.flatMap((space) => space.polygon),
+      ...floor.walls.flatMap((wall) => [wall.from, wall.to])
+    ];
+    if (!points.length) return '0 0 10000 10000';
+
+    let minX = points[0].x;
+    let maxX = points[0].x;
+    let minY = points[0].y;
+    let maxY = points[0].y;
+    for (const point of points) {
+      minX = Math.min(minX, point.x);
+      maxX = Math.max(maxX, point.x);
+      minY = Math.min(minY, point.y);
+      maxY = Math.max(maxY, point.y);
+    }
+    const padding = Math.max(250, Math.round(Math.max(maxX - minX, maxY - minY) * 0.06));
+    return `${minX - padding} ${minY - padding} ${maxX - minX + padding * 2} ${maxY - minY + padding * 2}`;
+  });
   readonly isDirty = computed(
     () => JSON.stringify(this.draftTasks()) !== JSON.stringify(this.snapshot().tasks)
   );
@@ -123,6 +172,7 @@ export class HouseholdTasksComponent implements OnChanges {
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['selectedSpaceId']) {
       this.filterSpaceId.set(this.selectedSpaceId ?? '');
+      this.activeSpaceId.set(this.selectedSpaceId);
       if (
         this.selectedSpaceId &&
         this.spaces().some((space) => space.id === this.selectedSpaceId)
@@ -182,7 +232,7 @@ export class HouseholdTasksComponent implements OnChanges {
       details: this.newDetails().trim() || null,
       spaceId: this.newSpaceId() || null,
       scheduledDate: this.newDate(),
-      assignedMemberId: this.newMemberId() || null,
+      assignedMemberId: this.randomAssignmentMode() ? null : this.newMemberId() || null,
       completed: false
     };
     this.draftTasks.update((tasks) => [...tasks, task]);
@@ -290,6 +340,150 @@ export class HouseholdTasksComponent implements OnChanges {
     return this.visibleTasks().filter((task) => task.scheduledDate === date);
   }
 
+  selectMapSpace(spaceId: string): void {
+    this.activeSpaceId.set(spaceId);
+    this.filterSpaceId.set(spaceId);
+    this.newSpaceId.set(spaceId);
+  }
+
+  selectFloor(floorId: string): void {
+    if (this.floors().some((floor) => floor.id === floorId)) this.selectedFloorId.set(floorId);
+  }
+
+  spacePoints(space: HouseholdPlanSpace): string {
+    return space.polygon.map((point) => `${point.x},${point.y}`).join(' ');
+  }
+
+  spaceCenter(space: HouseholdPlanSpace): HouseholdPlanPoint {
+    const totals = space.polygon.reduce(
+      (sum, point) => ({ x: sum.x + point.x, y: sum.y + point.y }),
+      { x: 0, y: 0 }
+    );
+    const count = Math.max(1, space.polygon.length);
+    return { x: totals.x / count, y: totals.y / count };
+  }
+
+  openingLine(
+    floor: HouseholdPlanFloor,
+    opening: HouseholdPlanOpening
+  ): { from: HouseholdPlanPoint; to: HouseholdPlanPoint } | null {
+    return openingSegment(floor.walls, opening);
+  }
+
+  openingRails(
+    floor: HouseholdPlanFloor,
+    opening: HouseholdPlanOpening
+  ): Array<{ from: HouseholdPlanPoint; to: HouseholdPlanPoint }> {
+    const segment = this.openingLine(floor, opening);
+    if (!segment || opening.kind !== 'window') return [];
+    const horizontal = segment.from.y === segment.to.y;
+    return [-70, 70].map((offset) =>
+      horizontal
+        ? {
+            from: { x: segment.from.x, y: segment.from.y + offset },
+            to: { x: segment.to.x, y: segment.to.y + offset }
+          }
+        : {
+            from: { x: segment.from.x + offset, y: segment.from.y },
+            to: { x: segment.to.x + offset, y: segment.to.y }
+          }
+    );
+  }
+
+  doorSwing(
+    floor: HouseholdPlanFloor,
+    opening: HouseholdPlanOpening
+  ): { hinge: HouseholdPlanPoint; leafTip: HouseholdPlanPoint; arc: string } | null {
+    const segment = this.openingLine(floor, opening);
+    if (!segment || opening.kind !== 'door') return null;
+    const width = Math.abs(segment.to.x - segment.from.x) + Math.abs(segment.to.y - segment.from.y);
+    if (segment.from.y === segment.to.y) {
+      const hinge = segment.to;
+      const leafTip = { x: hinge.x, y: hinge.y - width };
+      return {
+        hinge,
+        leafTip,
+        arc: `M ${leafTip.x} ${leafTip.y} A ${width} ${width} 0 0 0 ${segment.from.x} ${segment.from.y}`
+      };
+    }
+    const hinge = segment.from;
+    const leafTip = { x: hinge.x + width, y: hinge.y };
+    return {
+      hinge,
+      leafTip,
+      arc: `M ${leafTip.x} ${leafTip.y} A ${width} ${width} 0 0 1 ${segment.to.x} ${segment.to.y}`
+    };
+  }
+
+  assignedMembers(spaceId: string): HouseholdMember[] {
+    const memberIds = this.assignments()[spaceId] ?? [];
+    return memberIds
+      .map((id) => this.members.find((member) => member.userId === id))
+      .filter((member): member is HouseholdMember => Boolean(member?.isActive));
+  }
+
+  assignmentClass(spaceId: string): string {
+    const assigned = this.assignedMembers(spaceId);
+    if (assigned.length > 1) return 'tasks-map__area--shared';
+    if (!assigned.length) return 'tasks-map__area--unassigned';
+    const ownerIndex = this.members
+      .filter((member) => member.isActive)
+      .findIndex((member) => member.userId === assigned[0].userId);
+    return `tasks-map__area--owner-${Math.max(0, ownerIndex) % 4}`;
+  }
+
+  spaceAssignmentLabel(spaceId: string): string {
+    const assigned = this.assignedMembers(spaceId);
+    if (assigned.length > 1) return this.i18n.t('household.plan_zone_shared');
+    return assigned[0]?.name ?? this.i18n.t('household.plan_zone_unassigned');
+  }
+
+  spaceMapAssigneeLabel(spaceId: string): string {
+    const assigned = this.assignedMembers(spaceId);
+    if (assigned.length > 1) return this.i18n.t('household.plan_zone_shared');
+    return (
+      assigned[0]?.name.trim().split(/\s+/u)[0] ?? this.i18n.t('household.plan_zone_unassigned')
+    );
+  }
+
+  memberInitials(member: HouseholdMember): string {
+    return member.name
+      .trim()
+      .split(/\s+/u)
+      .slice(0, 2)
+      .map((part) => part.slice(0, 1).toLocaleUpperCase())
+      .join('');
+  }
+
+  memberColorIndex(memberId: string): number {
+    const index = this.members
+      .filter((member) => member.isActive)
+      .findIndex((member) => member.userId === memberId);
+    return Math.max(0, index) % 4;
+  }
+
+  memberInitialsForId(memberId: string | null): string {
+    const member = this.members.find((candidate) => candidate.userId === memberId);
+    return member ? this.memberInitials(member) : '·';
+  }
+
+  assignmentSummary(): string {
+    const activeMembers = this.members.filter((member) => member.isActive);
+    if (!activeMembers.length) return this.i18n.t('household.tasks_no_active_members');
+    const counts = activeMembers.map((member) => ({
+      name: member.name,
+      count: this.draftTasks().filter((task) => task.assignedMemberId === member.userId).length
+    }));
+    if (!counts.some((entry) => entry.count)) return this.i18n.t('household.tasks_no_assignments');
+    return `${this.i18n.t('household.tasks_distribution_label')}: ${counts
+      .map((entry) => `${entry.name} ${entry.count}`)
+      .join(' · ')}`;
+  }
+
+  areaLabel(space: HouseholdPlanSpace): string {
+    return space.label || getHouseholdAreaLabel(space.kind, this.i18n.resolved());
+  }
+
   memberName(memberId: string | null): string {
     if (!memberId) return this.i18n.t('household.tasks_unassigned');
     const member = this.members.find((candidate) => candidate.userId === memberId);
@@ -373,20 +567,59 @@ export class HouseholdTasksComponent implements OnChanges {
         next: (snapshot) => {
           if (generation !== this.planGeneration || requestedHouseholdId !== this.householdId)
             return;
+          this.plan.set(snapshot.plan);
+          this.planVersion.set(snapshot.version);
           this.spaces.set(snapshot.plan?.floors.flatMap((floor) => floor.spaces) ?? []);
+          if (!snapshot.plan?.floors.some((floor) => floor.id === this.selectedFloorId())) {
+            this.selectedFloorId.set(snapshot.plan?.floors[0]?.id ?? '');
+          }
           if (
             this.selectedSpaceId &&
             this.spaces().some((space) => space.id === this.selectedSpaceId)
           ) {
             this.newSpaceId.set(this.selectedSpaceId);
+            this.activeSpaceId.set(this.selectedSpaceId);
           }
+          this.loadAssignments(requestedHouseholdId, generation, snapshot.version);
           this.loadingSpaces.set(false);
         },
         error: () => {
           if (generation !== this.planGeneration || requestedHouseholdId !== this.householdId)
             return;
           this.spaces.set([]);
+          this.plan.set(null);
+          this.planVersion.set(0);
+          this.assignments.set({});
           this.loadingSpaces.set(false);
+        }
+      });
+  }
+
+  private loadAssignments(householdId: string, planGeneration: number, planVersion: number): void {
+    const generation = ++this.assignmentGeneration;
+    this.assignments.set({});
+    this.planService
+      .loadAssignments(householdId)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (snapshot) => {
+          if (
+            generation !== this.assignmentGeneration ||
+            planGeneration !== this.planGeneration ||
+            householdId !== this.householdId
+          ) {
+            return;
+          }
+          this.assignments.set(snapshot.planVersion === planVersion ? snapshot.assignments : {});
+        },
+        error: () => {
+          if (
+            generation === this.assignmentGeneration &&
+            planGeneration === this.planGeneration &&
+            householdId === this.householdId
+          ) {
+            this.assignments.set({});
+          }
         }
       });
   }

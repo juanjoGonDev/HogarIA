@@ -1,5 +1,9 @@
 import { householdEn, householdEs } from '../../core/i18n/dict/household';
-import { HOUSEHOLD_AREA_CATALOG, getHouseholdAreaLabel } from './household-area-catalog';
+import {
+  HOUSEHOLD_AREA_CATALOG,
+  getHouseholdAreaGlyph,
+  getHouseholdAreaLabel
+} from './household-area-catalog';
 
 describe('household area catalogue', () => {
   it('includes the supported interior, outdoor, shared and custom spaces', () => {
@@ -24,5 +28,15 @@ describe('household area catalogue', () => {
       expect(getHouseholdAreaLabel(area.kind, 'es')).toBe(householdEs[area.labelKey]);
       expect(getHouseholdAreaLabel(area.kind, 'en')).toBe(householdEn[area.labelKey]);
     }
+  });
+
+  it('uses recognizable plan glyphs for key rooms and outdoor spaces', () => {
+    expect(getHouseholdAreaGlyph('kitchen')).toBe('kitchen');
+    expect(getHouseholdAreaGlyph('dining_room')).toBe('seating');
+    expect(getHouseholdAreaGlyph('bedroom')).toBe('bedroom');
+    expect(getHouseholdAreaGlyph('bathroom')).toBe('bathroom');
+    expect(getHouseholdAreaGlyph('garden')).toBe('outdoors');
+    expect(getHouseholdAreaGlyph('garage')).toBe('vehicle');
+    expect(getHouseholdAreaGlyph('custom')).toBe('generic');
   });
 });

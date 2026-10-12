@@ -6,6 +6,7 @@ import {
   DestroyRef,
   EventEmitter,
   Input,
+  OnDestroy,
   OnChanges,
   Output,
   SimpleChanges,
@@ -24,6 +25,8 @@ import {
   PickerComponent,
   type PickerOption
 } from '../../shared/components/ui/picker/picker.component';
+import { HouseholdAreaGlyphComponent } from './household-area-glyph.component';
+import { HouseholdPlanPreviewMapComponent } from './household-plan-preview-map.component';
 import {
   HOUSEHOLD_AREA_CATALOG,
   getHouseholdAreaGroupLabel,
@@ -41,6 +44,8 @@ import type {
   HouseholdPlanWall,
   VersionedHouseholdPlan
 } from '../../shared/models/household-plan.model';
+import type { HouseholdMember } from '../../shared/models/household.model';
+import type { VersionedHouseholdPlanAssignments } from '../../shared/models/household-plan.model';
 import {
   HOUSEHOLD_AREA_KINDS,
   HOUSEHOLD_DWELLING_TYPES
@@ -56,8 +61,10 @@ import {
   openingSegment
 } from './household-plan-editor.utils';
 
-type PlanTool = 'select' | 'space' | 'wall';
+type PlanTool = 'select' | 'space' | 'wall' | 'door' | 'window';
 type PlanPreview = 'current' | 'proposal';
+type PlanEntryMethod = 'canvas' | 'photo' | 'guided';
+type ProposalPresentation = 'photo' | 'chat';
 
 const DWELLING_TYPE_KEYS: Record<HouseholdDwellingType, TranslationKey> = {
   apartment: 'household.dwelling_apartment',
@@ -71,19 +78,37 @@ const DWELLING_TYPE_KEYS: Record<HouseholdDwellingType, TranslationKey> = {
   mobile_home: 'household.dwelling_mobile_home',
   other: 'household.dwelling_other'
 };
+const DWELLING_CARD_LABEL_KEYS: Record<
+  'apartment' | 'detached_house' | 'terraced_house' | 'other',
+  TranslationKey
+> = {
+  apartment: 'household.plan_dwelling_short_apartment',
+  detached_house: 'household.plan_dwelling_short_house',
+  terraced_house: 'household.plan_dwelling_short_terraced',
+  other: 'household.plan_dwelling_short_other'
+};
 
 @Component({
   selector: 'app-household-plan-editor',
   standalone: true,
-  imports: [CommonModule, FormsModule, TranslatePipe, PickerComponent],
+  imports: [
+    CommonModule,
+    FormsModule,
+    TranslatePipe,
+    PickerComponent,
+    HouseholdAreaGlyphComponent,
+    HouseholdPlanPreviewMapComponent
+  ],
   templateUrl: './household-plan-editor.component.html',
   styleUrl: './household-plan-editor.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush
 })
-export class HouseholdPlanEditorComponent implements OnChanges {
+export class HouseholdPlanEditorComponent implements OnChanges, OnDestroy {
   @Input({ required: true }) householdId = '';
   @Input() canEdit = false;
+  @Input() members: HouseholdMember[] = [];
   @Output() readonly planSaved = new EventEmitter<void>();
+  @Output() readonly assignmentSaved = new EventEmitter<void>();
   @Output() readonly zoneTasksSelected = new EventEmitter<string>();
 
   private readonly planService = inject(HouseholdPlanService);
@@ -100,6 +125,12 @@ export class HouseholdPlanEditorComponent implements OnChanges {
 
   readonly areaCatalog = HOUSEHOLD_AREA_CATALOG;
   readonly dwellingTypes = HOUSEHOLD_DWELLING_TYPES;
+  readonly dwellingCardTypes: Array<keyof typeof DWELLING_CARD_LABEL_KEYS> = [
+    'apartment',
+    'detached_house',
+    'terraced_house',
+    'other'
+  ];
   readonly dwellingTypeOptions = computed<PickerOption[]>(() =>
     this.dwellingTypes.map((type) => ({
       value: type,
@@ -109,6 +140,11 @@ export class HouseholdPlanEditorComponent implements OnChanges {
   readonly floorOptions = computed<PickerOption[]>(() =>
     this.shownPlan().floors.map((floor) => ({ value: floor.id, label: floor.name }))
   );
+  readonly setupFloorOptions: PickerOption[] = [
+    { value: '1', label: '1' },
+    { value: '2', label: '2' },
+    { value: '3', label: '3' }
+  ];
   readonly areaOptions = computed<PickerOption[]>(() =>
     (['interior', 'exterior', 'shared'] as const).flatMap((group) =>
       this.areaCatalog[group].map((area) => ({
@@ -123,9 +159,15 @@ export class HouseholdPlanEditorComponent implements OnChanges {
     { value: 'exterior', label: this.i18n.t('household.plan_wall_exterior') }
   ]);
   readonly snapshot = signal<VersionedHouseholdPlan>({ version: 0, plan: null });
+  readonly assignmentSnapshot = signal<VersionedHouseholdPlanAssignments>({
+    planVersion: 0,
+    version: 0,
+    assignments: {}
+  });
   readonly draft = signal<HouseholdPlan>(this.createEmptyPlan());
   readonly selectedFloorId = signal('floor-0');
   readonly selectedSpaceId = signal<string | null>(null);
+  readonly assignmentViewActive = signal(false);
   readonly selectedWallId = signal<string | null>(null);
   readonly selectedKind = signal<HouseholdAreaKind>('living_room');
   readonly selectedLabel = signal('');
@@ -143,8 +185,19 @@ export class HouseholdPlanEditorComponent implements OnChanges {
   readonly confirmOrphanedTasks = signal(false);
   readonly orphanedTaskIds = signal<string[]>([]);
   readonly undoStack = signal<HouseholdPlan[]>([]);
+  readonly redoStack = signal<HouseholdPlan[]>([]);
   readonly drawingStart = signal<HouseholdPlanPoint | null>(null);
   readonly drawingEnd = signal<HouseholdPlanPoint | null>(null);
+  readonly snapToGrid = signal(true);
+  readonly canvasZoom = signal(100);
+  readonly setupVisible = signal(false);
+  readonly selectedEntryMethod = signal<PlanEntryMethod | null>(null);
+  readonly setupFloorCount = signal(2);
+  readonly assignmentDraftMemberIds = signal<string[]>([]);
+  readonly assignmentSaving = signal(false);
+  readonly assignmentNoticeKey = signal<TranslationKey | null>(null);
+  readonly proposalPresentation = signal<ProposalPresentation>('chat');
+  readonly attachmentPreviewUrl = signal<string | null>(null);
 
   readonly activeFloor = computed(
     () => this.draft().floors.find((floor) => floor.id === this.selectedFloorId()) ?? null
@@ -168,9 +221,64 @@ export class HouseholdPlanEditorComponent implements OnChanges {
     const floors = this.shownPlan().floors;
     return floors.find((floor) => floor.id === this.selectedFloorId()) ?? floors[0] ?? null;
   });
+  get canvasViewBox(): string {
+    const floor = this.shownFloor();
+    const points = [
+      ...(floor?.spaces.flatMap((space) => space.polygon) ?? []),
+      ...(floor?.walls.flatMap((wall) => [wall.from, wall.to]) ?? [])
+    ];
+    if (!points.length) return '0 0 10000 8000';
+
+    const padding = 200;
+    let left = Math.max(0, Math.min(...points.map((point) => point.x)) - padding);
+    let top = Math.max(0, Math.min(...points.map((point) => point.y)) - padding);
+    let right = Math.min(10_000, Math.max(...points.map((point) => point.x)) + padding);
+    let bottom = Math.min(10_000, Math.max(...points.map((point) => point.y)) + padding);
+    let width = right - left;
+    let height = bottom - top;
+    const preferredAspectRatio = 1.25;
+
+    if (width / height < preferredAspectRatio) {
+      const expandedWidth = Math.min(10_000, Math.ceil(height * preferredAspectRatio));
+      const extra = expandedWidth - width;
+      left -= extra / 2;
+      right += extra / 2;
+      width = right - left;
+    } else if (width / height > preferredAspectRatio) {
+      const expandedHeight = Math.min(10_000, Math.ceil(width / preferredAspectRatio));
+      const extra = expandedHeight - height;
+      top -= extra / 2;
+      bottom += extra / 2;
+      height = bottom - top;
+    }
+
+    return `${Math.floor(left)} ${Math.floor(top)} ${Math.ceil(width)} ${Math.ceil(height)}`;
+  }
   readonly selectedSpaceLabel = computed(() => {
     const selected = this.selectedSpace();
     return selected ? getHouseholdAreaLabel(selected.kind, this.i18n.resolved()) : '';
+  });
+  readonly assignmentDirty = computed(() => {
+    const spaceId = this.selectedSpace()?.id;
+    if (!spaceId) return false;
+    const saved = this.assignmentSnapshot().assignments[spaceId] ?? [];
+    const current = this.assignmentDraftMemberIds();
+    return JSON.stringify([...saved].sort()) !== JSON.stringify([...current].sort());
+  });
+  readonly activeMembers = computed(() =>
+    this.members
+      .filter((member) => member.isActive)
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name))
+  );
+  readonly assignmentDraftIsShared = computed(() => {
+    const members = this.activeMembers();
+    const assignedMemberIds = this.assignmentDraftMemberIds();
+    return (
+      members.length > 1 &&
+      assignedMemberIds.length === members.length &&
+      members.every((member) => assignedMemberIds.includes(member.userId))
+    );
   });
   readonly canApplyProposal = computed(() => {
     const proposal = this.proposal();
@@ -191,9 +299,14 @@ export class HouseholdPlanEditorComponent implements OnChanges {
     const requestedHouseholdId = this.householdId;
     this.snapshot.set({ version: 0, plan: null });
     this.draft.set(this.createEmptyPlan());
+    this.setupVisible.set(false);
+    this.assignmentSnapshot.set({ planVersion: 0, version: 0, assignments: {} });
+    this.assignmentDraftMemberIds.set([]);
+    this.assignmentNoticeKey.set(null);
     this.selectedFloorId.set('floor-0');
     this.resetSelection();
     this.undoStack.set([]);
+    this.redoStack.set([]);
     this.proposal.set(null);
     this.orphanedTaskIds.set([]);
     this.confirmOrphanedTasks.set(false);
@@ -215,10 +328,14 @@ export class HouseholdPlanEditorComponent implements OnChanges {
           );
           this.selectedFloorId.set(snapshot.plan?.floors[0]?.id ?? 'floor-0');
           this.selectedSpaceId.set(null);
+          this.assignmentViewActive.set(false);
           this.selectedWallId.set(null);
           this.undoStack.set([]);
+          this.redoStack.set([]);
           this.proposal.set(null);
+          this.setupVisible.set(!snapshot.plan);
           this.loading.set(false);
+          this.loadAssignments(generation, requestedHouseholdId);
         },
         error: () => {
           if (!this.isCurrentRequest(generation, requestedHouseholdId)) return;
@@ -226,6 +343,10 @@ export class HouseholdPlanEditorComponent implements OnChanges {
           this.errorKey.set('household.plan_load_error');
         }
       });
+  }
+
+  ngOnDestroy(): void {
+    this.revokeAttachmentPreview();
   }
 
   savePlan(): void {
@@ -250,10 +371,13 @@ export class HouseholdPlanEditorComponent implements OnChanges {
           this.snapshot.set(snapshot);
           this.draft.set(cloneHouseholdPlan(snapshot.plan ?? this.createEmptyPlan()));
           this.undoStack.set([]);
+          this.redoStack.set([]);
           this.orphanedTaskIds.set([]);
           this.confirmOrphanedTasks.set(false);
           this.saving.set(false);
           this.noticeKey.set('household.plan_saved');
+          this.setupVisible.set(false);
+          this.loadAssignments(generation, requestedHouseholdId);
           this.planSaved.emit();
         },
         error: (error: HttpErrorResponse) => {
@@ -280,6 +404,7 @@ export class HouseholdPlanEditorComponent implements OnChanges {
       this.snapshot().plan ? cloneHouseholdPlan(this.snapshot().plan!) : this.createEmptyPlan()
     );
     this.undoStack.set([]);
+    this.redoStack.set([]);
     this.proposal.set(null);
     this.orphanedTaskIds.set([]);
     this.confirmOrphanedTasks.set(false);
@@ -293,8 +418,18 @@ export class HouseholdPlanEditorComponent implements OnChanges {
     const history = this.undoStack();
     const previous = history.at(-1);
     if (!previous) return;
+    this.redoStack.update((redo) => [...redo.slice(-19), cloneHouseholdPlan(this.draft())]);
     this.draft.set(previous);
     this.undoStack.set(history.slice(0, -1));
+  }
+
+  redo(): void {
+    const history = this.redoStack();
+    const next = history.at(-1);
+    if (!next) return;
+    this.undoStack.update((undo) => [...undo.slice(-19), cloneHouseholdPlan(this.draft())]);
+    this.draft.set(next);
+    this.redoStack.set(history.slice(0, -1));
   }
 
   addFloor(): void {
@@ -379,6 +514,41 @@ export class HouseholdPlanEditorComponent implements OnChanges {
     this.updateDraft((plan) => ({ ...plan, dwellingTypeLabel: label.slice(0, 80) }), false);
   }
 
+  selectEntryMethod(method: PlanEntryMethod): void {
+    this.selectedEntryMethod.set(method);
+  }
+
+  setSetupDwellingType(type: HouseholdDwellingType): void {
+    this.setDwellingType(type);
+  }
+
+  setSetupFloorCount(value: string | number): void {
+    const count = Number(value);
+    if (Number.isInteger(count) && count >= 1 && count <= 12) this.setupFloorCount.set(count);
+  }
+
+  startPlan(): void {
+    if (!this.canEdit || !this.setupVisible()) return;
+    const plan = this.createEmptyPlan();
+    plan.dwellingType = this.draft().dwellingType;
+    plan.dwellingTypeLabel = this.draft().dwellingTypeLabel;
+    if (this.selectedEntryMethod() !== 'photo') {
+      plan.floors[0] = this.createStarterFloor(plan.floors[0]);
+    }
+    while (plan.floors.length < this.setupFloorCount()) {
+      const floor = createHouseholdPlanFloor(plan.floors, 'above', this.newId('floor'));
+      if (!floor) break;
+      plan.floors.push(floor);
+    }
+    this.draft.set(plan);
+    this.selectedFloorId.set(plan.floors[0]?.id ?? 'floor-0');
+    this.selectedKind.set('kitchen');
+    this.selectedLabel.set(this.areaLabel('kitchen'));
+    this.undoStack.set([]);
+    this.redoStack.set([]);
+    this.setupVisible.set(false);
+  }
+
   setSelectedKind(kind: HouseholdAreaKind): void {
     this.selectedKind.set(kind);
     const label = kind === 'custom' ? '' : getHouseholdAreaLabel(kind, this.i18n.resolved());
@@ -397,6 +567,7 @@ export class HouseholdPlanEditorComponent implements OnChanges {
 
   setTool(tool: PlanTool): void {
     if (!this.canEdit || this.proposal()) return;
+    this.assignmentViewActive.set(false);
     this.tool.set(tool);
     this.drawingStart.set(null);
     this.drawingEnd.set(null);
@@ -410,14 +581,14 @@ export class HouseholdPlanEditorComponent implements OnChanges {
       return;
     }
     const index = floor.spaces.length;
-    const left = 150 + (index % 5) * 1_970;
-    const top = 150 + Math.floor(index / 5) * 620;
+    const left = 700 + (index % 3) * 3_000;
+    const top = 700 + Math.floor(index / 3) * 3_000;
     const space = createHouseholdPlanSpace(
       this.selectedKind(),
       this.roomLabel(),
       this.newId('space'),
       { x: left, y: top },
-      { x: left + 1_800, y: top + 480 }
+      { x: left + 2_600, y: top + 2_500 }
     );
     if (!space) {
       this.errorKey.set('household.plan_custom_label_required');
@@ -426,6 +597,11 @@ export class HouseholdPlanEditorComponent implements OnChanges {
     this.updateFloor(floor.id, (current) => ({ ...current, spaces: [...current.spaces, space] }));
     this.selectedSpaceId.set(space.id);
     this.selectedWallId.set(null);
+  }
+
+  addQuickArea(kind: HouseholdAreaKind): void {
+    this.setSelectedKind(kind);
+    this.addGuidedSpace();
   }
 
   onCanvasPointerDown(event: PointerEvent): void {
@@ -444,6 +620,18 @@ export class HouseholdPlanEditorComponent implements OnChanges {
     const target = event.target instanceof Element ? event.target : null;
     const spaceId = target?.closest('[data-space-id]')?.getAttribute('data-space-id');
     const wallId = target?.closest('[data-wall-id]')?.getAttribute('data-wall-id');
+    if (wallId && this.tool() === 'door') {
+      this.selectedWallId.set(wallId);
+      this.selectedSpaceId.set(null);
+      this.addOpening('door');
+      return;
+    }
+    if (wallId && this.tool() === 'window') {
+      this.selectedWallId.set(wallId);
+      this.selectedSpaceId.set(null);
+      this.addOpening('window');
+      return;
+    }
     if (spaceId) {
       const selected = this.activeFloor()?.spaces.find((space) => space.id === spaceId);
       if (!selected) return;
@@ -517,10 +705,102 @@ export class HouseholdPlanEditorComponent implements OnChanges {
     return space.polygon.map((point) => `${point.x},${point.y}`).join(' ');
   }
 
+  assignmentMemberX(space: HouseholdPlanSpace, memberIndex: number): number {
+    const assignedCount = this.assignmentSnapshot().assignments[space.id]?.length ?? 1;
+    return this.spaceCenter(space).x + (memberIndex - (assignedCount - 1) / 2) * 520;
+  }
+
+  assignmentMemberY(space: HouseholdPlanSpace): number {
+    return this.spaceCenter(space).y + 420;
+  }
+
+  spaceCenter(space: HouseholdPlanSpace): HouseholdPlanPoint {
+    const xs = space.polygon.map((point) => point.x);
+    const ys = space.polygon.map((point) => point.y);
+    return {
+      x: (Math.min(...xs) + Math.max(...xs)) / 2,
+      y: (Math.min(...ys) + Math.max(...ys)) / 2
+    };
+  }
+
+  comparisonFloor(plan: HouseholdPlan | null): HouseholdPlanFloor | null {
+    if (!plan) return null;
+    return (
+      plan.floors.find((floor) => floor.id === this.selectedFloorId()) ?? plan.floors[0] ?? null
+    );
+  }
+
+  setProposalPresentation(presentation: ProposalPresentation): void {
+    this.proposalPresentation.set(presentation);
+  }
+
+  startPhotoFollowup(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+      this.errorKey.set('household.plan_file_too_large');
+      input.value = '';
+      return;
+    }
+
+    this.continueEditingProposal();
+    this.onAttachmentChange(event);
+  }
+
+  isImageAttachment(): boolean {
+    return Boolean(this.attachment()?.type.startsWith('image/'));
+  }
+
   openingLine(
     opening: HouseholdPlanOpening
   ): { from: HouseholdPlanPoint; to: HouseholdPlanPoint } | null {
     return openingSegment(this.shownFloor()?.walls ?? [], opening);
+  }
+
+  openingRails(
+    opening: HouseholdPlanOpening
+  ): Array<{ from: HouseholdPlanPoint; to: HouseholdPlanPoint }> {
+    const segment = this.openingLine(opening);
+    if (!segment || opening.kind !== 'window') return [];
+    const horizontal = segment.from.y === segment.to.y;
+    return [-70, 70].map((offset) =>
+      horizontal
+        ? {
+            from: { x: segment.from.x, y: segment.from.y + offset },
+            to: { x: segment.to.x, y: segment.to.y + offset }
+          }
+        : {
+            from: { x: segment.from.x + offset, y: segment.from.y },
+            to: { x: segment.to.x + offset, y: segment.to.y }
+          }
+    );
+  }
+
+  doorSwing(opening: HouseholdPlanOpening): {
+    hinge: HouseholdPlanPoint;
+    leafTip: HouseholdPlanPoint;
+    arc: string;
+  } | null {
+    const segment = this.openingLine(opening);
+    if (!segment || opening.kind !== 'door') return null;
+    const width = Math.abs(segment.to.x - segment.from.x) + Math.abs(segment.to.y - segment.from.y);
+    if (segment.from.y === segment.to.y) {
+      const hinge = segment.to;
+      const leafTip = { x: hinge.x, y: hinge.y - width };
+      return {
+        hinge,
+        leafTip,
+        arc: `M ${leafTip.x} ${leafTip.y} A ${width} ${width} 0 0 0 ${segment.from.x} ${segment.from.y}`
+      };
+    }
+    const hinge = segment.from;
+    const leafTip = { x: hinge.x + width, y: hinge.y };
+    return {
+      hinge,
+      leafTip,
+      arc: `M ${leafTip.x} ${leafTip.y} A ${width} ${width} 0 0 1 ${segment.to.x} ${segment.to.y}`
+    };
   }
 
   addOpening(kind: HouseholdPlanOpening['kind']): void {
@@ -596,9 +876,78 @@ export class HouseholdPlanEditorComponent implements OnChanges {
   }
 
   selectSpace(space: HouseholdPlanSpace): void {
+    this.tool.set('select');
+    this.drawingStart.set(null);
+    this.drawingEnd.set(null);
     this.selectedSpaceId.set(space.id);
+    this.assignmentViewActive.set(true);
     this.selectedWallId.set(null);
     this.selectedLabel.set(space.label);
+    this.assignmentDraftMemberIds.set([...(this.assignmentSnapshot().assignments[space.id] ?? [])]);
+    this.assignmentNoticeKey.set(null);
+  }
+
+  toggleAssignmentMember(memberId: string): void {
+    if (!this.activeMembers().some((member) => member.userId === memberId)) return;
+    if (this.assignmentDraftIsShared()) {
+      this.assignmentDraftMemberIds.set([memberId]);
+      this.assignmentNoticeKey.set(null);
+      return;
+    }
+    this.assignmentDraftMemberIds.update((memberIds) =>
+      memberIds.includes(memberId)
+        ? memberIds.filter((existing) => existing !== memberId)
+        : [...memberIds, memberId]
+    );
+    this.assignmentNoticeKey.set(null);
+  }
+
+  saveZoneAssignment(): void {
+    const space = this.selectedSpace();
+    if (
+      !space ||
+      !this.canEdit ||
+      !this.assignmentDirty() ||
+      this.assignmentSaving() ||
+      this.proposal()
+    )
+      return;
+    const generation = this.requestGeneration;
+    const requestedHouseholdId = this.householdId;
+    const memberIds = [...this.assignmentDraftMemberIds()];
+    this.assignmentSaving.set(true);
+    this.assignmentNoticeKey.set(null);
+    this.planService
+      .saveAssignment(
+        requestedHouseholdId,
+        this.assignmentSnapshot().version,
+        this.snapshot().version,
+        space.id,
+        memberIds
+      )
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (snapshot) => {
+          if (!this.isCurrentRequest(generation, requestedHouseholdId)) return;
+          this.assignmentSnapshot.set(snapshot);
+          this.assignmentDraftMemberIds.set([...(snapshot.assignments[space.id] ?? [])]);
+          this.assignmentSaving.set(false);
+          this.assignmentNoticeKey.set('household.plan_assignment_saved');
+          this.assignmentSaved.emit();
+        },
+        error: (error: HttpErrorResponse) => {
+          if (!this.isCurrentRequest(generation, requestedHouseholdId)) return;
+          this.assignmentSaving.set(false);
+          this.assignmentNoticeKey.set(
+            error.status === 409
+              ? 'household.plan_assignment_conflict'
+              : error.status === 422
+                ? 'household.plan_assignment_member_invalid'
+                : 'household.plan_assignment_error'
+          );
+          if (error.status === 409) this.loadAssignments(generation, requestedHouseholdId);
+        }
+      });
   }
 
   selectFloor(floorId: string): void {
@@ -616,16 +965,20 @@ export class HouseholdPlanEditorComponent implements OnChanges {
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0] ?? null;
     if (file && file.size > 10 * 1024 * 1024) {
+      this.revokeAttachmentPreview();
       this.attachment.set(null);
       this.errorKey.set('household.plan_file_too_large');
       input.value = '';
       return;
     }
+    this.revokeAttachmentPreview();
     this.attachment.set(file);
+    this.attachmentPreviewUrl.set(file ? URL.createObjectURL(file) : null);
     this.errorKey.set(null);
   }
 
   clearAttachment(input?: HTMLInputElement): void {
+    this.revokeAttachmentPreview();
     this.attachment.set(null);
     if (input) input.value = '';
   }
@@ -652,6 +1005,7 @@ export class HouseholdPlanEditorComponent implements OnChanges {
           if (!this.isCurrentRequest(generation, requestedHouseholdId)) return;
           this.proposal.set(proposal);
           this.previewMode.set('proposal');
+          this.proposalPresentation.set(file ? 'photo' : 'chat');
           this.confirmOrphanedTasks.set(false);
           this.proposing.set(false);
         },
@@ -683,8 +1037,11 @@ export class HouseholdPlanEditorComponent implements OnChanges {
           this.confirmOrphanedTasks.set(false);
           this.previewMode.set('current');
           this.undoStack.set([]);
+          this.redoStack.set([]);
           this.saving.set(false);
           this.noticeKey.set('household.plan_proposal_applied');
+          this.setupVisible.set(false);
+          this.loadAssignments(generation, requestedHouseholdId);
           this.planSaved.emit();
         },
         error: (error: HttpErrorResponse) => {
@@ -703,6 +1060,25 @@ export class HouseholdPlanEditorComponent implements OnChanges {
     this.confirmOrphanedTasks.set(false);
   }
 
+  continueEditingProposal(): void {
+    const proposal = this.proposal();
+    if (!proposal || this.saving() || this.proposing()) return;
+
+    this.pushUndo();
+    this.draft.set(cloneHouseholdPlan(proposal.proposal));
+    this.selectedFloorId.set(proposal.proposal.floors[0]?.id ?? 'floor-0');
+    this.resetSelection();
+    this.proposal.set(null);
+    this.previewMode.set('current');
+    this.orphanedTaskIds.set([...proposal.orphanedTaskIds]);
+    this.confirmOrphanedTasks.set(false);
+    this.prompt.set('');
+    this.clearAttachment();
+    this.proposalPresentation.set('chat');
+    this.setupVisible.set(false);
+    this.resetMessages();
+  }
+
   setPreviewMode(mode: PlanPreview): void {
     if (mode === 'proposal' && !this.proposal()) return;
     this.previewMode.set(mode);
@@ -715,6 +1091,55 @@ export class HouseholdPlanEditorComponent implements OnChanges {
 
   areaLabel(kind: HouseholdAreaKind): string {
     return getHouseholdAreaLabel(kind, this.i18n.resolved());
+  }
+
+  dwellingTypeLabel(type: HouseholdDwellingType): string {
+    return this.i18n.t(DWELLING_TYPE_KEYS[type]);
+  }
+
+  dwellingCardLabel(type: 'apartment' | 'detached_house' | 'terraced_house' | 'other'): string {
+    return this.i18n.t(DWELLING_CARD_LABEL_KEYS[type]);
+  }
+
+  memberName(memberId: string): string {
+    return this.members.find((member) => member.userId === memberId)?.name ?? '';
+  }
+
+  memberInitials(memberId: string): string {
+    return this.memberName(memberId)
+      .split(/\s+/u)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toLocaleUpperCase() ?? '')
+      .join('');
+  }
+
+  memberIndexForId(memberId: string): number {
+    return this.activeMembers().findIndex((member) => member.userId === memberId);
+  }
+
+  spaceResponsibilityClass(spaceId: string): string {
+    const memberIds = this.assignmentSnapshot().assignments[spaceId] ?? [];
+    if (memberIds.length > 1) return 'plan-canvas__space--shared';
+    if (!memberIds.length) return '';
+    const memberIndex = this.memberIndexForId(memberIds[0]);
+    return memberIndex < 0 ? '' : `plan-canvas__space--member-${memberIndex % 4}`;
+  }
+
+  closeSpaceDetails(): void {
+    this.selectedSpaceId.set(null);
+    this.assignmentViewActive.set(false);
+    this.assignmentDraftMemberIds.set([]);
+    this.assignmentNoticeKey.set(null);
+  }
+
+  setZoneShared(): void {
+    this.assignmentDraftMemberIds.set(this.activeMembers().map((member) => member.userId));
+    this.assignmentNoticeKey.set(null);
+  }
+
+  changeCanvasZoom(amount: number): void {
+    this.canvasZoom.update((zoom) => Math.min(150, Math.max(50, zoom + amount)));
   }
 
   groupLabel(group: 'interior' | 'exterior' | 'shared'): string {
@@ -790,14 +1215,31 @@ export class HouseholdPlanEditorComponent implements OnChanges {
 
   private pushUndo(): void {
     this.undoStack.update((history) => [...history.slice(-19), cloneHouseholdPlan(this.draft())]);
+    this.redoStack.set([]);
   }
 
   private pointerPoint(event: PointerEvent, svg: SVGSVGElement): HouseholdPlanPoint | null {
     const bounds = svg.getBoundingClientRect();
     if (!bounds.width || !bounds.height) return null;
+    const coordinate = (value: number): number =>
+      clampCoordinate(this.snapToGrid() ? Math.round(value / 200) * 200 : value);
+    const screenMatrix = svg.getScreenCTM?.();
+    if (screenMatrix && svg.createSVGPoint) {
+      const screenPoint = svg.createSVGPoint();
+      screenPoint.x = event.clientX;
+      screenPoint.y = event.clientY;
+      const planPoint = screenPoint.matrixTransform(screenMatrix.inverse());
+      return { x: coordinate(planPoint.x), y: coordinate(planPoint.y) };
+    }
+
+    const viewBox = svg.viewBox?.baseVal;
+    const viewX = viewBox?.width ? viewBox.x : 0;
+    const viewY = viewBox?.height ? viewBox.y : 0;
+    const viewWidth = viewBox?.width || 10_000;
+    const viewHeight = viewBox?.height || 10_000;
     return {
-      x: clampCoordinate(((event.clientX - bounds.left) / bounds.width) * 10_000),
-      y: clampCoordinate(((event.clientY - bounds.top) / bounds.height) * 10_000)
+      x: coordinate(viewX + ((event.clientX - bounds.left) / bounds.width) * viewWidth),
+      y: coordinate(viewY + ((event.clientY - bounds.top) / bounds.height) * viewHeight)
     };
   }
 
@@ -815,8 +1257,112 @@ export class HouseholdPlanEditorComponent implements OnChanges {
     return emptyHouseholdPlan(this.i18n.t('household.plan_default_floor'));
   }
 
+  private createStarterFloor(floor: HouseholdPlanFloor): HouseholdPlanFloor {
+    const spaces: Array<[HouseholdAreaKind, string, HouseholdPlanPoint, HouseholdPlanPoint]> = [
+      ['kitchen', this.areaLabel('kitchen'), { x: 300, y: 1_400 }, { x: 3_600, y: 4_000 }],
+      [
+        'living_room',
+        this.areaLabel('living_room'),
+        { x: 3_600, y: 1_400 },
+        { x: 7_600, y: 4_400 }
+      ],
+      ['bathroom', this.areaLabel('bathroom'), { x: 300, y: 4_000 }, { x: 3_000, y: 5_600 }],
+      ['bedroom', this.areaLabel('bedroom'), { x: 300, y: 5_600 }, { x: 4_300, y: 8_600 }],
+      ['entrance', this.areaLabel('entrance'), { x: 4_300, y: 4_400 }, { x: 7_600, y: 8_600 }],
+      ['patio', this.areaLabel('patio'), { x: 7_600, y: 1_400 }, { x: 9_700, y: 6_000 }],
+      ['garden', this.areaLabel('garden'), { x: 7_600, y: 6_000 }, { x: 9_700, y: 8_600 }]
+    ];
+    const roomSpaces = spaces
+      .map(([kind, label, from, to]) =>
+        createHouseholdPlanSpace(kind, label, this.newId('space'), from, to)
+      )
+      .filter((space): space is HouseholdPlanSpace => space !== null);
+    const wallSegments: Array<['interior' | 'exterior', HouseholdPlanPoint, HouseholdPlanPoint]> = [
+      ['exterior', { x: 300, y: 1_400 }, { x: 7_600, y: 1_400 }],
+      ['exterior', { x: 300, y: 1_400 }, { x: 300, y: 8_600 }],
+      ['exterior', { x: 300, y: 8_600 }, { x: 7_600, y: 8_600 }],
+      ['exterior', { x: 7_600, y: 1_400 }, { x: 7_600, y: 8_600 }],
+      ['interior', { x: 3_600, y: 1_400 }, { x: 3_600, y: 4_000 }],
+      ['interior', { x: 300, y: 4_000 }, { x: 3_600, y: 4_000 }],
+      ['interior', { x: 3_000, y: 4_000 }, { x: 3_000, y: 5_600 }],
+      ['interior', { x: 300, y: 5_600 }, { x: 4_300, y: 5_600 }],
+      ['interior', { x: 4_300, y: 5_600 }, { x: 4_300, y: 8_600 }],
+      ['interior', { x: 3_600, y: 4_400 }, { x: 7_600, y: 4_400 }]
+    ];
+    const walls = wallSegments.map(([kind, from, to]) => ({
+      id: this.newId('wall'),
+      kind,
+      from,
+      to
+    }));
+    const openingOn = (
+      wall: (typeof walls)[number] | undefined,
+      kind: HouseholdPlanOpening['kind'],
+      offset: number,
+      width: number,
+      isMainEntrance = false
+    ): HouseholdPlanOpening | null =>
+      wall
+        ? {
+            id: this.newId('opening'),
+            wallId: wall.id,
+            kind,
+            offset,
+            width,
+            isMainEntrance
+          }
+        : null;
+    const openings = [
+      openingOn(
+        walls.find((wall) => wall.kind === 'exterior' && wall.from.y === 8_600),
+        'door',
+        4_900,
+        900,
+        true
+      ),
+      openingOn(walls[4], 'door', 1_450, 750),
+      openingOn(walls[6], 'door', 350, 700),
+      openingOn(walls[7], 'door', 2_550, 800),
+      openingOn(walls[0], 'window', 800, 1_200),
+      openingOn(walls[1], 'window', 2_400, 1_100),
+      openingOn(walls[2], 'window', 1_150, 1_200)
+    ].filter((opening): opening is HouseholdPlanOpening => opening !== null);
+    return { ...floor, walls, openings, spaces: roomSpaces };
+  }
+
+  private loadAssignments(generation: number, requestedHouseholdId: string): void {
+    this.planService
+      .loadAssignments(requestedHouseholdId)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (snapshot) => {
+          if (!this.isCurrentRequest(generation, requestedHouseholdId)) return;
+          this.assignmentSnapshot.set(snapshot);
+          const spaceId = this.selectedSpace()?.id;
+          if (spaceId) {
+            this.assignmentDraftMemberIds.set([...(snapshot.assignments[spaceId] ?? [])]);
+          }
+        },
+        error: () => {
+          if (!this.isCurrentRequest(generation, requestedHouseholdId)) return;
+          this.assignmentSnapshot.set({
+            planVersion: this.snapshot().version,
+            version: 0,
+            assignments: {}
+          });
+        }
+      });
+  }
+
+  private revokeAttachmentPreview(): void {
+    const url = this.attachmentPreviewUrl();
+    if (url) URL.revokeObjectURL(url);
+    this.attachmentPreviewUrl.set(null);
+  }
+
   private resetSelection(): void {
     this.selectedSpaceId.set(null);
+    this.assignmentViewActive.set(false);
     this.selectedWallId.set(null);
   }
 

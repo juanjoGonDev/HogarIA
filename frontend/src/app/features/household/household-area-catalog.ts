@@ -69,6 +69,82 @@ const shared = [
 export const HOUSEHOLD_AREA_CATALOG = { interior, exterior, shared } as const;
 export type HouseholdAreaGroup = keyof typeof HOUSEHOLD_AREA_CATALOG;
 export type { HouseholdAreaKind } from '../../shared/models/household-plan.model';
+export type HouseholdAreaGlyph =
+  | 'kitchen'
+  | 'seating'
+  | 'bedroom'
+  | 'bathroom'
+  | 'outdoors'
+  | 'entry'
+  | 'work'
+  | 'vehicle'
+  | 'storage'
+  | 'shared'
+  | 'generic';
+
+const glyphByArea: Record<HouseholdAreaKind, HouseholdAreaGlyph> = {
+  entrance: 'entry',
+  foyer: 'entry',
+  living_room: 'seating',
+  dining_room: 'seating',
+  kitchen: 'kitchen',
+  pantry: 'storage',
+  bedroom: 'bedroom',
+  primary_bedroom: 'bedroom',
+  guest_bedroom: 'bedroom',
+  bathroom: 'bathroom',
+  toilet: 'bathroom',
+  laundry_room: 'storage',
+  home_office: 'work',
+  studio_room: 'work',
+  library: 'storage',
+  playroom: 'seating',
+  gym: 'work',
+  walk_in_closet: 'storage',
+  hallway: 'entry',
+  staircase: 'entry',
+  landing: 'entry',
+  elevator: 'entry',
+  storage_room: 'storage',
+  basement: 'storage',
+  wine_cellar: 'storage',
+  attic: 'storage',
+  garage: 'vehicle',
+  parking_space: 'vehicle',
+  utility_room: 'storage',
+  workshop: 'work',
+  sunroom: 'seating',
+  garden: 'outdoors',
+  vegetable_garden: 'outdoors',
+  plot: 'outdoors',
+  balcony: 'outdoors',
+  terrace: 'outdoors',
+  patio: 'outdoors',
+  courtyard: 'outdoors',
+  porch: 'outdoors',
+  veranda: 'outdoors',
+  gallery: 'outdoors',
+  roof_terrace: 'outdoors',
+  solarium: 'outdoors',
+  pool: 'outdoors',
+  outdoor_kitchen: 'kitchen',
+  shed: 'storage',
+  greenhouse: 'outdoors',
+  driveway: 'vehicle',
+  outdoor_parking: 'vehicle',
+  path: 'entry',
+  pet_area: 'outdoors',
+  sports_area: 'work',
+  common_area: 'shared',
+  shared_room: 'shared',
+  storage_area: 'storage',
+  custom: 'generic'
+};
+
+export function getHouseholdAreaGlyph(kind: HouseholdAreaKind): HouseholdAreaGlyph {
+  return glyphByArea[kind];
+}
+
 type HouseholdAreaLabelKey =
   (typeof HOUSEHOLD_AREA_CATALOG)[HouseholdAreaGroup][number]['labelKey'];
 
