@@ -68,6 +68,7 @@ import {
 } from './household-meal-proposal-request.schema.js';
 import { mealProposalSchema } from './household-meal-proposal.schema.js';
 import { householdMealConsumptionSchema } from './household-meal-consumption.schema.js';
+import { householdMealShoppingApprovalSchema } from './household-meal-shopping-approval.schema.js';
 import { householdMealShoppingPreviewQuerySchema } from './household-meal-shopping-preview.schema.js';
 import { householdPlanningAutomationPatchSchema } from './household-planning-automation.schema.js';
 import { generatedRecipeCandidateSchema } from './generated-recipe.schema.js';
@@ -319,6 +320,17 @@ const ROWS: Row[] = [
     kind: 'query',
     required: { startDate: '2026-10-13', endDate: '2026-10-13' },
     note: 'El cálculo requiere un rango explícito y acotado; la ruta rechaza fechas anteriores a hoy.'
+  },
+  {
+    name: 'householdMealShoppingApprovalSchema',
+    schema: householdMealShoppingApprovalSchema,
+    required: {
+      startDate: '2026-10-13',
+      endDate: '2026-10-13',
+      previewId: 'a'.repeat(64),
+      items: [{ name: 'Lentejas', unit: 'g', quantity: 80 }]
+    },
+    note: 'La aprobación referencia un preview y solo admite líneas en un rango y cantidad válidos.'
   },
   {
     name: 'mealProposalSchema',
