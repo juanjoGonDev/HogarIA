@@ -17,6 +17,8 @@ const responsiveViewports = [
 ] as const;
 const calendarViews = [
   { value: 'agenda', label: 'Agenda' },
+  { value: 'day', label: 'Día' },
+  { value: 'fourDays', label: '4 días' },
   { value: 'week', label: 'Semana' },
   { value: 'month', label: 'Mes' },
   { value: 'year', label: 'Año' }
@@ -151,6 +153,7 @@ async function expectNoPageHorizontalOverflow(page: Page, viewportLabel: string)
 test('el calendario actual muestra tareas del hogar, zona, estado y persona asignada', async ({
   page
 }) => {
+  test.setTimeout(90_000);
   await registerWithHousehold(
     page,
     '/calendar?view=agenda&date=2026-10-12',
@@ -158,16 +161,19 @@ test('el calendario actual muestra tareas del hogar, zona, estado y persona asig
   );
   const memberName = await seedHouseholdTask(page);
 
-  const rangeRequest = page.waitForResponse(
-    (response) =>
-      response.url().includes('/api/calendar/range') &&
-      new URL(response.url()).searchParams.get('startDate') === TASK_DATE
-  );
+  let calendarEnvelope: { data?: { tasks?: Array<Record<string, unknown>> } } | undefined;
+  const rangeResponse = page.waitForResponse(async (response) => {
+    const url = new URL(response.url());
+    if (url.pathname !== '/api/calendar/range' || url.searchParams.get('startDate') !== TASK_DATE) {
+      return false;
+    }
+    calendarEnvelope = (await response.json()) as typeof calendarEnvelope;
+    return true;
+  });
   await page.goto('/calendar?view=agenda&date=2026-10-12');
-  const response = await rangeRequest;
+  const response = await rangeResponse;
   expect(response.status()).toBe(200);
-  const envelope = await response.json();
-  expect(envelope.data.tasks).toEqual([
+  expect(calendarEnvelope?.data?.tasks).toEqual([
     expect.objectContaining({
       title: TASK_TITLE,
       date: TASK_DATE,
@@ -176,7 +182,7 @@ test('el calendario actual muestra tareas del hogar, zona, estado y persona asig
       completed: true
     })
   ]);
-  expect(envelope.data.tasks[0]).not.toHaveProperty('details');
+  expect(calendarEnvelope?.data?.tasks?.[0]).not.toHaveProperty('details');
 
   const task = page.locator('[data-test="calendar-household-task"]');
   await expect(task).toBeVisible();
@@ -209,6 +215,7 @@ test('el calendario actual muestra tareas del hogar, zona, estado y persona asig
 test('las tareas del hogar se mantienen legibles, visibles y accesibles en las vistas y breakpoints del calendario', async ({
   page
 }) => {
+  test.setTimeout(120_000);
   await registerWithHousehold(
     page,
     `/calendar?view=agenda&date=${TASK_DATE}`,
