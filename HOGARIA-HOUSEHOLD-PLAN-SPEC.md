@@ -998,6 +998,14 @@ una alergia obliga a separar o a dejar el turno sin resolver aunque el objetivo 
   primera ocurrencia. Un timeout ambiguo de IA no se reintenta a ciegas: se conserva una ejecución
   recuperable para revisión/reintento explícito y la escritura local usa una clave idempotente por
   ocurrencia. La siguiente ejecución debe exponer su instante UTC y etiqueta en la zona elegida.
+  La configuración es única por hogar, desactivada por defecto, permite seleccionar tareas/comidas y
+  requiere modo, día ISO, hora local y zona IANA explícitos antes de activar. Pausar conserva modo,
+  ámbitos y horario; reanudar programa la ocurrencia futura siguiente, no recupera atrasos. Solo puede
+  habilitar o cambiar esta automatización una membresía activa con el permiso existente de ajustes del
+  hogar (`settings`); para activarla y publicar exige también `calendar.edit`. Las escrituras de un worker
+  comprueban que quien autorizó siga activo con esos permisos; la tarea automática se pausa si la
+  autorización deja de ser válida. La lectura de configuración no cambia calendario, tareas, inventario
+  ni listas de compra.
 
 ### Alta de cuenta: pertenencia obligatoria a un hogar
 
