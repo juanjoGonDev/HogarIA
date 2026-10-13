@@ -1,6 +1,6 @@
 # HogarIA — Plano interactivo del hogar y tareas por zonas
 
-Estado: **seguimiento de calidad visual abierto; ampliación de planificación de comidas y alta obligatoria de hogar capturada como propuesta pendiente de validar; PR #47 en Draft · 2026-10-13**
+Estado: **seguimiento de calidad visual abierto; política de planificación de comidas confirmada y en implementación; PR #47 en Draft · 2026-10-13**
 
 Este contrato concreta capacidades de HogarIA y complementa las reglas compartidas de
 `HOGARIA-SPEC.md` §12ap (aislamiento por hogar, membresía, permisos y proveedor de IA) y §13
@@ -822,13 +822,15 @@ parecer un único grupo de controles diseñado; no basta con que los controles f
   de commit/push terminaron correctamente; los hooks se ejecutan de nuevo automáticamente al publicar.
   El PR permanece Draft.
 
-## Extensión propuesta — planificación del hogar, comidas por miembro y alta obligatoria (13-10-2026)
+## Extensión — planificación del hogar, comidas por miembro y alta obligatoria (13-10-2026)
 
-> **Estado:** requisitos capturados para que no se pierdan; la política de conflictos y este alcance
-> ampliado siguen pendientes de confirmación e implementación. No se marca ningún criterio nuevo como
-> probado. La UI de calendario existente se conserva como calendario único.
+> **Decisión confirmada por el usuario (13-10-2026):** configuración del hogar como valor compartido,
+> overrides personales independientes de objetivo/horario apagados por defecto, primero comida común y,
+> si no es compatible, eventos individuales asignados; restricciones estrictas personales siempre
+> prevalecen. La extensión está en implementación; los criterios de aceptación siguen pendientes hasta
+> tener pruebas reproducibles. La UI de calendario existente se conserva como calendario único.
 
-### Recomendación de producto
+### Decisión de producto
 
 La generación de comidas debe configurarse en **Hogar > Planificación**, porque produce una agenda
 para el hogar y necesita considerar a sus miembros. No debe ser un interruptor global de la cuenta.
@@ -949,9 +951,6 @@ asignación, conflictos y aislamiento; no se implementará un atajo que invalide
 
 ### Criterios pendientes de aceptación — no implementados
 
-- [ ] Confirmar la jerarquía propuesta: configuración común del hogar; overrides personales e
-      independientes de objetivo/horario, apagados por defecto; gustos y restricciones de seguridad
-      permanecen personales.
 - [ ] Confirmar que el permiso vigente de configuración del hogar protege los valores comunes y la
       automatización; las personas solo editan sus propios overrides/perfil.
 - [ ] Definir/validar nombres y significado exacto de los campos de objetivo, horarios, comidas habilitadas,
