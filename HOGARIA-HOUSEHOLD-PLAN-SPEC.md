@@ -1128,9 +1128,10 @@ criterios inferiores permanecen sin marcar hasta validar cada condición en su a
       overrides apagados; hogar nuevo inicializado idempotentemente desde valores existentes; unirse
       no modifica valores comunes; ningún dato ajeno/no seleccionado llega al planificador.
 - [ ] **QA-HOME-MEALS.PLAN.1** — subtabs `Comidas`, `Tareas` y `Ajustes`; solo el panel seleccionado
-      ocupa la vista, con navegación accesible por teclado y contexto/URL conservados en escritorio y
-      móvil; cada `aria-controls` apunta a un tabpanel existente y solo el contenido del panel activo
-      se monta. Dentro de Comidas, `Preparar` y `Revisar propuesta` son pasos excluyentes; E2E comprueba que
+      es visible, con navegación accesible por teclado y contexto/URL conservados en escritorio y
+      móvil; cada `aria-controls` apunta a un tabpanel existente. Componentes inactivos se montan bajo
+      demanda, pero una propuesta aún no confirmada conserva selección, paso y día al cambiar de subtab;
+      volver no genera otra petición IA. Dentro de Comidas, `Preparar` y `Revisar propuesta` son pasos excluyentes; E2E comprueba que
       no se apilan formulario+semana+confirmación y que móvil ofrece un día/grupo manejable con el CTA
       alcanzable sin recorrer toda la semana. Revisión de existencias/compra es un
       paso secuencial que conecta con el módulo Compra existente, no una sección larga con todo mezclado.
