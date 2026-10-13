@@ -3,6 +3,7 @@ import { ReadableStream } from 'node:stream/web';
 import { Hono } from 'hono';
 import jwt from 'jsonwebtoken';
 import { createMealProposalResponseFormat } from '../schemas/household-meal-proposal.schema.js';
+import type { HouseholdMealProposalProvider } from './household-meal-proposals.routes.js';
 
 process.env.DATABASE_PATH = ':memory:';
 process.env.NODE_ENV = 'test';
@@ -1346,5 +1347,61 @@ describe('household meal proposal preview route', () => {
       status: 502,
       code: 'AI_PROVIDER_ERROR'
     });
+  });
+
+  it('builds an automation proposal through one strict provider call without sending member names', async () => {
+    addHousehold('home');
+    const planner = addUser('planner', 'home');
+    const companion = addUser('companion', 'home');
+    const provider = vi.fn<HouseholdMealProposalProvider>(async (messages, responseFormat) => {
+      expect(responseFormat).toMatchObject({ type: 'json_schema', json_schema: { strict: true } });
+      expect(JSON.stringify(messages)).not.toContain('Private name');
+      return JSON.stringify(validProposal(['P1', 'P2']));
+    });
+    const { generateAutomatedHouseholdMealProposal } =
+      await import('./household-meal-proposals.routes.js');
+
+    const result = await generateAutomatedHouseholdMealProposal(
+      {
+        db,
+        householdId: 'home',
+        actorUserId: planner.id,
+        householdMemberIds: [planner.membershipId, companion.membershipId],
+        weekStart: WEEK_START,
+        language: 'es'
+      },
+      provider
+    );
+
+    expect(provider).toHaveBeenCalledTimes(1);
+    expect(result.events).toHaveLength(7);
+    expect(result.participants.map(({ userId }) => userId)).toEqual([planner.id, companion.id]);
+    expect(result.events[0]?.participantAliases).toEqual(['P1', 'P2']);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM meals').get()).toEqual({ count: 0 });
+  });
+
+  it('does not retry an ambiguous provider timeout in the automation generator', async () => {
+    const { AiCallError } = await import('../utils/ai-client.js');
+    const { generateAutomatedHouseholdMealProposal } =
+      await import('./household-meal-proposals.routes.js');
+    addHousehold('home');
+    const planner = addUser('planner', 'home');
+    const timeout = new AiCallError('TIMEOUT', 'synthetic timeout');
+    const provider = vi.fn(async () => Promise.reject(timeout));
+
+    await expect(
+      generateAutomatedHouseholdMealProposal(
+        {
+          db,
+          householdId: 'home',
+          actorUserId: planner.id,
+          householdMemberIds: [planner.membershipId],
+          weekStart: WEEK_START,
+          language: 'es'
+        },
+        provider
+      )
+    ).rejects.toBe(timeout);
+    expect(provider).toHaveBeenCalledTimes(1);
   });
 });
