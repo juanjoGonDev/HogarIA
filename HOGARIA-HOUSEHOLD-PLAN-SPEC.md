@@ -894,7 +894,11 @@ una alergia obliga a separar o a dejar el turno sin resolver aunque el objetivo 
 - **Hogar > Planificación** organiza la planificación semanal mediante subtabs independientes de
   **Comidas**, **Tareas** y **Ajustes**. No se muestran todos los formularios y estados juntos en un único
   scroll: cada subtab conserva un foco de trabajo claro y la navegación mantiene el contexto del hogar.
-  La generación, la propuesta y la confirmación de comidas se presentan como pasos del flujo de Comidas;
+  Dentro de **Comidas**, preparación y revisión de la propuesta son pasos separados y mutuamente
+  excluyentes: no se apilan el formulario, las siete jornadas y el CTA de confirmación en una sola
+  pantalla. En móvil la revisión limita las comidas visibles al día seleccionado o a grupos plegados,
+  para que las semanas no se conviertan en una página interminable; confirmar no requiere recorrer
+  todas las jornadas. La generación, la propuesta y la confirmación de comidas se presentan como pasos del flujo de Comidas;
   revisar existencias y aprobar una compra se muestra como un paso de revisión antes de abrir/actualizar
   la lista del módulo Compra, no como un panel de controles simultáneos. No crea un
   calendario paralelo: las comidas y tareas planificadas aparecen en el calendario actual, con persona(s)
@@ -1072,7 +1076,9 @@ criterios inferiores permanecen sin marcar hasta validar cada condición en su a
       no modifica valores comunes; ningún dato ajeno/no seleccionado llega al planificador.
 - [ ] **QA-HOME-MEALS.PLAN.1** — subtabs `Comidas`, `Tareas` y `Ajustes`; solo el panel seleccionado
       ocupa la vista, con navegación accesible por teclado y contexto/URL conservados en escritorio y
-      móvil. El flujo de comida incluye generación y vista previa; revisión de existencias/compra es un
+      móvil. Dentro de Comidas, `Preparar` y `Revisar propuesta` son pasos excluyentes; E2E comprueba que
+      no se apilan formulario+semana+confirmación y que móvil ofrece un día/grupo manejable con el CTA
+      alcanzable sin recorrer toda la semana. Revisión de existencias/compra es un
       paso secuencial que conecta con el módulo Compra existente, no una sección larga con todo mezclado.
       Plan semanal con proveedor simulado, vista previa explícita y
       `response_format` estricto; plato compartido una vez, raciones por participantes, conflictos
