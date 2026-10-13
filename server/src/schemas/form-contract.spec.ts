@@ -70,7 +70,11 @@ import { mealProposalSchema } from './household-meal-proposal.schema.js';
 import { householdMealConsumptionSchema } from './household-meal-consumption.schema.js';
 import { householdMealShoppingApprovalSchema } from './household-meal-shopping-approval.schema.js';
 import { householdMealShoppingPreviewQuerySchema } from './household-meal-shopping-preview.schema.js';
-import { householdPlanningAutomationPatchSchema } from './household-planning-automation.schema.js';
+import {
+  householdPlanningAutomationPatchSchema,
+  householdPlanningAutomationRetrySchema,
+  householdPlanningAutomationRunSummarySchema
+} from './household-planning-automation.schema.js';
 import { generatedRecipeCandidateSchema } from './generated-recipe.schema.js';
 import {
   applyLinesSchema,
@@ -431,6 +435,24 @@ const ROWS: Row[] = [
       timeZone:
         'La zona debe ser IANA explícita; null sí permite limpiar una configuración pausada.'
     }
+  },
+  {
+    name: 'householdPlanningAutomationRetrySchema',
+    schema: householdPlanningAutomationRetrySchema,
+    required: { expectedVersion: 1, occurrenceKey: '2026-10-17|Europe/Madrid' },
+    note: 'El retry identifica una ocurrencia explícita y exige la versión que ve el usuario.'
+  },
+  {
+    name: 'householdPlanningAutomationRunSummarySchema',
+    schema: householdPlanningAutomationRunSummarySchema,
+    required: {
+      occurrenceKey: '2026-10-17|Europe/Madrid',
+      targetWeekStart: '2026-10-19',
+      status: 'completed',
+      failureCode: null,
+      updatedAt: '2026-10-13T21:00:00.000Z'
+    },
+    note: 'La lectura pública del ledger expone solo un resumen con estado y fecha allowlist.'
   },
   { name: 'updateHouseholdSchema', schema: updateHouseholdSchema },
   { name: 'joinHouseholdSchema', schema: joinHouseholdSchema, required: { inviteCode: 'ABC123' } },
