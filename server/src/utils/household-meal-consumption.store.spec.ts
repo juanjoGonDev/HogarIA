@@ -529,4 +529,99 @@ describe('shared meal consumption persistence', () => {
         .get(mealId)
     ).toEqual({ count: 2 });
   });
+
+  it('rejects a same-deduction correction after a partial stock deduction if the unit changed', () => {
+    const mealId = addSharedMeal({
+      ...snapshot,
+      ingredients: [{ name: 'Arroz', quantity: 25, unit: 'g', isOptional: false }]
+    });
+    addIngredient('rice', 'arroz', 'g', 25);
+    const first = record(db, 'alice', request(mealId, { servings: 2 }));
+    expect(first.warnings).toContainEqual(expect.objectContaining({ code: 'INSUFFICIENT_STOCK' }));
+    expect(
+      db
+        .prepare(
+          'SELECT target_quantity, deducted_quantity FROM meal_consumption_deductions WHERE meal_id = ?'
+        )
+        .get(mealId)
+    ).toEqual({
+      target_quantity: 50,
+      deducted_quantity: 25
+    });
+    db.prepare("UPDATE ingredients SET unit = 'kg' WHERE id = 'rice'").run();
+
+    expect(() =>
+      record(db, 'alice', request(mealId, { servings: 1, expectedVersion: first.version }))
+    ).toThrow(expect.objectContaining({ code: 'INVENTORY_UNIT_CHANGED' }));
+    expect(db.prepare("SELECT quantity FROM ingredients WHERE id = 'rice'").get()).toEqual({
+      quantity: 0
+    });
+    expect(
+      db
+        .prepare('SELECT status, servings, version FROM meal_consumptions WHERE meal_id = ?')
+        .get(mealId)
+    ).toEqual({
+      status: 'realized',
+      servings: 2,
+      version: 1
+    });
+    expect(
+      db
+        .prepare(
+          'SELECT target_quantity, deducted_quantity FROM meal_consumption_deductions WHERE meal_id = ?'
+        )
+        .get(mealId)
+    ).toEqual({
+      target_quantity: 50,
+      deducted_quantity: 25
+    });
+    expect(
+      db
+        .prepare('SELECT COUNT(*) AS count FROM meal_inventory_movements WHERE meal_id = ?')
+        .get(mealId)
+    ).toEqual({
+      count: 1
+    });
+  });
+
+  it('guards unit before restoring a prior deduction for a removed snapshot line', () => {
+    const mealId = addSharedMeal();
+    addIngredient('rice', 'arroz', 'g', 500);
+    const first = record(db, 'alice', request(mealId, { servings: 2 }));
+    db.prepare('UPDATE meal_consumptions SET recipe_snapshot_hash = NULL WHERE meal_id = ?').run(
+      mealId
+    );
+    db.prepare('UPDATE meals SET recipe_snapshot = ? WHERE id = ?').run(
+      JSON.stringify({ ...snapshot, ingredients: [] }),
+      mealId
+    );
+    db.prepare("UPDATE ingredients SET unit = 'kg' WHERE id = 'rice'").run();
+
+    expect(() =>
+      record(
+        db,
+        'alice',
+        request(mealId, { status: 'not_realized', servings: 0, expectedVersion: first.version })
+      )
+    ).toThrow(expect.objectContaining({ code: 'INVENTORY_UNIT_CHANGED' }));
+    expect(db.prepare("SELECT quantity FROM ingredients WHERE id = 'rice'").get()).toEqual({
+      quantity: 400
+    });
+    expect(
+      db
+        .prepare('SELECT status, servings, version FROM meal_consumptions WHERE meal_id = ?')
+        .get(mealId)
+    ).toEqual({
+      status: 'realized',
+      servings: 2,
+      version: 1
+    });
+    expect(
+      db
+        .prepare('SELECT COUNT(*) AS count FROM meal_inventory_movements WHERE meal_id = ?')
+        .get(mealId)
+    ).toEqual({
+      count: 1
+    });
+  });
 });

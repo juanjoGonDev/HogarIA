@@ -286,8 +286,6 @@ function applyStockDelta(
   sharedPantry: number | null
 ): { deducted: number; warning?: MealConsumptionWarning } {
   const delta = target - previousDeducted;
-  if (Math.abs(delta) < EPSILON) return { deducted: previousDeducted };
-
   const latest = ingredientById(db, ingredient.household_id, ingredient.id);
   if (!latest) {
     return {
@@ -306,6 +304,7 @@ function applyStockDelta(
       'La unidad del producto cambió; no se puede corregir este consumo con seguridad'
     );
   }
+  if (Math.abs(delta) < EPSILON) return { deducted: previousDeducted };
 
   if (delta < 0) {
     const restore = -delta;
@@ -488,20 +487,19 @@ function reconcileDeductions(
       });
       continue;
     }
-    db.prepare(
-      `UPDATE ingredients SET quantity = quantity + ?, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ? AND household_id = ?`
-    ).run(prior.deducted_quantity, selected.id, meal.household_id);
-    addMovement(
+    const restored = applyStockDelta(
       db,
       mealId,
       version,
       prior.line_index,
-      selected.id,
+      selected,
       prior.ingredient_name,
       prior.unit,
-      prior.deducted_quantity
+      prior.deducted_quantity,
+      0,
+      meal.shared_pantry
     );
+    if (restored.warning) warnings.push(restored.warning);
   }
 
   db.prepare('DELETE FROM meal_consumption_deductions WHERE meal_id = ?').run(mealId);

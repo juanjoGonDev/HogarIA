@@ -1086,13 +1086,14 @@ solo su backend o sus pruebas unitarias.
   pnpm --filter @hogaria/server exec tsc --noEmit -p tsconfig.json
   ```
 
-  Para consumo, la prueba focal aprueba **3 archivos / 28 tests** (schema, store y ruta); la ruta/store
-  suman **20 tests**, con cobertura por fichero de **88,67/80/100/91,83 %** y
-  **88,06/79,39/100/90,18 %** (statements/branches/funciones/líneas). El esquema suma **8 tests** y
+  Para consumo, la prueba focal aprueba **3 archivos / 30 tests** (schema, store y ruta); la ruta/store
+  suman **22 tests**, con cobertura por fichero de **88,67/80/100/91,83 %** y
+  **89,83/80,83/100/92,63 %** (statements/branches/funciones/líneas). El esquema suma **8 tests** y
   **100/100/100/100 %**. El contrato cubre valores positivos, cero solo para «no realizada», límites,
   versión y propiedades no permitidas. Se ejercitaron retries, correcciones, receta alterada/corrupta,
-  rollback, contexto y permisos, cambio de unidad tras deducción, desactivación de despensa compartida,
-  stock insuficiente, producto ambiguo y recetas ausentes/corruptas. `tsc --noEmit -p tsconfig.json` pasa.
+  rollback, contexto y permisos, cambio de unidad tras deducción parcial o restauración de línea huérfana,
+  desactivación de despensa compartida, stock insuficiente, producto ambiguo y recetas ausentes/corruptas.
+  `tsc --noEmit -p tsconfig.json` pasa.
   Los tests usan `DATABASE_PATH=:memory:` y datos
   sintéticos; no llaman a servidor, inventario persistente ni proveedor real. La suite completa de
   servidor y E2E UI no forman parte de esta unidad aislada.
