@@ -67,6 +67,7 @@ import {
   householdMealProposalRequestSchema
 } from './household-meal-proposal-request.schema.js';
 import { mealProposalSchema } from './household-meal-proposal.schema.js';
+import { householdMealConsumptionSchema } from './household-meal-consumption.schema.js';
 import { generatedRecipeCandidateSchema } from './generated-recipe.schema.js';
 import {
   applyLinesSchema,
@@ -303,6 +304,12 @@ const ROWS: Row[] = [
       ]
     },
     note: 'La confirmación acepta solo alias opacos; el servidor resuelve las membresías y vuelve a validar receta y turnos.'
+  },
+  {
+    name: 'householdMealConsumptionSchema',
+    schema: householdMealConsumptionSchema,
+    required: { status: 'realized', servings: 1, expectedVersion: 0 },
+    note: 'El contrato exige todos los campos y distingue raciones positivas para consumo realizado y cero solo para no realizado.'
   },
   {
     name: 'mealProposalSchema',
