@@ -20,6 +20,9 @@ import {
  * parte defensiva, que es la que evita pantallas en blanco con datos viejos.
  */
 describe('home-profile model', () => {
+  const es = DICTS.es as Record<string, string>;
+  const en = DICTS.en as Record<string, string>;
+
   it('declara los cuatro niveles con su etiqueta y su explicacion', () => {
     expect(COOKING_LEVEL_OPTIONS.map((option) => option.value)).toEqual([
       'none',
@@ -29,28 +32,28 @@ describe('home-profile model', () => {
     ]);
     for (const option of COOKING_LEVEL_OPTIONS) {
       expect(option.labelKey).toBe(COOKING_LEVEL_LABEL_KEYS[option.value]);
-      expect(DICTS.es[option.hintKey].length).toBeGreaterThan(10);
-      expect(DICTS.en[option.hintKey]).toBeTruthy();
+      expect(es[option.hintKey].length).toBeGreaterThan(10);
+      expect(en[option.hintKey]).toBeTruthy();
     }
   });
 
   it('dice a cada nivel cuanto explica la IA', () => {
-    expect(DICTS.es[detailLevelHintKey('none')]).toContain('pasos cortos');
-    expect(DICTS.es[detailLevelHintKey('beginner')]).toContain('cada paso');
-    expect(DICTS.es[detailLevelHintKey('intermediate')]).toContain('al grano');
-    expect(DICTS.es[detailLevelHintKey('expert')]).toContain('técnica');
+    expect(es[detailLevelHintKey('none')]).toContain('pasos cortos');
+    expect(es[detailLevelHintKey('beginner')]).toContain('cada paso');
+    expect(es[detailLevelHintKey('intermediate')]).toContain('al grano');
+    expect(es[detailLevelHintKey('expert')]).toContain('técnica');
   });
 
   it('lista las cinco secciones y deja pendiente solo Hogar', () => {
     expect(HOME_MODULE_OPTIONS.map((option) => option.value)).toEqual(HOME_MODULES);
     // «Lista», «Despensa» y «Tickets» ya están disponibles; solo quedan pendientes las tareas del hogar.
-    expect(HOME_MODULE_OPTIONS.filter((option) => !option.available).map((option) => option.value)).toEqual([
-      'home'
-    ]);
+    expect(
+      HOME_MODULE_OPTIONS.filter((option) => !option.available).map((option) => option.value)
+    ).toEqual(['home']);
     for (const option of HOME_MODULE_OPTIONS) {
-      expect(DICTS.es[option.labelKey].length).toBeGreaterThan(3);
-      expect(DICTS.es[option.hintKey].length).toBeGreaterThan(3);
-      expect(DICTS.en[option.labelKey]).toBeTruthy();
+      expect(es[option.labelKey].length).toBeGreaterThan(3);
+      expect(es[option.hintKey].length).toBeGreaterThan(3);
+      expect(en[option.labelKey]).toBeTruthy();
     }
   });
 
@@ -143,7 +146,10 @@ describe('home-profile model', () => {
   it('los cuatro niveles tienen palabra en los dos idiomas', () => {
     for (const level of COOKING_LEVEL_OPTIONS.map((option) => option.value)) {
       for (const idioma of ['es', 'en'] as const) {
-        const palabra = cookingLevelWord(level, (clave) => DICTS[idioma][clave as keyof typeof DICTS['es']]);
+        const palabra = cookingLevelWord(
+          level,
+          (clave) => DICTS[idioma][clave as keyof (typeof DICTS)['es']]
+        );
         expect(palabra.length).toBeGreaterThan(2);
         expect(palabra).not.toContain('.'); // «profile.cooking.none» no es una respuesta, es un diagnostico
       }

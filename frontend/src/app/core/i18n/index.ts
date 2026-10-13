@@ -17,7 +17,7 @@ import { shoppingListsEs, shoppingListsEn } from './dict/shopping_lists';
 import { shoppingListDetailEs, shoppingListDetailEn } from './dict/shopping_list_detail';
 import { onboardingEs, onboardingEn } from './dict/onboarding';
 import { inviteEs, inviteEn } from './dict/invite';
-import { householdEs, householdEn } from './dict/household';
+import { householdSharedEs, householdSharedEn } from './dict/household_shared';
 import { aiConfigEs, aiConfigEn } from './dict/ai_config';
 import { avatarEditorEs, avatarEditorEn } from './dict/avatar_editor';
 import { accountEs, accountEn } from './dict/account';
@@ -44,7 +44,7 @@ const es = {
   ...shoppingListDetailEs,
   ...onboardingEs,
   ...inviteEs,
-  ...householdEs,
+  ...householdSharedEs,
   ...aiConfigEs,
   ...avatarEditorEs,
   ...accountEs,
@@ -63,7 +63,7 @@ const es = {
   ...settingsEs,
   ...tasteEs,
   ...aiParticipantsEs,
-  ...uiEs,
+  ...uiEs
 };
 
 const en: Record<keyof typeof es, string> = {
@@ -72,7 +72,7 @@ const en: Record<keyof typeof es, string> = {
   ...shoppingListDetailEn,
   ...onboardingEn,
   ...inviteEn,
-  ...householdEn,
+  ...householdSharedEn,
   ...aiConfigEn,
   ...avatarEditorEn,
   ...accountEn,
@@ -91,13 +91,13 @@ const en: Record<keyof typeof es, string> = {
   ...settingsEn,
   ...tasteEn,
   ...aiParticipantsEn,
-  ...uiEn,
+  ...uiEn
 };
 
 export const DICTS = { es, en };
 
-/** Toda clave que existe. Una cadena nueva sin traduccion no compila, y una clave inventada tampoco. */
-export type TranslationKey = keyof typeof es;
+/** Claves estáticas y del diccionario hogar, cargado bajo demanda al entrar en su ruta. */
+export type TranslationKey = keyof typeof es | keyof typeof import('./dict/household').householdEs;
 
 /** Lo que hay que traducir, por si manana el diccionario viene de un JSON y no de un literal. */
 /**

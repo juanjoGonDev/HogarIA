@@ -294,10 +294,11 @@ describe('ModulesService', () => {
     // Y la clave no puede estar de adorno: si no resuelve en los dos idiomas, la pantalla sale a medias.
     for (const definition of MODULE_REGISTRY) {
       for (const idioma of ['es', 'en'] as const) {
-        expect(DICTS[idioma][definition.labelKey])
+        const dictionary = DICTS[idioma] as Record<string, string>;
+        expect(dictionary[definition.labelKey])
           .withContext(`${definition.id} en ${idioma}`)
           .toBeTruthy();
-        expect(DICTS[idioma][definition.hintKey])
+        expect(dictionary[definition.hintKey])
           .withContext(`${definition.id} (pista) en ${idioma}`)
           .toBeTruthy();
       }

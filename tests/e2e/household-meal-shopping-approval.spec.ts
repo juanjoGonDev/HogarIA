@@ -98,6 +98,43 @@ async function expectMobileShoppingLayout(
   expect(layout.heading!.bottom).toBeLessThanOrEqual(layout.count!.top);
 }
 
+async function expectMobileShoppingActionReachable(
+  page: import('@playwright/test').Page,
+  viewport: { width: number; height: number }
+) {
+  await page.setViewportSize(viewport);
+  const approveButton = page.locator('[data-test="meal-shopping-approve"] button');
+  await expect(approveButton).toBeEnabled();
+  await approveButton.focus();
+  await approveButton.scrollIntoViewIfNeeded();
+
+  const visibility = await page.evaluate(() => {
+    const button = document.querySelector<HTMLElement>(
+      '[data-test="meal-shopping-approve"] button'
+    );
+    const navigation = document.querySelector<HTMLElement>('.bottom-nav');
+    if (!button || !navigation) return null;
+    const buttonBounds = button.getBoundingClientRect();
+    const navigationBounds = navigation.getBoundingClientRect();
+    return {
+      buttonTop: buttonBounds.top,
+      buttonBottom: buttonBounds.bottom,
+      viewportHeight: window.innerHeight,
+      navigationTop: navigationBounds.top,
+      navigationBottom: navigationBounds.bottom,
+      focused: document.activeElement === button
+    };
+  });
+
+  expect(visibility).toBeTruthy();
+  expect(visibility!.buttonTop).toBeGreaterThanOrEqual(0);
+  expect(visibility!.buttonBottom).toBeLessThanOrEqual(visibility!.viewportHeight);
+  expect(visibility!.navigationTop).toBeLessThan(visibility!.viewportHeight);
+  expect(visibility!.navigationBottom).toBeLessThanOrEqual(visibility!.viewportHeight);
+  expect(visibility!.buttonBottom).toBeLessThanOrEqual(visibility!.navigationTop - 1);
+  expect(visibility!.focused).toBe(true);
+}
+
 test('plan semanal de compra permite revisar, editar, cancelar y aprobar sin tocar el inventario', async ({
   page
 }, testInfo) => {
@@ -223,6 +260,12 @@ test('plan semanal de compra permite revisar, editar, cancelar y aprobar sin toc
   await expect(quantityInput).toHaveValue('140');
   await quantityInput.fill('280');
 
+  if (testInfo.project.name === 'mobile-chrome') {
+    await expectMobileShoppingActionReachable(page, { width: 390, height: 844 });
+    await expectMobileShoppingActionReachable(page, { width: 320, height: 740 });
+    await page.setViewportSize(viewport);
+  }
+
   // Simulate a transient API failure and prove it leaves both pantry and list untouched.
   let failedOnce = false;
   await page.route('**/api/shopping/meal-plan/approve', async (route) => {
@@ -305,7 +348,7 @@ test('plan semanal de compra permite revisar, editar, cancelar y aprobar sin toc
     await expectMobileShoppingLayout(page, { width: 390, height: 844 });
     await expectMobileShoppingLayout(page, { width: 320, height: 740 });
     await page.setViewportSize(viewport);
-    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.locator('[data-test="meal-shopping-approve"] button').scrollIntoViewIfNeeded();
   }
 
   const screenshotDirectory = resolve('.e2e-screenshots/household-meal-shopping-approval');

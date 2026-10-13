@@ -14,7 +14,9 @@ describe('PantryCategoryLabelPipe', () => {
     lang = 'es';
     const tick = signal(0);
     changeTick = jasmine.createSpy('changeTick').and.callFake(() => tick());
-    translate = jasmine.createSpy('t').and.callFake((key: TranslationKey) => DICTS[lang][key]);
+    translate = jasmine
+      .createSpy('t')
+      .and.callFake((key: TranslationKey) => (DICTS[lang] as Record<string, string>)[key]);
 
     TestBed.configureTestingModule({
       providers: [

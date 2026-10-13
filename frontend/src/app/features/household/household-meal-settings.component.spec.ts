@@ -3,6 +3,7 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { RouterTestingModule } from '@angular/router/testing';
 import { Subject, of, throwError } from 'rxjs';
+import { I18nService } from '../../core/services/i18n.service';
 import {
   HouseholdMealPlanningService,
   type HouseholdMealPlanningPatch,
@@ -66,6 +67,7 @@ describe('HouseholdMealSettingsComponent', () => {
       imports: [CommonModule, RouterTestingModule, HouseholdMealSettingsComponent],
       providers: [{ provide: HouseholdMealPlanningService, useValue: api }]
     }).compileComponents();
+    await TestBed.inject(I18nService).loadHouseholdTranslations();
   });
 
   it('loads settings and keeps both personal overrides off by default', () => {

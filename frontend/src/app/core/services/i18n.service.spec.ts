@@ -132,16 +132,35 @@ describe('I18nService', () => {
     const i18n = injectService();
     const key: TranslationKey = 'ui.ahora';
     const english = DICTS.en as Record<string, string>;
+    const spanish = DICTS.es as Record<string, string>;
     const translation = english[key];
     delete english[key];
 
     try {
       i18n.setLang('en');
       TestBed.flushEffects();
-      expect(i18n.t(key)).toBe(DICTS.es[key]);
+      expect(i18n.t(key)).toBe(spanish[key]);
     } finally {
       english[key] = translation;
     }
+  });
+
+  it('loads household translations once for both languages before the route renders', async () => {
+    const i18n = injectService();
+    const changeTickBeforeLoad = i18n.changeTick();
+
+    await Promise.all([i18n.loadHouseholdTranslations(), i18n.loadHouseholdTranslations()]);
+
+    expect(i18n.changeTick()).toBe(changeTickBeforeLoad + 1);
+    expect(i18n.t('household.meal_shopping_approve')).toBe('Añadir selección a Compra');
+
+    i18n.setLang('en');
+    TestBed.flushEffects();
+    expect(i18n.t('household.meal_shopping_approve')).toBe('Add selection to Shopping');
+
+    const changeTickAfterLoad = i18n.changeTick();
+    await i18n.loadHouseholdTranslations();
+    expect(i18n.changeTick()).toBe(changeTickAfterLoad);
   });
 
   it('returns and warns with a missing key in development, but stays quiet in production', () => {

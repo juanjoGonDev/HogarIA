@@ -14,6 +14,7 @@ import { HouseholdPlanService } from '../../core/services/household-plan.service
 import { HouseholdTasksService } from '../../core/services/household-tasks.service';
 import { HouseholdMealPlanningService } from '../../core/services/household-meal-planning.service';
 import { HouseholdMealProposalService } from '../../core/services/household-meal-proposal.service';
+import { HouseholdMealShoppingService } from '../../core/services/household-meal-shopping.service';
 import type { Household } from '../../shared/models/household.model';
 import { householdEn, householdEs } from '../../core/i18n/dict/household';
 
@@ -51,6 +52,7 @@ describe('HouseholdComponent', () => {
   let router: jasmine.SpyObj<Router>;
   let queryParams: BehaviorSubject<ParamMap>;
   let mealPlanning: jasmine.SpyObj<HouseholdMealPlanningService>;
+  let mealShopping: jasmine.SpyObj<HouseholdMealShoppingService>;
 
   function createHouseholdService() {
     const householdState = signal<Household | null>(null);
@@ -118,6 +120,33 @@ describe('HouseholdComponent', () => {
         }
       })
     );
+    mealShopping = jasmine.createSpyObj<HouseholdMealShoppingService>(
+      'HouseholdMealShoppingService',
+      ['loadPreview', 'approve']
+    );
+    mealShopping.loadPreview.and.returnValue(
+      of({
+        startDate: '2026-10-05',
+        endDate: '2026-10-11',
+        previewId: 'synthetic-preview',
+        sharedPantry: true,
+        plannedMealCount: 0,
+        requiredIngredients: [],
+        optionalIngredients: [],
+        warnings: []
+      })
+    );
+    mealShopping.approve.and.returnValue(
+      of({
+        listId: null,
+        version: null,
+        created: false,
+        idempotent: false,
+        added: 0,
+        updated: 0,
+        removed: 0
+      })
+    );
     toast = jasmine.createSpyObj<ToastService>('ToastService', ['success', 'error']);
     confirm = jasmine.createSpyObj<ConfirmService>('ConfirmService', ['confirm']);
     confirm.confirm.and.resolveTo(true);
@@ -128,6 +157,7 @@ describe('HouseholdComponent', () => {
         { provide: HouseholdService, useValue: service },
         { provide: ToastService, useValue: toast },
         { provide: HouseholdMealPlanningService, useValue: mealPlanning },
+        { provide: HouseholdMealShoppingService, useValue: mealShopping },
         {
           provide: HouseholdMealProposalService,
           useValue: jasmine.createSpyObj<HouseholdMealProposalService>(
@@ -417,6 +447,8 @@ describe('HouseholdComponent', () => {
     expect(
       fixture.nativeElement.querySelectorAll('.household-planning-panel:not([hidden])').length
     ).toBe(1);
+    expect(mealShopping.loadPreview).not.toHaveBeenCalled();
+    expect(mealShopping.approve).not.toHaveBeenCalled();
   });
 
   it('cleans invalid planning subtabs from the URL while preserving other query parameters', () => {

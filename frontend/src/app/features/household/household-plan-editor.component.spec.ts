@@ -6,12 +6,18 @@ import { I18nService } from '../../core/services/i18n.service';
 import { HouseholdPlanService } from '../../core/services/household-plan.service';
 import { ConfirmService } from '../../core/services/confirm.service';
 import { DICTS, type TranslationKey, type TranslationParams } from '../../core/i18n';
+import { householdEs, householdEn } from '../../core/i18n/dict/household';
 import type {
   HouseholdPlan,
   HouseholdPlanProposal,
   VersionedHouseholdPlan
 } from '../../shared/models/household-plan.model';
 import type { HouseholdMember } from '../../shared/models/household.model';
+
+const TEST_DICTS = {
+  es: { ...DICTS.es, ...householdEs },
+  en: { ...DICTS.en, ...householdEn }
+};
 import { emptyHouseholdPlan, openingSegment } from './household-plan-editor.utils';
 import { HouseholdPlanEditorComponent } from './household-plan-editor.component';
 
@@ -168,7 +174,7 @@ describe('HouseholdPlanEditorComponent', () => {
     await mount();
     i18n.resolved.set('es');
     i18n.t.and.callFake((key: string, params?: TranslationParams) => {
-      let message = DICTS[i18n.resolved()][key as TranslationKey];
+      let message = TEST_DICTS[i18n.resolved()][key as TranslationKey];
       for (const [name, value] of Object.entries(params ?? {})) {
         message = message.replaceAll(`{${name}}`, String(value ?? ''));
       }

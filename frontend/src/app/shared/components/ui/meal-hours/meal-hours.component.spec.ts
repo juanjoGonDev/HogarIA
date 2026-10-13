@@ -34,8 +34,8 @@ describe('app-meal-hours', () => {
     ]);
     // Y las claves llevan a lo que se ensena, en los dos idiomas: si una se queda sin traduccion, la
     // fila sale en espanol para quien puso ingles.
-    expect(DICTS.es[component.rows[0].labelKey]).toBe('Desayuno');
-    expect(DICTS.en[component.rows[3].labelKey]).toBe('Dinner');
+    expect((DICTS.es as Record<string, string>)[component.rows[0].labelKey]).toBe('Desayuno');
+    expect((DICTS.en as Record<string, string>)[component.rows[3].labelKey]).toBe('Dinner');
   });
 
   it('el prefijo del tour deja intactos los ids que buscan los e2e', () => {
