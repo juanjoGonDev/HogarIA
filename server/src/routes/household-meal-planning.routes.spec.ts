@@ -7,6 +7,7 @@ process.env.NODE_ENV = 'test';
 
 type Sql = import('better-sqlite3').Database;
 type User = { id: string; token: string };
+type ApiResponse = { success: boolean; code?: string; data: any };
 
 let app: Hono;
 let db: Sql;
@@ -86,13 +87,17 @@ function call(user: User, method: string, body?: unknown, householdId = 'home') 
   });
 }
 
+async function responseBody(response: Response): Promise<ApiResponse> {
+  return (await response.json()) as ApiResponse;
+}
+
 describe('household meal-planning settings routes', () => {
   it('returns defaults and only the caller personal profile on GET', async () => {
     addHousehold();
     const member = addUser('member', 'home', false);
 
     const response = await call(member, 'GET');
-    const json = await response.json();
+    const json = await responseBody(response);
 
     expect(response.status).toBe(200);
     expect(response.headers.get('cache-control')).toBe('no-store');
@@ -122,7 +127,7 @@ describe('household meal-planning settings routes', () => {
         schedule: { mealTypes: { dinner: false }, mealTimes: { dinner: '19:45' } }
       }
     });
-    const json = await response.json();
+    const json = await responseBody(response);
 
     expect(response.status).toBe(200);
     expect(json.data.member.goalOverrideEnabled).toBe(true);
@@ -147,7 +152,7 @@ describe('household meal-planning settings routes', () => {
       household: { objective: { goals: ['variety'] } }
     });
     expect(denied.status).toBe(403);
-    expect((await denied.json()).code).toBe('HOUSEHOLD_SETTINGS_REQUIRED');
+    expect((await responseBody(denied)).code).toBe('HOUSEHOLD_SETTINGS_REQUIRED');
     const allowed = await call(admin, 'PATCH', {
       household: {
         objective: { goals: ['variety'], notes: 'De temporada' },
@@ -155,7 +160,7 @@ describe('household meal-planning settings routes', () => {
         mealTimes: { lunch: '13:30' }
       }
     });
-    const json = await allowed.json();
+    const json = await responseBody(allowed);
     expect(allowed.status).toBe(200);
     expect(json.data.household.objective).toEqual({ goals: ['variety'], notes: 'De temporada' });
     expect(json.data.household.mealTypes.snack).toBe(false);
@@ -198,7 +203,7 @@ describe('household meal-planning settings routes', () => {
     });
 
     expect(response.status).toBe(500);
-    expect((await response.json()).code).toBe('HOUSEHOLD_MEAL_PLANNING_SAVE_FAILED');
+    expect((await responseBody(response)).code).toBe('HOUSEHOLD_MEAL_PLANNING_SAVE_FAILED');
     expect(
       (
         db.prepare('SELECT meal_planning_preferences FROM households WHERE id = ?').get('home') as {
@@ -224,7 +229,9 @@ describe('household meal-planning settings routes', () => {
       .get('member') as { meal_planning_preferences: string };
     expect(JSON.parse(storedMember.meal_planning_preferences)).toEqual({});
     const responseAgain = await call(member, 'GET');
-    expect((await responseAgain.json()).data.household.objective.goals).toEqual(['balanced']);
+    expect((await responseBody(responseAgain)).data.household.objective.goals).toEqual([
+      'balanced'
+    ]);
   });
 
   it('rejects malformed patches, invalid times, missing home context, and stale home headers', async () => {
@@ -255,7 +262,7 @@ describe('household meal-planning settings routes', () => {
     const unauthenticated = await app.request('/api/household/meal-planning');
 
     expect(malformed.status).toBe(400);
-    expect((await malformed.json()).code).toBe('INVALID_MEAL_PLANNING_SETTINGS');
+    expect((await responseBody(malformed)).code).toBe('INVALID_MEAL_PLANNING_SETTINGS');
     expect(unauthenticated.status).toBe(401);
   });
 });
