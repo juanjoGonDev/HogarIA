@@ -21,6 +21,63 @@
   gap: var(--space-4);
 }
 
+.meal-planner__steps {
+  display: flex;
+  gap: var(--space-2);
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  border-bottom: 1px solid var(--border-default);
+  scrollbar-width: thin;
+}
+
+.meal-planner__steps [role='tab'] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: max-content;
+  min-height: 44px;
+  flex: 0 0 auto;
+  padding: var(--space-2) var(--space-4);
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.meal-planner__steps [role='tab']:hover {
+  color: var(--text-primary);
+}
+
+.meal-planner__steps [role='tab'][aria-selected='true'] {
+  border-bottom-color: var(--primary);
+  color: var(--primary-dark);
+  font-weight: var(--font-semibold);
+}
+
+.meal-planner__steps [role='tab']:focus-visible,
+.meal-planner__step-panel:focus-visible,
+.meal-planner__review-day-control select:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.meal-planner__step-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.meal-planner__step-panel[hidden] {
+  display: none;
+}
+
 .meal-planner__header h2,
 .meal-planner__review-header h3 {
   margin: 0;
@@ -194,13 +251,6 @@
   flex: 0 0 auto;
 }
 
-.meal-planner__days {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-4);
-  min-width: 0;
-}
-
 .meal-planner__day {
   display: flex;
   flex-direction: column;
@@ -358,6 +408,20 @@
   margin: 0;
 }
 
+.meal-planner__review-day-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-2);
+  min-width: 0;
+  max-width: 24rem;
+}
+
+.meal-planner__review-day-control label {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+}
+
 @media (max-width: 767px) {
   .meal-planner__controls {
     grid-template-columns: minmax(0, 1fr);
@@ -365,10 +429,6 @@
   }
 
   .meal-planner__member-list {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .meal-planner__days {
     grid-template-columns: minmax(0, 1fr);
   }
 

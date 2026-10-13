@@ -20,6 +20,27 @@ interface ExpectedSlot {
 
 const screenshotDirectory = resolve('.e2e-screenshots/household-meal-planning');
 
+async function expectTabsToReferencePanels(
+  page: import('@playwright/test').Page,
+  tabListSelector: string
+) {
+  const tabs = page.locator(`${tabListSelector} [role="tab"]`);
+  for (let index = 0; index < (await tabs.count()); index += 1) {
+    const panelId = await tabs.nth(index).getAttribute('aria-controls');
+    expect(panelId).toBeTruthy();
+    await expect(page.locator(`[id="${panelId}"][role="tabpanel"]`)).toHaveCount(1);
+  }
+}
+
+async function expectOneActivePanel(
+  page: import('@playwright/test').Page,
+  panelSelector: string,
+  expectedPanels = 3
+) {
+  await expect(page.locator(panelSelector)).toHaveCount(expectedPanels);
+  await expect(page.locator(`${panelSelector}:not([hidden])`)).toHaveCount(1);
+}
+
 async function registerWithoutAssumingOnboarding(
   page: import('@playwright/test').Page,
   name: string
@@ -197,17 +218,39 @@ test('genera, revisa y confirma comidas con navegación de planificación en esc
     await page.goto('/household?tab=tasks&planning=meals&source=synthetic-e2e');
     const planningTabs = page.locator('.household-planning-tabs');
     await expect(planningTabs).toHaveAttribute('role', 'tablist');
+    await expectTabsToReferencePanels(page, '.household-tabs');
+    await expectTabsToReferencePanels(page, '.household-planning-tabs');
+    const householdTabMetrics = await page
+      .locator('[data-test="household-tab-tasks"]')
+      .evaluate((tab) => {
+        const bounds = tab.getBoundingClientRect();
+        return {
+          fontSize: Number.parseFloat(getComputedStyle(tab).fontSize),
+          height: bounds.height
+        };
+      });
+    expect(householdTabMetrics.fontSize).toBeGreaterThanOrEqual(14);
+    expect(householdTabMetrics.height).toBeGreaterThanOrEqual(44);
+    if (testInfo.project.name === 'mobile-chrome') {
+      const tabOverflow = await page.locator('.household-tabs').evaluate((element) => ({
+        scrollWidth: element.scrollWidth,
+        clientWidth: element.clientWidth,
+        overflowX: getComputedStyle(element).overflowX
+      }));
+      expect(tabOverflow.overflowX).toBe('auto');
+      expect(tabOverflow.scrollWidth).toBeGreaterThan(tabOverflow.clientWidth);
+    }
     await expect(page).toHaveURL(/tab=tasks.*planning=meals.*source=synthetic-e2e/);
     await expect(page.locator('[data-test="household-planning-tab-meals"]')).toHaveAttribute(
       'aria-selected',
       'true'
     );
-    await expect(page.locator('[data-test^="household-planning-panel-"]')).toHaveCount(1);
+    await expectOneActivePanel(page, '[data-test^="household-planning-panel-"]');
 
     const settingsTab = page.getByRole('tab', { name: 'Ajustes de comidas' });
     await settingsTab.click();
     await expect(page).toHaveURL(/planning=settings.*source=synthetic-e2e/);
-    await expect(page.locator('[data-test^="household-planning-panel-"]')).toHaveCount(1);
+    await expectOneActivePanel(page, '[data-test^="household-planning-panel-"]');
     await expect(page.locator('[data-test="meal-settings-content"]')).toBeVisible();
     await settingsTab.focus();
     await page.keyboard.press('Home');
@@ -216,7 +259,7 @@ test('genera, revisa y confirma comidas con navegación de planificación en esc
       'true'
     );
     await expect(page).toHaveURL(/planning=meals.*source=synthetic-e2e/);
-    await expect(page.locator('[data-test^="household-planning-panel-"]')).toHaveCount(1);
+    await expectOneActivePanel(page, '[data-test^="household-planning-panel-"]');
 
     const proposalRequest = page.waitForRequest(
       (request) =>
@@ -239,12 +282,56 @@ test('genera, revisa y confirma comidas con navegación de planificación en esc
     expect(generatedResponse.status(), await generatedResponse.text()).toBe(200);
     const review = page.locator('[data-test="meal-proposal-review"]');
     await expect(review).toBeVisible();
+    await expect(page.locator('[data-test="meal-proposal-step-tab-review"]')).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
+    await expectTabsToReferencePanels(page, '.meal-planner__steps');
+    await expectOneActivePanel(page, '[data-test^="meal-proposal-step-panel-"]', 2);
+    const reviewStepTab = page.locator('[data-test="meal-proposal-step-tab-review"]');
+    await reviewStepTab.focus();
+    await page.keyboard.press('Home');
+    await expect(page.locator('[data-test="meal-proposal-step-tab-prepare"]')).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
+    await expectOneActivePanel(page, '[data-test^="meal-proposal-step-panel-"]', 2);
+    await expect(review).toHaveCount(0);
+    await page.keyboard.press('End');
+    await expect(reviewStepTab).toHaveAttribute('aria-selected', 'true');
     await expect(review).toContainText('Compartida');
-    await expect(review).toContainText('Individual');
     await expect(review).toContainText('2 raciones');
     await expect(review).toContainText('Planificador sintético uno');
     await expect(review).toContainText('Planificador sintético dos');
     await expect(page.locator('[data-test="meal-proposal-confirm"] button')).toBeEnabled();
+    const reviewDay = page.locator('[data-test="meal-proposal-review-day"]');
+    await expect(reviewDay).toBeVisible();
+    await expect(page.locator('[data-test^="meal-proposal-event-"]')).toHaveCount(1);
+    await reviewDay.locator('button[aria-haspopup="listbox"]').click();
+    await page.getByRole('option').nth(1).click();
+    await expect(page.locator('[data-test^="meal-proposal-event-"]')).toHaveCount(2);
+    await expect(review).toContainText('Individual');
+    await reviewDay.locator('button[aria-haspopup="listbox"]').click();
+    await page.getByRole('option').nth(0).click();
+    if (testInfo.project.name === 'mobile-chrome') {
+      const reviewHeight = await review.evaluate((element) => element.scrollHeight);
+      expect(reviewHeight).toBeLessThan(1600);
+    }
+    const confirmButton = page.locator('[data-test="meal-proposal-confirm"] button');
+    await expect(confirmButton).toBeVisible();
+    if (testInfo.project.name === 'mobile-chrome') {
+      await confirmButton.scrollIntoViewIfNeeded();
+      await expect(confirmButton).toBeInViewport();
+      const confirmationSpace = await confirmButton.evaluate((button) => {
+        const buttonBottom = button.getBoundingClientRect().bottom;
+        const navigation = document.querySelector('.bottom-nav');
+        return {
+          buttonBottom,
+          navigationTop: navigation?.getBoundingClientRect().top ?? window.innerHeight
+        };
+      });
+      expect(confirmationSpace.buttonBottom).toBeLessThan(confirmationSpace.navigationTop);
+    }
 
     expect(providerRequests).toHaveLength(1);
     expect(providerRequests[0]?.response_format).toMatchObject({
@@ -260,10 +347,12 @@ test('genera, revisa y confirma comidas con navegación de planificación en esc
     }
 
     await mkdir(screenshotDirectory, { recursive: true });
-    await review.scrollIntoViewIfNeeded();
+    if (testInfo.project.name !== 'mobile-chrome') {
+      await page.evaluate(() => window.scrollTo(0, 0));
+    }
     await page.screenshot({
       path: resolve(screenshotDirectory, `${testInfo.project.name}-proposal.png`),
-      fullPage: true,
+      fullPage: testInfo.project.name !== 'mobile-chrome',
       animations: 'disabled'
     });
 
@@ -280,7 +369,7 @@ test('genera, revisa y confirma comidas con navegación de planificación en esc
           .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
           .toBeLessThanOrEqual(size.width);
         await expect(page.locator('[data-test="household-planning-tab-meals"]')).toBeVisible();
-        await expect(page.locator('[data-test^="household-planning-panel-"]')).toHaveCount(1);
+        await expectOneActivePanel(page, '[data-test^="household-planning-panel-"]');
       }
       await page.setViewportSize(viewport);
     }

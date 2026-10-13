@@ -144,6 +144,46 @@ describe('HouseholdMealPlannerComponent', () => {
     expect(component.canConfirm()).toBeTrue();
   });
 
+  it('separates preparation and review into exclusive linked panels', () => {
+    service.createProposal.and.returnValue(of(proposal()));
+
+    const tabs = fixture.nativeElement.querySelectorAll('[data-test^="meal-proposal-step-tab-"]');
+    expect(tabs.length).toBe(2);
+    for (const tab of Array.from(tabs) as HTMLButtonElement[]) {
+      const panelId = tab.getAttribute('aria-controls');
+      expect(panelId).toBeTruthy();
+      expect(fixture.nativeElement.querySelector(`#${panelId}`)).not.toBeNull();
+    }
+    const preparePanel = fixture.nativeElement.querySelector(
+      '[data-test="meal-proposal-step-panel-prepare"]'
+    ) as HTMLElement;
+    const reviewPanel = fixture.nativeElement.querySelector(
+      '[data-test="meal-proposal-step-panel-review"]'
+    ) as HTMLElement;
+    expect(preparePanel?.hidden).toBeFalse();
+    expect(reviewPanel?.hidden).toBeTrue();
+    const reviewTab = fixture.nativeElement.querySelector(
+      '[data-test="meal-proposal-step-tab-review"]'
+    ) as HTMLButtonElement;
+    const prepareTab = fixture.nativeElement.querySelector(
+      '[data-test="meal-proposal-step-tab-prepare"]'
+    ) as HTMLButtonElement;
+
+    component.generateProposal();
+    fixture.detectChanges();
+
+    expect(reviewTab.getAttribute('aria-selected')).toBe('true');
+    expect(preparePanel.hidden).toBeTrue();
+    expect(reviewPanel.hidden).toBeFalse();
+
+    prepareTab.click();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('[data-test="meal-proposal-review"]')).toBeNull();
+    expect(
+      fixture.nativeElement.querySelector('[data-test="meal-proposal-step-panel-prepare"]').hidden
+    ).toBeFalse();
+  });
+
   it('confirms only after an explicit action and submits the validated preview unchanged', () => {
     const preview = proposal();
     service.createProposal.and.returnValue(of(preview));
@@ -182,6 +222,8 @@ describe('HouseholdMealPlannerComponent', () => {
     component.toggleMember('member-2', false);
     fixture.detectChanges();
     expect(component.canConfirm()).toBeFalse();
+    component.selectMealStep('review');
+    fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('[data-test="meal-proposal-stale"]')).not.toBeNull();
     expect(
       fixture.nativeElement.querySelector('[data-test="meal-proposal-confirm"] button').disabled

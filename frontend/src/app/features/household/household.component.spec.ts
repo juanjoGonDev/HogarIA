@@ -356,11 +356,24 @@ describe('HouseholdComponent', () => {
       fixture.nativeElement.querySelector('[data-test="household-planning-panel-meals"]')
     ).not.toBeNull();
     expect(
-      fixture.nativeElement.querySelector('[data-test="household-planning-panel-tasks"]')
-    ).toBeNull();
+      fixture.nativeElement.querySelector('[data-test="household-planning-panel-tasks"]')?.hidden
+    ).toBeTrue();
     expect(
-      fixture.nativeElement.querySelector('[data-test="household-planning-panel-settings"]')
-    ).toBeNull();
+      fixture.nativeElement.querySelector('[data-test="household-planning-panel-settings"]')?.hidden
+    ).toBeTrue();
+
+    const planningTabs = fixture.nativeElement.querySelectorAll(
+      '.household-planning-tabs [role="tab"]'
+    );
+    expect(planningTabs.length).toBe(3);
+    for (const tab of Array.from(planningTabs) as HTMLButtonElement[]) {
+      const panelId = tab.getAttribute('aria-controls');
+      expect(panelId).toBeTruthy();
+      expect(fixture.nativeElement.querySelector(`#${panelId}[role="tabpanel"]`)).not.toBeNull();
+    }
+    expect(
+      fixture.nativeElement.querySelectorAll('.household-planning-panel:not([hidden])').length
+    ).toBe(1);
 
     const mealsTab = fixture.nativeElement.querySelector(
       '[data-test="household-planning-tab-meals"]'
@@ -381,8 +394,11 @@ describe('HouseholdComponent', () => {
       fixture.nativeElement.querySelector('[data-test="household-planning-panel-tasks"]')
     ).not.toBeNull();
     expect(
-      fixture.nativeElement.querySelector('[data-test="household-planning-panel-meals"]')
-    ).toBeNull();
+      fixture.nativeElement.querySelector('[data-test="household-planning-panel-meals"]')?.hidden
+    ).toBeTrue();
+    expect(
+      fixture.nativeElement.querySelectorAll('.household-planning-panel:not([hidden])').length
+    ).toBe(1);
 
     queryParams.next(convertToParamMap({ tab: 'tasks', planning: 'settings' }));
     fixture.detectChanges();
@@ -393,11 +409,14 @@ describe('HouseholdComponent', () => {
       fixture.nativeElement.querySelector('[data-test="household-planning-panel-settings"]')
     ).not.toBeNull();
     expect(
-      fixture.nativeElement.querySelector('[data-test="household-planning-panel-meals"]')
-    ).toBeNull();
+      fixture.nativeElement.querySelector('[data-test="household-planning-panel-meals"]')?.hidden
+    ).toBeTrue();
     expect(
-      fixture.nativeElement.querySelector('[data-test="household-planning-panel-tasks"]')
-    ).toBeNull();
+      fixture.nativeElement.querySelector('[data-test="household-planning-panel-tasks"]')?.hidden
+    ).toBeTrue();
+    expect(
+      fixture.nativeElement.querySelectorAll('.household-planning-panel:not([hidden])').length
+    ).toBe(1);
   });
 
   it('cleans invalid planning subtabs from the URL while preserving other query parameters', () => {

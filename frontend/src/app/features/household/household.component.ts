@@ -522,7 +522,7 @@ function completeMemberPermissions(value: unknown, role: MemberRole): MemberPerm
           </nav>
 
           <section
-            *ngIf="activePlanningTab() === 'meals'"
+            [hidden]="activePlanningTab() !== 'meals'"
             id="household-planning-panel-meals"
             class="household-planning-panel"
             role="tabpanel"
@@ -531,6 +531,7 @@ function completeMemberPermissions(value: unknown, role: MemberRole): MemberPerm
             data-test="household-planning-panel-meals"
           >
             <app-household-meal-planner
+              *ngIf="activePlanningTab() === 'meals'"
               [householdId]="household.id"
               [canEdit]="household.myPermissions?.calendar?.edit ?? household.myRole === 'admin'"
               [members]="household.members"
@@ -538,7 +539,7 @@ function completeMemberPermissions(value: unknown, role: MemberRole): MemberPerm
           </section>
 
           <section
-            *ngIf="activePlanningTab() === 'tasks'"
+            [hidden]="activePlanningTab() !== 'tasks'"
             id="household-planning-panel-tasks"
             class="household-planning-panel"
             role="tabpanel"
@@ -547,6 +548,7 @@ function completeMemberPermissions(value: unknown, role: MemberRole): MemberPerm
             data-test="household-planning-panel-tasks"
           >
             <app-household-tasks
+              *ngIf="activePlanningTab() === 'tasks'"
               [householdId]="household.id"
               [canEdit]="household.myPermissions?.calendar?.edit ?? household.myRole === 'admin'"
               [members]="household.members"
@@ -557,7 +559,7 @@ function completeMemberPermissions(value: unknown, role: MemberRole): MemberPerm
           </section>
 
           <section
-            *ngIf="activePlanningTab() === 'settings'"
+            [hidden]="activePlanningTab() !== 'settings'"
             id="household-planning-panel-settings"
             class="household-planning-panel"
             role="tabpanel"
@@ -566,6 +568,7 @@ function completeMemberPermissions(value: unknown, role: MemberRole): MemberPerm
             data-test="household-planning-panel-settings"
           >
             <app-household-meal-settings
+              *ngIf="activePlanningTab() === 'settings'"
               [householdId]="household.id"
               [canEdit]="household.myPermissions?.settings ?? household.myRole === 'admin'"
             />
@@ -751,6 +754,8 @@ function completeMemberPermissions(value: unknown, role: MemberRole): MemberPerm
       }
 
       .household-tabs__tab {
+        min-height: 44px;
+        min-width: max-content;
         flex: 0 0 auto;
         white-space: nowrap;
         padding: var(--space-3) var(--space-4);
@@ -823,6 +828,10 @@ function completeMemberPermissions(value: unknown, role: MemberRole): MemberPerm
         min-width: 0;
       }
 
+      .household-planning-panel[hidden] {
+        display: none;
+      }
+
       .household-tabs__tab:focus-visible,
       .household-tab-panel:focus-visible {
         outline: 2px solid var(--primary);
@@ -844,15 +853,6 @@ function completeMemberPermissions(value: unknown, role: MemberRole): MemberPerm
           gap: 0;
           overflow-x: auto;
         }
-
-        .household__content--plan-flow .household-tabs__tab {
-          min-width: max-content;
-          flex: 0 0 auto;
-          padding-right: 2px;
-          padding-left: 2px;
-          font-size: 0.7rem;
-          text-align: center;
-        }
       }
 
       @media (max-width: 389px) {
@@ -863,19 +863,11 @@ function completeMemberPermissions(value: unknown, role: MemberRole): MemberPerm
           overflow-x: auto;
         }
 
-        .household__content--plan-flow .household-tabs::after,
-        .household-tabs::after {
-          content: '';
-          flex: 0 0 20px;
-        }
-
         .household__content--plan-flow .household-tabs__tab,
         .household-tabs__tab {
-          min-width: 0;
-          flex: 0 0 auto;
-          padding-right: 3px;
-          padding-left: 3px;
-          font-size: 0.62rem;
+          min-width: max-content;
+          padding-inline: var(--space-4);
+          font-size: var(--text-sm);
         }
       }
 

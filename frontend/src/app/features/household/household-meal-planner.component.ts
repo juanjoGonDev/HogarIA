@@ -26,6 +26,8 @@ import { I18nService } from '../../core/services/i18n.service';
 import { ButtonComponent } from '../../shared/components/ui/button/button.component';
 import { CheckboxComponent } from '../../shared/components/ui/checkbox/checkbox.component';
 import { IconComponent } from '../../shared/components/ui/icon/icon.component';
+import { PickerComponent } from '../../shared/components/ui/picker/picker.component';
+import type { PickerOption } from '../../shared/components/ui/picker/picker.component';
 import type { HouseholdMember } from '../../shared/models/household.model';
 import type { MealType } from '../../shared/models/calendar.model';
 import { validateHouseholdMealProposal } from './household-meal-proposal.validation';
@@ -42,10 +44,19 @@ interface ProposalContext {
   memberIds: string[];
 }
 
+type HouseholdMealProposalStep = 'prepare' | 'review';
+
 @Component({
   selector: 'app-household-meal-planner',
   standalone: true,
-  imports: [CommonModule, TranslatePipe, ButtonComponent, CheckboxComponent, IconComponent],
+  imports: [
+    CommonModule,
+    TranslatePipe,
+    ButtonComponent,
+    CheckboxComponent,
+    IconComponent,
+    PickerComponent
+  ],
   templateUrl: './household-meal-planner.component.html',
   styleUrl: './household-meal-planner.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush
@@ -78,6 +89,8 @@ export class HouseholdMealPlannerComponent implements OnChanges, OnDestroy {
   readonly successKey = signal<TranslationKey | null>(null);
   readonly savedEventsCount = signal(0);
   readonly unresolvedEventsCount = signal(0);
+  readonly activeMealStep = signal<HouseholdMealProposalStep>('prepare');
+  readonly selectedProposalDate = signal('');
   readonly hasConfirmableMeals = computed(
     () => this.proposal()?.events.some((event) => event.status === 'scheduled') ?? false
   );
@@ -128,6 +141,13 @@ export class HouseholdMealPlannerComponent implements OnChanges, OnDestroy {
       if (events.length) days.push({ date, label: this.formatDate(date), events });
     }
     return days;
+  });
+  readonly proposalDayOptions = computed<PickerOption[]>(() =>
+    this.proposalDays().map((day) => ({ value: day.date, label: day.label }))
+  );
+  readonly selectedProposalDay = computed(() => {
+    const days = this.proposalDays();
+    return days.find((day) => day.date === this.selectedProposalDate()) ?? days[0] ?? null;
   });
 
   ngOnChanges(changes: SimpleChanges): void {
@@ -222,6 +242,8 @@ export class HouseholdMealPlannerComponent implements OnChanges, OnDestroy {
           }
           this.proposal.set(response);
           this.proposalContext.set(context);
+          this.selectedProposalDate.set(this.proposalDays()[0]?.date ?? '');
+          this.activeMealStep.set('review');
           if (!response.events.length) this.errorKey.set('household.meal_proposal_empty');
         },
         error: (error: unknown) => {
@@ -276,6 +298,30 @@ export class HouseholdMealPlannerComponent implements OnChanges, OnDestroy {
     return this.selectedMemberIds().includes(memberId);
   }
 
+  selectMealStep(step: HouseholdMealProposalStep): void {
+    this.activeMealStep.set(step);
+  }
+
+  onMealStepKeydown(event: KeyboardEvent): void {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const currentIndex = this.activeMealStep() === 'prepare' ? 0 : 1;
+    const nextIndex = event.key === 'Home' ? 0 : event.key === 'End' ? 1 : (currentIndex + 1) % 2;
+    const next: HouseholdMealProposalStep = nextIndex === 0 ? 'prepare' : 'review';
+    const list = (event.currentTarget as HTMLElement | null)?.parentElement;
+    const tab = list?.querySelector<HTMLButtonElement>(
+      `[data-test="meal-proposal-step-tab-${next}"]`
+    );
+    tab?.focus({ preventScroll: true });
+    this.selectMealStep(next);
+  }
+
+  selectProposalDate(value: string): void {
+    if (this.proposalDays().some((day) => day.date === value)) {
+      this.selectedProposalDate.set(value);
+    }
+  }
+
   memberName(userId: string): string {
     return this.membersState().find((member) => member.userId === userId)?.name ?? '';
   }
@@ -328,6 +374,8 @@ export class HouseholdMealPlannerComponent implements OnChanges, OnDestroy {
     this.generating.set(false);
     this.confirming.set(false);
     this.selectedMemberIds.set([]);
+    this.activeMealStep.set('prepare');
+    this.selectedProposalDate.set('');
     this.errorKey.set('household.meal_proposal_context_changed');
     this.successKey.set(null);
   }
@@ -335,6 +383,7 @@ export class HouseholdMealPlannerComponent implements OnChanges, OnDestroy {
   private invalidateProposalState(): void {
     this.proposalContext.set(null);
     this.confirmed.set(false);
+    this.activeMealStep.set('prepare');
     this.errorKey.set(null);
     this.successKey.set(null);
   }
