@@ -580,8 +580,8 @@ Evidencia visual y regresión:
       registrar comando, resultado y limitación exactos.
 - [x] Hooks pre-commit/pre-push obligatorios ejecutados sin bypass: Prettier, `check:ui`, build,
       typecheck E2E y tests completos.
-- [ ] CI manual final de esta auditoría: ejecutar sobre el commit con la matriz responsive corregida;
-      registrar resultado de los nueve jobs y mantener PR #47 en Draft.
+- [x] CI manual final de esta auditoría `38370834683`: nueve jobs verdes sobre el código y la matriz
+      responsive corregida; PR #47 permanece Draft.
 - [x] Inspección Playwright con servidor aislado y datos sintéticos; PC y móvil, capturas comparables,
       geometría equivalente con tolerancia ≤1 CSS px, teclado/labels y ninguna información privada.
 - [x] PR #47 continúa Draft como se solicitó; no se hizo merge.
@@ -748,5 +748,6 @@ inspección visual y geométrica de forma crítica.
 - **Matriz responsive en CI:** la ejecución manual `38369051262` sobre `e139a934` detectó que el
   media query `max-width: 339px` no incluía las anchuras B−1/B/B+1 (`338/339/340px`). Se añadió
   ese breakpoint a `WIDTH_BREAKPOINTS`; el spec completo `tests/e2e/layout-gutters.spec.ts` pasó
-  **7/7 en 1,3 min** con servidor y SQLite aislados. Falta repetir CI completa sobre el commit de
-  esta corrección antes de dar la auditoría por cerrada.
+  **7/7 en 1,3 min** con servidor y SQLite aislados. La CI final [#38370834683](https://github.com/juanjoGonDev/MiCocinAI/actions/runs/38370834683),
+  sobre `91f18268972ea2b088e634d6e79ca2673cacf873`, terminó **success en los nueve jobs**: cuatro
+  shards E2E, full-stack E2E, build de producción, servidor y typecheck. PR #47 continúa Draft.
