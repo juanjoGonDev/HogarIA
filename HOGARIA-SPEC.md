@@ -2651,6 +2651,18 @@ de Node 22; Volta local quedó en Node **22.23.1** y pnpm **10.15.0**. El build 
 presupuesto (bundle inicial 982,22 kB y SCSS del editor 10,27 kB); no se bajaron los límites. Los gates/
 matriz completa continúan pendientes; ver la spec activa.
 
+**Compatibilidad de preferencias blandas (2026-10-14):** el contrato de § «Resolución de diferencias
+entre miembros» define que gustos distintos no implican incompatibilidad ni justifican duplicar platos;
+la IA debe priorizar una opción compartida segura y razonablemente compatible con los objetivos,
+omitiendo o sirviendo aparte ingredientes cuando baste, y separar solo si no hay un compromiso común
+adecuado. El prompt del endpoint nuevo ahora expresa esa regla y distingue los disgustos de alergias
+estrictas. Pruebas de ruta/planner: **40/40**, cobertura focal >70 % en statements/branches/functions/
+lines y typecheck servidor; detalles, comando y límites están en `HOGARIA-HOUSEHOLD-PLAN-SPEC.md`.
+La regresión usa proveedor sintético: el smoke real semántico continúa pendiente porque la sesión
+ChatGPT de WebAPI indica `needs_login`. Un smoke separado de tickets terminó con
+`ChatGptFlowError(authentication_required)` antes de una respuesta válida; no se considera validada la
+decisión semántica del planificador. El resultado de tickets y sus límites están abajo.
+
 ### R. Recurrencia de los eventos de la casa
 
 - [ ] **El dato, dos columnas**: `calendar_events.recurrence` (`'none' | 'daily' | 'weekly'`, `NOT NULL DEFAULT

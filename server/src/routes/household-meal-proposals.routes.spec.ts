@@ -530,7 +530,7 @@ describe('household meal proposal preview route', () => {
       objectiveSummary: 'Plato compatible con el objetivo muscle-gain.'
     });
     expect(providerBody.response_format).toEqual(createMealProposalResponseFormat());
-    expect(prompt).toContain('Primero intenta un plato compartido');
+    expect(prompt).toContain('Busca primero un plato compartido');
     expect(prompt).not.toContain(promptMarker);
     expect(prompt.match(/"objectiveSource":"member"/g)).toHaveLength(2);
     expect(prompt).toContain('PERSONAL_WEIGHT_GOAL_992');
@@ -547,14 +547,14 @@ describe('household meal proposal preview route', () => {
       goals: ['weight-loss'],
       goalNotes: 'PERSONAL_OVERRIDE_GOAL_621',
       allergies: [],
-      likes: [],
+      likes: ['PREFER_LEGUMES_621'],
       dislikes: []
     });
     const inheriting = addUser('inheriting', 'home', undefined, {
       goals: ['muscle-gain'],
       goalNotes: 'IGNORED_INHERITED_PERSONAL_GOAL_621',
       allergies: [],
-      likes: [],
+      likes: ['PREFER_TOMATOES_621'],
       dislikes: []
     });
     const excluded = addUser('excluded', 'home', undefined, {
@@ -612,7 +612,11 @@ describe('household meal proposal preview route', () => {
       participantIds: [planner.id, inheriting.id],
       servings: 2
     });
-    expect(prompt).toContain('Primero intenta un plato compartido');
+    expect(prompt).toContain('Busca primero un plato compartido');
+    expect(prompt).toContain(
+      'una diferencia de gustos entre personas no significa por sí sola que sean incompatibles'
+    );
+    expect(prompt).toContain('Un disgusto no equivale a alergia/intolerancia');
     expect(participantsJson).toBeDefined();
     expect(JSON.parse(participantsJson!)).toMatchObject([
       {
@@ -621,7 +625,8 @@ describe('household meal proposal preview route', () => {
         effectiveObjective: {
           goals: ['weight-loss'],
           notes: 'PERSONAL_OVERRIDE_GOAL_621'
-        }
+        },
+        preferences: { likes: ['PREFER_LEGUMES_621'] }
       },
       {
         participant: 'P2',
@@ -629,7 +634,8 @@ describe('household meal proposal preview route', () => {
         effectiveObjective: {
           goals: ['variety'],
           notes: 'SHARED_HOUSEHOLD_GOAL_621'
-        }
+        },
+        preferences: { likes: ['PREFER_TOMATOES_621'] }
       }
     ]);
     expect(prompt).not.toContain('IGNORED_INHERITED_PERSONAL_GOAL_621');

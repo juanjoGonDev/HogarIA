@@ -898,8 +898,12 @@ confirma para esa planificación: pertenecer al hogar no implica automáticament
 6. **Objetivos incompatibles no se resuelven ocultando la diferencia.** Si todos contradicen el objetivo
    común mediante overrides, se planifica por los objetivos personales y se omite únicamente el objetivo
    común. Si una receta sirve a varios miembros con objetivos distintos, puede compartirse si sigue siendo
-   adecuada; si no, se separan y se explica el criterio. Gustos/disgustos son señales de optimización, no
-   motivo automático para multiplicar platos. La IA no formula diagnósticos ni promete resultados médicos.
+   adecuada; si no, se separan y se explica el criterio. Gustos/disgustos son señales de optimización,
+   no motivo automático para multiplicar platos: una diferencia entre lo que gusta a dos miembros no
+   implica incompatibilidad; prioriza un plato común razonable, puede omitir un ingrediente que solo
+   una persona prefiere o servirlo aparte, y solo propone platos separados si ningún compromiso común
+   respeta restricciones estrictas y resulta razonablemente adecuado para todos los objetivos aplicables.
+   Un disgusto no se eleva a alergia/intolerancia. La IA no formula diagnósticos ni promete resultados médicos.
 7. **Privacidad en el calendario.** La persona asignada ve el objetivo/resumen de su plato. Un evento
    compartido muestra una explicación neutral; no revela alergias, objetivos sensibles ni notas privadas
    de otro miembro. La petición al proveedor incluye solo perfiles de quienes participan.
@@ -1162,16 +1166,29 @@ HOGARIA-HOUSEHOLD-PLAN-SPEC.md server/src/routes/household-meal-proposals.routes
   Matriz sintética de asignación: con overrides personales distintos se omite el objetivo común, el
   prompt conserva gustos/disgustos por alias y una respuesta individual se proyecta a raciones/persona;
   con override personal más herencia común, una respuesta compartida conserva un único evento y dos
-  raciones. El proveedor está simulado, no se afirma que un modelo real siempre elija correctamente.
+  raciones. **Actualización 14-10-2026:** el contrato de compatibilidad blanda quedó explícito en esta
+  sección y en el prompt del proveedor: gustos distintos no significan incompatibilidad por sí solos,
+  dislikes no son restricciones de seguridad y solo se separa si no hay un compromiso seguro y
+  razonablemente compatible con los objetivos. La prueba `sends the personal override and inherited
+household goal for their respective members` usa gustos distintos y una respuesta compartida sintética;
+  junto con `household-meal-proposal.planner.spec.ts` pasa **40/40**, coverage de ruta
+  **90,62/73,18/100/93,69 %** y planner **91,73/81,6/100/93,39 %** (S/B/F/L), con
+  `DATABASE_PATH=:memory:` y `pnpm --filter @hogaria/server exec tsc --noEmit -p tsconfig.json`.
+  Esto verifica el contrato enviado y el normalizador, no el criterio semántico real del modelo.
+  WebAPI `GET /health/ready` responde **200** y su `origin/master` incluye la PR #164 de adjuntos;
+  la sesión ChatGPT del servicio responde `needs_login`. El smoke real de tickets de esta fecha produjo
+  `authentication_required` antes de una respuesta válida; no es una validación semántica del plan de
+  comidas ni se envió una propuesta de comidas al proveedor. Pendiente: autenticar ChatGPT en WebAPI y
+  ejecutar un smoke aislado con perfiles sintéticos.
   La prueba `uses a selected member schedule override, inherits household schedule for another selected member, and excludes unselected members`
   comprueba la combinación de horarios personales/heredados y excluye perfil, IDs y datos de quien no
   fue seleccionado; el archivo de rutas pasa **31/31** con `DATABASE_PATH=:memory:`.
   Límite: la matriz sintética cubre prompt/resolución y rutas de respuesta, no acredita la decisión
-  semántica de un proveedor real ni que siempre comparta platos compatibles y separe solo los
-  incompatibles; `QA-HOME-MEALS.PLAN.1` sigue abierto. Rollback de esta cobertura: retirar el helper y
-  los casos añadidos en `server/src/routes/household-meal-proposals.routes.spec.ts` y
-  `frontend/src/app/features/household/household-meal-planner.component.spec.ts`, junto con esta
-  evidencia; no hay cambios de producción ni datos persistentes asociados.
+  semántica de un proveedor real; `QA-HOME-MEALS.PLAN.1` sigue abierto hasta ese smoke y los otros
+  criterios de UI/flujo. Rollback del delta de compatibilidad blanda (14-10-2026): retirar el texto
+  añadido a `buildPrompt` en `server/src/routes/household-meal-proposals.routes.ts`, sus aserciones y
+  gustos sintéticos en `server/src/routes/household-meal-proposals.routes.spec.ts`, y esta actualización
+  de decisión/evidencia; las pruebas anteriores de propuestas no dependen de ese texto.
 - **Plan semanal — UI parcial integrada:** `Hogar > Planificación` separa `Comidas`, `Tareas` y
   `Ajustes`; dentro de Comidas, `Preparar` y `Revisar propuesta` son etapas excluyentes. Solo un
   tabpanel queda visible; los shells ARIA existen y el planificador se monta al abrir Comidas, luego
@@ -1472,13 +1489,18 @@ también las condiciones que aún están abiertas.
       soft/hard, alergia estricta, todos con overrides, turnos personales, sin receta segura,
       respuesta inválida/IDs foráneos/duplicados/error sin escrituras; cantidades de receta por ración
       y cambio local de raciones sin llamada IA ni mutación de la receta base.
-      Pendiente: cerrar el contrato semántico de compatibilidad soft y validar que el proveedor aplique
-      “compartir primero / separar solo si no encaja”. Tests sintéticos verifican el prompt y aceptan
-      respuestas compartidas o individuales; no prueban la decisión semántica de un proveedor real ni el
-      caso reproducible de gustos distintos pero no incompatibles. La protección hard (alergia → grupo
-      seguro + unresolved sin revelar la causa) sí tiene pruebas. Cobertura actual: planificador
+      Contrato soft cerrado en § «Resolución de diferencias entre miembros»: gustos distintos no son
+      incompatibilidad automática; se prioriza un compromiso compartido seguro y compatible con objetivos,
+      y un dislike no se trata como alergia. El prompt ordenado y una regresión sintética comprueban esa
+      instrucción con dos perfiles de gustos distintos y un evento compartido, pero no prueban la decisión
+      semántica de un proveedor real. Pendiente: smoke opt-in real con perfiles sintéticos. WebAPI
+      `GET /health/ready` responde **200**, pero `GET /admin/api/chatgpt/session` indica `needs_login`;
+      el smoke aislado de tickets falló con `ChatGptFlowError(authentication_required)` antes de
+      obtener respuesta válida. No se envió una propuesta de comidas y el resultado de tickets no
+      valida la semántica de este planificador. La protección hard (alergia → grupo seguro +
+      unresolved sin revelar la causa) sí tiene pruebas. Cobertura actual: planificador
       **90,48/81,08/92,55/96,2 %** y servicio **100/100/100/100 %** (sentencias/ramas/funciones/líneas);
-      el gate por archivo está satisfecho. No se llamó al proveedor real.
+      el gate por archivo está satisfecho; la llamada real fallida no devuelve completions semánticas.
 - [x] **QA-HOME-MEALS.CALENDAR.1** — persistencia idempotente tras confirmar, calendario actual,
       evento compartido visible una vez a todos los miembros activos con `calendar.view` aunque la comida
       sea individual, asignaciones correctas, consumo limitado a participantes y ninguna nota/objetivo
