@@ -25,6 +25,7 @@ import {
   type PickerOption
 } from '../../shared/components/ui/picker/picker.component';
 import { HouseholdAreaGlyphComponent } from './household-area-glyph.component';
+import { HouseholdMealSettingsComponent } from './household-meal-settings.component';
 import type { HouseholdMember } from '../../shared/models/household.model';
 import type {
   HouseholdPlan,
@@ -57,7 +58,14 @@ interface WeekDay {
 @Component({
   selector: 'app-household-tasks',
   standalone: true,
-  imports: [CommonModule, FormsModule, TranslatePipe, PickerComponent, HouseholdAreaGlyphComponent],
+  imports: [
+    CommonModule,
+    FormsModule,
+    TranslatePipe,
+    PickerComponent,
+    HouseholdAreaGlyphComponent,
+    HouseholdMealSettingsComponent
+  ],
   templateUrl: './household-tasks.component.html',
   styleUrl: './household-tasks.component.scss',
   encapsulation: ViewEncapsulation.None,
@@ -69,6 +77,8 @@ export class HouseholdTasksComponent implements OnChanges {
   @Input() members: HouseholdMember[] = [];
   @Input() selectedSpaceId: string | null = null;
   @Input() refreshToken = 0;
+  @Input() showMealSettings = false;
+  @Input() canEditMealSettings = false;
 
   private readonly tasksService = inject(HouseholdTasksService);
   private readonly planService = inject(HouseholdPlanService);

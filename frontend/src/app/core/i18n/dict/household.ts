@@ -158,7 +158,6 @@ export const householdEs = {
   'household.area_custom': 'Otra zona personalizada',
   'household.member_settings_select': 'Elige un miembro para revisar sus permisos.',
   'household.tab_plan': 'Plano',
-  'household.tab_tasks': 'Tareas',
   'household.plan_setup_title': 'Plano de tu hogar',
   'household.plan_setup_description': 'Crea un plano para organizar zonas y tareas.',
   'household.plan_setup_method': 'Elige cómo empezar',
@@ -368,7 +367,7 @@ export const householdEs = {
     'Usa el objetivo de tu perfil en vez del objetivo común.',
   'household.meal_settings_schedule_override': 'Usar mis horarios personales',
   'household.meal_settings_schedule_override_help':
-    'Elige tus comidas y horarios sin cambiar los del hogar.',
+    'Elige comidas y horarios sin cambiar los del hogar.',
   'household.meal_settings_load_error': 'No se pudo cargar la configuración. Inténtalo de nuevo.',
   'household.meal_settings_save_error': 'No se pudo guardar. Tus cambios siguen aquí.',
   'household.meal_settings_context_changed':
@@ -605,7 +604,6 @@ export const householdEn: Record<keyof typeof householdEs, string> = {
   'household.area_clothes_drying_area': 'Drying area',
   'household.area_custom': 'Custom area',
   'household.tab_plan': 'Plan',
-  'household.tab_tasks': 'Tasks',
   'household.plan_setup_title': 'Your home plan',
   'household.plan_setup_description': 'Create a plan to organize your spaces and tasks.',
   'household.plan_setup_method': 'Choose how to start',
@@ -808,7 +806,7 @@ export const householdEn: Record<keyof typeof householdEs, string> = {
     'Uses your profile goal instead of the shared goal.',
   'household.meal_settings_schedule_override': 'Use my personal times',
   'household.meal_settings_schedule_override_help':
-    'Choose your meals and times without changing the home settings.',
+    'Choose meals and times without changing home settings.',
   'household.meal_settings_load_error': 'Could not load settings. Try again.',
   'household.meal_settings_save_error': 'Could not save. Your changes are still here.',
   'household.meal_settings_context_changed':

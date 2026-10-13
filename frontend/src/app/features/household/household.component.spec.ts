@@ -1,8 +1,10 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { signal } from '@angular/core';
 import { ActivatedRoute, convertToParamMap, Router, type ParamMap } from '@angular/router';
+import { By } from '@angular/platform-browser';
 import { BehaviorSubject, of, Subject, throwError } from 'rxjs';
 import { HouseholdComponent } from './household.component';
+import { HouseholdMealSettingsComponent } from './household-meal-settings.component';
 import { HouseholdService } from '../../core/services/household.service';
 import { ConfirmService } from '../../core/services/confirm.service';
 import { I18nService } from '../../core/services/i18n.service';
@@ -10,6 +12,7 @@ import { ToastService } from '../../core/services/toast.service';
 import { AuthService } from '../../core/services/auth.service';
 import { HouseholdPlanService } from '../../core/services/household-plan.service';
 import { HouseholdTasksService } from '../../core/services/household-tasks.service';
+import { HouseholdMealPlanningService } from '../../core/services/household-meal-planning.service';
 import type { Household } from '../../shared/models/household.model';
 import { householdEn, householdEs } from '../../core/i18n/dict/household';
 
@@ -46,6 +49,7 @@ describe('HouseholdComponent', () => {
   let confirm: jasmine.SpyObj<ConfirmService>;
   let router: jasmine.SpyObj<Router>;
   let queryParams: BehaviorSubject<ParamMap>;
+  let mealPlanning: jasmine.SpyObj<HouseholdMealPlanningService>;
 
   function createHouseholdService() {
     const householdState = signal<Household | null>(null);
@@ -83,6 +87,36 @@ describe('HouseholdComponent', () => {
     queryParams = new BehaviorSubject(convertToParamMap({}));
     router = jasmine.createSpyObj<Router>('Router', ['navigate']);
     router.navigate.and.resolveTo(true);
+    mealPlanning = jasmine.createSpyObj<HouseholdMealPlanningService>(
+      'HouseholdMealPlanningService',
+      ['load', 'save']
+    );
+    mealPlanning.load.and.returnValue(
+      of({
+        household: {
+          objective: { goals: ['balanced'], notes: '' },
+          mealTypes: { breakfast: false, lunch: true, dinner: true, snack: false },
+          mealTimes: { breakfast: '08:00', lunch: '13:00', dinner: '20:00', snack: '17:00' }
+        },
+        member: {
+          goalOverrideEnabled: false,
+          scheduleOverrideEnabled: false,
+          personalObjective: { goals: ['balanced'], notes: '' },
+          personalSchedule: {
+            mealTypes: { breakfast: false, lunch: true, dinner: true, snack: false },
+            mealTimes: { breakfast: '08:00', lunch: '13:00', dinner: '20:00', snack: '17:00' }
+          }
+        },
+        effective: {
+          objective: { goals: ['balanced'], notes: '', source: 'household' },
+          schedule: {
+            mealTypes: { breakfast: false, lunch: true, dinner: true, snack: false },
+            mealTimes: { breakfast: '08:00', lunch: '13:00', dinner: '20:00', snack: '17:00' },
+            source: 'household'
+          }
+        }
+      })
+    );
     toast = jasmine.createSpyObj<ToastService>('ToastService', ['success', 'error']);
     confirm = jasmine.createSpyObj<ConfirmService>('ConfirmService', ['confirm']);
     confirm.confirm.and.resolveTo(true);
@@ -92,6 +126,7 @@ describe('HouseholdComponent', () => {
       providers: [
         { provide: HouseholdService, useValue: service },
         { provide: ToastService, useValue: toast },
+        { provide: HouseholdMealPlanningService, useValue: mealPlanning },
         { provide: ConfirmService, useValue: confirm },
         { provide: AuthService, useValue: { currentUser: () => ({ id: 'synthetic-admin' }) } },
         { provide: I18nService, useValue: i18n },
@@ -301,6 +336,50 @@ describe('HouseholdComponent', () => {
       queryParams: { tab: null },
       queryParamsHandling: 'merge'
     });
+  });
+
+  it('mounts meal settings in the household planning tab with the active home and scoped edit permission', async () => {
+    const home = {
+      ...HOUSEHOLD,
+      myPermissions: { ...HOUSEHOLD.myPermissions, settings: true }
+    } as Household;
+    service.household.set(home);
+    queryParams.next(convertToParamMap({ tab: 'tasks' }));
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const settingsDebugElement = fixture.debugElement.query(
+      By.directive(HouseholdMealSettingsComponent)
+    );
+    expect(settingsDebugElement).not.toBeNull();
+    expect(settingsDebugElement.componentInstance.householdId).toBe(home.id);
+    expect(settingsDebugElement.componentInstance.canEdit).toBeTrue();
+    expect(mealPlanning.load).toHaveBeenCalledOnceWith(home.id);
+    expect(
+      fixture.nativeElement.querySelector('[data-test="household-panel-tasks"]')?.hidden
+    ).toBeFalse();
+  });
+
+  it('keeps shared meal settings read-only when the active member lacks household settings permission', async () => {
+    const memberHome = {
+      ...HOUSEHOLD,
+      myRole: 'member',
+      myPermissions: { ...HOUSEHOLD.myPermissions, settings: false }
+    } as Household;
+    service.household.set(memberHome);
+    queryParams.next(convertToParamMap({ tab: 'tasks' }));
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const settingsDebugElement = fixture.debugElement.query(
+      By.directive(HouseholdMealSettingsComponent)
+    );
+    expect(settingsDebugElement).not.toBeNull();
+    expect(settingsDebugElement.componentInstance.householdId).toBe(memberHome.id);
+    expect(settingsDebugElement.componentInstance.canEdit).toBeFalse();
+    expect(mealPlanning.load).toHaveBeenCalledOnceWith(memberHome.id);
   });
 
   it('keeps the selected tab in view after a narrow-screen layout changes', async () => {

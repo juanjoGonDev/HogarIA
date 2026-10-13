@@ -492,6 +492,10 @@ function completeMemberPermissions(value: unknown, role: MemberRole): MemberPerm
             [members]="household.members"
             [selectedSpaceId]="selectedTaskSpaceId()"
             [refreshToken]="tasksRefreshToken()"
+            [showMealSettings]="activeTab() === 'tasks'"
+            [canEditMealSettings]="
+              household.myPermissions?.settings ?? household.myRole === 'admin'
+            "
           />
         </section>
       </div>
@@ -707,12 +711,12 @@ function completeMemberPermissions(value: unknown, role: MemberRole): MemberPerm
         .household__content--plan-flow .household-tabs {
           margin-bottom: var(--space-3);
           gap: 0;
-          overflow-x: hidden;
+          overflow-x: auto;
         }
 
         .household__content--plan-flow .household-tabs__tab {
-          min-width: 0;
-          flex: 1 1 0;
+          min-width: max-content;
+          flex: 0 0 auto;
           padding-right: 2px;
           padding-left: 2px;
           font-size: 0.7rem;
@@ -1166,7 +1170,7 @@ export class HouseholdComponent implements OnInit {
   readonly tabOptions: Array<{ value: HouseholdTab; label: TranslationKey }> = [
     { value: 'home', label: 'household.tab_home' },
     { value: 'plan', label: 'household.tab_plan' },
-    { value: 'tasks', label: 'household.tab_tasks' },
+    { value: 'tasks', label: 'calendar.planificacion' },
     { value: 'members', label: 'household.tab_members' },
     { value: 'permissions', label: 'household.tab_permissions' },
     { value: 'settings', label: 'household.tab_settings' }
@@ -1252,6 +1256,7 @@ export class HouseholdComponent implements OnInit {
       const queryTab = params.get('tab');
       this.activeTab.set(resolveHouseholdTab(queryTab));
       this.selectedTaskSpaceId.set(params.get('space'));
+      requestAnimationFrame(() => this.revealHouseholdTab(this.activeTab()));
       if (!isCanonicalHouseholdTabQuery(queryTab)) {
         void this.router.navigate([], {
           relativeTo: this.route,

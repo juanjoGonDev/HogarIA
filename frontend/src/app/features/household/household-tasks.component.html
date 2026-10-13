@@ -1,4 +1,9 @@
 <section class="tasks-editor" [attr.aria-busy]="loading() || saving() || loadingSpaces()">
+  <app-household-meal-settings
+    *ngIf="showMealSettings"
+    [householdId]="householdId"
+    [canEdit]="canEditMealSettings"
+  />
   <div class="tasks-layout" data-test="tasks-layout">
     <main class="tasks-main">
       <header class="tasks-editor__header">
