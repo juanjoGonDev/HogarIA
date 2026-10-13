@@ -1062,6 +1062,18 @@ solo su backend o sus pruebas unitarias.
   revalida el contexto tras parsearlo y el store verifica dentro de la transacción que siga activo el
   hogar capturado. El máximo del store (2.800 eventos) coincide con el schema estructurado. El
   `POST /api/ai/plan-week` heredado no se declara sustituido.
+- **Plan semanal — UI parcial integrada:** `Hogar > Planificación` separa `Comidas`, `Tareas` y
+  `Ajustes`; dentro de Comidas, `Preparar` y `Revisar propuesta` son etapas excluyentes. Solo un
+  tabpanel queda visible; los shells ARIA existen y el planificador se monta al abrir Comidas, luego
+  conserva una propuesta sin confirmar al cambiar de subtab para evitar otra llamada IA. Cambiar de
+  hogar limpia el borrador. Revisar muestra un día seleccionado y el CTA es alcanzable en móvil. La
+  E2E aislada sintética en árbol integrado pasa **2/2** en Chromium/Mobile Chrome, incluyendo generación,
+  revisión, confirmación, navegación/teclado, `response_format`, preservación del borrador sin petición
+  duplicada y limpieza al cambiar de hogar. La suite web completa pasa **1455 tests** con cobertura
+  **93,49/84,12/93,66/95,4 %** (statements/branches/funciones/líneas). Capturas sintéticas inspeccionadas:
+  `.e2e-screenshots/household-meal-planning/chromium-proposal.png`,
+  `mobile-chrome-proposal-top.png` y `mobile-chrome-proposal.png` (CTA). Sin proveedor real; quedan
+  pendientes el recorrido completo de combinaciones de preferencias y la auditoría visual global.
 - **Calendario compartido — backend parcial integrado:** un evento compartido se guarda una vez y sus
   participantes son usuarios del hogar con permiso de lectura; las lecturas existentes exponen el
   evento solo a las personas asignadas, sin notas/objetivos privados. El consumo dispone de GET/PUT
@@ -1105,19 +1117,22 @@ solo su backend o sus pruebas unitarias.
   pnpm --filter @hogaria/server run test:coverage
   ```
 
-  Resultado previo a los últimos fixes: **5 archivos / 452 tests aprobados** en la focal. Tras las
-  pruebas de regresión de permiso de lectura, cambio de hogar durante el parseo y ejecución del
-  proveedor, límite del body, lote de más de 100 eventos y escritura atómica, la suite de servidor
-  termina **75 archivos aprobados / 1 omitido; 1440 tests aprobados / 1 omitido**. TypeScript del
-  servidor pasa.
+  Resultado previo a los últimos fixes: **5 archivos / 452 tests aprobados** en la focal. Verificación
+  integrada actual: suite de servidor **78 archivos aprobados / 1 omitido; 1480 tests aprobados / 1
+  omitido**, con cobertura **91,60/83,04/96,18/94,14 %** (statements/branches/funciones/líneas); el
+  contrato de formulario incluye ahora el esquema de consumo. TypeScript del servidor pasa.
   Cobertura de la ruta propuesta+confirmación: **90.47 % statements, 70.83 % branches, 98.07 % funciones
-  y 92.3 % líneas**; planner: 91.73 %, 81.6 %, 100 % y 93.39 %. Cobertura global de servidor: **91.79 %
-  statements, 83.14 % branches, 96.70 % funciones y 94.29 % líneas**. La suite usa `DATABASE_PATH=:memory:`
-  y proveedor sintético; no se llamó a IA real. **Runtime:** las rutas se verificaron con harness Hono y
-  SQLite en memoria; el recorrido real app+servidor/E2E de esta vista aún no se ejecuta. **Rollback de la
+  y 92.3 % líneas**; planner: 91.73 %, 81.6 %, 100 % y 93.39 %. La suite usa `DATABASE_PATH=:memory:`
+  y proveedor sintético; no se llamó a IA real. **Runtime:** rutas verificadas con harness Hono/SQLite
+  en memoria y flujo integrado aislado app+servidor para generación/revisión/confirmación en PC y
+  móvil; no se llamó a proveedor real ni se usó inventario persistente. `pnpm --filter @hogaria/web run
+test:coverage` pasa **1455 tests**, cobertura **93,49/84,12/93,66/95,4 %**. Los E2E sintéticos
+  aislados pasan: plan **2/2**, onboarding obligatorio **4/4**, ajustes **2/2** en Chromium/Mobile Chrome.
+  `pnpm run typecheck:e2e`, `pnpm run check:ui` (237 ficheros/21 reglas) y `git diff --check` pasan.
+  **Rollback de la
   unidad de confirmación:** retirar endpoint, esquema de confirmación, tests/cobertura y esta evidencia;
-  conserva preview, schema Structured Outputs y almacén/calendario compartido. Aún faltan integrar la UI,
-  E2E reproducible PC+móvil, consumo, compras, automatización y validar la matriz completa.
+  conserva preview, schema Structured Outputs y almacén/calendario compartido. Aún faltan la UI de
+  consumo, compras, automatización y validar la matriz completa de preferencias/estados.
 
 El análisis previo del planificador está reflejado arriba para orientar la próxima unidad; todos los
 criterios inferiores permanecen sin marcar hasta validar cada condición en su alcance completo.

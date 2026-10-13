@@ -2548,10 +2548,11 @@ de eventos es independiente y sigue vigente.
 entrega completa. La API/persistencia/semilla del hogar y el alta con puerta de membresía tienen
 implementación parcial y pruebas unitarias. El endpoint nuevo de propuesta semanal ya resuelve ajustes
 por miembro y confirma de forma explícita tras revalidar; el `POST /api/ai/plan-week` legado todavía
-lee preferencias antiguas y escribe sin esa vista previa. La UI de ajustes de Hogar > Planificación y
-el ajuste local de recetas por ración ya están integrados en la rama. Una E2E aislada sintética de
-ajustes pasa 2/2 (PC/móvil); sigue pendiente verificar el flujo integrado completo de generación,
-confirmación y varios miembros. La API backend de consumo está integrada en PR #47: solo participantes explícitos con
+lee preferencias antiguas y escribe sin esa vista previa. La UI de ajustes y propuesta semanal de
+Hogar > Planificación, más el ajuste local de recetas por ración, están integrados. E2E aislada
+sintética de ajustes pasa 2/2 (PC/móvil); propuesta pasa 2/2 con dos miembros, revisión/confirmación,
+navegación entre subtabs y limpieza de contexto al cambiar de hogar. Faltan combinaciones de
+preferencias y casos completos de restricciones. La API backend de consumo está integrada en PR #47: solo participantes explícitos con
 `calendar.view` registran/corrigen; el stock doméstico se ajusta de forma atómica, versionada e
 idempotente desde el snapshot por ración, con warnings conservadores ante falta/ambigüedad. Su UI,
 integración visual en el calendario y E2E siguen pendientes; no se marca `QA-HOME-MEALS.CONSUMPTION.1`
