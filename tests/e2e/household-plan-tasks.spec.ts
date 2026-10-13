@@ -2767,6 +2767,28 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     page.locator('.plan-chat__assistant-avatar svg'),
     'the assistant reply retains its home mark'
   ).toBeVisible();
+  const assistantAvatarGeometry = await page
+    .locator('.plan-chat__assistant-avatar')
+    .evaluate((avatar) => {
+      const circle = avatar.getBoundingClientRect();
+      const icon = avatar.querySelector('svg')?.getBoundingClientRect();
+      return {
+        iconWidth: icon?.width ?? 0,
+        iconHeight: icon?.height ?? 0,
+        centerOffset: icon
+          ? Math.abs(icon.top + icon.height / 2 - circle.top - circle.height / 2)
+          : Infinity
+      };
+    });
+  expect(
+    assistantAvatarGeometry.iconWidth,
+    'the home avatar glyph matches the reference scale'
+  ).toBe(24);
+  expect(assistantAvatarGeometry.iconHeight, 'the home avatar glyph stays square').toBe(24);
+  expect(
+    assistantAvatarGeometry.centerOffset,
+    'the home glyph is centered in its avatar'
+  ).toBeLessThanOrEqual(1);
   await expect(
     page.locator('[data-test="plan-proposal-discard"] svg'),
     'undo is represented by its circular arrow icon'
@@ -3036,6 +3058,46 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   );
   await expect(page.locator('[data-test="plan-proposal-apply"]')).toBeVisible();
   await expect(page.locator('[data-test="plan-chat-continuation"]')).toHaveCount(4);
+  const continuationGeometry = await page
+    .locator('[data-test="plan-chat-continuation"]')
+    .evaluateAll((buttons) =>
+      buttons.map((button) => {
+        const icon = button.querySelector('svg')?.getBoundingClientRect();
+        const textElement = button.querySelector(':scope > span');
+        let textBounds = textElement?.getBoundingClientRect() ?? null;
+        if (!textBounds) {
+          const textNode = Array.from(button.childNodes).find(
+            (node): node is Text => node.nodeType === Node.TEXT_NODE && !!node.textContent?.trim()
+          );
+          if (textNode) {
+            const range = document.createRange();
+            range.selectNodeContents(textNode);
+            textBounds = range.getBoundingClientRect();
+          }
+        }
+        return {
+          iconWidth: icon?.width ?? 0,
+          iconHeight: icon?.height ?? 0,
+          horizontalGap: icon && textBounds ? textBounds.left - icon.right : -Infinity,
+          verticalOffset:
+            icon && textBounds
+              ? Math.abs(icon.top + icon.height / 2 - textBounds.top - textBounds.height / 2)
+              : Infinity
+        };
+      })
+    );
+  for (const geometry of continuationGeometry) {
+    expect(geometry.iconWidth, 'continuation icons match the reference scale').toBe(24);
+    expect(geometry.iconHeight, 'continuation icons stay square').toBe(24);
+    expect(
+      geometry.horizontalGap,
+      'continuation labels remain to the right of their icons'
+    ).toBeGreaterThanOrEqual(4);
+    expect(
+      geometry.verticalOffset,
+      'continuation icons align with single- or multi-line labels'
+    ).toBeLessThanOrEqual(4);
+  }
   if (mobile) await expect(page.locator('.plan-review__mobile-tabs')).toBeVisible();
   if (mobile) {
     const mobileChatPlan = page.locator(
