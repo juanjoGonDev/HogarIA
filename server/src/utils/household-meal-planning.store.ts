@@ -1,6 +1,8 @@
 import type Database from 'better-sqlite3';
 import {
   emptyTasteProfile,
+  MEAL_TYPE_KEYS,
+  isMealTimeValue,
   tasteGoalEnum,
   toMealPlan,
   toMealTimes,
@@ -32,6 +34,8 @@ export interface ResolvedMemberMealPlanning {
   goal: MealPlanningObjective & { source: 'household' | 'member' };
   scheduleOverrideEnabled: boolean;
   schedule: MealPlanningSchedule & { source: 'household' | 'member' };
+  /** Missing personal values are used only by proposal generation; never expose them in settings. */
+  missingOverrideValues: Array<'objective' | 'schedule'>;
 }
 
 export interface HouseholdMealPlanningContext {
@@ -121,6 +125,14 @@ function normalizeMemberPreferences(value: unknown, personalProfile: unknown) {
   const raw = parseJsonRecord(value);
   const rawSchedule = parseJsonRecord(raw.schedule);
   const personal = parseJsonRecord(personalProfile);
+  const explicitMealTypes = {
+    ...parseJsonRecord(personal.mealPlan),
+    ...parseJsonRecord(rawSchedule.mealTypes)
+  };
+  const explicitMealTimes = {
+    ...parseJsonRecord(personal.mealTimes),
+    ...parseJsonRecord(rawSchedule.mealTimes)
+  };
   // Keep legacy account schedules as the member's personal starting point, never as a fallback
   // from household defaults. Invalid or absent legacy values use the built-in meal defaults.
   const profileSchedule: MealPlanningSchedule = {
@@ -140,8 +152,37 @@ function normalizeMemberPreferences(value: unknown, personalProfile: unknown) {
   return {
     goalOverrideEnabled: raw.goalOverrideEnabled === true,
     scheduleOverrideEnabled: raw.scheduleOverrideEnabled === true,
-    personalSchedule
+    personalSchedule,
+    hasExplicitSchedule:
+      // An enabled override may not silently inherit `toMealPlan`'s true defaults. Legacy profile
+      // fields still count when persisted explicitly; a saved member schedule takes precedence.
+      MEAL_TYPE_KEYS.every((key) => typeof explicitMealTypes[key] === 'boolean') &&
+      MEAL_TYPE_KEYS.every(
+        (key) => explicitMealTypes[key] !== true || isMealTimeValue(explicitMealTimes[key])
+      )
   };
+}
+
+function hasExplicitObjective(value: unknown): boolean {
+  const raw = parseJsonRecord(value);
+  // `taste.goal` is accepted only in its legacy scalar form when `goals` is absent, matching
+  // `toTasteProfile`. Defaults inserted by `toTasteProfile` itself never establish presence.
+  const rawGoals = Array.isArray(raw.goals)
+    ? raw.goals
+    : typeof raw.goal === 'string'
+      ? [raw.goal]
+      : [];
+  const validGoals: TasteGoal[] = [];
+  for (const goal of rawGoals) {
+    const parsed = tasteGoalEnum.safeParse(goal);
+    if (parsed.success && !validGoals.includes(parsed.data)) validGoals.push(parsed.data);
+  }
+  if (validGoals.some((goal) => goal !== 'custom')) return true;
+  return (
+    validGoals.includes('custom') &&
+    typeof raw.goalNotes === 'string' &&
+    raw.goalNotes.trim().length > 0
+  );
 }
 
 function selectHousehold(db: Database.Database, householdId: string): HouseholdRow | undefined {
@@ -256,9 +297,18 @@ export function readHouseholdMealPlanningForMembers(
         row.meal_planning_preferences,
         row.preferences
       );
-      const personalTaste = toTasteProfile(parseJsonRecord(row.preferences).taste);
+      const personalProfile = parseJsonRecord(row.preferences);
+      const personalTasteRaw = personalProfile.taste;
+      const personalTaste = toTasteProfile(personalTasteRaw);
       const goalOverrideEnabled = preferences.goalOverrideEnabled;
       const scheduleOverrideEnabled = preferences.scheduleOverrideEnabled;
+      const missingOverrideValues: Array<'objective' | 'schedule'> = [];
+      if (goalOverrideEnabled && !hasExplicitObjective(personalTasteRaw)) {
+        missingOverrideValues.push('objective');
+      }
+      if (scheduleOverrideEnabled && !preferences.hasExplicitSchedule) {
+        missingOverrideValues.push('schedule');
+      }
       return {
         householdMemberId: row.id,
         userId: row.user_id,
@@ -275,7 +325,8 @@ export function readHouseholdMealPlanningForMembers(
               mealTypes: household.mealTypes,
               mealTimes: household.mealTimes,
               source: 'household' as const
-            }
+            },
+        missingOverrideValues
       };
     })
   };

@@ -319,6 +319,121 @@ describe('household meal proposal preview route', () => {
     expect(db.prepare('SELECT COUNT(*) AS count FROM calendar_events').get()).toEqual({ count: 0 });
   });
 
+  it('blocks an enabled personal goal override without an explicit valid goal before AI access', async () => {
+    addHousehold('home');
+    const planner = addUser('planner', 'home', undefined, {});
+    setGoalOverride(planner);
+    addAiConfig(planner.id, 'home');
+    const provider = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              { finish_reason: 'stop', message: { content: JSON.stringify(validProposal()) } }
+            ]
+          }),
+          { status: 200 }
+        )
+    );
+    vi.stubGlobal('fetch', provider);
+    const before = {
+      meals: db.prepare('SELECT COUNT(*) AS count FROM meals').get(),
+      calendars: db.prepare('SELECT COUNT(*) AS count FROM weekly_calendars').get(),
+      aiJobs: db.prepare('SELECT COUNT(*) AS count FROM ai_jobs').get(),
+      householdPreferences: db
+        .prepare('SELECT meal_planning_preferences FROM households WHERE id = ?')
+        .get('home'),
+      memberPreferences: db
+        .prepare('SELECT meal_planning_preferences FROM household_members WHERE id = ?')
+        .get(planner.membershipId)
+    };
+
+    const response = await call(planner, {
+      weekStart: WEEK_START,
+      householdMemberIds: [planner.membershipId]
+    });
+
+    expect(provider).not.toHaveBeenCalled();
+    expect(response.status).toBe(409);
+    expect(await read(response)).toMatchObject({
+      success: false,
+      code: 'MEAL_PLAN_OVERRIDE_INCOMPLETE',
+      missingFields: ['objective']
+    });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM meals').get()).toEqual(before.meals);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM weekly_calendars').get()).toEqual(
+      before.calendars
+    );
+    expect(db.prepare('SELECT COUNT(*) AS count FROM ai_jobs').get()).toEqual(before.aiJobs);
+    expect(
+      db.prepare('SELECT meal_planning_preferences FROM households WHERE id = ?').get('home')
+    ).toEqual(before.householdPreferences);
+    expect(
+      db
+        .prepare('SELECT meal_planning_preferences FROM household_members WHERE id = ?')
+        .get(planner.membershipId)
+    ).toEqual(before.memberPreferences);
+  });
+
+  it('blocks an enabled personal schedule override without an explicit valid schedule before AI access', async () => {
+    addHousehold('home');
+    const planner = addUser('planner', 'home');
+    db.prepare('UPDATE household_members SET meal_planning_preferences = ? WHERE id = ?').run(
+      JSON.stringify({ scheduleOverrideEnabled: true }),
+      planner.membershipId
+    );
+    addAiConfig(planner.id, 'home');
+    const provider = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              { finish_reason: 'stop', message: { content: JSON.stringify(validProposal()) } }
+            ]
+          }),
+          { status: 200 }
+        )
+    );
+    vi.stubGlobal('fetch', provider);
+    const before = {
+      meals: db.prepare('SELECT COUNT(*) AS count FROM meals').get(),
+      calendars: db.prepare('SELECT COUNT(*) AS count FROM weekly_calendars').get(),
+      aiJobs: db.prepare('SELECT COUNT(*) AS count FROM ai_jobs').get(),
+      householdPreferences: db
+        .prepare('SELECT meal_planning_preferences FROM households WHERE id = ?')
+        .get('home'),
+      memberPreferences: db
+        .prepare('SELECT meal_planning_preferences FROM household_members WHERE id = ?')
+        .get(planner.membershipId)
+    };
+
+    const response = await call(planner, {
+      weekStart: WEEK_START,
+      householdMemberIds: [planner.membershipId]
+    });
+
+    expect(provider).not.toHaveBeenCalled();
+    expect(response.status).toBe(409);
+    expect(await read(response)).toMatchObject({
+      success: false,
+      code: 'MEAL_PLAN_OVERRIDE_INCOMPLETE',
+      missingFields: ['schedule']
+    });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM meals').get()).toEqual(before.meals);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM weekly_calendars').get()).toEqual(
+      before.calendars
+    );
+    expect(db.prepare('SELECT COUNT(*) AS count FROM ai_jobs').get()).toEqual(before.aiJobs);
+    expect(
+      db.prepare('SELECT meal_planning_preferences FROM households WHERE id = ?').get('home')
+    ).toEqual(before.householdPreferences);
+    expect(
+      db
+        .prepare('SELECT meal_planning_preferences FROM household_members WHERE id = ?')
+        .get(planner.membershipId)
+    ).toEqual(before.memberPreferences);
+  });
+
   it('omits the shared goal when everyone selected has a personal override', async () => {
     addHousehold('home');
     const planner = addUser('planner', 'home');

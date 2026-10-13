@@ -245,6 +245,7 @@ describe('household meal-planning settings storage', () => {
       mealTypes: personalProfile.mealPlan,
       mealTimes: personalProfile.mealTimes
     });
+    expect(context.members[0].missingOverrideValues).toEqual([]);
 
     const later = store.saveHouseholdMealPlanning(db, 'home', 'person', {
       member: {
@@ -268,6 +269,60 @@ describe('household meal-planning settings storage', () => {
       ).preferences
     ).toBe(JSON.stringify(personalProfile));
     expect(JSON.stringify(context)).not.toContain('sésamo');
+  });
+
+  it('marks enabled overrides incomplete when their only values come from read-time defaults', () => {
+    addHousehold('home');
+    const memberId = addMember('home', 'person');
+    db.prepare('UPDATE users SET preferences = ? WHERE id = ?').run(
+      JSON.stringify({ taste: {} }),
+      'person'
+    );
+    db.prepare('UPDATE household_members SET meal_planning_preferences = ? WHERE id = ?').run(
+      JSON.stringify({ goalOverrideEnabled: true, scheduleOverrideEnabled: true }),
+      memberId
+    );
+
+    const context = store.readHouseholdMealPlanningForMembers(db, 'home', 'person', [memberId]);
+
+    expect(context.members[0].goal.goals).toEqual(['balanced']);
+    expect(context.members[0].schedule.mealTypes).toEqual({
+      breakfast: true,
+      lunch: true,
+      snack: true,
+      dinner: true
+    });
+    expect(context.members[0].missingOverrideValues).toEqual(['objective', 'schedule']);
+    expect(JSON.stringify(context)).not.toContain('cacahuete');
+  });
+
+  it('accepts explicit legacy scalar goals and complete partial schedules for active meal types', () => {
+    addHousehold('home');
+    const memberId = addMember('home', 'person');
+    db.prepare('UPDATE users SET preferences = ? WHERE id = ?').run(
+      JSON.stringify({
+        taste: { goal: 'variety' },
+        mealPlan: { breakfast: false, lunch: true, snack: false, dinner: false },
+        mealTimes: { lunch: '12:45' }
+      }),
+      'person'
+    );
+    db.prepare('UPDATE household_members SET meal_planning_preferences = ? WHERE id = ?').run(
+      JSON.stringify({ goalOverrideEnabled: true, scheduleOverrideEnabled: true }),
+      memberId
+    );
+
+    const context = store.readHouseholdMealPlanningForMembers(db, 'home', 'person', [memberId]);
+
+    expect(context.members[0].goal.goals).toEqual(['variety']);
+    expect(context.members[0].schedule.mealTypes).toEqual({
+      breakfast: false,
+      lunch: true,
+      snack: false,
+      dinner: false
+    });
+    expect(context.members[0].schedule.mealTimes.lunch).toBe('12:45');
+    expect(context.members[0].missingOverrideValues).toEqual([]);
   });
 
   it('uses personal schedule defaults for null or corrupt legacy preference data', () => {

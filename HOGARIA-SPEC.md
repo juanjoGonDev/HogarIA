@@ -2552,7 +2552,10 @@ lee preferencias antiguas y escribe sin esa vista previa. La UI de ajustes y pro
 Hogar > Planificación, más el ajuste local de recetas por ración, están integrados. E2E aislada
 sintética de ajustes pasa 2/2 (PC/móvil); propuesta pasa 2/2 con dos miembros, revisión/confirmación,
 navegación entre subtabs y limpieza de contexto al cambiar de hogar. Faltan combinaciones de
-preferencias y casos completos de restricciones. La API backend de consumo está integrada en PR #47: solo participantes explícitos con
+preferencias y casos completos de restricciones. Una guarda adicional devuelve
+`409 MEAL_PLAN_OVERRIDE_INCOMPLETE` antes de IA cuando un override personal activo carece de valor
+explícito válido; su cobertura focal y E2E de ajustes pasan, pero no cierra el criterio completo de
+configuración. La API backend de consumo está integrada en PR #47: solo participantes explícitos con
 `calendar.view` registran/corrigen; el stock doméstico se ajusta de forma atómica, versionada e
 idempotente desde el snapshot por ración, con warnings conservadores ante falta/ambigüedad. Su UI,
 integración visual en el calendario y E2E siguen pendientes; no se marca `QA-HOME-MEALS.CONSUMPTION.1`

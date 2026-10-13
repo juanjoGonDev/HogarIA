@@ -406,6 +406,20 @@ export class HouseholdMealPlannerComponent implements OnChanges, OnDestroy {
         return 'household.meal_proposal_ai_error';
       case 'MEAL_PLAN_NO_SELECTED_TURNS':
         return 'household.meal_proposal_no_turns';
+      case 'MEAL_PLAN_OVERRIDE_INCOMPLETE': {
+        const missingFields =
+          error instanceof HttpErrorResponse && Array.isArray(error.error?.missingFields)
+            ? error.error.missingFields
+            : [];
+        const missingObjective = missingFields.includes('objective');
+        const missingSchedule = missingFields.includes('schedule');
+        if (missingObjective && missingSchedule) {
+          return 'household.meal_proposal_override_objective_and_schedule';
+        }
+        if (missingObjective) return 'household.meal_proposal_override_objective';
+        if (missingSchedule) return 'household.meal_proposal_override_schedule';
+        return 'household.meal_proposal_override_incomplete';
+      }
       case 'MEAL_PLAN_NO_SAFE_MEALS':
         return 'household.meal_proposal_no_safe_meals';
       case 'MEAL_PROPOSAL_SLOT_COVERAGE_INVALID':

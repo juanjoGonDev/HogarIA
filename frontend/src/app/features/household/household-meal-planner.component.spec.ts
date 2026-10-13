@@ -250,6 +250,28 @@ describe('HouseholdMealPlannerComponent', () => {
     expect(component.canGenerate()).toBeTrue();
   });
 
+  it('explains where to complete enabled personal overrides before generating again', () => {
+    service.createProposal.and.returnValue(
+      throwError(
+        () =>
+          new HttpErrorResponse({
+            status: 409,
+            error: {
+              code: 'MEAL_PLAN_OVERRIDE_INCOMPLETE',
+              missingFields: ['objective', 'schedule']
+            }
+          })
+      )
+    );
+    component.generateProposal();
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('[role="alert"]')?.textContent).toContain(
+      'household.meal_proposal_override_objective_and_schedule'
+    );
+    expect(component.canGenerate()).toBeTrue();
+  });
+
   it('does not offer calendar confirmation when every proposal event needs review', () => {
     const reviewOnly = proposal();
     reviewOnly.events = reviewOnly.events.map((item) => ({

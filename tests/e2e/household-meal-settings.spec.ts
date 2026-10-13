@@ -98,6 +98,31 @@ test('configuración de comidas carga, reintenta y guarda campos parciales en Pl
   });
   await expect(panel.getByRole('status').filter({ hasText: 'Guardado' })).toBeVisible();
 
+  await page.locator('[data-test="member-schedule-override"]').click();
+  await expect(page.locator('[data-test="member-dinner-time"]')).toBeVisible();
+  const personalMealTypes: Record<string, boolean> = {};
+  const personalMealTimes: Record<string, string> = {};
+  for (const meal of ['breakfast', 'lunch', 'snack', 'dinner']) {
+    const checked = await page
+      .locator(`[data-test="member-meal-${meal}"] button`)
+      .getAttribute('aria-checked');
+    personalMealTypes[meal] = checked === 'true';
+    personalMealTimes[meal] = await page.locator(`[data-test="member-${meal}-time"]`).inputValue();
+  }
+  const schedulePatchPromise = page.waitForRequest(
+    (request) =>
+      request.url().includes('/api/household/meal-planning') && request.method() === 'PATCH'
+  );
+  await page.locator('[data-test="meal-settings-save"] button').click();
+  const schedulePatch = await schedulePatchPromise;
+  expect(JSON.parse(schedulePatch.postData() ?? '{}')).toEqual({
+    member: {
+      scheduleOverrideEnabled: true,
+      schedule: { mealTypes: personalMealTypes, mealTimes: personalMealTimes }
+    }
+  });
+  await expect(panel.getByRole('status').filter({ hasText: 'Guardado' })).toBeVisible();
+
   await expect
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
     .toBeLessThanOrEqual(viewport.width);

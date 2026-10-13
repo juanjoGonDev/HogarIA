@@ -95,7 +95,13 @@ describe('HouseholdMealSettingsComponent', () => {
     fixture.detectChanges();
 
     expect(api.save).toHaveBeenCalledOnceWith('home-1', {
-      member: { scheduleOverrideEnabled: true }
+      member: {
+        scheduleOverrideEnabled: true,
+        schedule: {
+          mealTypes: { breakfast: true, lunch: true, snack: true, dinner: true },
+          mealTimes: { breakfast: '09:00', lunch: '13:00', snack: '17:00', dinner: '21:00' }
+        }
+      }
     } satisfies HouseholdMealPlanningPatch);
   });
 
@@ -129,7 +135,10 @@ describe('HouseholdMealSettingsComponent', () => {
     expect(api.save).toHaveBeenCalledOnceWith('home-1', {
       member: {
         scheduleOverrideEnabled: true,
-        schedule: { mealTypes: { snack: false }, mealTimes: { dinner: '22:00' } }
+        schedule: {
+          mealTypes: { breakfast: true, lunch: true, snack: false, dinner: true },
+          mealTimes: { breakfast: '09:00', lunch: '13:00', snack: '17:00', dinner: '22:00' }
+        }
       }
     } satisfies HouseholdMealPlanningPatch);
   });

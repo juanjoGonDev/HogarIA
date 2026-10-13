@@ -306,19 +306,12 @@ export class HouseholdMealSettingsComponent implements OnChanges {
         member.scheduleOverrideEnabled = this.scheduleOverrideEnabled;
       }
       if (this.scheduleOverrideEnabled) {
-        const schedule: NonNullable<NonNullable<HouseholdMealPlanningPatch['member']>['schedule']> =
-          {};
-        const changedTypes = changedFields(
-          this.personalSchedule.mealTypes,
-          this.baseline.member.personalSchedule.mealTypes
-        );
-        if (Object.keys(changedTypes).length) schedule.mealTypes = changedTypes;
-        const changedTimes = changedFields(
-          this.personalSchedule.mealTimes,
-          this.baseline.member.personalSchedule.mealTimes
-        );
-        if (Object.keys(changedTimes).length) schedule.mealTimes = changedTimes;
-        if (Object.keys(schedule).length) member.schedule = schedule;
+        // Saving an enabled override confirms the full visible schedule. Persist the complete
+        // snapshot so proposal generation never treats read-time defaults as personal choices.
+        member.schedule = {
+          mealTypes: { ...this.personalSchedule.mealTypes },
+          mealTimes: { ...this.personalSchedule.mealTimes }
+        };
       }
       if (Object.keys(member).length) patch.member = member;
     }

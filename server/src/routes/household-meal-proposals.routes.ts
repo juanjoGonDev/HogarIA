@@ -83,6 +83,13 @@ householdMealProposalRoutes.post('/meal-planning/proposal', async (c) => {
     if (!selectedMembersCanViewCalendar(db, householdId, context.members)) {
       return c.json({ success: false, code: 'HOUSEHOLD_CALENDAR_VIEW_REQUIRED' }, 403);
     }
+    const missingFields = Array.from(
+      new Set(context.members.flatMap((member) => member.missingOverrideValues))
+    ).sort();
+    if (missingFields.length) {
+      // Report only the kinds of missing inputs, never which member has a private override.
+      return c.json({ success: false, code: 'MEAL_PLAN_OVERRIDE_INCOMPLETE', missingFields }, 409);
+    }
     const members = resolveProposalMembers(db, householdId, context.members);
     const slots = buildExpectedMealSlots(request.data.weekStart, members);
     if (slots.length === 0) {

@@ -50,6 +50,11 @@ export const MEAL_TIME_DEFAULTS: Record<MealTypeKey, string> = {
 /** La hora tal y como la escribe un `<input type="time">`. */
 const HOUR_MINUTE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
+/** Validates a persisted meal time without applying the UI's read-time default. */
+export function isMealTimeValue(value: unknown): value is string {
+  return typeof value === 'string' && HOUR_MINUTE.test(value.trim());
+}
+
 export const mealTimesSchema = z.object({
   breakfast: formTime('Desayuno'),
   lunch: formTime('Almuerzo'),
@@ -66,7 +71,7 @@ export function toMealTimes(stored: unknown): MealTimes {
   const out: MealTimes = { ...MEAL_TIME_DEFAULTS };
   for (const key of MEAL_TYPE_KEYS) {
     const value = String(raw[key] ?? '').trim();
-    if (HOUR_MINUTE.test(value)) out[key] = value;
+    if (isMealTimeValue(value)) out[key] = value;
   }
   return out;
 }
@@ -406,7 +411,7 @@ export function saveTasteProfile(
     for (const key of MEAL_TYPE_KEYS) {
       if (!(key in patchTimes)) continue;
       const value = String(patchTimes[key] ?? '').trim();
-      if (HOUR_MINUTE.test(value)) next[key] = value;
+      if (isMealTimeValue(value)) next[key] = value;
       else delete next[key];
     }
     prefs.mealTimes = next;

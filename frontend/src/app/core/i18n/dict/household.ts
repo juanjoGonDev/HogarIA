@@ -432,6 +432,14 @@ export const householdEs = {
   'household.meal_proposal_ai_error': 'No se pudo generar la propuesta. Inténtalo de nuevo.',
   'household.meal_proposal_no_turns':
     'No hay comidas configuradas para las personas seleccionadas.',
+  'household.meal_proposal_override_objective':
+    'Una o varias personas tienen activado un objetivo personal sin un valor guardado. Cada persona debe elegirlo y guardarlo en Preferencias > Objetivo, o desactivar su override en Hogar > Planificación > Ajustes; después, vuelve a generar.',
+  'household.meal_proposal_override_schedule':
+    'Una o varias personas tienen activados sus horarios personales sin valores guardados completos. Cada persona debe completarlos y guardarlos en Hogar > Planificación > Ajustes, o desactivar su override; después, vuelve a generar.',
+  'household.meal_proposal_override_objective_and_schedule':
+    'Una o varias personas tienen un objetivo o un horario personal activado sin valores guardados completos. Cada persona debe completar el objetivo en Preferencias > Objetivo y el horario en Hogar > Planificación > Ajustes, o desactivar el override que no use; después, vuelve a generar.',
+  'household.meal_proposal_override_incomplete':
+    'Completa los valores personales activados en Preferencias > Objetivo o Hogar > Planificación > Ajustes, o desactiva el override que no uses; después, vuelve a generar.',
   'household.meal_proposal_no_safe_meals':
     'No hay comidas seguras que guardar. Revisa las restricciones o cambia la selección.',
   'household.meal_proposal_generate_error':
@@ -938,6 +946,14 @@ export const householdEn: Record<keyof typeof householdEs, string> = {
   'household.meal_proposal_ai_timeout': 'The AI took too long. You can try again.',
   'household.meal_proposal_ai_error': 'The proposal could not be generated. Try again.',
   'household.meal_proposal_no_turns': 'No meals are configured for the selected people.',
+  'household.meal_proposal_override_objective':
+    'One or more people have enabled a personal goal without a saved value. Each person must choose and save it in Preferences > Goal, or turn off their override in Home > Planning > Settings; then generate again.',
+  'household.meal_proposal_override_schedule':
+    'One or more people have enabled personal meal times without complete saved values. Each person must complete and save them in Home > Planning > Settings, or turn off their override; then generate again.',
+  'household.meal_proposal_override_objective_and_schedule':
+    'One or more people have a personal goal or schedule enabled without complete saved values. Each person must complete their goal in Preferences > Goal and schedule in Home > Planning > Settings, or turn off the override they do not use; then generate again.',
+  'household.meal_proposal_override_incomplete':
+    'Complete enabled personal values in Preferences > Goal or Home > Planning > Settings, or turn off an unused override; then generate again.',
   'household.meal_proposal_no_safe_meals':
     'There are no safe meals to save. Review restrictions or change your selection.',
   'household.meal_proposal_generate_error':

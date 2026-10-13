@@ -1054,10 +1054,18 @@ solo su backend o sus pruebas unitarias.
   de hogar/miembro, validación de permiso existente, resolución por miembro e inicialización del hogar
   están implementados. Los overrides empiezan apagados; la preferencia de horario personal procede de
   `users.preferences.mealPlan/mealTimes` al activar override, sin copiar alergias ni gustos al hogar.
+  Un override personal activo sin objetivo u horario explícito válido ahora bloquea la propuesta con
+  `409 MEAL_PLAN_OVERRIDE_INCOMPLETE` antes de encolar/llamar a IA; el error solo identifica el tipo
+  de valor que falta, nunca al miembro. Los valores legacy válidos cuentan como explícitos. Al activar
+  override de horario desde Ajustes se guarda el snapshot completo visible para que los defaults de
+  lectura no se conviertan silenciosamente en preferencias personales.
   La nueva ruta de propuesta ya consume esta resolución; `plan-week` heredado no se declara migrado.
   La UI está integrada en Hogar > Planificación con errores recuperables, guardado parcial y overrides
-  separados; E2E aislada sintética pasa 2/2 en Chromium y Mobile Chrome. Falta cobertura de preferencias
-  de varios miembros en el recorrido integrado y revisión completa de breakpoints/estados.
+  separados; E2E aislada sintética de ajustes pasa 2/2 en Chromium y Mobile Chrome. La regresión
+  focal de la guarda pasa 69/69 con cobertura **94,35/83,97/98,09/96,46 %** (statements/branches/
+  funciones/líneas); ruta/store y UI focals pasan, además de `tsc` del servidor y `typecheck:e2e`.
+  Falta cobertura de preferencias de varios miembros en el recorrido integrado y revisión completa de
+  breakpoints/estados.
 - **Plan semanal — backend parcial:** se añadió `POST /api/household/meal-planning/proposal`
   con selección explícita de miembros, permisos `calendar.edit`, datos del perfil de quienes participan,
   despacho IA fijado al hogar capturado, `response_format` JSON Schema estricto y validación local de
@@ -1155,7 +1163,8 @@ criterios inferiores permanecen sin marcar hasta validar cada condición en su a
 
 - [ ] **QA-HOME-MEALS.SETTINGS.1** — API, persistencia, permisos y resolución por campo; defaults de
       overrides apagados; hogar nuevo inicializado idempotentemente desde valores existentes; unirse
-      no modifica valores comunes; ningún dato ajeno/no seleccionado llega al planificador.
+      no modifica valores comunes; un override activo sin valor explícito válido bloquea antes de IA;
+      ningún dato ajeno/no seleccionado llega al planificador.
 - [ ] **QA-HOME-MEALS.PLAN.1** — subtabs `Comidas`, `Tareas` y `Ajustes`; solo el panel seleccionado
       es visible, con navegación accesible por teclado y contexto/URL conservados en escritorio y
       móvil; cada `aria-controls` apunta a un tabpanel existente. Componentes inactivos se montan bajo
