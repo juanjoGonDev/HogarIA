@@ -1189,7 +1189,27 @@ src/utils/household-meal-shopping-preview.store.spec.ts` pasa **14/14** con `DAT
   una manual, repite la aprobación y comprueba idempotencia, conservación de ambas filas y despensa
   intacta. Capturas inspeccionadas: `.e2e-screenshots/household-meal-shopping-approval/chromium-approval.png`
   y `mobile-chrome-approval.png`. El runner usó DB temporal y fixtures sintéticos, sin llamar a IA.
-  Faltan los gates integrados de la rama; por eso `QA-HOME-MEALS.SHOPPING.1` permanece abierto.
+  Auditoría responsive posterior (13-10-2026): Playwright detectó en móvil una pestaña de compra
+  recortada y el contador del encabezado solapado; SCSS ahora distribuye las tres etapas y apila el
+  encabezado. La geometría comprueba a 390×844 y 320×740 que, tras desplazar al CTA, este queda completo
+  dentro del viewport y encima de la navegación fija. E2E aislada Chromium/Mobile Chrome: **2/2**;
+  captura sintética regenerada e inspeccionada en `.e2e-screenshots/household-meal-shopping-approval/`.
+  `pnpm run test:client` pasa **1462/1462**, cobertura **93,25/83,8/93,53/95,21 %**; `pnpm run build`
+  pasa con bundle inicial **954,73 kB** (bajo 1 MB, sin bajar presupuesto). El diccionario grande de Hogar
+  era eager en todas las rutas; separar siete claves compartidas y cargarlo desde el resolver de Hogar
+  redujo el bundle inicial. App/spec/e2e typechecks, Prettier, `check:ui` (239 archivos/21 reglas) y
+  `git diff --check` pasan. La suite final de rama y auditoría responsive completa siguen pendientes;
+  por eso `QA-HOME-MEALS.SHOPPING.1` permanece abierto.
+- **Automatización semanal — configuración/control backend parcial:** se añadió una configuración única
+  por hogar, apagada por defecto, con GET/PATCH, Zod estricto, versión/CAS, día/hora/zona IANA explícitos,
+  próximo instante mediante el helper DST ya probado y pausa conservadora. El servidor vuelve a comprobar
+  contexto/membresía y exige `settings` para modificar; `calendar.edit` también para activar. Lectura no
+  crea ni repara registros. Focal con `DATABASE_PATH=:memory:`: 4 archivos/57 pruebas, cobertura por
+  archivo ≥70 % en todas las métricas; TypeScript, Prettier, `git diff --check` y hook pre-commit pasan.
+  La primera suite completa del servidor tras integrarlo dio 1.578 aprobadas, 1 omitida y una falla del
+  contrato que no tenía fila para `householdMealShoppingApprovalSchema`; se añadió la fila y su prueba
+  focal pasa **2/2**, pero la suite completa aún se debe repetir. No hay worker/ledger, ejecución de IA,
+  repetición de planes ni UI de configuración/indicador; `QA-HOME-PLANNING.AUTOMATION.1` sigue abierto.
 - **Calendario compartido y registro de consumo — backend/UI integrado:** un evento del plan se guarda
   una vez y sus asignaciones identifican usuarios del hogar. `GET /api/calendar` y `/range` muestran
   todas las comidas confirmadas del plan a cualquier miembro activo con `calendar.view`, aunque la
