@@ -2827,13 +2827,24 @@
   }
 
   @media (max-height: 400px) {
-    .plan-editor__advanced-settings-content {
+    .plan-editor__advanced-settings[open] > .plan-editor__advanced-settings-content {
       position: absolute;
       top: calc(100% + 28px);
-      right: 0;
+      right: 8px;
       bottom: auto;
       width: min(360px, calc(100vw - 16px));
       margin-top: 0;
+      padding-block: 1px;
+    }
+
+    .plan-editor__advanced-settings-content .plan-options-footer {
+      margin-top: 0;
+      padding-top: 0;
+      border-top: 0;
+    }
+
+    .plan-options-footer .plan-editor__version {
+      display: none;
     }
   }
 

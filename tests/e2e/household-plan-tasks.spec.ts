@@ -828,20 +828,53 @@ test('el menú del plano alinea sus acciones y distingue la eliminación', async
           .toBeLessThanOrEqual(menuFlow.bottom + 1);
       }
       if (menuCanScroll) {
-        await menu.evaluate((element) => {
-          element.scrollTop = element.scrollHeight;
-        });
-        const finalActionBounds = await menu
-          .locator('[data-test="plan-discard-changes"]')
-          .boundingBox();
+        const finalAction = menu.locator('[data-test="plan-discard-changes"]');
+        await menu.locator('.plan-editor__floor-name input').fill('Planta editada para prueba');
+        await expect(finalAction).toBeEnabled();
+        await menu.locator('[data-test="plan-draw-area"]').focus();
+        for (let tabIndex = 0; tabIndex < 12; tabIndex += 1) {
+          await page.keyboard.press('Tab');
+          if (await finalAction.evaluate((element) => element === document.activeElement)) break;
+        }
+        await expect(finalAction).toBeFocused();
+        const finalActionBounds = await finalAction.boundingBox();
+        const visibleMenuBounds = await menu.boundingBox();
         expect(finalActionBounds).not.toBeNull();
-        expect.soft(finalActionBounds!.y).toBeGreaterThanOrEqual(menuFlow.top - 1);
+        expect(visibleMenuBounds).not.toBeNull();
+        const scrolledMenu = await menu.evaluate((element) => element.scrollTop);
+        expect
+          .soft(scrolledMenu, 'the final menu action is reachable by scrolling')
+          .toBeGreaterThan(0);
+        expect.soft(finalActionBounds!.y).toBeGreaterThanOrEqual(visibleMenuBounds!.y - 1);
         expect
           .soft(finalActionBounds!.y + finalActionBounds!.height)
-          .toBeLessThanOrEqual(menuFlow.bottom + 1);
+          .toBeLessThanOrEqual(visibleMenuBounds!.y + visibleMenuBounds!.height + 1);
+        const dockOverlap = await finalAction.evaluate((element) => {
+          const action = element.getBoundingClientRect();
+          const dock = document.querySelector('.bottom-nav');
+          if (!dock) return false;
+          const dockStyle = getComputedStyle(dock);
+          const dockBounds = dock.getBoundingClientRect();
+          if (dockStyle.display === 'none' || dockBounds.width === 0 || dockBounds.height === 0) {
+            return false;
+          }
+          return (
+            action.left < dockBounds.right &&
+            action.right > dockBounds.left &&
+            action.top < dockBounds.bottom &&
+            action.bottom > dockBounds.top
+          );
+        });
+        expect
+          .soft(dockOverlap, 'the final menu action is not covered by the bottom navigation')
+          .toBe(false);
+        if (size.width === 568 && size.height === 320) {
+          await screenshot(page, '08-options-menu-568x320-final-action', size);
+        }
         await menu.evaluate((element) => {
           element.scrollTop = 0;
         });
+        await advanced.locator('summary').focus();
       }
       await screenshot(page, `08-options-menu-${size.width}x${size.height}`, size);
     }
