@@ -709,7 +709,7 @@ inspección visual y geométrica de forma crítica.
       comparar de nuevo las 12 vistas de producto; obtener rects de componentes equivalentes y
       documentar diferencias reales. No cerrar la spec mientras exista una desalineación
       reproducible dentro del alcance.
-- [ ] Actualizar resultados/comandos/limitaciones aquí; mantener PR #47 en Draft. Cada unidad va
+- [x] Actualizar resultados/comandos/limitaciones aquí; mantener PR #47 en Draft. Cada unidad va
       en commit atómico con pruebas, hooks completos y push a la rama actual.
 
 #### Evidencia de esta auditoría
@@ -717,10 +717,12 @@ inspección visual y geométrica de forma crítica.
 - **Inspección visual:** se generaron e inspeccionaron las doce comparativas sintéticas de
   escritorio/móvil (`.e2e-screenshots/household-plan-comparison/01-...` a `06-...`) y las vistas
   específicas del switch en escritorio, Chrome móvil y Safari móvil bajo
-  `.e2e-screenshots/household-plan-tasks/`. Inicio, asignación, tareas y chat no mostraron defectos
-  reproducibles adicionales de alineación o iconos. En el editor se corrigieron el switch y el
-  solapamiento de 12 px del panel; en propuesta desde foto, el espacio de la pregunta; en Safari,
-  la selección táctil de zonas.
+  `.e2e-screenshots/household-plan-tasks/`. La captura inicial del usuario sirve de antes; las
+  capturas E2E de PC/móvil muestran el después. Inicio, asignación, tareas y chat no mostraron
+  defectos reproducibles adicionales de alineación ni iconos faltantes/descentrados; las acciones
+  solo textuales conservan su etiqueta. En el editor se corrigieron el switch y el solapamiento de
+  12 px del panel; en propuesta desde foto, el espacio de la pregunta; en Safari, la selección
+  táctil de zonas.
 - **TDD del contraste:** la nueva aserción E2E primero falló de forma determinista: thumb/pista
   activa **2,68:1**, bajo el mínimo **3:1**. La pista activa usa ahora el naranja 600 y el foco el
   naranja oscuro accesible. La prueba enfocada pasó **1/1** en Chromium; la geometría y el
@@ -739,3 +741,7 @@ inspección visual y geométrica de forma crítica.
 - **Limitación conocida:** `pnpm run lint:client` sigue sin poder arrancar porque falta el paquete
   ya requerido `@angular-eslint/builder`; no se añadió una dependencia fuera del alcance. `check:ui`
   y los hooks sí cubren el cambio.
+- **Entrega:** `cf39429` está publicado en `feat/household-floorplan`. Lefthook pre-commit y
+  pre-push pasaron sin bypass: Prettier, check:ui, build, typecheck E2E y `pnpm run test`
+  (11 config, 1.418 cliente, 1.330 servidor y 1 skip). PR #47 continúa Draft; no se cambió su base
+  ni se hizo merge.
