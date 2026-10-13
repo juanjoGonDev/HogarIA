@@ -977,6 +977,13 @@ es un evento, no una copia por miembro. Antes de confirmar, el servidor valida p
 horario efectivo, raciones y restricciones estrictas; persiste solo tras aprobación. La IA no recibe
 datos de miembros fuera de la selección y el calendario no expone notas privadas de otra persona.
 
+Para las recetas generadas, la IA entrega cantidades de ingredientes **por ración** (rendimiento base
+de una ración). El número de comensales de cada evento se decide en el servidor/UI; al cambiarlo,
+cantidades se escalan localmente por multiplicación y no se vuelve a llamar al proveedor ni se altera
+la receta base. El tiempo de preparación/cocción describe el método, no escala linealmente con las
+raciones; se conserva y la receta debe advertir si hace falta cocinar en tandas. La misma aritmética
+se aplica al ajustar porciones de una receta guardada con rendimiento base conocido.
+
 ### Criterios pendientes de aceptación — no implementados
 
 - [ ] **QA-HOME-MEALS.SETTINGS.1** — API, persistencia, permisos y resolución por campo; defaults de
@@ -985,7 +992,8 @@ datos de miembros fuera de la selección y el calendario no expone notas privada
 - [ ] **QA-HOME-MEALS.PLAN.1** — plan semanal con proveedor simulado, vista previa explícita y
       `response_format` estricto; plato compartido una vez, raciones por participantes, conflictos
       soft/hard, alergia estricta, todos con overrides, turnos personales, sin receta segura,
-      respuesta inválida/IDs foráneos/duplicados/error sin escrituras.
+      respuesta inválida/IDs foráneos/duplicados/error sin escrituras; cantidades de receta por ración
+      y cambio local de raciones sin llamada IA ni mutación de la receta base.
 - [ ] **QA-HOME-MEALS.CALENDAR.1** — persistencia idempotente tras confirmar, calendario actual,
       evento compartido visible una vez, asignaciones correctas y ninguna nota/objetivo privado
       filtrado.
