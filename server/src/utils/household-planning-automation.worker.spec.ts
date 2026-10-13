@@ -265,6 +265,22 @@ describe('household planning automation worker', () => {
   it('generates both scopes with strict JSON, assigns tasks locally, and publishes atomically', async () => {
     addCurrentPlan();
     configureAutomation();
+    const { saveHouseholdTaskWeek } = await import('./household-task.store.js');
+    saveHouseholdTaskWeek(db, HOUSEHOLD_ID, 'alice', {
+      baseVersion: 0,
+      weekStart: '2026-10-12',
+      tasks: [
+        {
+          id: 'private-previous-task-id',
+          title: 'Limpiar el fregadero',
+          details: 'Detalle privado que no debe llegar al proveedor',
+          spaceId: 'kitchen',
+          scheduledDate: '2026-10-14',
+          assignedMemberId: 'alice',
+          completed: true
+        }
+      ]
+    });
     const provider = providerForGeneratedPlans();
 
     const result = await runHouseholdPlanningAutomationOccurrence(baseInput(), {
@@ -286,12 +302,22 @@ describe('household planning automation worker', () => {
       undefined
     );
     const prompt = JSON.stringify(provider.mock.calls.map(([messages]) => messages));
+    const taskProposalMessages = provider.mock.calls.find(
+      ([, responseFormat]) => responseFormat.json_schema.name === 'household_task_proposal'
+    )?.[0];
+    const taskPrompt = taskProposalMessages?.map(({ content }) => content).join('\n') ?? '';
     expect(prompt).toContain('Cocina');
     expect(prompt).not.toContain('alice');
     expect(prompt).not.toContain('bob');
     expect(prompt).not.toContain('membership-alice');
     expect(prompt).not.toContain('Nombre privado');
     expect(prompt).not.toContain('alice@hogaria.test');
+    expect(prompt).not.toContain('private-previous-task-id');
+    expect(prompt).not.toContain('Detalle privado');
+    expect(taskPrompt).toContain('mostRecentlyConfirmedWeek');
+    expect(taskPrompt).toContain('Limpiar el fregadero');
+    expect(taskPrompt).toContain('"weekStart":"2026-10-12"');
+    expect(taskPrompt).toContain('"zone":{"id":"kitchen","label":"Cocina"}');
 
     const taskWeek = db
       .prepare(
