@@ -709,6 +709,36 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     page.locator('.plan-method-card[aria-pressed="true"]'),
     'the three entry methods stay neutral until the user chooses one'
   ).toHaveCount(0);
+  const methodChevronIcons = page.locator('.plan-method-card__chevron svg');
+  if (mobile) {
+    await expect(methodChevronIcons, 'mobile method cards use proper chevron icons').toHaveCount(3);
+    const chevronGeometry = await methodChevronIcons.evaluateAll((icons) =>
+      icons.map((icon) => {
+        const bounds = icon.getBoundingClientRect();
+        const card = icon.closest('.plan-method-card')?.getBoundingClientRect();
+        return {
+          width: bounds.width,
+          height: bounds.height,
+          verticalOffset: card
+            ? Math.abs(bounds.top + bounds.height / 2 - card.top - card.height / 2)
+            : Infinity
+        };
+      })
+    );
+    for (const geometry of chevronGeometry) {
+      expect(geometry.width, 'method chevrons match the shared icon size').toBe(18);
+      expect(geometry.height, 'method chevrons remain square').toBe(18);
+      expect(
+        geometry.verticalOffset,
+        'method chevrons align to the card center'
+      ).toBeLessThanOrEqual(1);
+    }
+  } else {
+    await expect(
+      page.locator('.plan-method-card__chevron').first(),
+      'desktop method cards omit the mobile-only directional affordance from the prototype'
+    ).toBeHidden();
+  }
   await page.locator('[data-test="plan-dwelling-house"]').click();
   await expect(
     page.locator('.plan-setup__dwelling-card[aria-pressed="true"]'),
