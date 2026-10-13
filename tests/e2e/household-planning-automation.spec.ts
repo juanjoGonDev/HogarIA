@@ -173,11 +173,16 @@ test('configura la planificación automática con API real y controles accesible
   const weekdayPicker = panel.locator('[data-test="planning-automation-weekday"] button');
   await weekdayPicker.focus();
   await expect(weekdayPicker).toBeFocused();
-  await weekdayPicker.press('ArrowDown'); // Opens the custom picker with Monday active.
+  await page.keyboard.press('ArrowDown'); // Opens the custom picker with Monday active.
+  const weekdayList = panel.getByRole('listbox', { name: 'Día de la semana' });
+  await expect(weekdayList).toBeVisible();
+  await expect(weekdayList.getByRole('option', { name: 'Lunes' })).toHaveClass(
+    /picker__option--active/
+  );
   for (let index = 0; index < target.weekday - 1; index += 1) {
-    await weekdayPicker.press('ArrowDown');
+    await page.keyboard.press('ArrowDown');
   }
-  await weekdayPicker.press('Enter');
+  await page.keyboard.press('Enter');
   await expect(weekdayPicker).toHaveAttribute(
     'aria-label',
     `Día de la semana: ${weekdayLabels[target.weekday - 1]}`

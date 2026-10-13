@@ -1,6 +1,9 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HouseholdWeeklyOccurrence } from './household-weekly-schedule.js';
-import type { RunHouseholdPlanningAutomationOccurrenceInput } from './household-planning-automation.worker.js';
+import type {
+  HouseholdPlanningAutomationProvider,
+  RunHouseholdPlanningAutomationOccurrenceInput
+} from './household-planning-automation.worker.js';
 
 process.env.DATABASE_PATH = ':memory:';
 process.env.NODE_ENV = 'test';
@@ -115,6 +118,75 @@ describe('household planning automation scheduler', () => {
         utcInstant: '2026-10-12T07:30:00.000Z'
       }
     });
+  });
+
+  it('polls through the real worker once, records completion, and publishes without duplicates', async () => {
+    makeHousehold('home-a');
+    enableAutomation('home-a');
+    const provider = vi.fn<HouseholdPlanningAutomationProvider>(
+      async (_messages, responseFormat) => {
+        if (responseFormat.json_schema.name !== 'household_task_proposal') {
+          throw new Error('Unexpected synthetic response format.');
+        }
+        return JSON.stringify({
+          tasks: [{ title: 'Limpiar la encimera', scheduledDate: '2026-10-19', spaceId: null }]
+        });
+      }
+    );
+    const now = new Date('2026-10-12T07:31:00.000Z');
+    const options = {
+      workerId: 'scheduler-integration-test',
+      workerDependencies: { provider, random: () => 0.5 }
+    };
+
+    const firstPoll = await scheduler.pollHouseholdPlanningAutomations(db, now, options);
+    const secondPoll = await scheduler.pollHouseholdPlanningAutomations(db, now, options);
+
+    expect(firstPoll).toEqual({ checkedHouseholds: 1, dueOccurrences: 1, attempted: 1, failed: 0 });
+    expect(secondPoll).toEqual({
+      checkedHouseholds: 1,
+      dueOccurrences: 1,
+      attempted: 1,
+      failed: 0
+    });
+    expect(provider).toHaveBeenCalledTimes(1);
+    const recordedRun = db
+      .prepare(
+        `SELECT status, target_week_start AS targetWeekStart, completed_at AS completedAt
+           FROM household_planning_automation_runs WHERE household_id = ?`
+      )
+      .get('home-a');
+    expect(recordedRun).toMatchObject({
+      status: 'completed',
+      targetWeekStart: '2026-10-19',
+      completedAt: expect.any(String)
+    });
+    expect(
+      db
+        .prepare(
+          'SELECT COUNT(*) AS count FROM household_planning_automation_runs WHERE household_id = ?'
+        )
+        .get('home-a')
+    ).toEqual({ count: 1 });
+
+    const publishedWeek = db
+      .prepare(
+        `SELECT version, tasks_json AS tasksJson FROM household_task_weeks
+          WHERE household_id = ? AND week_start = ?`
+      )
+      .get('home-a', '2026-10-19') as { version: number; tasksJson: string } | undefined;
+    expect(publishedWeek).toBeDefined();
+    expect(publishedWeek?.version).toBe(1);
+    expect(JSON.parse(publishedWeek?.tasksJson ?? '[]')).toMatchObject([
+      { title: 'Limpiar la encimera', scheduledDate: '2026-10-19' }
+    ]);
+    expect(
+      db
+        .prepare(
+          'SELECT COUNT(*) AS count FROM household_task_weeks WHERE household_id = ? AND week_start = ?'
+        )
+        .get('home-a', '2026-10-19')
+    ).toEqual({ count: 1 });
   });
 
   it('does not execute before the configured wall-clock time or for paused homes', async () => {
