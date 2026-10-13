@@ -515,18 +515,28 @@
   color: var(--color-warning-700);
 }
 
-.meal-planner__shopping-quantity {
+.meal-planner__shopping-quantity,
+.meal-planner__servings-control {
   display: grid;
-  grid-template-columns: auto minmax(4.5rem, 6rem) auto;
   align-items: center;
-  justify-content: end;
   gap: var(--space-2);
   min-height: 44px;
   color: var(--text-secondary);
   font-size: var(--text-xs);
 }
 
-.meal-planner__shopping-quantity input {
+.meal-planner__shopping-quantity {
+  grid-template-columns: auto minmax(4.5rem, 6rem) auto;
+  justify-content: end;
+}
+
+.meal-planner__servings-control {
+  grid-template-columns: max-content minmax(3.5rem, 4.5rem);
+  justify-content: start;
+}
+
+.meal-planner__shopping-quantity input,
+.meal-planner__servings-control input {
   width: 100%;
   min-width: 0;
   min-height: 40px;
@@ -539,13 +549,20 @@
   font-size: var(--text-sm);
 }
 
+.meal-planner__servings-control input {
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
 .meal-planner__shopping-quantity input:focus-visible,
+.meal-planner__servings-control input:focus-visible,
 .meal-planner__shopping-item input:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 2px;
 }
 
-.meal-planner__shopping-quantity input:disabled {
+.meal-planner__shopping-quantity input:disabled,
+.meal-planner__servings-control input:disabled {
   background: var(--bg-tertiary);
   color: var(--text-secondary);
   opacity: 0.75;

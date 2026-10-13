@@ -526,6 +526,46 @@ export class HouseholdMealPlannerComponent implements OnChanges, OnDestroy {
       : 'household.meal_proposal_individual';
   }
 
+  updateEventServings(event: HouseholdMealProposalEvent, input: HTMLInputElement): void {
+    const nextServings = input.valueAsNumber;
+    if (
+      !this.canEdit ||
+      this.confirming() ||
+      this.confirmed() ||
+      event.status !== 'scheduled' ||
+      !event.recipe ||
+      !Number.isInteger(nextServings) ||
+      nextServings < 1 ||
+      nextServings > 100
+    ) {
+      input.value = String(event.servings);
+      return;
+    }
+
+    this.proposal.update((current) => {
+      if (!current) return current;
+      let found = false;
+      const events = current.events.map((item) => {
+        if (item.id !== event.id || item.status !== 'scheduled' || !item.recipe) return item;
+        found = true;
+        return { ...item, servings: nextServings };
+      });
+      return found ? { ...current, events } : current;
+    });
+  }
+
+  scaledIngredientQuantity(
+    ingredient: HouseholdMealProposalIngredient,
+    event: HouseholdMealProposalEvent
+  ): number {
+    const baseServings = event.recipe?.baseServings;
+    if (!baseServings || event.status !== 'scheduled' || event.servings < 1) {
+      return ingredient.quantity;
+    }
+    const scaled = (ingredient.quantity * event.servings) / baseServings;
+    return Number.isFinite(scaled) ? scaled : ingredient.quantity;
+  }
+
   isShared(event: HouseholdMealProposalEvent): boolean {
     return event.participantIds.length > 1;
   }

@@ -112,8 +112,15 @@ describe('HouseholdMealPlannerComponent', () => {
     const i18n = {
       resolved: signal<'es' | 'en'>('es'),
       changeTick: signal(0),
-      t: (key: string, params?: Record<string, unknown>) =>
-        key === 'household.meal_proposal_servings' ? `${params?.['count']} raciones` : key
+      t: (key: string, params?: Record<string, unknown>) => {
+        if (key === 'household.meal_proposal_servings_for') {
+          return `Raciones para ${params?.['meal']}`;
+        }
+        if (key === 'household.meal_proposal_ingredients') {
+          return `Ingredientes para ${params?.['count']} raciones`;
+        }
+        return key;
+      }
     } as unknown as I18nService;
 
     await TestBed.configureTestingModule({
@@ -151,10 +158,103 @@ describe('HouseholdMealPlannerComponent', () => {
     ).toBe(3);
     expect(fixture.nativeElement.textContent).toContain('household.meal_proposal_shared');
     expect(fixture.nativeElement.textContent).toContain('household.meal_proposal_individual');
-    expect(fixture.nativeElement.textContent).toContain('2 raciones');
+    expect(fixture.nativeElement.textContent).toContain('Ingredientes para 2 raciones');
     expect(fixture.nativeElement.textContent).toContain('Alicia');
     expect(fixture.nativeElement.textContent).toContain('Bruno');
     expect(component.canConfirm()).toBeTrue();
+  });
+
+  it('scales displayed ingredients locally and confirms servings without changing the base recipe', () => {
+    const preview = proposal();
+    service.createProposal.and.returnValue(of(preview));
+    service.confirmProposal.and.returnValue(
+      of({
+        proposalId: preview.proposalId,
+        weekStart: preview.weekStart,
+        idempotent: false,
+        events: [],
+        unresolvedEvents: []
+      })
+    );
+
+    component.generateProposal();
+    fixture.detectChanges();
+
+    const servingsInput = fixture.nativeElement.querySelector(
+      '[data-test="meal-proposal-servings-shared-lunch"]'
+    ) as HTMLInputElement;
+    expect(servingsInput).withContext('review exposes a labeled serving count').not.toBeNull();
+    expect(servingsInput.min).toBe('1');
+    expect(servingsInput.max).toBe('100');
+    expect(servingsInput.step).toBe('1');
+    expect(servingsInput.getAttribute('aria-label')).toBe('Raciones para Lentejas para compartir');
+
+    const ingredient = fixture.nativeElement.querySelector(
+      '[data-test="meal-proposal-ingredient-shared-lunch-0"]'
+    ) as HTMLElement;
+    expect(ingredient.textContent).toContain('200 g');
+
+    servingsInput.value = '3';
+    servingsInput.dispatchEvent(new Event('change'));
+    fixture.detectChanges();
+
+    expect(ingredient.textContent).toContain('300 g');
+    expect(service.createProposal).toHaveBeenCalledTimes(1);
+    expect(preview.events[0].servings).toBe(2);
+    expect(preview.events[0].recipe?.ingredients[0].quantity).toBe(100);
+
+    component.confirmProposal();
+    const request = service.confirmProposal.calls.mostRecent().args[1];
+    const submittedEvent = request.events.find((item) => item.id === 'shared-lunch');
+    expect(submittedEvent?.servings).toBe(3);
+    expect(submittedEvent?.recipe?.ingredients[0].quantity).toBe(100);
+  });
+
+  it('rejects serving counts outside the supported integer range and restores the last valid value', () => {
+    service.createProposal.and.returnValue(of(proposal()));
+    component.generateProposal();
+    fixture.detectChanges();
+
+    const servingsInput = fixture.nativeElement.querySelector(
+      '[data-test="meal-proposal-servings-shared-lunch"]'
+    ) as HTMLInputElement;
+    const ingredient = fixture.nativeElement.querySelector(
+      '[data-test="meal-proposal-ingredient-shared-lunch-0"]'
+    ) as HTMLElement;
+
+    for (const invalidValue of ['0', '101', '1.5', '']) {
+      servingsInput.value = invalidValue;
+      servingsInput.dispatchEvent(new Event('change'));
+      fixture.detectChanges();
+
+      expect(servingsInput.value).toBe('2');
+      expect(ingredient.textContent).toContain('200 g');
+    }
+    expect(service.createProposal).toHaveBeenCalledTimes(1);
+  });
+
+  it('scales quantities at both valid serving boundaries', () => {
+    service.createProposal.and.returnValue(of(proposal()));
+    component.generateProposal();
+    fixture.detectChanges();
+
+    const servingsInput = fixture.nativeElement.querySelector(
+      '[data-test="meal-proposal-servings-shared-lunch"]'
+    ) as HTMLInputElement;
+    const ingredient = fixture.nativeElement.querySelector(
+      '[data-test="meal-proposal-ingredient-shared-lunch-0"]'
+    ) as HTMLElement;
+
+    servingsInput.value = '1';
+    servingsInput.dispatchEvent(new Event('change'));
+    fixture.detectChanges();
+    expect(ingredient.textContent).toContain('100 g');
+
+    servingsInput.value = '100';
+    servingsInput.dispatchEvent(new Event('change'));
+    fixture.detectChanges();
+    expect(ingredient.textContent?.replace(/[\s,]/g, '')).toContain('10000g');
+    expect(service.createProposal).toHaveBeenCalledTimes(1);
   });
 
   it('separates preparation and review into exclusive linked panels', () => {

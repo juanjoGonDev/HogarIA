@@ -259,6 +259,9 @@
             data-test="meal-proposal-selected-day"
           >
             <h4>{{ day.label }}</h4>
+            <p id="meal-proposal-servings-help" class="meal-planner__visually-hidden">
+              {{ 'household.meal_proposal_servings_help' | t }}
+            </p>
             <article
               *ngFor="let event of day.events; trackBy: trackEvent"
               class="meal-planner__event"
@@ -286,9 +289,24 @@
                 <h5>{{ event.recipe?.name }}</h5>
                 <p class="meal-planner__summary">{{ event.objectiveSummary }}</p>
                 <div class="meal-planner__event-meta">
-                  <span>{{
-                    'household.meal_proposal_servings' | t: { count: event.servings }
-                  }}</span>
+                  <label class="meal-planner__servings-control">
+                    <span>{{ 'household.meal_proposal_servings_label' | t }}</span>
+                    <input
+                      type="number"
+                      inputmode="numeric"
+                      min="1"
+                      max="100"
+                      step="1"
+                      [value]="event.servings"
+                      [disabled]="!canEdit || confirming() || confirmed()"
+                      [attr.aria-label]="
+                        'household.meal_proposal_servings_for' | t: { meal: event.recipe?.name }
+                      "
+                      aria-describedby="meal-proposal-servings-help"
+                      [attr.data-test]="'meal-proposal-servings-' + event.id"
+                      (change)="updateEventServings(event, $any($event.target))"
+                    />
+                  </label>
                   <span *ngIf="event.recipe as recipe">
                     {{
                       'household.meal_proposal_total_time'
@@ -310,10 +328,22 @@
                 <details class="meal-planner__recipe-details" *ngIf="event.recipe as recipe">
                   <summary>{{ 'household.meal_proposal_recipe_details' | t }}</summary>
                   <p>{{ recipe.description }}</p>
-                  <h6>{{ 'household.meal_proposal_ingredients' | t }}</h6>
+                  <h6>
+                    {{ 'household.meal_proposal_ingredients' | t: { count: event.servings } }}
+                  </h6>
                   <ul>
-                    <li *ngFor="let ingredient of recipe.ingredients; trackBy: trackIngredient">
-                      {{ ingredient.quantity }} {{ ingredient.unit }} · {{ ingredient.name }}
+                    <li
+                      *ngFor="
+                        let ingredient of recipe.ingredients;
+                        let ingredientIndex = index;
+                        trackBy: trackIngredient
+                      "
+                      [attr.data-test]="
+                        'meal-proposal-ingredient-' + event.id + '-' + ingredientIndex
+                      "
+                    >
+                      {{ scaledIngredientQuantity(ingredient, event) | number: '1.0-2' }}
+                      {{ ingredient.unit }} · {{ ingredient.name }}
                       <span *ngIf="ingredient.preparation"> · {{ ingredient.preparation }}</span>
                       <span *ngIf="ingredient.isOptional">
                         · {{ 'household.meal_proposal_optional' | t }}</span
