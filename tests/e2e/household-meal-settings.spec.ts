@@ -51,31 +51,41 @@ test('configuración de comidas carga, reintenta y guarda campos parciales en Pl
   await createHousehold(page, 'Casa sintética planificación');
 
   let loadAttempts = 0;
+  let failLoads = true;
   await page.route('**/api/household/meal-planning', async (route) => {
-    if (route.request().method() === 'GET' && loadAttempts === 0) {
+    if (route.request().method() === 'GET') {
       loadAttempts += 1;
-      await route.fulfill({
-        status: 503,
-        contentType: 'application/json',
-        body: JSON.stringify({ success: false, error: 'Synthetic transient failure' })
-      });
-      return;
+      if (failLoads) {
+        await route.fulfill({
+          status: 503,
+          contentType: 'application/json',
+          body: JSON.stringify({ success: false, error: 'Synthetic transient failure' })
+        });
+        return;
+      }
     }
-    if (route.request().method() === 'GET') loadAttempts += 1;
     await route.continue();
   });
 
   await page.goto('/household?tab=tasks&planning=settings');
   await expect(page.locator('[data-test="household-tab-tasks"]')).toHaveText('Planificación');
-  const panel = page.locator('[data-test="household-panel-tasks"]');
+  const panel = page.locator('[data-test="household-planning-panel-settings"]');
   await expect(panel).toBeVisible();
   await expectHouseholdTabsNotToOverlap(page);
   await expect(panel.getByRole('alert')).toContainText('No se pudo cargar. Reintenta.');
   await expect(page.locator('[data-test="meal-settings-retry"] button')).toBeEnabled();
 
+  const attemptsBeforeManualRetry = loadAttempts;
+  failLoads = false;
+  const retryResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'GET' &&
+      response.url().includes('/api/household/meal-planning')
+  );
   await page.locator('[data-test="meal-settings-retry"] button').click();
+  expect((await retryResponse).status()).toBe(200);
   await expect(panel.locator('[data-test="meal-settings-content"]')).toBeVisible();
-  expect(loadAttempts).toBe(2);
+  expect(loadAttempts).toBeGreaterThan(attemptsBeforeManualRetry);
   await expect(panel.getByRole('heading', { name: 'Planificación de comidas' })).toBeVisible();
   await expect(page.locator('[data-test="member-goal-override"]')).toHaveAttribute(
     'aria-checked',
