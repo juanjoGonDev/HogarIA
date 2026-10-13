@@ -1100,8 +1100,10 @@ solo su backend o sus pruebas unitarias.
   `mobile-chrome-proposal-top.png` y `mobile-chrome-proposal.png` (CTA). Sin proveedor real; quedan
   pendientes el recorrido completo de combinaciones de preferencias y la auditoría visual global.
 - **Calendario compartido — backend parcial integrado:** un evento compartido se guarda una vez y sus
-  participantes son usuarios del hogar con permiso de lectura; las lecturas existentes exponen el
-  evento solo a las personas asignadas, sin notas/objetivos privados. El consumo dispone de GET/PUT
+  asignaciones identifican usuarios del hogar. El calendario actual todavía filtra cada comida por
+  participante (pendiente de cambiar según la decisión del 13-10-2026); la lectura del plan deberá
+  exponer el evento a todos los miembros activos con `calendar.view`, sin notas/objetivos privados.
+  Registrar/corregir consumo seguirá limitado a participantes asignados. El consumo dispone de GET/PUT
   separado, permiso por miembro asignado con `calendar.view`, versiones optimistas, idempotencia,
   correcciones y un ledger de movimientos de stock transaccional. La coincidencia del producto es
   estricta por nombre normalizado y unidad; inventario privado, conversión de unidades y sugerencias
@@ -1182,8 +1184,9 @@ criterios inferiores permanecen sin marcar hasta validar cada condición en su a
       respuesta inválida/IDs foráneos/duplicados/error sin escrituras; cantidades de receta por ración
       y cambio local de raciones sin llamada IA ni mutación de la receta base.
 - [ ] **QA-HOME-MEALS.CALENDAR.1** — persistencia idempotente tras confirmar, calendario actual,
-      evento compartido visible una vez, asignaciones correctas y ninguna nota/objetivo privado
-      filtrado.
+      evento compartido visible una vez a todos los miembros activos con `calendar.view` aunque la comida
+      sea individual, asignaciones correctas, consumo limitado a participantes y ninguna nota/objetivo
+      privado filtrado.
 - [ ] **QA-HOME-MEALS.CONSUMPTION.1** — realizada/no realizada, raciones cero/positivas/fuera de
       rango, ajustes, inventario sin cambios antes de confirmar e idempotencia; la receta base y los
       movimientos de stock no se duplican.

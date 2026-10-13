@@ -2558,7 +2558,8 @@ explícito válido; su cobertura focal y E2E de ajustes pasan, pero no cierra el
 configuración. Decisión del 13-10-2026: toda comida confirmada del plan del hogar será visible para
 miembros activos con `calendar.view`, aunque esté asignada individualmente; esto no expone calendarios
 personales ni metas, alergias, notas o prompts privados. Solo los participantes asignados podrán
-registrar/corregir su consumo: la lectura no concede permiso de escritura. La API backend de consumo
+registrar/corregir su consumo: la lectura no concede permiso de escritura. La ruta del calendario aún
+limita la lectura a participantes y está pendiente de alineación con esta decisión. La API backend de consumo
 está integrada en PR #47: solo participantes explícitos con `calendar.view` registran/corrigen; el stock doméstico se ajusta de forma atómica, versionada e
 idempotente desde el snapshot por ración, con warnings conservadores ante falta/ambigüedad. Su UI,
 integración visual en el calendario y E2E siguen pendientes; no se marca `QA-HOME-MEALS.CONSUMPTION.1`
