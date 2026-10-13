@@ -719,6 +719,12 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
         return {
           width: bounds.width,
           height: bounds.height,
+          stroke: icon.querySelector('path')
+            ? getComputedStyle(icon.querySelector('path')!).stroke
+            : '',
+          strokeWidth: icon.querySelector('path')
+            ? getComputedStyle(icon.querySelector('path')!).strokeWidth
+            : '',
           verticalOffset: card
             ? Math.abs(bounds.top + bounds.height / 2 - card.top - card.height / 2)
             : Infinity
@@ -728,6 +734,20 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     for (const geometry of chevronGeometry) {
       expect(geometry.width, 'method chevrons match the shared icon size').toBe(18);
       expect(geometry.height, 'method chevrons remain square').toBe(18);
+      expect(geometry.strokeWidth, 'method chevrons match the prototype stroke weight').toBe(
+        '2.2px'
+      );
+      const primaryTextColor = await page.locator('html').evaluate((html) => {
+        const probe = document.createElement('span');
+        probe.style.color = 'var(--text-primary)';
+        html.append(probe);
+        const color = getComputedStyle(probe).color;
+        probe.remove();
+        return color;
+      });
+      expect(geometry.stroke, 'method chevrons use the prototype primary text color').toBe(
+        primaryTextColor
+      );
       expect(
         geometry.verticalOffset,
         'method chevrons align to the card center'
