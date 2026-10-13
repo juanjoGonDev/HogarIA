@@ -2561,12 +2561,15 @@ personales ni metas, alergias, notas o prompts privados. Solo los participantes 
 registrar/corregir su consumo: la lectura no concede permiso de escritura. `GET /api/calendar` y
 `/range` ya aplican esta regla; la regresión primero falló para un lector no asignado y luego pasan
 60/60 tests focales (cobertura de ruta/almacén 88,43/79,56/94,52/90,74 % S/B/F/L), `tsc` y hooks.
-También pasan 7/7 tests focales que mantienen consumo solo para asignados. Aún falta E2E integrado de
-calendario en PC/móvil. La API backend de consumo está integrada en PR #47: solo participantes
-explícitos con `calendar.view` registran/corrigen; el stock doméstico se ajusta de forma atómica, versionada e
-idempotente desde el snapshot por ración, con warnings conservadores ante falta/ambigüedad. Su UI,
-integración visual en el calendario y E2E siguen pendientes; no se marca `QA-HOME-MEALS.CONSUMPTION.1`
-completo. El endpoint backend de preview de compra ya es de solo lectura; incluye comidas pendientes
+La UI de calendario abre el registro de consumo solo para participantes explícitos con `calendar.view`;
+otros miembros siguen viendo la comida doméstica pero no obtienen control de escritura. El endpoint
+GET/PUT persiste realizada/no realizada, raciones reales, versión, idempotencia y ajustes de stock desde
+el snapshot por ración. La regresión focal de consumo pasa 30 tests (schema/store/ruta) con cobertura
+de ruta 88,67/80/100/91,83 % y store 89,77/80,83/100/92,59 % S/B/F/L; 92 tests de frontend pasan y el
+E2E sintético de escritorio/móvil 2/2 verifica propuesta con proveedor local, confirmación, calendario,
+teclado, persistencia de consumo y breakpoints estrechos. Capturas y comandos reproducibles están en
+`HOGARIA-HOUSEHOLD-PLAN-SPEC.md`. La suite web/cobertura global integrada queda pendiente; por eso no
+se marca `QA-HOME-MEALS.CONSUMPTION.1` completo todavía. El endpoint backend de preview de compra ya es de solo lectura; incluye comidas pendientes
 de hoy, excluye comidas con consumo registrado y asigna primero el stock a ingredientes obligatorios.
 Tests focales pasan 41/41, TSC y hooks pasan; el coverage aislado del store supera todos los umbrales.
 Faltan la revalidación de la suite completa en el árbol integrado, revisión UI y aprobación hacia

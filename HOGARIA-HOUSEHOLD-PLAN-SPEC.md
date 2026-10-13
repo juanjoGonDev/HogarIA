@@ -1113,21 +1113,29 @@ solo su backend o sus pruebas unitarias.
   regresiones y debe revalidarse en el gate integrado. Aún no hay revisión UI ni endpoint de aprobación
   que actualice Compra y preserve filas compradas/manuales, por lo que `QA-HOME-MEALS.SHOPPING.1` sigue
   abierto.
-- **Calendario compartido — backend parcial integrado:** un evento del plan se guarda una vez y sus
-  asignaciones identifican usuarios del hogar. `GET /api/calendar` y `/range` muestran todas las comidas
-  confirmadas del plan a cualquier miembro activo con `calendar.view`, aunque la asignación sea
-  individual; no comparten calendarios personales ni objetivos, notas o prompts privados. Si el lector
-  aún no tiene calendario semanal propio, la ruta proyecta la última semana del plan sin materializar
-  una fila ni copiar objetivos de otra persona. Registrar/corregir consumo sigue limitado a participantes
-  asignados. Test-first confirmó el fallo previo (lector activo no asignado recibía cero comidas); tras
-  el fix, tests focales de calendario/almacén pasan **60/60** con cobertura **88,43/79,56/94,52/90,74 %**
-  (statements/branches/funciones/líneas), `tsc --noEmit` y hooks pasan; la suite focal de consumo sigue
-  pasando **7/7**. Aún falta E2E integrado en escritorio/móvil y mostrar/validar el estado de consumo en
-  la UI del calendario. El consumo dispone de GET/PUT separado, permiso por miembro asignado con
-  `calendar.view`, versiones optimistas, idempotencia, correcciones y un ledger de movimientos de stock
-  transaccional. La coincidencia del producto es estricta por nombre normalizado y unidad; inventario
-  privado, conversión de unidades y sugerencias aproximadas quedan excluidos deliberadamente. Pendientes
-  el recorrido E2E real, UI e integración de compra.
+- **Calendario compartido y registro de consumo — backend/UI integrado:** un evento del plan se guarda
+  una vez y sus asignaciones identifican usuarios del hogar. `GET /api/calendar` y `/range` muestran
+  todas las comidas confirmadas del plan a cualquier miembro activo con `calendar.view`, aunque la
+  asignación sea individual; no comparten calendarios personales ni objetivos, notas o prompts privados.
+  Si el lector aún no tiene calendario semanal propio, la ruta proyecta la última semana del plan sin
+  materializar una fila ni copiar objetivos de otra persona. El evento compartido es de solo lectura para
+  otros miembros; solo sus participantes asignados registran/corrigen el consumo con `calendar.view`. La
+  UI pide realizada/no realizada y raciones reales, envía la versión esperada y permite recuperarse de
+  conflictos sin duplicar movimientos. La coincidencia del producto es estricta por nombre normalizado y
+  unidad; inventario privado, conversión y sugerencias aproximadas quedan excluidos. Test-first confirmó
+  el fallo previo (lector activo no asignado recibía cero comidas); tras el fix, tests focales de
+  calendario/almacén pasan **60/60** con cobertura **88,43/79,56/94,52/90,74 %**
+  (statements/branches/funciones/líneas). Consumo: **30 tests** (schema/store/ruta), cobertura de ruta
+  **88,67/80/100/91,83 %**, store **89,77/80,83/100/92,59 %**; frontend focal **92/92**. E2E sintética
+  aislada de escritorio y móvil **2/2** incluye generación con proveedor local sintético, confirmación,
+  calendario, teclado, guardado de raciones/no realizada y anchos 320×568/568×320; `check:ui`,
+  `typecheck:e2e` y `tsc` pasan. Capturas: `.e2e-screenshots/household-meal-consumption/chromium-consumption.png`
+  y `mobile-chrome-consumption.png`. Las pruebas de servidor usan `DATABASE_PATH=:memory:`; el E2E creó y
+  limpió su DB temporal; no se llamó a proveedor real ni se tocó inventario persistente. El coverage
+  frontend de este subconjunto no es el gate global (su umbral global falla al cargar solo 92 tests); la
+  suite web/cobertura integrada y matriz final siguen pendientes, por lo que
+  `QA-HOME-MEALS.CONSUMPTION.1` aún no se marca completo. Continúan pendientes revisión/aprobación de
+  compra y automatización.
 - **Recetas por ración — backend/UI integrado:** el contrato nuevo usa `baseServings: 1`; la generación
   normaliza cantidades para una ración, el cliente escala cantidades localmente y conserva tiempos y
   receta base, con aviso de cocción por tandas. Los cambios del worktree ya están en esta rama; su
@@ -1145,15 +1153,23 @@ solo su backend o sus pruebas unitarias.
 
   Para consumo, la prueba focal aprueba **3 archivos / 30 tests** (schema, store y ruta); la ruta/store
   suman **22 tests**, con cobertura por fichero de **88,67/80/100/91,83 %** y
-  **89,83/80,83/100/92,63 %** (statements/branches/funciones/líneas). El esquema suma **8 tests** y
+  **89,77/80,83/100/92,59 %** (statements/branches/funciones/líneas). El esquema suma **8 tests** y
   **100/100/100/100 %**. El contrato cubre valores positivos, cero solo para «no realizada», límites,
   versión y propiedades no permitidas. Se ejercitaron retries, correcciones, receta alterada/corrupta,
   rollback, contexto y permisos, cambio de unidad tras deducción parcial o restauración de línea huérfana,
   desactivación de despensa compartida, stock insuficiente, producto ambiguo y recetas ausentes/corruptas.
-  `tsc --noEmit -p tsconfig.json` pasa.
-  Los tests usan `DATABASE_PATH=:memory:` y datos
-  sintéticos; no llaman a servidor, inventario persistente ni proveedor real. La suite completa de
-  servidor y E2E UI no forman parte de esta unidad aislada.
+  `tsc --noEmit -p tsconfig.json` pasa. En el worktree integrado, `pnpm run check:ui`,
+  `pnpm run typecheck:e2e`, 92 pruebas focales de frontend y E2E de consumo 2/2 también pasan.
+  Los tests de servidor usan `DATABASE_PATH=:memory:` y datos sintéticos; no modifican inventario
+  persistente. El E2E levanta app/SQLite temporales y apunta a un proveedor sintético local; tras el
+  test el runner confirma limpieza de DB/artefactos temporales. No hubo llamadas a proveedor real.
+  Comandos de esta unidad (el `test:coverage` filtrado informa el coverage focal; el gate global exige
+  la suite completa y sigue pendiente):
+
+  ```powershell
+  pnpm --filter @hogaria/web exec ng test --no-watch --browsers=ChromeHeadless --include=src/app/core/services/household-meal-consumption.service.spec.ts --include=src/app/features/calendar/calendar-meal-consumption.component.spec.ts --include=src/app/features/calendar/calendar-timeline-consumption-permissions.spec.ts --include=src/app/features/calendar/calendar.component.spec.ts --include=src/app/features/calendar/calendar-event.component.spec.ts --include=src/app/core/services/calendar.service.spec.ts --include=src/app/shared/models/calendar.model.spec.ts
+  pnpm run test:e2e -- --project=chromium --project=mobile-chrome --workers=1 --grep="registra raciones reales"
+  ```
 
   ```powershell
   $env:DATABASE_PATH=':memory:'

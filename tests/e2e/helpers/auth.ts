@@ -17,10 +17,10 @@ function generatedEmail(): string {
   return email;
 }
 
-/** El registro termina en el onboarding (o en el dashboard si ya se configuro). */
+/** El registro termina en el gate obligatorio del hogar, onboarding o dashboard. */
 function waitAfterRegister(page: Page, timeout: number): Promise<boolean> {
   return page
-    .waitForURL(/.*(dashboard|onboarding)/, { timeout })
+    .waitForURL(/.*(dashboard|onboarding|household)/, { timeout })
     .then(() => true)
     .catch(() => false);
 }
@@ -54,7 +54,9 @@ async function submitRegister(
   if (!hasForm) return { ok: await waitAfterRegister(page, 15000) };
 
   const pending = page
-    .waitForResponse((response) => response.url().includes('/api/auth/register'), { timeout: 20000 })
+    .waitForResponse((response) => response.url().includes('/api/auth/register'), {
+      timeout: 20000
+    })
     .catch(() => null);
 
   await form.fill(name);
@@ -75,14 +77,18 @@ async function submitRegister(
  * quedan en el dashboard.
  */
 export async function skipOnboarding(page: Page): Promise<void> {
-  await page.waitForURL(/.*(dashboard|onboarding)/, { timeout: 45000 });
+  await page.waitForURL(/.*(dashboard|onboarding|household)/, { timeout: 45000 });
+  if (page.url().includes('/household')) {
+    await expect(page.locator('.no-household')).toBeVisible({ timeout: 45000 });
+    return;
+  }
   if (!page.url().includes('/onboarding')) return;
 
   await page.getByRole('button', { name: /Saltar por ahora/i }).click();
   await page.waitForURL(/.*dashboard/, { timeout: 45000 });
 }
 
-/** Registra un usuario nuevo y lo deja en el onboarding (sin saltarlo). */
+/** Registra un usuario nuevo y espera su setup obligatorio sin saltarlo. */
 export async function registerToOnboarding(
   page: Page,
   name = 'E2E',
@@ -106,7 +112,7 @@ export async function registerToOnboarding(
     );
   }
 
-  await expect(page).toHaveURL(/.*(dashboard|onboarding)/);
+  await expect(page).toHaveURL(/.*(dashboard|onboarding|household)/);
   return target;
 }
 

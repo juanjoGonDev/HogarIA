@@ -30,6 +30,8 @@ interface MealRow {
   servings: number | null;
   notes: string | null;
   completed: number | boolean | null;
+  isShared?: number | boolean;
+  participantIds?: string[];
 }
 
 interface RangeResponse {
@@ -60,7 +62,9 @@ function toMeal(row: MealRow): CalendarMeal {
     servings: row.servings ?? 1,
     notes: row.notes ?? null,
     completed: row.completed === 1 || row.completed === true,
-    calories: typeof row.recipe_calories === 'number' ? row.recipe_calories : null
+    calories: typeof row.recipe_calories === 'number' ? row.recipe_calories : null,
+    isShared: row.isShared === 1 || row.isShared === true,
+    participantIds: Array.isArray(row.participantIds) ? row.participantIds : []
   };
 }
 

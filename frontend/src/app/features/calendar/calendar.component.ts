@@ -97,6 +97,7 @@ import { CalendarAgendaViewComponent } from './calendar-agenda-view.component';
 import { AiParticipantsComponent } from '../../shared/components/ai-participants.component';
 import { CalendarReplanComponent } from './calendar-replan.component';
 import { CalendarMealCompletionComponent } from './calendar-meal-completion.component';
+import { CalendarMealConsumptionComponent } from './calendar-meal-consumption.component';
 
 interface MealDraft {
   id: string | null;
@@ -163,7 +164,8 @@ const emptyDraft = (date: string, mealType: MealType): MealDraft => ({
     CalendarAgendaViewComponent,
     AiParticipantsComponent,
     CalendarReplanComponent,
-    CalendarMealCompletionComponent
+    CalendarMealCompletionComponent,
+    CalendarMealConsumptionComponent
   ],
   host: {
     '(window:keydown)': 'onKeydown($event)'
@@ -1077,6 +1079,13 @@ const emptyDraft = (date: string, mealType: MealType): MealDraft => ({
         </div>
       </app-modal>
 
+      <app-calendar-meal-consumption
+        *ngIf="selectedSharedMeal() as sharedMeal"
+        [meal]="sharedMeal"
+        [householdId]="selectedSharedMealHouseholdId() ?? ''"
+        (close)="closeSharedMealConsumption()"
+      />
+
       <!-- ══ Objetivos ══ -->
       <app-modal
         [isOpen]="isGoalsModalOpen()"
@@ -1423,6 +1432,17 @@ export class CalendarComponent implements OnInit {
   );
 
   readonly isMealModalOpen = signal(false);
+  readonly selectedSharedMeal = signal<CalendarMeal | null>(null);
+  readonly selectedSharedMealHouseholdId = signal<string | null>(null);
+  private readonly closeSharedMealOnHouseholdChange = effect(() => {
+    const selectedMeal = this.selectedSharedMeal();
+    const selectedHouseholdId = this.selectedSharedMealHouseholdId();
+    const activeHouseholdId = this.householdService.activeHouseholdId();
+    if (selectedMeal && selectedHouseholdId !== activeHouseholdId) {
+      this.selectedSharedMeal.set(null);
+      this.selectedSharedMealHouseholdId.set(null);
+    }
+  });
   readonly mealDeletionFailed = signal(false);
   readonly replacementOpen = signal(false);
   readonly isReplacingMeal = signal(false);
@@ -1583,7 +1603,13 @@ export class CalendarComponent implements OnInit {
       const iso = toISODate(date);
       // Apagar la capa de comidas no es esconder CSS: es no darles nada que pintar,
       // y así cada vista respeta la misma selección de capas.
-      const meals = this.mealsVisible() ? (byDate.get(iso) ?? []) : [];
+      const meals = this.mealsVisible()
+        ? (byDate.get(iso) ?? []).map((meal) =>
+            meal.isShared
+              ? { ...meal, canRecordConsumption: this.canRecordSharedMealConsumption(meal) }
+              : meal
+          )
+        : [];
       const slots = { breakfast: [], lunch: [], dinner: [], snack: [] } as Record<
         MealType,
         CalendarMeal[]
@@ -1894,7 +1920,8 @@ export class CalendarComponent implements OnInit {
       this.isMealModalOpen() ||
       this.isGoalsModalOpen() ||
       this.isGenerateModalOpen() ||
-      this.isEventModalOpen()
+      this.isEventModalOpen() ||
+      this.selectedSharedMeal() !== null
     )
       return;
 
@@ -1976,6 +2003,10 @@ export class CalendarComponent implements OnInit {
   }
 
   openEditModal(meal: CalendarMeal): void {
+    if (meal.isShared) {
+      this.openSharedMealConsumption(meal);
+      return;
+    }
     this.resetReplacementState();
     this.mealDeletionFailed.set(false);
     this.draft = {
@@ -1990,6 +2021,35 @@ export class CalendarComponent implements OnInit {
     };
     this.mealTab.set(meal.recipeId ? 'recipe' : 'custom');
     this.isMealModalOpen.set(true);
+  }
+
+  private openSharedMealConsumption(meal: CalendarMeal): void {
+    if (!this.canRecordSharedMealConsumption(meal)) return;
+    const activeHouseholdId = this.householdService.activeHouseholdId();
+    if (!activeHouseholdId) return;
+    this.selectedSharedMealHouseholdId.set(activeHouseholdId);
+    this.selectedSharedMeal.set(meal);
+  }
+
+  private canRecordSharedMealConsumption(meal: CalendarMeal): boolean {
+    const userId = this.authService.userId();
+    const activeHouseholdId = this.householdService.activeHouseholdId();
+    const household = this.householdService.household();
+    const member = household?.members.find((candidate) => candidate.userId === userId);
+    return Boolean(
+      userId &&
+      activeHouseholdId &&
+      household?.id === activeHouseholdId &&
+      meal.participantIds?.includes(userId) &&
+      member?.isActive &&
+      member.permissions?.calendar?.view === true &&
+      household.myPermissions?.calendar?.view === true
+    );
+  }
+
+  closeSharedMealConsumption(): void {
+    this.selectedSharedMeal.set(null);
+    this.selectedSharedMealHouseholdId.set(null);
   }
 
   toggleReplacementForm(): void {

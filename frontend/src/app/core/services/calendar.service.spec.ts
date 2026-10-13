@@ -368,6 +368,21 @@ describe('CalendarService visible range concurrency', () => {
             servings: null,
             notes: null,
             completed: false
+          },
+          {
+            id: 'shared-meal',
+            date: RANGE_A.start,
+            meal_type: 'dinner',
+            recipe_id: 'recipe-shared',
+            recipe_name: '  Guiso compartido  ',
+            recipe_calories: 500,
+            custom_meal: null,
+            time: '20:00',
+            servings: 4,
+            notes: null,
+            completed: false,
+            isShared: true,
+            participantIds: ['user-1', 'user-2']
           }
         ]
       }
@@ -390,9 +405,15 @@ describe('CalendarService visible range concurrency', () => {
         calories: null,
         servings: 1,
         completed: false
+      }),
+      jasmine.objectContaining({
+        id: 'shared-meal',
+        title: 'Guiso compartido',
+        isShared: true,
+        participantIds: ['user-1', 'user-2']
       })
     ]);
-    expect(service.mealsByDate().get(RANGE_A.start)?.length).toBe(2);
+    expect(service.mealsByDate().get(RANGE_A.start)?.length).toBe(3);
   });
 
   it('reads an auxiliary meal range silently without replacing the visible data', () => {

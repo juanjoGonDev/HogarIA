@@ -36,7 +36,8 @@ export interface Meal {
   completedAt?: Date;
 }
 
-export type DayOfWeek = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
+export type DayOfWeek =
+  'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
 
 export type MealType = 'breakfast' | 'lunch' | 'dinner' | 'snack';
 
@@ -56,13 +57,7 @@ export interface NutritionalGoals {
 }
 
 export type GoalType =
-  | 'balanced'
-  | 'weight-loss'
-  | 'weight-gain'
-  | 'muscle-gain'
-  | 'maintenance'
-  | 'variety'
-  | 'custom';
+  'balanced' | 'weight-loss' | 'weight-gain' | 'muscle-gain' | 'maintenance' | 'variety' | 'custom';
 
 export interface CustomGoal {
   name: string;
@@ -93,7 +88,13 @@ export const GOAL_TYPE_LABELS: Record<GoalType, TranslationKey> = {
 };
 
 export const DAY_ORDER: DayOfWeek[] = [
-  'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'
+  'monday',
+  'tuesday',
+  'wednesday',
+  'thursday',
+  'friday',
+  'saturday',
+  'sunday'
 ];
 
 /**
@@ -179,6 +180,12 @@ export interface CalendarMeal {
   completed: boolean;
   /** Calorías de la receta (por ración), si el plato viene del recetario. */
   calories?: number | null;
+  /** True only for a meal explicitly assigned through a household proposal. */
+  isShared?: boolean;
+  /** Active household users explicitly assigned to this shared meal. */
+  participantIds?: string[];
+  /** Derived client-side permission for the currently active member; never persisted. */
+  canRecordConsumption?: boolean;
 }
 
 /** Un día tal y como lo consume una vista: fecha + sus comidas + resumen. */
@@ -216,7 +223,6 @@ export const MEAL_TYPE_META: Record<MealType, MealTypeMeta> = {
   dinner: { color: 'var(--info)' }
 };
 
-
 /**
  * Día ya preparado para pintar: las comidas repartidas por franja, para que las
  * vistas no llamen a funciones en el template (una por celda y por detección de
@@ -235,7 +241,13 @@ export interface CalendarDayView extends CalendarDay {
  * abajo: vienen del plan semanal y se proyectan, para que no haya dos verdades sobre lo
  * que se cena. Por eso `meal` no tiene META propia: es una CAPA visible, no un evento.
  */
-export const HOUSEHOLD_EVENT_KINDS = ['shopping', 'home', 'appointment', 'personal', 'other'] as const;
+export const HOUSEHOLD_EVENT_KINDS = [
+  'shopping',
+  'home',
+  'appointment',
+  'personal',
+  'other'
+] as const;
 export type HouseholdEventKind = (typeof HOUSEHOLD_EVENT_KINDS)[number];
 
 /** Quien esta invitado a una suelta: nombre y foto, como en todo lo que es identidad. */
@@ -283,11 +295,19 @@ export interface HouseholdEvent {
 
 export const HOUSEHOLD_EVENT_META: Record<
   HouseholdEventKind,
-  { labelKey: TranslationKey; color: string; icon: 'shopping_cart' | 'home' | 'event_available' | 'person' | 'flag' }
+  {
+    labelKey: TranslationKey;
+    color: string;
+    icon: 'shopping_cart' | 'home' | 'event_available' | 'person' | 'flag';
+  }
 > = {
   shopping: { labelKey: 'nav.shopping', color: '#4FA3D1', icon: 'shopping_cart' },
   home: { labelKey: 'household_event.home', color: '#4CAF50', icon: 'home' },
-  appointment: { labelKey: 'household_event.appointment', color: '#E05A5A', icon: 'event_available' },
+  appointment: {
+    labelKey: 'household_event.appointment',
+    color: '#E05A5A',
+    icon: 'event_available'
+  },
   personal: { labelKey: 'household_event.personal', color: '#8E5AC8', icon: 'person' },
   other: { labelKey: 'household_event.other', color: '#8A8F98', icon: 'flag' }
 };
@@ -302,9 +322,7 @@ export type HouseholdRecurrence = (typeof HOUSEHOLD_RECURRENCES)[number];
 
 export type CalendarRecurrenceFrequency = 'daily' | 'weekly' | 'monthly' | 'yearly';
 export type CalendarRecurrenceEnd =
-  | { type: 'never' }
-  | { type: 'date'; date: string }
-  | { type: 'count'; count: number };
+  { type: 'never' } | { type: 'date'; date: string } | { type: 'count'; count: number };
 /** Days follow ISO-8601 numbering: Monday=1 through Sunday=7. */
 export interface CalendarRecurrenceRule {
   frequency: CalendarRecurrenceFrequency;
@@ -314,13 +332,21 @@ export interface CalendarRecurrenceRule {
 }
 
 /** Etiquetas del selector, en el catalogo y no en el componente: el idioma cambia y el campo no. */
-export const HOUSEHOLD_RECURRENCE_META: Record<HouseholdRecurrence, { labelKey: TranslationKey }> = {
-  none: { labelKey: 'calendar.no_se_repite' },
-  daily: { labelKey: 'calendar.todos_los_dias' },
-  weekly: { labelKey: 'calendar.cada_semana' }
-};
+export const HOUSEHOLD_RECURRENCE_META: Record<HouseholdRecurrence, { labelKey: TranslationKey }> =
+  {
+    none: { labelKey: 'calendar.no_se_repite' },
+    daily: { labelKey: 'calendar.todos_los_dias' },
+    weekly: { labelKey: 'calendar.cada_semana' }
+  };
 
-export const HOUSEHOLD_EVENT_COLORS = ['#4FA3D1', '#4CAF50', '#E05A5A', '#8E5AC8', '#C99A2E', '#2FA79B'];
+export const HOUSEHOLD_EVENT_COLORS = [
+  '#4FA3D1',
+  '#4CAF50',
+  '#E05A5A',
+  '#8E5AC8',
+  '#C99A2E',
+  '#2FA79B'
+];
 
 export function eventTimeLabel(event: HouseholdEvent): string {
   if (event.allDay || !event.startTime) return '';

@@ -173,39 +173,45 @@ const MIN_DAY_COLUMN_WIDTH_PX = 48;
                   <span class="tl__now" [style.top.px]="nowTop()" aria-hidden="true"></span>
                 }
                 @for (block of blocksOf(day); track block.item.id) {
-                  <button
-                    type="button"
-                    class="tl__block"
-                    [class.tl__block--meal]="block.item.kind === 'meal'"
-                    [class.is-done]="block.item.meal?.completed"
-                    [style.--event-color]="colorOf(block.item)"
-                    [style.top.px]="block.topPx"
-                    [style.height.px]="block.heightPx"
-                    [style.left.%]="(block.column / block.columns) * 100"
-                    [style.width.%]="100 / block.columns - 0.6"
-                    [attr.title]="tipOf(block.item)"
-                    [attr.data-test]="'timeline-block-' + block.item.kind"
-                    (click)="$event.stopPropagation(); onOpen(block.item)"
-                  >
-                    <span class="tl__block-when">{{ whenOf(block.item) }}</span>
-                    <span class="tl__block-title">{{ titleOf(block.item) }}</span>
-                    @if (facesOf(block.item).length) {
-                      <!-- Las caras son identidad: la de quien escribio el evento (solo si no soy yo,
-                           que para eso esta el boton de salir) y la de quien esta invitado. Un nombre sin
-                           foto es media identidad, y media identidad es lo que hace preguntar «¿cuanta
-                           Ana?» cuando en la casa hay dos. -->
-                      <span class="tl__block-faces" aria-hidden="true">
-                        @for (person of facesOf(block.item); track person.id) {
-                          <app-avatar
-                            [name]="person.name"
-                            [src]="person.avatar ?? undefined"
-                            size="xs"
-                            [title]="person.who"
-                          />
-                        }
-                      </span>
-                    }
-                  </button>
+                  @if (canOpen(block.item)) {
+                    <button
+                      type="button"
+                      class="tl__block"
+                      [class.tl__block--meal]="block.item.kind === 'meal'"
+                      [class.is-done]="block.item.meal?.completed"
+                      [style.--event-color]="colorOf(block.item)"
+                      [style.top.px]="block.topPx"
+                      [style.height.px]="block.heightPx"
+                      [style.left.%]="(block.column / block.columns) * 100"
+                      [style.width.%]="100 / block.columns - 0.6"
+                      [attr.title]="tipOf(block.item)"
+                      [attr.data-test]="'timeline-block-' + block.item.kind"
+                      (click)="$event.stopPropagation(); onOpen(block.item)"
+                    >
+                      <ng-container
+                        *ngTemplateOutlet="timelineBlockContent; context: { $implicit: block.item }"
+                      />
+                    </button>
+                  } @else {
+                    <div
+                      class="tl__block tl__block--readonly tl__block--meal"
+                      [class.is-done]="block.item.meal?.completed"
+                      role="group"
+                      [attr.aria-label]="tipOf(block.item)"
+                      [style.--event-color]="colorOf(block.item)"
+                      [style.top.px]="block.topPx"
+                      [style.height.px]="block.heightPx"
+                      [style.left.%]="(block.column / block.columns) * 100"
+                      [style.width.%]="100 / block.columns - 0.6"
+                      [attr.title]="tipOf(block.item)"
+                      [attr.data-test]="'timeline-block-' + block.item.kind"
+                      (click)="$event.stopPropagation()"
+                    >
+                      <ng-container
+                        *ngTemplateOutlet="timelineBlockContent; context: { $implicit: block.item }"
+                      />
+                    </div>
+                  }
                 }
               </div>
             }
@@ -213,6 +219,27 @@ const MIN_DAY_COLUMN_WIDTH_PX = 48;
         </div>
       </div>
     </div>
+
+    <ng-template #timelineBlockContent let-item>
+      <span class="tl__block-when">{{ whenOf(item) }}</span>
+      <span class="tl__block-title">{{ titleOf(item) }}</span>
+      @if (facesOf(item).length) {
+        <!-- Las caras son identidad: la de quien escribio el evento (solo si no soy yo,
+             que para eso esta el boton de salir) y la de quien esta invitado. Un nombre sin
+             foto es media identidad, y media identidad es lo que hace preguntar «¿cuanta
+             Ana?» cuando en la casa hay dos. -->
+        <span class="tl__block-faces" aria-hidden="true">
+          @for (person of facesOf(item); track person.id) {
+            <app-avatar
+              [name]="person.name"
+              [src]="person.avatar ?? undefined"
+              size="xs"
+              [title]="person.who"
+            />
+          }
+        </span>
+      }
+    </ng-template>
   `,
   styles: [
     `
@@ -477,8 +504,12 @@ const MIN_DAY_COLUMN_WIDTH_PX = 48;
         transition: var(--transition-fast);
       }
 
-      .tl__block:hover {
+      .tl__block:not(.tl__block--readonly):hover {
         background: color-mix(in srgb, var(--event-color, var(--primary)) 28%, var(--bg-secondary));
+      }
+
+      .tl__block--readonly {
+        cursor: default;
       }
 
       .tl__block:focus-visible {
@@ -767,6 +798,14 @@ export class CalendarTimelineComponent implements AfterViewInit, OnChanges {
   protected onOpen(item: TimelineItem): void {
     if (item.kind === 'meal' && item.meal) this.openMeal.emit(item.meal);
     else if (item.kind === 'event' && item.event) this.editEvent.emit(item.event);
+  }
+
+  protected canOpen(item: TimelineItem): boolean {
+    return (
+      item.kind !== 'meal' ||
+      item.meal?.isShared !== true ||
+      item.meal.canRecordConsumption === true
+    );
   }
 
   protected onAddMeal(day: CalendarDayView): void {
