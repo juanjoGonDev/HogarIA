@@ -1,6 +1,6 @@
 # HogarIA — Plano interactivo del hogar y tareas por zonas
 
-Estado: **implementación y auditoría visual cerradas según los criterios de este contrato; PR #47 en Draft · 2026-10-13**
+Estado: **seguimiento de calidad visual abierto por defectos observados en la UI; PR #47 en Draft · 2026-10-13**
 
 Este contrato concreta una nueva capacidad de HogarIA y complementa las reglas compartidas de
 `HOGARIA-SPEC.md` §12ap (aislamiento por hogar, membresía, permisos y proveedor de IA) y §13
@@ -639,3 +639,58 @@ Cobertura verificada localmente (repetición final después de la revisión visu
   configurables nuevos.
 - La geometría generada es un boceto organizativo editable, no documento profesional ni medición
   fiable. La interfaz debe dejar claro que la persona revisa y confirma el resultado.
+
+## Seguimiento de calidad visual — controles y alineación (13-10-2026)
+
+La auditoría previa no se considera cierre suficiente: el usuario observa un switch visiblemente
+descentrado en la barra «Ajustar a cuadrícula» y reporta más inconsistencias. La captura nueva es
+la evidencia de referencia para este seguimiento; no se dará por resuelto el problema por existir
+un control funcional o por pasar checks de estructura. La afirmación de auditoría anterior de que
+«no quedan desajustes geométricos» queda **invalidada como criterio de cierre** hasta repetir la
+inspección visual y geométrica de forma crítica.
+
+### Hallazgos iniciales
+
+- El switch de cuadrícula está duplicado para móvil y escritorio como checkbox nativo oculto más
+  una pista dibujada manualmente (`.plan-snap-switch`, 38×22 px con pseudo-elemento móvil de 16 px).
+- Ajustes usa una tercera apariencia/implementación independiente (`role="switch"`, pista y knob
+  en `settings.component.ts`). No existe un componente de switch compartido que garantice una
+  geometría, foco, estado accesible y comportamiento únicos.
+- La causa exacta del desfase que muestra la captura queda **pendiente de medir en navegador**;
+  no se presume que sea solo el CSS local de la pista. Se auditarán también cascada global, caja de
+  alineación, centro del track/thumb, baseline de etiquetas, foco y estados en PC/móvil.
+
+### Aceptación obligatoria antes de cerrar
+
+- [ ] **Auditoría crítica reproducible:** volver a abrir los seis estados de plano/tareas en
+      servidor Playwright aislado, inspeccionar los controles uno por uno y registrar defectos
+      visibles de alineación, iconos ausentes/incorrectos, tamaño de toque, contraste, recorte,
+      desbordamiento o separación. No descartar un defecto porque `scrollWidth` no detecte overflow.
+- [ ] **Componente compartido `app-switch`:** definir una única pista/thumb, estado on/off,
+      accesibilidad (`role=switch`, nombre, `aria-checked`, deshabilitado/ocupado), teclado,
+      foco visible y objetivo táctil ≥44×44 px; soportar etiqueta/hint externos sin duplicar
+      nombres accesibles. La pista y el knob se posicionan por geometría explícita, no por márgenes
+      de texto ni herencia accidental.
+- [ ] **Unificación de consumidores:** sustituir las variantes desktop/móvil de ajuste de cuadrícula
+      y el switch de módulos de Ajustes por el componente compartido, conservando la persistencia,
+      permisos, bloqueo durante guardado, selectores de pruebas y traducciones.
+- [ ] **Pruebas rojas antes del cambio:** cobertura de componente para cambio repetido, teclado,
+      nombre/estado accesibles, ocupado, deshabilitado y labels; E2E a 1280×970 y 390×950 mide
+      track y thumb en ambos estados y exige centro vertical ≤1 CSS px, márgenes laterales
+      simétricos ≤1 CSS px y hit target ≥44×44 px. Repetir geometría en Ajustes, además de modo
+      oscuro/claro si lo activa el harness.
+- [ ] **Revisión de todos los controles de los seis estados:** corregir cada defecto confirmado,
+      no solo el switch. Verificar que botones/iconos forman una unidad centrada, que controles
+      equivalentes comparten dimensiones/padding/alineación, y que texto/acciones no se solapan ni
+      quedan fuera de la vista. Registrar explícitamente los puntos revisados que no requieren
+      cambios; no ajustar tamaños aislados sin una regla compartida que lo justifique.
+- [ ] **Responsive y accesibilidad:** comprobar estados PC, 390×950, anchura mínima 320×568,
+      orientación 568×320, foco/teclado, contraste, áreas táctiles, safe-area y ausencia de
+      recorte/overflow en editor, propuesta, chat y tareas; verificar la ruta de Ajustes afectada
+      por el switch compartido.
+- [ ] **Evidencia visual:** guardar e inspeccionar capturas sintéticas PC/móvil antes/después y
+      comparar de nuevo las 12 vistas de producto; obtener rects de componentes equivalentes y
+      documentar diferencias reales. No cerrar la spec mientras exista una desalineación
+      reproducible dentro del alcance.
+- [ ] Actualizar resultados/comandos/limitaciones aquí; mantener PR #47 en Draft. Cada unidad va
+      en commit atómico con pruebas, hooks completos y push a la rama actual.
