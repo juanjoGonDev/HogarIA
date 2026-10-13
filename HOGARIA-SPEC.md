@@ -2592,8 +2592,8 @@ no existe por DST se ejecuta en la primera hora válida posterior; una hora dupl
 en la primera ocurrencia. Ante una ejecución automática de generación nueva, el usuario autorizó
 publicar al calendario solo después de la misma validación del servidor; la propuesta manual mantiene
 confirmación explícita y Compra siempre requiere aprobación. El helper puro de siguiente ocurrencia
-pasa 16/16 con cobertura 96,1/97,36/100/95,94 %; todavía no hay configuración persistente, worker ni
-ledger de ejecuciones. Contrato, decisiones de seguridad, comandos y pendientes en
+pasó 16/16 con cobertura 96,1/97,36/100/95,94 % en esa primera etapa, cuando aún no existían
+configuración persistente, worker ni ledger de ejecuciones. Contrato, decisiones de seguridad, comandos y pendientes en
 `HOGARIA-HOUSEHOLD-PLAN-SPEC.md`.
 
 La proyección de tareas semanales en el calendario existente ya tiene implementación backend/UI y
@@ -2611,6 +2611,18 @@ extensión de planificación está verificada en desktop y móvil, incluyendo eq
 consecutivos, preservación de asignaciones manuales durante propuesta/uso explícito y persistencia tras
 Guardar. Comando, capturas sintéticas, límites y resultado reproducible constan en
 `HOGARIA-HOUSEHOLD-PLAN-SPEC.md`, «Estado de implementación y evidencia».
+
+**Actualización de automatización (2026-10-13):** ahora hay configuración/ledger SQLite por hogar,
+poller único, worker con fence de versión, modos generar/repetir, publicación transaccional, pausa y retry
+explícito. Para «Generar» tareas el usuario eligió una propuesta nueva con IA, usando las zonas vigentes y
+la última semana confirmada solo como contexto; el servidor asigna localmente y publica únicamente tras
+validar ámbitos y comprobar que el destino no contiene cambios/conflictos manuales. «Repetir» copia la
+última semana confirmada sin IA. Scheduler **4/4**, worker **14/14**, configuración/rutas **55/55** con
+SQLite en memoria; E2E aislada de configuración **2/2 PC/móvil** cubre guardar/reanudar/pausar/cambiar
+modo/guardar y la versión vigente tras acciones del aviso. No se envió proveedor real ni se ejecutó una
+planificación desde este E2E. La aceptación global sigue abierta hasta cubrir el flujo integrado de
+ocurrencia y los gates/matriz restantes; evidencia, comandos y capturas sintéticas en
+`HOGARIA-HOUSEHOLD-PLAN-SPEC.md`.
 
 ### R. Recurrencia de los eventos de la casa
 

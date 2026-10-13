@@ -1212,12 +1212,12 @@ src/utils/household-meal-shopping-preview.store.spec.ts` pasa **14/14** con `DAT
   redujo el bundle inicial. App/spec/e2e typechecks, Prettier, `check:ui` (239 archivos/21 reglas) y
   `git diff --check` pasan. La suite final de rama y auditoría responsive completa siguen pendientes;
   por eso `QA-HOME-MEALS.SHOPPING.1` permanece abierto.
-- **Automatización semanal — configuración/control backend parcial:** se añadió una configuración única
-  por hogar, apagada por defecto, con GET/PATCH, Zod estricto, versión/CAS, día/hora/zona IANA explícitos,
-  próximo instante mediante el helper DST ya probado y pausa conservadora. El servidor vuelve a comprobar
-  contexto/membresía y exige `settings` para modificar; `calendar.edit` también para activar. Lectura no
-  crea ni repara registros. El ledger persistente de ejecuciones ya tiene store y esquema SQLite; esta
-  unidad añade al GET la última ejecución mediante una proyección allowlist estricta (sin IDs internos,
+- **Automatización semanal — backend integrado; UI y aceptación global parciales:** existe configuración
+  única por hogar, apagada por defecto, con GET/PATCH, Zod estricto, versión/CAS, día/hora/zona IANA
+  explícitos, próximo instante mediante el helper DST ya probado y pausa conservadora. El servidor vuelve
+  a comprobar contexto/membresía y exige `settings` para modificar; `calendar.edit` también para activar.
+  Lectura no crea ni repara registros. El ledger persistente de ejecuciones ya tiene store y esquema SQLite;
+  esta unidad añade al GET la última ejecución mediante una proyección allowlist estricta (sin IDs internos,
   lease, owner ni fencing token) y normaliza los `updated_at` UTC heredados de SQLite. Las pruebas
   existentes cubren configuración apagada, estado `in_progress` con timestamp
   SQLite, resumen `review_required` y ausencia de metadatos internos. El endpoint
@@ -1229,10 +1229,20 @@ src/utils/household-meal-shopping-preview.store.spec.ts` pasa **14/14** con `DAT
   se espera la promesa; la suite del worker/ledger aporta sus pruebas separadas con DB en memoria y
   proveedor sintético. Sin llamadas al proveedor real. Evidencia: **55/55**; cobertura combinada
   **83,64/80/94,73/86,11 %** (statements/branches/funciones/líneas); TypeScript del servidor pasa.
-  La verificación HTTP usa worker simulado, por lo que aún no prueba en un solo flujo endpoint + ledger +
-  generación IA real. Falta la conexión
-  scheduler/start-stop y gates integrados; flujos completos de repetición y publicación siguen pendientes.
-  `QA-HOME-PLANNING.AUTOMATION.1` permanece abierto.
+  La verificación HTTP usa worker simulado; scheduler (4/4) y worker (14/14, incluida generación, repetición,
+  rollback de ámbitos y conflictos de destino) están validados por separado con DB en memoria. El smoke de
+  arranque/parada del scheduler también pasó. Aún no se prueba en un solo flujo ocurrencia vencida → ledger
+  → worker → publicación ni el proveedor real; ese flujo integrado y los gates globales mantienen abierta la
+  aceptación.
+  La E2E aislada de ajustes pasa **2/2 en Chromium/Mobile Chrome** y cubre guardar → reanudar → pausar →
+  cambiar a repetir/comidas → guardar con la versión actual (regresión de un 409 por usar la versión vieja
+  del editor). Comprueba que día/hora/zona y CTA son alcanzables sin solaparse con el aviso fijo tras
+  desplazar la página; revisé capturas sintéticas de PC/móvil. Comando:
+  `pnpm run test:e2e -- --project=chromium --project=mobile-chrome
+tests/e2e/household-planning-automation.spec.ts --workers=1`; `pnpm run typecheck:e2e`, Prettier y
+  `git diff --check` pasan. Usa DB y artefactos temporales; no genera ni repite una planificación ni llama
+  al proveedor. Aún falta un flujo integrado de ocurrencia vencida → worker → publicación, así como la
+  matriz global; `QA-HOME-PLANNING.AUTOMATION.1` permanece abierto.
 - **Calendario compartido y registro de consumo — backend/UI integrado:** un evento del plan se guarda
   una vez y sus asignaciones identifican usuarios del hogar. `GET /api/calendar` y `/range` muestran
   todas las comidas confirmadas del plan a cualquier miembro activo con `calendar.view`, aunque la
@@ -1380,8 +1390,9 @@ test:coverage` pasa **1455 tests**, cobertura **93,49/84,12/93,66/95,4 %**. Los 
   Prettier: TypeScript afectado y `HOGARIA-SPEC.md` pasan; el check de este documento completo ya
   fallaba en la base `cf7283c`, por formato histórico fuera de esta unidad, y no se reformateó en bloque.
 
-El análisis previo del planificador está reflejado arriba para orientar la próxima unidad; todos los
-criterios inferiores permanecen sin marcar hasta validar cada condición en su alcance completo.
+El análisis previo del planificador orienta el trabajo, pero no cierra por sí mismo los criterios
+compuestos. Las subunidades marcadas `[x]` tienen evidencia focal explícita; el cierre global exige validar
+también las condiciones que aún están abiertas.
 
 ### Criterios de aceptación aún no cerrados
 
@@ -1449,6 +1460,17 @@ criterios inferiores permanecen sin marcar hasta validar cada condición en su a
       Evidencia focal: **55/55** schema/ruta con `DATABASE_PATH=:memory:`; worker inyectado con stub en prueba
       HTTP (sin proveedor real), coverage **83,64/80/94,73/86,11 %**, TypeScript servidor pasa. No valida
       en conjunto la reclamación real del ledger a través de HTTP ni el flujo E2E del proveedor.
+
+- [x] En modo `generate`, el worker solicita una propuesta nueva de tareas con JSON Schema estricto,
+      usando las zonas vigentes y la semana confirmada más reciente solo como contexto. No envía nombres,
+      perfiles ni asignaciones al proveedor; asigna localmente de forma equilibrada, evita repetir persona
+      en días consecutivos cuando hay solución y publica todos los ámbitos seleccionados en una única
+      transacción solo tras validar el resultado y el destino vacío. Una propuesta inválida, cancelación,
+      colisión o fallo de otro ámbito no deja publicación parcial. La prueba incluye la semana anterior
+      como contexto y comprueba que no se filtran IDs/detalles/personas.
+      Evidencia: `household-planning-automation.worker.spec.ts`, **14/14** con `DATABASE_PATH=:memory:`;
+      el caso `generates both scopes with strict JSON, assigns tasks locally, and publishes atomically`
+      comprueba ambas llamadas JSON, asignación equitativa, contexto y commit atómico. Sin proveedor real.
 
 Comandos focales:
 
