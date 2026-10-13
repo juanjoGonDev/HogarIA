@@ -1121,9 +1121,23 @@ tests/e2e/household-required-onboarding.spec.ts` (**6/6**, 13-10-2026). Usa inte
   focal final de 6 specs pasa **41/41**, TypeScript y hooks pasan; coverage aislada del store:
   **100/96,29/100/100 %** (statements/branches/funciones/líneas). La suite completa de servidor de
   1501/1 omitida y coverage agregada **91,67/83,14/96,25/94,18 %** fue medida antes de estas dos
-  regresiones y debe revalidarse en el gate integrado. Aún no hay revisión UI ni endpoint de aprobación
-  que actualice Compra y preserve filas compradas/manuales, por lo que `QA-HOME-MEALS.SHOPPING.1` sigue
-  abierto.
+  regresiones y debe revalidarse en el gate integrado. La UI ofrece revisión editable y aprobación
+  explícita en un paso separado. El servidor vuelve a calcular y validar el preview dentro de una
+  transacción antes de reconciliar solo filas pendientes `meal_plan`; una clave persistente evita recrear
+  una línea comprada al repetir la misma aprobación. Las filas compradas, manuales y de otras fuentes
+  quedan intactas; no se escribe en el inventario. El endpoint usa el hogar activo validado incluso si el
+  puntero legado del usuario es nulo y conserva una sola membresía activa. Evidencia de esta unidad: el
+  test de rutas reprodujo ambos fallos antes de corregirlos; después, `pnpm --filter @hogaria/server exec
+vitest run src/routes/shopping-meal-plan-approval.routes.spec.ts
+src/utils/household-meal-shopping-preview.store.spec.ts` pasa **14/14** con `DATABASE_PATH=:memory:`;
+  TypeScript servidor, Karma focal de planificador/servicio **13/13**, `pnpm run check:ui` (238
+  archivos/21 reglas), Prettier y `git diff --check` pasan. El E2E aislado sintético nuevo pasa **1/1 en
+  Chromium y 1/1 en Mobile Chrome**: revisa/edita y cancela sin crear lista ni cambiar despensa; simula
+  502 y verifica que no escribe; aprueba tras reintento, marca como comprada la fila generada, agrega
+  una manual, repite la aprobación y comprueba idempotencia, conservación de ambas filas y despensa
+  intacta. Capturas inspeccionadas: `.e2e-screenshots/household-meal-shopping-approval/chromium-approval.png`
+  y `mobile-chrome-approval.png`. El runner usó DB temporal y fixtures sintéticos, sin llamar a IA.
+  Faltan los gates integrados de la rama; por eso `QA-HOME-MEALS.SHOPPING.1` permanece abierto.
 - **Calendario compartido y registro de consumo — backend/UI integrado:** un evento del plan se guarda
   una vez y sus asignaciones identifican usuarios del hogar. `GET /api/calendar` y `/range` muestran
   todas las comidas confirmadas del plan a cualquier miembro activo con `calendar.view`, aunque la
@@ -1259,7 +1273,8 @@ criterios inferiores permanecen sin marcar hasta validar cada condición en su a
       ambigüedad o unidad distinta y exclusión inicial de ingredientes opcionales; UI con revisión editable
       en paso separado, cancelar/rechazar sin escritura y aprobación que crea/actualiza Compra conservando
       filas compradas/manuales. Errores no mutan Compra ni inventario.
-      Progreso: preview backend de solo lectura integrado; sin UI ni aprobación persistente todavía.
+      Progreso: preview backend, UI de revisión y aprobación persistente integrados; E2E PC/móvil sintético
+      pasa como se detalla arriba; faltan gates integrados antes de cerrar.
 - [ ] **QA-HOME-PLANNING.AUTOMATION.1** — configuración explícita por hogar de día semanal, hora local
       y zona IANA antes de activar; caso de hora inexistente → primera hora válida posterior y hora duplicada
       → primera ocurrencia única. Generar/repetir, play/pause, siguiente fecha, retry e idempotencia; repetir

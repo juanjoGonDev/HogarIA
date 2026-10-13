@@ -448,6 +448,40 @@ export const householdEs = {
     'No se pudo confirmar la propuesta. Sigue disponible para volver a intentarlo.',
   'household.meal_proposal_context_changed':
     'El hogar activo cambió. Vuelve a generar la propuesta para este hogar.',
+  'household.meal_shopping_step': 'Revisar compra',
+  'household.meal_shopping_open_review': 'Revisar ingredientes para la compra',
+  'household.meal_shopping_loading': 'Calculando lo necesario para las comidas…',
+  'household.meal_shopping_review_title': 'Compra para las comidas planificadas',
+  'household.meal_shopping_range': 'Del {start} al {end}',
+  'household.meal_shopping_meal_count': '{count} comidas planificadas',
+  'household.meal_shopping_pantry_private':
+    'El inventario del hogar no está compartido. Revisa las cantidades antes de añadirlas a Compra.',
+  'household.meal_shopping_snapshot_warning':
+    'No se pudieron calcular los ingredientes de la comida del {date}; revisa la receta.',
+  'household.meal_shopping_empty': 'No hay comidas futuras confirmadas en este periodo.',
+  'household.meal_shopping_required': 'Ingredientes necesarios',
+  'household.meal_shopping_optional': 'Ingredientes opcionales',
+  'household.meal_shopping_include': 'Añadir {name} a Compra',
+  'household.meal_shopping_quantity': 'Cantidad',
+  'household.meal_shopping_quantity_for': 'Cantidad de {name} en {unit}',
+  'household.meal_shopping_matched': 'Revisar existencias',
+  'household.meal_shopping_not_found': 'No está en el inventario',
+  'household.meal_shopping_ambiguous': 'Hay varias coincidencias',
+  'household.meal_shopping_unit_mismatch': 'La unidad no coincide',
+  'household.meal_shopping_pantry_not_shared': 'Inventario no compartido',
+  'household.meal_shopping_approved': 'La lista de compra se ha actualizado.',
+  'household.meal_shopping_open_compra': 'Abrir lista de Compra',
+  'household.meal_shopping_back': 'Volver',
+  'household.meal_shopping_approve': 'Añadir selección a Compra',
+  'household.meal_shopping_approving': 'Actualizando Compra…',
+  'household.meal_shopping_view_permission':
+    'Necesitas permiso para ver el calendario del hogar y revisar la compra compartida.',
+  'household.meal_shopping_stale':
+    'Las comidas o las existencias han cambiado. Vuelve a cargar la revisión antes de aprobar.',
+  'household.meal_shopping_invalid_preview':
+    'La revisión no es válida o algún ingrediente ya no corresponde al plan. Vuelve a cargarla.',
+  'household.meal_shopping_error':
+    'No se pudo actualizar Compra. No se ha cambiado el inventario; puedes volver a intentarlo.',
   'household.tasks_title': 'Tareas del hogar',
   'household.tasks_description': 'Elige una zona del plano para organizar su rutina.',
   'household.tasks_more_actions': 'Más acciones de la semana',
@@ -962,6 +996,40 @@ export const householdEn: Record<keyof typeof householdEs, string> = {
     'The proposal could not be confirmed. It is still available to retry.',
   'household.meal_proposal_context_changed':
     'The active household changed. Generate a new proposal for this household.',
+  'household.meal_shopping_step': 'Review shopping',
+  'household.meal_shopping_open_review': 'Review ingredients for shopping',
+  'household.meal_shopping_loading': 'Calculating what the planned meals need…',
+  'household.meal_shopping_review_title': 'Shopping for planned meals',
+  'household.meal_shopping_range': '{start} to {end}',
+  'household.meal_shopping_meal_count': '{count} planned meals',
+  'household.meal_shopping_pantry_private':
+    'The household inventory is not shared. Review quantities before adding them to Shopping.',
+  'household.meal_shopping_snapshot_warning':
+    'Ingredients for the meal on {date} could not be calculated; review its recipe.',
+  'household.meal_shopping_empty': 'There are no confirmed future meals in this period.',
+  'household.meal_shopping_required': 'Required ingredients',
+  'household.meal_shopping_optional': 'Optional ingredients',
+  'household.meal_shopping_include': 'Add {name} to Shopping',
+  'household.meal_shopping_quantity': 'Quantity',
+  'household.meal_shopping_quantity_for': '{name} quantity in {unit}',
+  'household.meal_shopping_matched': 'Review stock',
+  'household.meal_shopping_not_found': 'Not in inventory',
+  'household.meal_shopping_ambiguous': 'Multiple matches found',
+  'household.meal_shopping_unit_mismatch': 'Unit does not match',
+  'household.meal_shopping_pantry_not_shared': 'Inventory is not shared',
+  'household.meal_shopping_approved': 'The shopping list has been updated.',
+  'household.meal_shopping_open_compra': 'Open shopping list',
+  'household.meal_shopping_back': 'Back',
+  'household.meal_shopping_approve': 'Add selection to Shopping',
+  'household.meal_shopping_approving': 'Updating Shopping…',
+  'household.meal_shopping_view_permission':
+    'You need permission to view the household calendar and review shared shopping.',
+  'household.meal_shopping_stale':
+    'Meals or stock have changed. Reload the review before approving.',
+  'household.meal_shopping_invalid_preview':
+    'This review is invalid or an ingredient no longer matches the plan. Reload it.',
+  'household.meal_shopping_error':
+    'Shopping could not be updated. The inventory was not changed; you can try again.',
   'household.tasks_title': 'Household tasks',
   'household.tasks_description': 'Choose an area on the plan to organize its routine.',
   'household.tasks_more_actions': 'More weekly actions',

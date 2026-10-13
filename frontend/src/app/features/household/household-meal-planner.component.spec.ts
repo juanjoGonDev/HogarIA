@@ -1,6 +1,7 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { signal } from '@angular/core';
 import { HttpErrorResponse } from '@angular/common/http';
+import { provideRouter } from '@angular/router';
 import { of, Subject, throwError } from 'rxjs';
 import { HouseholdMealPlannerComponent } from './household-meal-planner.component';
 import { HouseholdMealProposalService } from '../../core/services/household-meal-proposal.service';
@@ -8,6 +9,11 @@ import type {
   HouseholdMealProposal,
   HouseholdMealProposalConfirmation
 } from '../../core/services/household-meal-proposal.service';
+import { HouseholdMealShoppingService } from '../../core/services/household-meal-shopping.service';
+import type {
+  HouseholdMealShoppingApproval,
+  HouseholdMealShoppingPreview
+} from '../../core/services/household-meal-shopping.service';
 import { I18nService } from '../../core/services/i18n.service';
 import type { HouseholdMember } from '../../shared/models/household.model';
 
@@ -92,12 +98,17 @@ describe('HouseholdMealPlannerComponent', () => {
   let fixture: ComponentFixture<HouseholdMealPlannerComponent>;
   let component: HouseholdMealPlannerComponent;
   let service: jasmine.SpyObj<HouseholdMealProposalService>;
+  let shoppingService: jasmine.SpyObj<HouseholdMealShoppingService>;
 
   beforeEach(async () => {
     service = jasmine.createSpyObj<HouseholdMealProposalService>('HouseholdMealProposalService', [
       'createProposal',
       'confirmProposal'
     ]);
+    shoppingService = jasmine.createSpyObj<HouseholdMealShoppingService>(
+      'HouseholdMealShoppingService',
+      ['loadPreview', 'approve']
+    );
     const i18n = {
       resolved: signal<'es' | 'en'>('es'),
       changeTick: signal(0),
@@ -108,7 +119,9 @@ describe('HouseholdMealPlannerComponent', () => {
     await TestBed.configureTestingModule({
       imports: [HouseholdMealPlannerComponent],
       providers: [
+        provideRouter([]),
         { provide: HouseholdMealProposalService, useValue: service },
+        { provide: HouseholdMealShoppingService, useValue: shoppingService },
         { provide: I18nService, useValue: i18n }
       ]
     }).compileComponents();
@@ -148,7 +161,7 @@ describe('HouseholdMealPlannerComponent', () => {
     service.createProposal.and.returnValue(of(proposal()));
 
     const tabs = fixture.nativeElement.querySelectorAll('[data-test^="meal-proposal-step-tab-"]');
-    expect(tabs.length).toBe(2);
+    expect(tabs.length).toBe(3);
     for (const tab of Array.from(tabs) as HTMLButtonElement[]) {
       const panelId = tab.getAttribute('aria-controls');
       expect(panelId).toBeTruthy();
@@ -211,6 +224,187 @@ describe('HouseholdMealPlannerComponent', () => {
     expect(component.confirmed()).toBeTrue();
     expect(component.canConfirm()).toBeFalse();
     expect(fixture.nativeElement.textContent).toContain('household.meal_proposal_saved');
+  });
+
+  it('opens a separate read-only shopping review with required items selected and optionals excluded', () => {
+    const preview: HouseholdMealShoppingPreview = {
+      startDate: '2026-10-13',
+      endDate: '2026-11-12',
+      previewId: 'a'.repeat(64),
+      sharedPantry: true,
+      plannedMealCount: 3,
+      requiredIngredients: [
+        {
+          name: 'Arroz',
+          unit: 'g',
+          quantity: 200,
+          stockQuantity: 50,
+          missingQuantity: 150,
+          status: 'matched'
+        },
+        {
+          name: 'Harina',
+          unit: 'g',
+          quantity: 40,
+          stockQuantity: null,
+          missingQuantity: null,
+          status: 'ambiguous'
+        },
+        {
+          name: 'Tomate',
+          unit: 'ud',
+          quantity: 2,
+          stockQuantity: 0,
+          missingQuantity: 2,
+          status: 'not_found'
+        }
+      ],
+      optionalIngredients: [
+        {
+          name: 'Aceite',
+          unit: 'ml',
+          quantity: 15,
+          stockQuantity: null,
+          missingQuantity: null,
+          status: 'unit_mismatch'
+        }
+      ],
+      warnings: [{ code: 'RECIPE_SNAPSHOT_UNAVAILABLE', date: '2026-10-18' }]
+    };
+    shoppingService.loadPreview.and.returnValue(of(preview));
+
+    const beforeWriteCount = shoppingService.approve.calls.count();
+    component.openShoppingReview();
+    fixture.detectChanges();
+
+    expect(shoppingService.loadPreview).toHaveBeenCalledOnceWith(
+      'home-1',
+      jasmine.any(String),
+      jasmine.any(String)
+    );
+    expect(shoppingService.approve.calls.count()).toBe(beforeWriteCount);
+    expect(component.activeMealStep()).toBe('shopping');
+    expect(component.shoppingLines().map((line) => [line.name, line.included])).toEqual([
+      ['Arroz', true],
+      ['Harina', false],
+      ['Tomate', true],
+      ['Aceite', false]
+    ]);
+    expect(fixture.nativeElement.textContent).toContain('household.meal_shopping_ambiguous');
+    expect(fixture.nativeElement.textContent).toContain('household.meal_shopping_unit_mismatch');
+    expect(fixture.nativeElement.textContent).toContain('household.meal_shopping_snapshot_warning');
+
+    const tabs = fixture.nativeElement.querySelectorAll('[data-test^="meal-proposal-step-tab-"]');
+    expect(tabs.length).toBe(3);
+    for (const tab of Array.from(tabs) as HTMLButtonElement[]) {
+      const panelId = tab.getAttribute('aria-controls');
+      expect(panelId).toBeTruthy();
+      expect(fixture.nativeElement.querySelector(`#${panelId}`)).not.toBeNull();
+    }
+    expect(
+      fixture.nativeElement.querySelector('[data-test="meal-proposal-step-panel-review"]').hidden
+    ).toBeTrue();
+    expect(
+      fixture.nativeElement.querySelector('[data-test="meal-shopping-step-panel"]').hidden
+    ).toBeFalse();
+  });
+
+  it('approves only the checked editable quantities after an explicit confirmation action', () => {
+    const preview: HouseholdMealShoppingPreview = {
+      startDate: '2026-10-13',
+      endDate: '2026-11-12',
+      previewId: 'c'.repeat(64),
+      sharedPantry: true,
+      plannedMealCount: 1,
+      requiredIngredients: [
+        {
+          name: 'Arroz',
+          unit: 'g',
+          quantity: 200,
+          stockQuantity: 50,
+          missingQuantity: 150,
+          status: 'matched'
+        }
+      ],
+      optionalIngredients: [
+        {
+          name: 'Orégano',
+          unit: 'g',
+          quantity: 4,
+          stockQuantity: 0,
+          missingQuantity: 4,
+          status: 'not_found'
+        }
+      ],
+      warnings: []
+    };
+    const approval: HouseholdMealShoppingApproval = {
+      listId: 'list-synthetic',
+      version: 1,
+      created: true,
+      idempotent: false,
+      added: 1,
+      updated: 0,
+      removed: 0
+    };
+    shoppingService.loadPreview.and.returnValue(of(preview));
+    shoppingService.approve.and.returnValue(of(approval));
+    component.openShoppingReview();
+    fixture.detectChanges();
+    component.setShoppingQuantity('arroz', 175);
+    fixture.detectChanges();
+
+    expect(shoppingService.approve).not.toHaveBeenCalled();
+    component.approveShopping();
+    fixture.detectChanges();
+
+    expect(shoppingService.approve).toHaveBeenCalledOnceWith('home-1', {
+      startDate: preview.startDate,
+      endDate: preview.endDate,
+      previewId: preview.previewId,
+      items: [{ name: 'Arroz', unit: 'g', quantity: 175 }]
+    });
+    expect(component.shoppingApproval()).toEqual(approval);
+    expect(
+      fixture.nativeElement.querySelector('[data-test="meal-shopping-compra-link"]')
+    ).not.toBeNull();
+  });
+
+  it('leaves the preview without writing and rejects invalid edited quantities locally', () => {
+    const preview: HouseholdMealShoppingPreview = {
+      startDate: '2026-10-13',
+      endDate: '2026-11-12',
+      previewId: 'd'.repeat(64),
+      sharedPantry: false,
+      plannedMealCount: 1,
+      requiredIngredients: [
+        {
+          name: 'Arroz',
+          unit: 'g',
+          quantity: 200,
+          stockQuantity: null,
+          missingQuantity: null,
+          status: 'pantry_not_shared'
+        }
+      ],
+      optionalIngredients: [],
+      warnings: []
+    };
+    shoppingService.loadPreview.and.returnValue(of(preview));
+    component.openShoppingReview();
+    fixture.detectChanges();
+    expect(component.canApproveShopping()).toBeFalse();
+    expect(fixture.nativeElement.textContent).toContain('household.meal_shopping_pantry_private');
+
+    component.setShoppingQuantity('arroz', 0);
+    fixture.detectChanges();
+    expect(component.canApproveShopping()).toBeFalse();
+    component.setShoppingQuantity('arroz', 200);
+    component.cancelShoppingReview();
+    fixture.detectChanges();
+
+    expect(shoppingService.approve).not.toHaveBeenCalled();
+    expect(component.activeMealStep()).toBe('prepare');
   });
 
   it('invalidates a preview when week or participant selection changes', () => {

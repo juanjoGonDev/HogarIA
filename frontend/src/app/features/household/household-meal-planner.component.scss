@@ -422,6 +422,178 @@
   font-weight: var(--font-semibold);
 }
 
+.meal-planner__shopping-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.meal-planner__shopping-header h3,
+.meal-planner__shopping-group legend {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--text-base);
+  font-weight: var(--font-semibold);
+  line-height: var(--leading-tight);
+}
+
+.meal-planner__shopping-header p {
+  margin: var(--space-1) 0 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+}
+
+.meal-planner__shopping-group {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.meal-planner__shopping-group legend {
+  width: 100%;
+  padding: 0 0 var(--space-2);
+  border-bottom: 1px solid var(--border-default);
+}
+
+.meal-planner__shopping-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(8rem, 0.48fr) minmax(12rem, 0.7fr);
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 56px;
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--border-default);
+}
+
+.meal-planner__shopping-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: 44px;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.meal-planner__shopping-item input {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  accent-color: var(--primary);
+}
+
+.meal-planner__shopping-name {
+  overflow-wrap: anywhere;
+}
+
+.meal-planner__shopping-status {
+  width: fit-content;
+  max-width: 100%;
+  padding: 3px var(--space-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-full);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+  overflow-wrap: anywhere;
+}
+
+.meal-planner__shopping-status[data-status='matched'] {
+  border-color: var(--color-success-100);
+  color: var(--color-success-700);
+}
+
+.meal-planner__shopping-status[data-status='not_found'],
+.meal-planner__shopping-status[data-status='ambiguous'],
+.meal-planner__shopping-status[data-status='unit_mismatch'],
+.meal-planner__shopping-status[data-status='pantry_not_shared'] {
+  border-color: var(--color-warning-100);
+  color: var(--color-warning-700);
+}
+
+.meal-planner__shopping-quantity {
+  display: grid;
+  grid-template-columns: auto minmax(4.5rem, 6rem) auto;
+  align-items: center;
+  justify-content: end;
+  gap: var(--space-2);
+  min-height: 44px;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+.meal-planner__shopping-quantity input {
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--text-sm);
+}
+
+.meal-planner__shopping-quantity input:focus-visible,
+.meal-planner__shopping-item input:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.meal-planner__shopping-quantity input:disabled {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  opacity: 0.75;
+}
+
+.meal-planner__shopping-success {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-success-100);
+  border-radius: var(--radius-md);
+  background: var(--success-subtle);
+}
+
+.meal-planner__shopping-success p {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+}
+
+.meal-planner__shopping-success a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: 44px;
+  color: var(--primary-dark);
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  text-decoration: none;
+}
+
+.meal-planner__shopping-success a:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.meal-planner__shopping-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-default);
+}
+
 @media (max-width: 767px) {
   .meal-planner__controls {
     grid-template-columns: minmax(0, 1fr);
@@ -433,14 +605,39 @@
   }
 
   .meal-planner__actions,
-  .meal-planner__review-footer {
+  .meal-planner__review-footer,
+  .meal-planner__shopping-actions {
     align-items: stretch;
     flex-direction: column;
   }
 
   .meal-planner__actions app-button ::ng-deep button,
-  .meal-planner__review-footer app-button ::ng-deep button {
+  .meal-planner__review-footer app-button ::ng-deep button,
+  .meal-planner__shopping-actions app-button ::ng-deep button {
     width: 100%;
+  }
+
+  .meal-planner__shopping-line {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: var(--space-2) var(--space-3);
+  }
+
+  .meal-planner__shopping-item {
+    grid-column: 1 / -1;
+  }
+
+  .meal-planner__shopping-status {
+    align-self: start;
+  }
+
+  .meal-planner__shopping-quantity {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .meal-planner__shopping-success {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .meal-planner__selection-count {

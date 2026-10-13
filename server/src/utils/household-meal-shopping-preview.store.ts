@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { createHash } from 'node:crypto';
 import type { HouseholdMealShoppingPreviewQuery } from '../schemas/household-meal-shopping-preview.schema.js';
 import { normalizeIngredientMatchKey } from './ingredient-match.js';
 
@@ -53,6 +54,14 @@ export type HouseholdMealShoppingPreview = {
   optionalIngredients: ShoppingPreviewIngredient[];
   warnings: Array<{ code: 'RECIPE_SNAPSHOT_UNAVAILABLE'; date: string }>;
 };
+
+/** Stable token that binds an approval to the exact household, range, needs, and stock snapshot. */
+export function householdMealShoppingPreviewId(
+  householdId: string,
+  preview: HouseholdMealShoppingPreview
+): string {
+  return createHash('sha256').update(JSON.stringify({ householdId, preview })).digest('hex');
+}
 
 export class HouseholdMealShoppingPreviewError extends Error {
   constructor(readonly code: 'HOUSEHOLD_NOT_FOUND') {

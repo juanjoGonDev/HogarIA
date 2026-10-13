@@ -473,6 +473,20 @@ async function runMigrations(db: Database.Database): Promise<void> {
       FOREIGN KEY (list_id) REFERENCES shopping_lists(id) ON DELETE CASCADE
     );
 
+    -- Approval idempotency records survive checked-list mutations so an exact retry cannot
+    -- recreate a purchased meal-plan item after its original request has already committed.
+    CREATE TABLE IF NOT EXISTS household_meal_shopping_approvals (
+      household_id TEXT NOT NULL,
+      preview_id TEXT NOT NULL,
+      request_hash TEXT NOT NULL,
+      list_id TEXT,
+      version INTEGER,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (household_id, preview_id, request_hash),
+      FOREIGN KEY (household_id) REFERENCES households(id) ON DELETE CASCADE,
+      FOREIGN KEY (list_id) REFERENCES shopping_lists(id) ON DELETE SET NULL
+    );
+
     -- Lo pagado por quantity unidades (un ticket dice eso, no el precio unitario)
     CREATE TABLE IF NOT EXISTS price_observations (
       id TEXT PRIMARY KEY,

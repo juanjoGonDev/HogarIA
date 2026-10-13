@@ -534,6 +534,9 @@ function completeMemberPermissions(value: unknown, role: MemberRole): MemberPerm
               *ngIf="mealPlannerVisited()"
               [householdId]="household.id"
               [canEdit]="household.myPermissions?.calendar?.edit ?? household.myRole === 'admin'"
+              [canViewShopping]="
+                household.myPermissions?.calendar?.view ?? household.myRole === 'admin'
+              "
               [members]="household.members"
             />
           </section>

@@ -12,6 +12,7 @@ import {
   signal
 } from '@angular/core';
 import { HttpErrorResponse } from '@angular/common/http';
+import { RouterLink } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { finalize, Subscription } from 'rxjs';
 import type { TranslationKey } from '../../core/i18n';
@@ -22,6 +23,13 @@ import type {
   HouseholdMealProposalEvent,
   HouseholdMealProposalIngredient
 } from '../../core/services/household-meal-proposal.service';
+import { HouseholdMealShoppingService } from '../../core/services/household-meal-shopping.service';
+import type {
+  HouseholdMealShoppingApproval,
+  HouseholdMealShoppingIngredient,
+  HouseholdMealShoppingPreview,
+  HouseholdMealShoppingStockStatus
+} from '../../core/services/household-meal-shopping.service';
 import { I18nService } from '../../core/services/i18n.service';
 import { ButtonComponent } from '../../shared/components/ui/button/button.component';
 import { CheckboxComponent } from '../../shared/components/ui/checkbox/checkbox.component';
@@ -44,13 +52,29 @@ interface ProposalContext {
   memberIds: string[];
 }
 
-type HouseholdMealProposalStep = 'prepare' | 'review';
+type HouseholdMealProposalStep = 'prepare' | 'review' | 'shopping';
+
+interface ShoppingDraftLine extends HouseholdMealShoppingIngredient {
+  key: string;
+  optional: boolean;
+  included: boolean;
+  addQuantity: number;
+}
+
+const SHOPPING_STATUS_LABELS: Record<HouseholdMealShoppingStockStatus, TranslationKey> = {
+  matched: 'household.meal_shopping_matched',
+  not_found: 'household.meal_shopping_not_found',
+  ambiguous: 'household.meal_shopping_ambiguous',
+  unit_mismatch: 'household.meal_shopping_unit_mismatch',
+  pantry_not_shared: 'household.meal_shopping_pantry_not_shared'
+};
 
 @Component({
   selector: 'app-household-meal-planner',
   standalone: true,
   imports: [
     CommonModule,
+    RouterLink,
     TranslatePipe,
     ButtonComponent,
     CheckboxComponent,
@@ -64,13 +88,17 @@ type HouseholdMealProposalStep = 'prepare' | 'review';
 export class HouseholdMealPlannerComponent implements OnChanges, OnDestroy {
   @Input({ required: true }) householdId = '';
   @Input() canEdit = false;
+  @Input() canViewShopping = true;
   @Input() members: HouseholdMember[] = [];
 
   private readonly service = inject(HouseholdMealProposalService);
+  private readonly shoppingService = inject(HouseholdMealShoppingService);
   private readonly i18n = inject(I18nService);
   private readonly destroyRef = inject(DestroyRef);
   private generation = 0;
   private request?: Subscription;
+  private shoppingGeneration = 0;
+  private shoppingRequest?: Subscription;
 
   readonly membersState = signal<HouseholdMember[]>([]);
   readonly eligibleMembers = computed(() =>
@@ -91,6 +119,34 @@ export class HouseholdMealPlannerComponent implements OnChanges, OnDestroy {
   readonly unresolvedEventsCount = signal(0);
   readonly activeMealStep = signal<HouseholdMealProposalStep>('prepare');
   readonly selectedProposalDate = signal('');
+  readonly shoppingPreview = signal<HouseholdMealShoppingPreview | null>(null);
+  readonly shoppingLines = signal<ShoppingDraftLine[]>([]);
+  readonly shoppingLoading = signal(false);
+  readonly shoppingSaving = signal(false);
+  readonly shoppingErrorKey = signal<TranslationKey | null>(null);
+  readonly shoppingApproval = signal<HouseholdMealShoppingApproval | null>(null);
+  readonly shoppingReturnStep = signal<'prepare' | 'review'>('review');
+  readonly requiredShoppingLines = computed(() =>
+    this.shoppingLines().filter((line) => !line.optional)
+  );
+  readonly optionalShoppingLines = computed(() =>
+    this.shoppingLines().filter((line) => line.optional)
+  );
+  readonly canApproveShopping = computed(() => {
+    const selected = this.shoppingLines().filter((line) => line.included);
+    return (
+      this.canViewShopping &&
+      Boolean(this.shoppingPreview()) &&
+      selected.length > 0 &&
+      selected.every(
+        (line) =>
+          Number.isFinite(line.addQuantity) && line.addQuantity > 0 && line.addQuantity <= 10_000
+      ) &&
+      !this.shoppingLoading() &&
+      !this.shoppingSaving() &&
+      !this.shoppingApproval()
+    );
+  });
   readonly hasConfirmableMeals = computed(
     () => this.proposal()?.events.some((event) => event.status === 'scheduled') ?? false
   );
@@ -174,6 +230,8 @@ export class HouseholdMealPlannerComponent implements OnChanges, OnDestroy {
   ngOnDestroy(): void {
     this.generation += 1;
     this.request?.unsubscribe();
+    this.shoppingGeneration += 1;
+    this.shoppingRequest?.unsubscribe();
   }
 
   toggleMember(memberId: string, checked: boolean): void {
@@ -299,21 +357,153 @@ export class HouseholdMealPlannerComponent implements OnChanges, OnDestroy {
   }
 
   selectMealStep(step: HouseholdMealProposalStep): void {
+    if (step === 'shopping') {
+      this.openShoppingReview();
+      return;
+    }
     this.activeMealStep.set(step);
   }
 
   onMealStepKeydown(event: KeyboardEvent): void {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault();
-    const currentIndex = this.activeMealStep() === 'prepare' ? 0 : 1;
-    const nextIndex = event.key === 'Home' ? 0 : event.key === 'End' ? 1 : (currentIndex + 1) % 2;
-    const next: HouseholdMealProposalStep = nextIndex === 0 ? 'prepare' : 'review';
+    const steps: HouseholdMealProposalStep[] = ['prepare', 'review', 'shopping'];
+    const currentIndex = steps.indexOf(this.activeMealStep());
+    const nextIndex =
+      event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? steps.length - 1
+          : (currentIndex + (event.key === 'ArrowRight' ? 1 : -1) + steps.length) % steps.length;
+    const next = steps[nextIndex];
     const list = (event.currentTarget as HTMLElement | null)?.parentElement;
     const tab = list?.querySelector<HTMLButtonElement>(
       `[data-test="meal-proposal-step-tab-${next}"]`
     );
     tab?.focus({ preventScroll: true });
-    this.selectMealStep(next);
+    if (next === 'shopping') this.openShoppingReview();
+    else this.selectMealStep(next);
+  }
+
+  openShoppingReview(): void {
+    if (!this.canViewShopping || !this.householdId || this.shoppingLoading()) return;
+    this.shoppingReturnStep.set(this.activeMealStep() === 'prepare' ? 'prepare' : 'review');
+    const householdId = this.householdId;
+    const startDate = new Date().toISOString().slice(0, 10);
+    const endDate = addDays(startDate, 30);
+    const requestId = ++this.shoppingGeneration;
+    this.shoppingRequest?.unsubscribe();
+    this.shoppingPreview.set(null);
+    this.shoppingLines.set([]);
+    this.shoppingApproval.set(null);
+    this.shoppingErrorKey.set(null);
+    this.shoppingLoading.set(true);
+    this.activeMealStep.set('shopping');
+    this.shoppingRequest = this.shoppingService
+      .loadPreview(householdId, startDate, endDate)
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        finalize(() => {
+          if (requestId === this.shoppingGeneration) this.shoppingLoading.set(false);
+        })
+      )
+      .subscribe({
+        next: (preview) => {
+          if (requestId !== this.shoppingGeneration || householdId !== this.householdId) return;
+          if (!isShoppingPreviewForRange(preview, startDate, endDate)) {
+            this.shoppingErrorKey.set('household.meal_shopping_invalid_preview');
+            return;
+          }
+          this.shoppingPreview.set(preview);
+          this.shoppingLines.set([
+            ...preview.requiredIngredients.map((ingredient) =>
+              makeShoppingDraftLine(ingredient, false)
+            ),
+            ...preview.optionalIngredients.map((ingredient) =>
+              makeShoppingDraftLine(ingredient, true)
+            )
+          ]);
+        },
+        error: (error: unknown) => {
+          if (requestId !== this.shoppingGeneration || householdId !== this.householdId) return;
+          this.shoppingErrorKey.set(this.shoppingErrorTranslation(error));
+        }
+      });
+  }
+
+  setShoppingIncluded(key: string, included: boolean): void {
+    if (this.shoppingSaving() || this.shoppingApproval()) return;
+    this.shoppingLines.update((lines) =>
+      lines.map((line) => (line.key === key ? { ...line, included } : line))
+    );
+  }
+
+  setShoppingQuantity(keyOrName: string, quantity: number): void {
+    if (this.shoppingSaving() || this.shoppingApproval()) return;
+    const normalized = normalizeShoppingName(keyOrName);
+    this.shoppingLines.update((lines) =>
+      lines.map((line) =>
+        line.key === keyOrName || normalizeShoppingName(line.name) === normalized
+          ? { ...line, addQuantity: quantity }
+          : line
+      )
+    );
+  }
+
+  approveShopping(): void {
+    const preview = this.shoppingPreview();
+    if (!preview || !this.canApproveShopping()) return;
+    const householdId = this.householdId;
+    const requestId = ++this.shoppingGeneration;
+    this.shoppingRequest?.unsubscribe();
+    this.shoppingErrorKey.set(null);
+    this.shoppingSaving.set(true);
+    this.shoppingRequest = this.shoppingService
+      .approve(householdId, {
+        startDate: preview.startDate,
+        endDate: preview.endDate,
+        previewId: preview.previewId,
+        items: this.shoppingLines()
+          .filter((line) => line.included)
+          .map((line) => ({ name: line.name, unit: line.unit, quantity: line.addQuantity }))
+      })
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        finalize(() => {
+          if (requestId === this.shoppingGeneration) this.shoppingSaving.set(false);
+        })
+      )
+      .subscribe({
+        next: (approval) => {
+          if (requestId !== this.shoppingGeneration || householdId !== this.householdId) return;
+          this.shoppingApproval.set(approval);
+        },
+        error: (error: unknown) => {
+          if (requestId !== this.shoppingGeneration || householdId !== this.householdId) return;
+          this.shoppingErrorKey.set(this.shoppingErrorTranslation(error));
+        }
+      });
+  }
+
+  cancelShoppingReview(): void {
+    this.shoppingGeneration += 1;
+    this.shoppingRequest?.unsubscribe();
+    this.shoppingRequest = undefined;
+    this.shoppingLoading.set(false);
+    this.shoppingSaving.set(false);
+    this.shoppingPreview.set(null);
+    this.shoppingLines.set([]);
+    this.shoppingApproval.set(null);
+    this.shoppingErrorKey.set(null);
+    this.activeMealStep.set(this.shoppingReturnStep());
+  }
+
+  shoppingStatusLabel(status: HouseholdMealShoppingStockStatus): TranslationKey {
+    return SHOPPING_STATUS_LABELS[status];
+  }
+
+  trackShoppingLine(_index: number, line: ShoppingDraftLine): string {
+    return line.key;
   }
 
   selectProposalDate(value: string): void {
@@ -368,6 +558,9 @@ export class HouseholdMealPlannerComponent implements OnChanges, OnDestroy {
     this.generation += 1;
     this.request?.unsubscribe();
     this.request = undefined;
+    this.shoppingGeneration += 1;
+    this.shoppingRequest?.unsubscribe();
+    this.shoppingRequest = undefined;
     this.proposal.set(null);
     this.proposalContext.set(null);
     this.confirmed.set(false);
@@ -376,6 +569,12 @@ export class HouseholdMealPlannerComponent implements OnChanges, OnDestroy {
     this.selectedMemberIds.set([]);
     this.activeMealStep.set('prepare');
     this.selectedProposalDate.set('');
+    this.shoppingPreview.set(null);
+    this.shoppingLines.set([]);
+    this.shoppingApproval.set(null);
+    this.shoppingErrorKey.set(null);
+    this.shoppingLoading.set(false);
+    this.shoppingSaving.set(false);
     this.errorKey.set('household.meal_proposal_context_changed');
     this.successKey.set(null);
   }
@@ -433,6 +632,23 @@ export class HouseholdMealPlannerComponent implements OnChanges, OnDestroy {
           : 'household.meal_proposal_generate_error';
     }
   }
+
+  private shoppingErrorTranslation(error: unknown): TranslationKey {
+    const code = error instanceof HttpErrorResponse ? error.error?.code : undefined;
+    switch (code) {
+      case 'HOUSEHOLD_CONTEXT_CHANGED':
+        return 'household.meal_proposal_context_changed';
+      case 'HOUSEHOLD_CALENDAR_VIEW_REQUIRED':
+        return 'household.meal_shopping_view_permission';
+      case 'MEAL_SHOPPING_PREVIEW_STALE':
+        return 'household.meal_shopping_stale';
+      case 'INVALID_MEAL_SHOPPING_APPROVAL':
+      case 'MEAL_SHOPPING_ITEM_NOT_IN_PREVIEW':
+        return 'household.meal_shopping_invalid_preview';
+      default:
+        return 'household.meal_shopping_error';
+    }
+  }
 }
 
 function mealOrder(mealType: MealType): number {
@@ -457,4 +673,45 @@ function mondayIsoDate(date: Date): string {
   const monday = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
   monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7));
   return monday.toISOString().slice(0, 10);
+}
+
+function makeShoppingDraftLine(
+  ingredient: HouseholdMealShoppingIngredient,
+  optional: boolean
+): ShoppingDraftLine {
+  const defaultQuantity =
+    ingredient.missingQuantity !== null && ingredient.missingQuantity > 0
+      ? ingredient.missingQuantity
+      : ingredient.quantity;
+  return {
+    ...ingredient,
+    key: JSON.stringify([normalizeShoppingName(ingredient.name), ingredient.unit]),
+    optional,
+    included:
+      !optional &&
+      (ingredient.status === 'not_found' ||
+        (ingredient.status === 'matched' && (ingredient.missingQuantity ?? 0) > 0)),
+    addQuantity: defaultQuantity
+  };
+}
+
+function normalizeShoppingName(value: string): string {
+  return value.normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleUpperCase('es');
+}
+
+function isShoppingPreviewForRange(
+  preview: HouseholdMealShoppingPreview,
+  startDate: string,
+  endDate: string
+): boolean {
+  return (
+    preview.startDate === startDate &&
+    preview.endDate === endDate &&
+    /^[a-f0-9]{64}$/.test(preview.previewId) &&
+    Number.isInteger(preview.plannedMealCount) &&
+    preview.plannedMealCount >= 0 &&
+    Array.isArray(preview.requiredIngredients) &&
+    Array.isArray(preview.optionalIngredients) &&
+    Array.isArray(preview.warnings)
+  );
 }

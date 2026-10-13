@@ -28,6 +28,7 @@ import {
   updateItemSchema,
   updateListSchema
 } from '../schemas/shopping.schema.js';
+import { householdMealShoppingApprovalSchema } from '../schemas/household-meal-shopping-approval.schema.js';
 import {
   catalogueForPrompt,
   ensureDefaultCategories,
@@ -60,6 +61,15 @@ import {
 import { streamSSE } from 'hono/streaming';
 import type { AppEnv } from '../types/hono-env.js';
 import { caducidadesDe, comprasDeLaCasa, hoy } from '../utils/caducidades.js';
+import {
+  hasActiveHouseholdMemberships,
+  readActiveHouseholdId
+} from '../utils/household-context.js';
+import {
+  HouseholdMealShoppingApprovalError,
+  approveHouseholdMealShopping
+} from '../utils/household-meal-shopping-approval.store.js';
+import { canViewSharedMeals } from '../utils/shared-meal-calendar.store.js';
 import {
   necesidadesDelPlan,
   preciosDeLaCasa,
@@ -108,6 +118,15 @@ function getScope(userId: string): Scope {
     clause: '(user_id = ? AND household_id IS NULL)',
     params: [userId],
     householdId: null
+  };
+}
+
+/** Scope list reads from the already validated active membership, including legacy null pointers. */
+function getActiveHouseholdScope(userId: string, householdId: string): Scope {
+  return {
+    clause: '((user_id = ? AND household_id IS NULL) OR household_id = ?)',
+    params: [userId, householdId],
+    householdId
   };
 }
 
@@ -2118,6 +2137,94 @@ shoppingRoutes.post('/suggested', async (c) => {
     },
     creada ? 201 : 200
   );
+});
+
+/** Explicit, household-scoped approval of the current read-only meal shopping preview. */
+shoppingRoutes.post('/meal-plan/approve', async (c) => {
+  const db = getDatabase();
+  const userId = c.get('userId');
+  const householdId = readActiveHouseholdId(db, userId);
+  if (!householdId) {
+    return c.json(
+      {
+        success: false,
+        code: hasActiveHouseholdMemberships(db, userId)
+          ? 'HOUSEHOLD_SELECTION_REQUIRED'
+          : 'HOUSEHOLD_REQUIRED'
+      },
+      hasActiveHouseholdMemberships(db, userId) ? 409 : 404
+    );
+  }
+  if (c.req.header('x-household-id') !== householdId) {
+    return c.json({ success: false, code: 'HOUSEHOLD_CONTEXT_CHANGED' }, 409);
+  }
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ success: false, code: 'INVALID_MEAL_SHOPPING_APPROVAL' }, 400);
+  }
+  const parsed = householdMealShoppingApprovalSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ success: false, code: 'INVALID_MEAL_SHOPPING_APPROVAL' }, 400);
+  }
+
+  // Body parsing yields to the event loop; never apply the approval to a newly selected home.
+  if (readActiveHouseholdId(db, userId) !== householdId) {
+    return c.json({ success: false, code: 'HOUSEHOLD_CONTEXT_CHANGED' }, 409);
+  }
+  if (!canViewSharedMeals(db, householdId, userId)) {
+    return c.json({ success: false, code: 'HOUSEHOLD_CALENDAR_VIEW_REQUIRED' }, 403);
+  }
+  // `householdId` came from readActiveHouseholdId + permission checks above. Do not re-resolve it
+  // from users.household_id: a legacy member with one active membership can have a null pointer.
+  const scope = getActiveHouseholdScope(userId, householdId);
+
+  try {
+    const result = approveHouseholdMealShopping(db, {
+      householdId,
+      userId,
+      input: parsed.data
+    });
+    if (result.changed && result.listId) {
+      const list = readList(db, scope, result.listId);
+      if (list) {
+        try {
+          // `announce` records and publishes only after the purchase list transaction commits.
+          announce(db, list, userId, result.created ? 'list.create' : 'list.update');
+        } catch (error) {
+          console.error(
+            '[Shopping] meal-plan approval committed but list notification failed',
+            error
+          );
+        }
+      }
+    }
+    c.header('Cache-Control', 'no-store');
+    return c.json(
+      {
+        success: true,
+        data: {
+          listId: result.listId,
+          version: result.version,
+          created: result.created,
+          idempotent: !result.changed,
+          added: result.added,
+          updated: result.updated,
+          removed: result.removed
+        }
+      },
+      result.created ? 201 : 200
+    );
+  } catch (error) {
+    if (error instanceof HouseholdMealShoppingApprovalError) {
+      const status = error.code === 'MEAL_SHOPPING_ITEM_NOT_IN_PREVIEW' ? 400 : 409;
+      return c.json({ success: false, code: error.code }, status);
+    }
+    console.error('[Shopping] meal-plan approval failed');
+    return c.json({ success: false, code: 'MEAL_SHOPPING_APPROVAL_FAILED' }, 500);
+  }
 });
 
 export { shoppingRoutes };

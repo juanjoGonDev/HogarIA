@@ -42,6 +42,20 @@
     >
       {{ 'household.meal_proposal_review_step' | t }}
     </button>
+    <button
+      type="button"
+      role="tab"
+      id="meal-proposal-step-tab-shopping"
+      aria-controls="meal-shopping-step-panel"
+      [attr.aria-selected]="activeMealStep() === 'shopping'"
+      [attr.tabindex]="activeMealStep() === 'shopping' ? 0 : -1"
+      [disabled]="!canViewShopping"
+      data-test="meal-proposal-step-tab-shopping"
+      (click)="openShoppingReview()"
+      (keydown)="onMealStepKeydown($event)"
+    >
+      {{ 'household.meal_shopping_step' | t }}
+    </button>
   </nav>
 
   <section
@@ -208,7 +222,9 @@
               <p>{{ formatWeekRange() }}</p>
             </div>
             <span class="meal-planner__event-count">
-              {{ 'household.meal_proposal_event_count' | t: { count: weeklyProposal.events.length } }}
+              {{
+                'household.meal_proposal_event_count' | t: { count: weeklyProposal.events.length }
+              }}
             </span>
           </header>
 
@@ -270,7 +286,9 @@
                 <h5>{{ event.recipe?.name }}</h5>
                 <p class="meal-planner__summary">{{ event.objectiveSummary }}</p>
                 <div class="meal-planner__event-meta">
-                  <span>{{ 'household.meal_proposal_servings' | t: { count: event.servings } }}</span>
+                  <span>{{
+                    'household.meal_proposal_servings' | t: { count: event.servings }
+                  }}</span>
                   <span *ngIf="event.recipe as recipe">
                     {{
                       'household.meal_proposal_total_time'
@@ -345,6 +363,16 @@
                 ) | t
               }}
             </app-button>
+            <app-button
+              *ngIf="canViewShopping"
+              variant="outline"
+              size="md"
+              (onClick)="openShoppingReview()"
+              data-test="meal-shopping-open-review"
+            >
+              <app-icon name="shopping_cart" [size]="18" [label]="null" />
+              {{ 'household.meal_shopping_open_review' | t }}
+            </app-button>
           </footer>
         </section>
       </ng-container>
@@ -362,6 +390,221 @@
           {{ 'household.meal_proposal_return_to_prepare' | t }}
         </app-button>
       </ng-template>
+    </ng-container>
+  </section>
+
+  <section
+    id="meal-shopping-step-panel"
+    class="meal-planner__step-panel meal-planner__shopping-panel"
+    role="tabpanel"
+    aria-labelledby="meal-proposal-step-tab-shopping"
+    tabindex="0"
+    [hidden]="activeMealStep() !== 'shopping'"
+    data-test="meal-shopping-step-panel"
+  >
+    <ng-container *ngIf="activeMealStep() === 'shopping'">
+      <p *ngIf="shoppingLoading()" class="meal-planner__status" role="status" aria-live="polite">
+        {{ 'household.meal_shopping_loading' | t }}
+      </p>
+      <p *ngIf="shoppingErrorKey() as key" class="meal-planner__error" role="alert">
+        {{ key | t }}
+      </p>
+      <ng-container *ngIf="shoppingPreview() as preview">
+        <header class="meal-planner__shopping-header">
+          <div>
+            <h3>{{ 'household.meal_shopping_review_title' | t }}</h3>
+            <p>
+              {{
+                'household.meal_shopping_range'
+                  | t
+                    : {
+                        start: formatDate(preview.startDate),
+                        end: formatDate(preview.endDate)
+                      }
+              }}
+            </p>
+          </div>
+          <span class="meal-planner__event-count">
+            {{ 'household.meal_shopping_meal_count' | t: { count: preview.plannedMealCount } }}
+          </span>
+        </header>
+
+        <p *ngIf="!preview.sharedPantry" class="meal-planner__notice" role="status">
+          {{ 'household.meal_shopping_pantry_private' | t }}
+        </p>
+        <p
+          *ngFor="let warning of preview.warnings; trackBy: trackIndex"
+          class="meal-planner__notice"
+          role="status"
+          data-test="meal-shopping-snapshot-warning"
+        >
+          {{ 'household.meal_shopping_snapshot_warning' | t: { date: formatDate(warning.date) } }}
+        </p>
+        <p
+          *ngIf="!preview.plannedMealCount"
+          class="meal-planner__empty"
+          data-test="meal-shopping-empty"
+        >
+          {{ 'household.meal_shopping_empty' | t }}
+        </p>
+
+        <fieldset
+          *ngIf="requiredShoppingLines().length"
+          class="meal-planner__shopping-group"
+          [disabled]="shoppingSaving() || shoppingApproval() !== null"
+          data-test="meal-shopping-required"
+        >
+          <legend>{{ 'household.meal_shopping_required' | t }}</legend>
+          <div
+            *ngFor="let line of requiredShoppingLines(); trackBy: trackShoppingLine"
+            class="meal-planner__shopping-line"
+            [attr.data-test]="'meal-shopping-line-' + line.key"
+          >
+            <label class="meal-planner__shopping-item">
+              <input
+                type="checkbox"
+                [checked]="line.included"
+                [disabled]="!canViewShopping || shoppingSaving() || shoppingApproval() !== null"
+                [attr.aria-label]="'household.meal_shopping_include' | t: { name: line.name }"
+                (change)="setShoppingIncluded(line.key, $any($event.target).checked)"
+                data-test="meal-shopping-include"
+              />
+              <span class="meal-planner__shopping-name">{{ line.name }}</span>
+            </label>
+            <span
+              class="meal-planner__shopping-status"
+              [attr.data-status]="line.status"
+              data-test="meal-shopping-stock-status"
+            >
+              {{ shoppingStatusLabel(line.status) | t }}
+            </span>
+            <label class="meal-planner__shopping-quantity">
+              <span>{{ 'household.meal_shopping_quantity' | t }}</span>
+              <input
+                type="number"
+                inputmode="decimal"
+                min="0.001"
+                max="10000"
+                step="any"
+                [value]="line.addQuantity"
+                [disabled]="
+                  !line.included ||
+                  !canViewShopping ||
+                  shoppingSaving() ||
+                  shoppingApproval() !== null
+                "
+                [attr.aria-label]="
+                  'household.meal_shopping_quantity_for' | t: { name: line.name, unit: line.unit }
+                "
+                (input)="setShoppingQuantity(line.key, $any($event.target).valueAsNumber)"
+                data-test="meal-shopping-quantity"
+              />
+              <span>{{ line.unit }}</span>
+            </label>
+          </div>
+        </fieldset>
+
+        <fieldset
+          *ngIf="optionalShoppingLines().length"
+          class="meal-planner__shopping-group"
+          [disabled]="shoppingSaving() || shoppingApproval() !== null"
+          data-test="meal-shopping-optional"
+        >
+          <legend>{{ 'household.meal_shopping_optional' | t }}</legend>
+          <div
+            *ngFor="let line of optionalShoppingLines(); trackBy: trackShoppingLine"
+            class="meal-planner__shopping-line"
+            [attr.data-test]="'meal-shopping-line-' + line.key"
+          >
+            <label class="meal-planner__shopping-item">
+              <input
+                type="checkbox"
+                [checked]="line.included"
+                [disabled]="!canViewShopping || shoppingSaving() || shoppingApproval() !== null"
+                [attr.aria-label]="'household.meal_shopping_include' | t: { name: line.name }"
+                (change)="setShoppingIncluded(line.key, $any($event.target).checked)"
+                data-test="meal-shopping-include"
+              />
+              <span class="meal-planner__shopping-name">{{ line.name }}</span>
+            </label>
+            <span
+              class="meal-planner__shopping-status"
+              [attr.data-status]="line.status"
+              data-test="meal-shopping-stock-status"
+            >
+              {{ shoppingStatusLabel(line.status) | t }}
+            </span>
+            <label class="meal-planner__shopping-quantity">
+              <span>{{ 'household.meal_shopping_quantity' | t }}</span>
+              <input
+                type="number"
+                inputmode="decimal"
+                min="0.001"
+                max="10000"
+                step="any"
+                [value]="line.addQuantity"
+                [disabled]="
+                  !line.included ||
+                  !canViewShopping ||
+                  shoppingSaving() ||
+                  shoppingApproval() !== null
+                "
+                [attr.aria-label]="
+                  'household.meal_shopping_quantity_for' | t: { name: line.name, unit: line.unit }
+                "
+                (input)="setShoppingQuantity(line.key, $any($event.target).valueAsNumber)"
+                data-test="meal-shopping-quantity"
+              />
+              <span>{{ line.unit }}</span>
+            </label>
+          </div>
+        </fieldset>
+
+        <div
+          *ngIf="shoppingApproval() as approval"
+          class="meal-planner__shopping-success"
+          role="status"
+        >
+          <p>{{ 'household.meal_shopping_approved' | t }}</p>
+          <a
+            *ngIf="approval.listId as listId"
+            [routerLink]="['/shopping', listId]"
+            data-test="meal-shopping-compra-link"
+          >
+            {{ 'household.meal_shopping_open_compra' | t }}
+            <app-icon name="chevron_right" [size]="16" [label]="null" />
+          </a>
+        </div>
+
+        <footer class="meal-planner__shopping-actions">
+          <app-button
+            variant="outline"
+            size="md"
+            [disabled]="shoppingSaving()"
+            (onClick)="cancelShoppingReview()"
+            data-test="meal-shopping-cancel"
+          >
+            <app-icon name="chevron_left" [size]="18" [label]="null" />
+            {{ 'household.meal_shopping_back' | t }}
+          </app-button>
+          <app-button
+            variant="primary"
+            size="md"
+            [disabled]="!canApproveShopping()"
+            [loading]="shoppingSaving()"
+            (onClick)="approveShopping()"
+            data-test="meal-shopping-approve"
+          >
+            <app-icon *ngIf="!shoppingSaving()" name="shopping_cart" [size]="18" [label]="null" />
+            {{
+              (shoppingSaving()
+                ? 'household.meal_shopping_approving'
+                : 'household.meal_shopping_approve'
+              ) | t
+            }}
+          </app-button>
+        </footer>
+      </ng-container>
     </ng-container>
   </section>
 </section>

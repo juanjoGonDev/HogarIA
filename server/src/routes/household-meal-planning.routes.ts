@@ -18,6 +18,7 @@ import {
 } from '../utils/household-meal-planning.store.js';
 import {
   HouseholdMealShoppingPreviewError,
+  householdMealShoppingPreviewId,
   readHouseholdMealShoppingPreview
 } from '../utils/household-meal-shopping-preview.store.js';
 
@@ -63,7 +64,10 @@ householdMealPlanningRoutes.get('/meal-planning/shopping-preview', (c) => {
   try {
     const preview = readHouseholdMealShoppingPreview(db, householdId, parsed.data, today);
     c.header('Cache-Control', 'no-store');
-    return c.json({ success: true, data: preview });
+    return c.json({
+      success: true,
+      data: { ...preview, previewId: householdMealShoppingPreviewId(householdId, preview) }
+    });
   } catch (error) {
     if (error instanceof HouseholdMealShoppingPreviewError) {
       return c.json({ success: false, code: 'HOUSEHOLD_MEAL_SHOPPING_PREVIEW_NOT_FOUND' }, 404);
