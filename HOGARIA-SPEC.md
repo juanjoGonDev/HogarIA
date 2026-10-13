@@ -2574,6 +2574,12 @@ Compra; la automatización tampoco está implementada. Evidencia y límites
 reproducibles están en `HOGARIA-HOUSEHOLD-PLAN-SPEC.md`, «Estado de implementación y evidencia»; no se
 declara `QA-HOME-MEALS.SETTINGS.1` ni `QA-HOME-MEALS.PLAN.1` completo.
 
+**Trazabilidad de tareas semanales (2026-10-13):** la unidad `QA-HOME-TASKS.WEEKLY.2` de la
+extensión de planificación está verificada en desktop y móvil, incluyendo equilibrio, días no
+consecutivos, preservación de asignaciones manuales durante propuesta/uso explícito y persistencia tras
+Guardar. Comando, capturas sintéticas, límites y resultado reproducible constan en
+`HOGARIA-HOUSEHOLD-PLAN-SPEC.md`, «Estado de implementación y evidencia».
+
 ### R. Recurrencia de los eventos de la casa
 
 - [ ] **El dato, dos columnas**: `calendar_events.recurrence` (`'none' | 'daily' | 'weekly'`, `NOT NULL DEFAULT

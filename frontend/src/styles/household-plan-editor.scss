@@ -2828,12 +2828,11 @@
 
   @media (max-height: 400px) {
     .plan-editor__advanced-settings-content {
-      position: fixed;
-      top: calc(var(--app-mobile-header-height, 56px) + 8px + env(safe-area-inset-top, 0px));
-      right: max(8px, env(safe-area-inset-right, 0px));
-      bottom: calc(var(--bottom-nav-height) + 8px + env(safe-area-inset-bottom, 0px));
+      position: absolute;
+      top: calc(100% + 28px);
+      right: 0;
+      bottom: auto;
       width: min(360px, calc(100vw - 16px));
-      max-height: none;
       margin-top: 0;
     }
   }
@@ -3722,7 +3721,7 @@
       'canvas'
       'details';
     gap: var(--space-2);
-    margin-top: 20px;
+    margin-top: 16px;
   }
 
   .plan-editor--assignment-view .plan-canvas__viewport {

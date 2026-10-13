@@ -2,6 +2,10 @@
   display: block;
   min-width: 0;
 }
+
+.tasks-create__reveal {
+  display: none;
+}
 /* Match the compact, map-first weekly checklist in the approved phone flow. */
 @media (max-width: 767px) {
   .tasks-layout {
@@ -269,6 +273,19 @@
     width: calc(100% + 12px);
     margin-inline: -6px;
   }
+
+  .tasks-create--collapsed-mobile {
+    display: none;
+  }
+
+  .tasks-board .tasks-create__reveal {
+    display: flex;
+    width: calc(100% - 2 * var(--space-2));
+    min-height: 44px;
+    align-items: center;
+    justify-self: center;
+    gap: var(--space-1);
+  }
 }
 
 /* Keep the mobile task form compact without removing its accessible labels. */
@@ -376,6 +393,36 @@
   .tasks-schedule__footer {
     row-gap: 0;
     margin-top: var(--space-2);
+  }
+
+  .tasks-board .tasks-create__primary-row {
+    margin-top: 0;
+  }
+
+  .tasks-board .tasks-assignment-mode label {
+    box-sizing: border-box;
+    height: 44px;
+    min-height: 44px;
+    align-items: center;
+    min-width: 0;
+    padding-inline: 2px;
+    font-size: var(--text-xs);
+    line-height: var(--leading-tight);
+    white-space: normal;
+  }
+}
+
+@media (min-width: 768px) {
+  .tasks-board .tasks-schedule__header.visually-hidden {
+    position: static;
+    width: auto;
+    height: auto;
+    padding: var(--space-1) var(--space-3);
+    margin: 0;
+    overflow: visible;
+    clip: auto;
+    white-space: normal;
+    border-bottom: 1px solid var(--border-default);
   }
 }
 

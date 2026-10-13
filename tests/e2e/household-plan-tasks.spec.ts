@@ -1,13 +1,34 @@
 import { mkdir, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { expect, test, type Page } from './fixtures';
-import { createHousehold, registerUser } from './helpers/auth';
+import { createHousehold } from './helpers/auth';
 import { tapSvgPolygonInterior } from './helpers/plan-geometry';
 import { assertSwitchGeometry, assertSwitchHitArea } from './helpers/switch-geometry';
 import type {
   HouseholdPlan,
   HouseholdPlanPoint
 } from '../../frontend/src/app/shared/models/household-plan.model';
+
+async function registerForHousehold(page: Page, name: string): Promise<void> {
+  await page.goto('/auth/register');
+  await page.locator('input#name').waitFor({ state: 'visible' });
+  await page.locator('input#name').fill(name);
+  await page.locator('input#email').fill(`household-tasks-${randomUUID()}@example.test`);
+  await page.locator('input#password').fill('Test1234');
+  const registration = page.waitForResponse((response) =>
+    response.url().includes('/api/auth/register')
+  );
+  await page.locator('button[type="submit"]').click();
+  const response = await registration;
+  expect(response.status(), await response.text()).toBe(201);
+  await expect(page).toHaveURL(/\/(dashboard|onboarding|household)(\?|$)/, { timeout: 45000 });
+  if (new URL(page.url()).pathname.endsWith('/onboarding')) {
+    await page.getByRole('button', { name: /Saltar por ahora/i }).click();
+    await expect(page).toHaveURL(/\/(dashboard|household)/, { timeout: 45000 });
+  }
+  await page.goto('/household');
+}
 
 function fitSyntheticPlan(
   source: HouseholdPlan,
@@ -520,7 +541,7 @@ test('el menú del plano alinea sus acciones y distingue la eliminación', async
   const mobile = testInfo.project.name.startsWith('mobile-');
   const viewport = mobile ? { width: 390, height: 844 } : { width: 1280, height: 970 };
   await page.setViewportSize(viewport);
-  await registerUser(page, 'Ana');
+  await registerForHousehold(page, 'Ana');
   await createHousehold(page, 'Hogar sintético menú de opciones');
   await page.getByRole('tab', { name: 'Plano' }).click();
   await expect(page.locator('[data-test="plan-setup"]')).toBeVisible();
@@ -922,7 +943,7 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   const mobile = testInfo.project.name.startsWith('mobile-');
   const viewport = mobile ? { width: 390, height: 950 } : { width: 1280, height: 970 };
 
-  await registerUser(page, 'Ana');
+  await registerForHousehold(page, 'Ana');
   await createHousehold(page, 'Hogar sintético de plano y tareas');
   const inviteUrl = (await page.locator('.invite-card__code').innerText()).trim();
   const inviteCode = new URL(inviteUrl).pathname.split('/').at(-1);
@@ -932,7 +953,7 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     const memberContext = await browser.newContext({ locale: 'es-ES' });
     const memberPage = await memberContext.newPage();
     try {
-      await registerUser(memberPage, memberName);
+      await registerForHousehold(memberPage, memberName);
       await memberPage.goto('/household');
       await memberPage.getByRole('button', { name: /Unirse con código/i }).click();
       const joinDialog = memberPage.getByRole('dialog', { name: 'Unirse a un Hogar' });
@@ -954,17 +975,26 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   await expect(page.locator('[data-test="household-panel-plan"]')).toBeVisible();
   const householdTabs = page.locator('.household-tabs');
   if (mobile) {
-    for (const tabName of ['Hogar', 'Plano', 'Tareas', 'Miembros', 'Permisos', 'Ajustes']) {
-      await expect(householdTabs.getByRole('tab', { name: tabName })).toBeInViewport();
+    for (const tabName of ['Hogar', 'Plano', 'Planificación', 'Miembros', 'Permisos', 'Ajustes']) {
+      await expect(householdTabs.getByRole('tab', { name: tabName })).toBeVisible();
     }
+    await expect(householdTabs.getByRole('tab', { name: 'Plano' })).toBeInViewport();
     const tabDimensions = await householdTabs.evaluate((element) => ({
       clientWidth: element.clientWidth,
       scrollWidth: element.scrollWidth
     }));
     expect(
       tabDimensions.scrollWidth,
-      'all household sections remain visible on mobile'
-    ).toBeLessThanOrEqual(tabDimensions.clientWidth + 1);
+      'long household tabs scroll instead of compressing their labels'
+    ).toBeGreaterThan(tabDimensions.clientWidth);
+    const pageWidths = await page.evaluate(() => ({
+      documentWidth: document.documentElement.scrollWidth,
+      layoutViewportWidth: document.documentElement.clientWidth
+    }));
+    expect(
+      pageWidths.documentWidth,
+      'the scrollable household tab row does not cause layout-viewport overflow'
+    ).toBeLessThanOrEqual(pageWidths.layoutViewportWidth);
     for (const width of [320, 359, 360, 389, 390]) {
       await page.setViewportSize({ width, height: 568 });
       const tabLayout = await householdTabs.evaluate((element) =>
@@ -1237,19 +1267,43 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   const advancedSettings = page.locator('.plan-editor__advanced-settings');
   const advancedPanel = page.locator('.plan-editor__advanced-settings-content');
   const assertAdvancedPanelBelowDescription = async () => {
-    const clearance = await advancedPanel.evaluate((panel) => {
-      const panelTop = panel.getBoundingClientRect().top;
-      const descriptionBottom = panel
-        .closest('.plan-editor')
-        ?.querySelector('.plan-editor__header > div:first-child p')
-        ?.getBoundingClientRect().bottom;
-      return descriptionBottom === undefined
-        ? Number.NEGATIVE_INFINITY
-        : panelTop - descriptionBottom;
+    const geometry = await advancedPanel.evaluate((panel) => {
+      const editor = panel.closest('.plan-editor');
+      const header = editor?.querySelector('.plan-editor__header') ?? null;
+      const description = header?.querySelector(':scope > div:first-child p') ?? null;
+      const summary = panel.parentElement?.querySelector(':scope > summary') ?? null;
+      const rect = (element: Element | null) => {
+        if (!element) return null;
+        const bounds = element.getBoundingClientRect();
+        return {
+          top: Math.round(bounds.top * 100) / 100,
+          bottom: Math.round(bounds.bottom * 100) / 100,
+          left: Math.round(bounds.left * 100) / 100,
+          right: Math.round(bounds.right * 100) / 100,
+          width: Math.round(bounds.width * 100) / 100,
+          height: Math.round(bounds.height * 100) / 100
+        };
+      };
+      const style = getComputedStyle(panel);
+      return {
+        scrollY: window.scrollY,
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        detailsOpen: (panel.parentElement as HTMLDetailsElement | null)?.open ?? false,
+        panelPosition: style.position,
+        panelDisplay: style.display,
+        header: rect(header),
+        description: rect(description),
+        summary: rect(summary),
+        panel: rect(panel)
+      };
     });
+    const clearance =
+      geometry.panel && geometry.description
+        ? Number(geometry.panel.top) - Number(geometry.description.bottom)
+        : Number.NEGATIVE_INFINITY;
     expect(
       clearance,
-      'the mobile options panel starts after the plan description'
+      `the mobile options panel starts after the plan description: ${JSON.stringify(geometry)}`
     ).toBeGreaterThanOrEqual(0);
   };
   if (mobile) {
@@ -2638,7 +2692,8 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   await page.locator('.plan-details__rename summary').click();
   await page.getByLabel('Nombre visible').fill('Borrador QA');
   await expect(savePlan).toBeEnabled();
-  await page.getByRole('tab', { name: 'Tareas' }).click();
+  await page.getByRole('tab', { name: 'Planificación' }).click();
+  await page.locator('[data-test="household-planning-tab-tasks"]').click();
   await page.getByRole('tab', { name: 'Plano' }).click();
   if (mobile) await page.locator('[data-test="plan-selected-space"] .plan-details__close').click();
   await expect(
@@ -3661,12 +3716,18 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   await expect(page.locator('.tasks-weekbar button svg')).toHaveCount(2);
   await expect(page.locator('[data-test="tasks-add"] svg')).toBeVisible();
   const fairAssignment = page.getByRole('radio', { name: 'Aleatoria y equitativa' });
-  await fairAssignment.check();
+  await fairAssignment.focus();
+  await expect(fairAssignment, 'assignment mode is keyboard focusable').toBeFocused();
+  await page.keyboard.press('Space');
+  await expect(fairAssignment, 'Space selects the focused assignment mode').toBeChecked();
   await expect(fairAssignment).toHaveAttribute('aria-describedby', 'tasks-random-mode-description');
   await expect(page.locator('#tasks-random-mode-description')).toContainText(
     'Reparto aleatorio equitativo'
   );
-  await page.getByRole('radio', { name: 'Elegir persona' }).check();
+  const manualAssignment = page.getByRole('radio', { name: 'Elegir persona' });
+  await manualAssignment.focus();
+  await page.keyboard.press('Space');
+  await expect(manualAssignment, 'the manual mode remains keyboard selectable').toBeChecked();
   if (mobile) {
     await expect(page.locator('.tasks-create__title-caption')).toHaveCSS('position', 'absolute');
     await expect(page.locator('.tasks-assignment-settings h3')).toHaveCSS('position', 'absolute');
@@ -3674,7 +3735,7 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
       'aria-labelledby',
       'tasks-assignment-mode-title'
     );
-    await expect(page.locator('.tasks-schedule__header')).toHaveCSS('position', 'static');
+    await expect(page.locator('.tasks-schedule__header')).toHaveClass(/visually-hidden/);
     const taskForm = await page.locator('.tasks-create').boundingBox();
     const assignmentSettings = await page.locator('.tasks-assignment-settings').boundingBox();
     const taskTitleRow = await page.locator('.tasks-create__primary-row').boundingBox();
@@ -3782,10 +3843,12 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
       expect(textBounds.scrollWidth).toBeLessThanOrEqual(textBounds.clientWidth + 1);
     }
   }
+  const scheduleHeading = page.getByRole('heading', { name: 'Asignación de la semana' });
   await expect(
-    page.locator('#tasks-schedule-title'),
-    'the weekly assignment section keeps its visible context on both desktop and mobile'
-  ).toBeVisible();
+    scheduleHeading,
+    'the weekly assignment heading stays accessible on both desktop and mobile'
+  ).toHaveCount(1);
+  if (!mobile) await expect(scheduleHeading).toBeVisible();
   await expect(page.locator('.tasks-schedule__summary svg')).toBeVisible();
   await expect(page.locator('[data-test="tasks-actions-menu"] summary svg')).toBeVisible();
   await expect(page.locator('[data-test="tasks-save"] svg')).toBeVisible();
@@ -3813,6 +3876,17 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     const assignmentMode = await page.locator('.tasks-assignment-mode').boundingBox();
     expect(assignmentMode).not.toBeNull();
     expect(assignmentMode!.height).toBeGreaterThanOrEqual(44);
+    for (const target of await page.locator('.tasks-assignment-mode label').all()) {
+      const bounds = await target.boundingBox();
+      expect(
+        bounds?.height,
+        'assignment choices remain comfortable touch targets'
+      ).toBeGreaterThanOrEqual(44);
+      const fontSize = await target.evaluate((label) =>
+        Number.parseFloat(getComputedStyle(label).fontSize)
+      );
+      expect(fontSize, 'assignment labels remain legible on mobile').toBeGreaterThanOrEqual(12);
+    }
   }
   const taskCanvas = await page.locator('.tasks-plan-canvas').boundingBox();
   const taskPlanFootprint = await page.locator('.tasks-plan-canvas').evaluate((svg) => {
@@ -3917,6 +3991,8 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   await expect(planningOptions.locator('.tasks-create__fields')).toBeHidden();
   await planningOptions.locator('summary').click();
   await expect(planningOptions.locator('.tasks-create__fields')).toBeVisible();
+  const manualAssigneeName = activeMemberNames[0].trim();
+  await choosePickerOption(page, /^Asignada a:/, manualAssigneeName);
   for (const [index, title] of taskTitles.entries()) {
     await createForm.getByLabel('Nombre de la tarea').fill(title);
     await createForm.getByRole('button', { name: /^Día:/ }).click();
@@ -3927,6 +4003,78 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   }
   await planningOptions.locator('summary').click();
   await expect(page.locator('[data-test="tasks-save"]')).toBeEnabled();
+  const manualSaveResponsePromise = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'PUT' &&
+      new URL(response.url()).pathname.endsWith('/api/household/tasks')
+  );
+  await page.locator('[data-test="tasks-save"]').click();
+  const manualSaveResponse = await manualSaveResponsePromise;
+  expect(manualSaveResponse.status()).toBe(200);
+  const manualSaveEnvelope = await manualSaveResponse.json();
+  expect(manualSaveEnvelope.data.tasks).toHaveLength(7);
+  const manualAssignedMemberIds = [
+    ...new Set(
+      manualSaveEnvelope.data.tasks.map(
+        (task: { assignedMemberId: string | null }) => task.assignedMemberId
+      )
+    )
+  ];
+  expect(
+    manualAssignedMemberIds,
+    'the fixture persists one deliberate manual assignee'
+  ).toHaveLength(1);
+  expect(manualAssignedMemberIds[0]).toBeTruthy();
+  const manualAssignmentsByTaskId = Object.fromEntries(
+    manualSaveEnvelope.data.tasks.map((task: { id: string; assignedMemberId: string | null }) => [
+      task.id,
+      task.assignedMemberId
+    ])
+  );
+  await page.reload();
+  await expect(
+    page.locator('[data-test="household-planning-panel-tasks"]'),
+    'the saved task week reloads before checking its compact mobile state'
+  ).toBeVisible();
+  if (mobile) {
+    await expect(
+      page.locator('[data-test="tasks-create-open"]'),
+      'a saved week offers an explicit action to open task creation on mobile'
+    ).toBeVisible();
+    await expect(page.locator('.tasks-create')).toBeHidden();
+  }
+  const persistedCheckPage = await page.context().newPage();
+  const readPersistedAssignments = async () => {
+    const taskWeekResponsePromise = persistedCheckPage.waitForResponse(
+      (response) =>
+        response.request().method() === 'GET' &&
+        new URL(response.url()).pathname.endsWith('/api/household/tasks')
+    );
+    if (persistedCheckPage.url() === 'about:blank') {
+      await persistedCheckPage.goto(`/household?tab=tasks&space=${encodeURIComponent(kitchenId)}`);
+    } else {
+      await persistedCheckPage.reload();
+    }
+    await expect(
+      persistedCheckPage.locator('[data-test="household-planning-panel-tasks"]')
+    ).toBeVisible();
+    const response = await taskWeekResponsePromise;
+    const envelope = await response.json();
+    return {
+      status: response.status(),
+      assignments: Object.fromEntries(
+        envelope.data.tasks.map((task: { id: string; assignedMemberId: string | null }) => [
+          task.id,
+          task.assignedMemberId
+        ])
+      )
+    };
+  };
+  const readDraftAssignees = async () =>
+    (await page.locator('.task-card__member-name').allTextContents()).map((name) => name.trim());
+
+  expect(await readDraftAssignees()).toEqual(Array.from({ length: 7 }, () => manualAssigneeName));
+  await expect(page.locator('[data-test="tasks-save"]')).toBeDisabled();
   await page.locator('[data-test="tasks-actions-menu"] summary').click();
   await page.getByRole('button', { name: 'Proponer reparto' }).click();
   await page.locator('[data-test="tasks-actions-menu"] summary').click();
@@ -3945,23 +4093,36 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   );
   expect(Math.max(...loadCounts) - Math.min(...loadCounts)).toBeLessThanOrEqual(1);
   await expect(page.locator('[data-test="tasks-save"]')).toBeDisabled();
+  expect(
+    await readDraftAssignees(),
+    'proposing a random distribution leaves the manually assigned draft untouched'
+  ).toEqual(Array.from({ length: 7 }, () => manualAssigneeName));
+  const persistedAfterProposal = await readPersistedAssignments();
+  expect(persistedAfterProposal.status).toBe(200);
+  expect(
+    persistedAfterProposal.assignments,
+    'a random proposal does not overwrite persisted manual assignments'
+  ).toEqual(manualAssignmentsByTaskId);
   await screenshot(page, 'tasks-random-preview-desktop-or-mobile', viewport);
   await page.getByRole('button', { name: 'Usar este reparto' }).click();
   await expect(page.locator('[data-test="tasks-save"]')).toBeEnabled();
+  expect(
+    await readDraftAssignees(),
+    'the explicit Use action applies the proposed assignees to the editable draft'
+  ).toEqual(assignments);
+  const persistedAfterUse = await readPersistedAssignments();
+  expect(persistedAfterUse.status).toBe(200);
+  expect(
+    persistedAfterUse.assignments,
+    'applying a proposal is still a draft; persistence waits for Save week'
+  ).toEqual(manualAssignmentsByTaskId);
+  await persistedCheckPage.close();
   for (const ratio of await primaryButtonContrast(page, '[data-test="tasks-save"]')) {
     expect(ratio, 'primary task actions meet WCAG AA in both themes').toBeGreaterThanOrEqual(4.5);
   }
   await page.evaluate(() => window.scrollTo(0, 0));
   const taskCards = page.locator('.task-card');
   await expect(taskCards).toHaveCount(7);
-  await createForm.getByLabel('Nombre de la tarea').fill('Limpiar cocina');
-  await fairAssignment.check();
-  await expect(page.locator('.tasks-day__count').first()).toBeHidden();
-  await expect(page.locator('.tasks-day__label-short').first()).toBeVisible();
-  const firstTaskDetails = taskCards.first().locator('.task-card__details');
-  await firstTaskDetails.locator('summary').click();
-  await expect(firstTaskDetails.locator('.tasks-link--danger')).toBeVisible();
-  await firstTaskDetails.locator('summary').click();
   const taskCardsFit = await taskCards.evaluateAll((cards) => {
     const bottomNavigation = document.querySelector('.bottom-nav')?.getBoundingClientRect();
     const visibleBottom =
@@ -4052,6 +4213,8 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
       taskRowsLayout.visibleCount,
       `the mobile checklist should show three full task rows above sticky actions: ${JSON.stringify(taskRowsLayout)}`
     ).toBeGreaterThanOrEqual(3);
+    console.info(`[visual:tasks-week-three-rows] ${JSON.stringify(taskRowsLayout)}`);
+    await screenshot(page, 'tasks-week-three-rows', viewport);
     await taskCards.last().evaluate((element) => element.scrollIntoView({ block: 'center' }));
     const lastTaskBounds = await taskCards.last().boundingBox();
     const scrolledWeekActions = await page.locator('.tasks-schedule__footer').boundingBox();
@@ -4092,6 +4255,18 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
       expect(textBounds.scrollWidth).toBeLessThanOrEqual(textBounds.clientWidth + 1);
     }
   }
+  if (mobile) {
+    await page.locator('[data-test="tasks-create-open"]').click();
+    await expect(page.locator('.tasks-create')).toBeVisible();
+  }
+  await createForm.getByLabel('Nombre de la tarea').fill('Limpiar cocina');
+  await fairAssignment.check();
+  await expect(page.locator('.tasks-day__count').first()).toBeHidden();
+  await expect(page.locator('.tasks-day__label-short').first()).toBeVisible();
+  const firstTaskDetails = taskCards.first().locator('.task-card__details');
+  await firstTaskDetails.locator('summary').click();
+  await expect(firstTaskDetails.locator('.tasks-link--danger')).toBeVisible();
+  await firstTaskDetails.locator('summary').click();
   await expect(
     page.locator('.task-card__fields > .task-card__title'),
     'a single scheduled task per day should not repeat its title in the compact weekly row'
@@ -4192,7 +4367,8 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     await page.setViewportSize(viewport);
   }
   await page.getByRole('tab', { name: 'Plano' }).click();
-  await page.getByRole('tab', { name: 'Tareas' }).click();
+  await page.getByRole('tab', { name: 'Planificación' }).click();
+  await page.locator('[data-test="household-planning-tab-tasks"]').click();
   await expect(page.locator('[data-test="tasks-save"]')).toBeEnabled();
   await expect(page.locator('.task-card')).toHaveCount(7);
   if (mobile) {
@@ -4212,6 +4388,23 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   expect(
     savedTasksEnvelope.data.tasks.every((task: { spaceId: string }) => task.spaceId === kitchenId)
   ).toBe(true);
+  const persistedMemberIds = new Set(
+    savedTasksEnvelope.data.tasks.map(
+      (task: { assignedMemberId: string | null }) => task.assignedMemberId
+    )
+  );
+  expect(
+    persistedMemberIds.size,
+    'saving after explicit Use persists the randomized assignments instead of the old manual owner'
+  ).toBe(3);
+  const changedAssignmentCount = savedTasksEnvelope.data.tasks.filter(
+    (task: { id: string; assignedMemberId: string | null }) =>
+      manualAssignmentsByTaskId[task.id] !== task.assignedMemberId
+  ).length;
+  expect(
+    changedAssignmentCount,
+    'saving after explicit Use persists changed taskId-to-member assignments; balance may keep tasks with the former owner'
+  ).toBeGreaterThan(0);
   await expect(page.locator('.task-card')).toHaveCount(7);
   if (mobile) {
     for (const label of await page.locator('.task-card__member-name').all()) {
@@ -4264,7 +4457,8 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   await page.locator('[data-test="tasks-save"]').click();
   expect((await editSave).status()).toBe(200);
   await page.reload();
-  await page.getByRole('tab', { name: 'Tareas' }).click();
+  await page.getByRole('tab', { name: 'Planificación' }).click();
+  await page.locator('[data-test="household-planning-tab-tasks"]').click();
   await expect(page.locator('.task-card')).toHaveCount(7);
   const persistedTaskRow = page.locator('.task-card').first();
   await persistedTaskRow.locator('.task-card__details summary').click();
@@ -4274,14 +4468,14 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
 
   // Keyboard tab navigation, focus visibility, orientation, breakpoints, and minimum width.
   const planTab = page.getByRole('tab', { name: 'Plano' });
-  const tasksTab = page.getByRole('tab', { name: 'Tareas' });
+  const planningTab = page.getByRole('tab', { name: 'Planificación' });
   await planTab.click();
   await planTab.focus();
   await page.keyboard.press('ArrowRight');
-  await expect(tasksTab).toBeFocused();
-  await expect(tasksTab).toHaveAttribute('aria-selected', 'true');
+  await expect(planningTab).toBeFocused();
+  await expect(planningTab).toHaveAttribute('aria-selected', 'true');
   await expect
-    .poll(() => tasksTab.evaluate((tab) => getComputedStyle(tab).outlineStyle))
+    .poll(() => planningTab.evaluate((tab) => getComputedStyle(tab).outlineStyle))
     .toBe('solid');
 
   for (const size of [

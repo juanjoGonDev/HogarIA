@@ -108,6 +108,7 @@ export class HouseholdTasksComponent implements OnChanges {
   readonly newSpaceId = signal('');
   readonly newMemberId = signal('');
   readonly randomAssignmentMode = signal(false);
+  readonly showTaskCreationForm = signal(false);
   readonly randomPreview = signal<HouseholdTaskOccurrence[] | null>(null);
   readonly loading = signal(false);
   readonly saving = signal(false);
@@ -270,6 +271,7 @@ export class HouseholdTasksComponent implements OnChanges {
       completed: false
     };
     this.draftTasks.update((tasks) => [...tasks, task]);
+    this.showTaskCreationForm.set(true);
     this.newTitle.set('');
     this.newDetails.set('');
     this.randomPreview.set(null);

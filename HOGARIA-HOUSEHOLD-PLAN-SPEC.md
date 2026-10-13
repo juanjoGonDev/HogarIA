@@ -1179,6 +1179,22 @@ test:coverage` pasa **1455 tests**, cobertura **93,49/84,12/93,66/95,4 %**. Los 
   conserva preview, schema Structured Outputs y almacén/calendario compartido. Aún faltan la UI de
   consumo, compras, automatización y validar la matriz completa de preferencias/estados.
 
+- **Tareas semanales — UX/E2E integrada:** la vista mantiene el plano/mapa al tamaño completo y, si ya
+  hay tareas, ofrece en móvil «Añadir tarea» para abrir explícitamente el formulario; una vez abierto
+  no se colapsa al añadir. El título de semana queda accesible para lectores de pantalla. El panel de
+  opciones en landscape se ancla bajo su control y no tapa la descripción; el mapa de asignación conserva
+  286 px / ≥84 % de ancho, y la checklist expone tres filas completas antes de sus acciones sticky.
+  El E2E de `household-plan-tasks.spec.ts` pasa **2/2** en Chromium y Mobile Chrome; incluye targets de
+  radio/checkbox/tacto, labels ≥12 px, teclado, 320×568 y 568×320, además de propuesta equilibrada sin
+  días consecutivos. Verifica que asignaciones manuales persistidas no cambian al proponer ni al pulsar
+  «Usar este reparto»; solo Guardar persiste el reparto aplicado. Evidencia sintética inspeccionada:
+  `.e2e-screenshots/household-plan-tasks/chromium/05-weekly-tasks.png` y
+  `.e2e-screenshots/household-plan-tasks/mobile-chrome/tasks-week-three-rows.png`.
+  Comando: `pnpm run test:e2e -- --project=chromium --project=mobile-chrome --workers=1 --grep="plano por hogar, propuesta revisable"`
+  (13-10-2026, **2 passed / 53.3 s**); typecheck E2E, Prettier y `git diff --check` también pasan.
+  Se usó DB/artifacts temporales limpiados por el harness; no se llamó a IA real ni se escribieron datos
+  de hogar persistentes. La auditoría visual de familias/rutas globales queda fuera de esta unidad.
+
 El análisis previo del planificador está reflejado arriba para orientar la próxima unidad; todos los
 criterios inferiores permanecen sin marcar hasta validar cada condición en su alcance completo.
 
@@ -1219,8 +1235,13 @@ criterios inferiores permanecen sin marcar hasta validar cada condición en su a
 - [ ] **QA-HOME-PLANNING.AUTOMATION.1** — generar/repetir, play/pause, siguiente fecha, retry e
       idempotencia; repetir no llama a IA ni duplica eventos, protege ediciones manuales y permite
       elegir tareas/comidas.
-- [ ] **QA-HOME-TASKS.WEEKLY.2** — asignación fija/aleatoria, equilibrio, no repetir días
+- [x] **QA-HOME-TASKS.WEEKLY.2** — asignación fija/aleatoria, equilibrio, no repetir días
       consecutivos si hay solución, excepción explicada y preservación de asignaciones manuales.
+      Evidencia: `household-task-assignment.spec.ts` y `household-tasks.component.spec.ts` cubren
+      equilibrio, consecutividad e imposibilidad; `tests/e2e/household-plan-tasks.spec.ts` verifica
+      asignación manual persistida, propuesta aleatoria sin mutar borrador/BD, adopción solo con
+      «Usar este reparto» y persistencia distinta solo tras Guardar. E2E aislada sintética en Chromium
+      y Mobile Chrome: 2/2 (13-10-2026); comando y límites en «Estado de implementación y evidencia».
 - [ ] **QA-AUTH.HOUSEHOLD-REQUIRED.1** — alta obligatoria crear/unirse, invitación inválida/revocada,
       error recuperable de red, reanudación, doble envío, membership activo antes de dashboard y rechazo
       server-side; sin acceso al resto con hogar pendiente. La caducidad no se prueba ni promete mientras

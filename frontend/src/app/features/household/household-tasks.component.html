@@ -294,7 +294,24 @@
         </section>
       </div>
 
-      <section *ngIf="canEdit" class="tasks-create" [attr.aria-label]="'household.tasks_add' | t">
+      <button
+        *ngIf="canEdit && draftTasks().length > 0 && !showTaskCreationForm()"
+        type="button"
+        class="tasks-button tasks-button--primary tasks-create__reveal"
+        data-test="tasks-create-open"
+        (click)="showTaskCreationForm.set(true)"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M12 5v14M5 12h14" />
+        </svg>
+        {{ 'household.tasks_add' | t }}
+      </button>
+      <section
+        *ngIf="canEdit"
+        class="tasks-create"
+        [class.tasks-create--collapsed-mobile]="draftTasks().length > 0 && !showTaskCreationForm()"
+        [attr.aria-label]="'household.tasks_add' | t"
+      >
         <div class="tasks-create__primary-row">
           <label class="tasks-create__title">
             <span class="tasks-create__title-caption">
@@ -453,7 +470,7 @@
         data-test="tasks-week"
         aria-labelledby="tasks-schedule-title"
       >
-        <header class="tasks-schedule__header">
+        <header class="tasks-schedule__header visually-hidden">
           <div>
             <h3 id="tasks-schedule-title">{{ 'household.tasks_weekly_assignment' | t }}</h3>
           </div>
