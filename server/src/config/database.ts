@@ -208,6 +208,54 @@ async function runMigrations(db: Database.Database): Promise<void> {
       FOREIGN KEY (household_id) REFERENCES households(id) ON DELETE CASCADE,
       FOREIGN KEY (authorized_by) REFERENCES users(id) ON DELETE SET NULL
     );
+
+    -- Durable, one-row-per-scheduled-occurrence ledger. It stores only scheduling/config metadata
+    -- and sanitized state codes: never prompts, provider output, credentials, or household content.
+    CREATE TABLE IF NOT EXISTS household_planning_automation_runs (
+      id TEXT PRIMARY KEY NOT NULL,
+      household_id TEXT NOT NULL,
+      occurrence_key TEXT NOT NULL,
+      scheduled_at TEXT NOT NULL,
+      scheduled_local_date TEXT NOT NULL,
+      time_zone TEXT NOT NULL,
+      config_version INTEGER NOT NULL CHECK (config_version >= 1),
+      mode TEXT NOT NULL CHECK (mode IN ('generate', 'repeat')),
+      scopes_json TEXT NOT NULL,
+      target_week_start TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (
+        status IN ('in_progress', 'review_required', 'completed', 'cancelled', 'skipped')
+      ),
+      lease_owner TEXT,
+      lease_expires_at TEXT,
+      fence INTEGER NOT NULL DEFAULT 1 CHECK (fence >= 1),
+      failure_code TEXT CHECK (failure_code IS NULL OR failure_code IN (
+        'AUTOMATION_PAUSED', 'CONFIG_STALE', 'AUTHORIZATION_INVALID',
+        'LEASE_EXPIRED_AMBIGUOUS', 'PROVIDER_TIMEOUT_AMBIGUOUS', 'PROVIDER_REJECTED',
+        'INVALID_PROPOSAL', 'PUBLISH_CONFLICT', 'TARGET_WEEK_MISSED', 'WORKER_FAILURE'
+      )),
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      completed_at DATETIME,
+      UNIQUE (household_id, occurrence_key),
+      CHECK (
+        (status = 'in_progress' AND lease_owner IS NOT NULL AND lease_expires_at IS NOT NULL) OR
+        (status <> 'in_progress' AND lease_owner IS NULL AND lease_expires_at IS NULL)
+      ),
+      CHECK ((status = 'completed' AND completed_at IS NOT NULL) OR
+        (status <> 'completed' AND completed_at IS NULL)),
+      FOREIGN KEY (household_id) REFERENCES households(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_household_planning_automation_runs_due
+      ON household_planning_automation_runs(status, lease_expires_at, scheduled_at);
+    CREATE INDEX IF NOT EXISTS idx_household_planning_automation_runs_household
+      ON household_planning_automation_runs(household_id, status, created_at);
+    CREATE TRIGGER IF NOT EXISTS household_planning_automation_runs_snapshot_immutable
+      BEFORE UPDATE OF household_id, occurrence_key, scheduled_at, scheduled_local_date, time_zone,
+                       config_version, mode, scopes_json, target_week_start
+      ON household_planning_automation_runs
+      BEGIN
+        SELECT RAISE(ABORT, 'automation occurrence snapshot is immutable');
+      END;
     -- Ingredients (pantry) table
     CREATE TABLE IF NOT EXISTS ingredients (
       id TEXT PRIMARY KEY,
