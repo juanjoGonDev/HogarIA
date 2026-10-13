@@ -948,6 +948,11 @@ una alergia obliga a separar o a dejar el turno sin resolver aunque el objetivo 
   nombre normalizado exactamente igual (Unicode NFKC, mayúsculas/minúsculas y espacios) **y unidad exacta**.
   No hay fuzzy matching ni conversión de unidades. Sin coincidencia o con más de una ficha coincidente no
   se descuenta; un stock insuficiente se consume solo hasta cero. La API devuelve avisos específicos.
+  Antes de cualquier ajuste de una ficha ya vinculada por ID se vuelve a comprobar la unidad actual;
+  si difiere de la receta, la corrección completa responde conflicto y no altera estado, stock ni ledger.
+  Si `shared_pantry` se desactiva después de una deducción, los aumentos de consumo no descuentan más
+  stock y devuelven un warning; marcar la comida no realizada aún puede reponer el débito anterior si
+  la unidad no cambió.
   Un libro de deducciones netas y movimientos con clave única comida/versión/línea evita duplicar cambios
   al reintentar o corregir. La huella persistida de las líneas impide que una edición posterior de la
   receta cambie cantidades de una corrección; sigue permitiendo revertir el débito con «no realizada».
@@ -1081,13 +1086,14 @@ solo su backend o sus pruebas unitarias.
   pnpm --filter @hogaria/server exec tsc --noEmit -p tsconfig.json
   ```
 
-  Para consumo, la prueba focal aprueba **3 archivos / 25 tests** (schema, store y ruta); la ruta/store
-  suman **17 tests**, con cobertura por fichero de **88,46/79,16/100/91,66 %** y
-  **87,79/78,88/100/89,93 %** (statements/branches/funciones/líneas). El esquema suma **8 tests** y
+  Para consumo, la prueba focal aprueba **3 archivos / 28 tests** (schema, store y ruta); la ruta/store
+  suman **20 tests**, con cobertura por fichero de **88,67/80/100/91,83 %** y
+  **88,06/79,39/100/90,18 %** (statements/branches/funciones/líneas). El esquema suma **8 tests** y
   **100/100/100/100 %**. El contrato cubre valores positivos, cero solo para «no realizada», límites,
   versión y propiedades no permitidas. Se ejercitaron retries, correcciones, receta alterada/corrupta,
-  rollback, contexto y permisos, stock insuficiente, unidades incompatibles, producto ambiguo y despensa
-  no compartida. `tsc --noEmit -p tsconfig.json` pasa. Los tests usan `DATABASE_PATH=:memory:` y datos
+  rollback, contexto y permisos, cambio de unidad tras deducción, desactivación de despensa compartida,
+  stock insuficiente, producto ambiguo y recetas ausentes/corruptas. `tsc --noEmit -p tsconfig.json` pasa.
+  Los tests usan `DATABASE_PATH=:memory:` y datos
   sintéticos; no llaman a servidor, inventario persistente ni proveedor real. La suite completa de
   servidor y E2E UI no forman parte de esta unidad aislada.
 

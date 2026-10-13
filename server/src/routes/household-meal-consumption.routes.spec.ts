@@ -330,4 +330,42 @@ describe('household meal consumption route', () => {
     expect(uncorrectable.status).toBe(409);
     expect(await read(uncorrectable)).toMatchObject({ code: 'RECIPE_SNAPSHOT_UNAVAILABLE' });
   });
+
+  it('returns a conflict without changing state or stock when a matched product unit changed', async () => {
+    const bob = { id: 'bob', token: jwt.sign({ sub: 'bob' }, jwtSecret) };
+    const first = await call(bob, 'PUT', 'meal-1', {
+      status: 'realized',
+      servings: 2,
+      expectedVersion: 0
+    });
+    expect(first.status).toBe(200);
+    db.prepare("UPDATE ingredients SET unit = 'kg' WHERE id = 'potatoes'").run();
+
+    const rejected = await call(bob, 'PUT', 'meal-1', {
+      status: 'not_realized',
+      servings: 0,
+      expectedVersion: 1
+    });
+
+    expect(rejected.status).toBe(409);
+    expect(await read(rejected)).toMatchObject({
+      success: false,
+      code: 'MEAL_CONSUMPTION_INVENTORY_UNIT_CHANGED'
+    });
+    expect(db.prepare("SELECT quantity FROM ingredients WHERE id = 'potatoes'").get()).toEqual({
+      quantity: 800
+    });
+    expect(
+      db
+        .prepare('SELECT status, servings, version FROM meal_consumptions WHERE meal_id = ?')
+        .get('meal-1')
+    ).toEqual({
+      status: 'realized',
+      servings: 2,
+      version: 1
+    });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM meal_inventory_movements').get()).toEqual({
+      count: 1
+    });
+  });
 });

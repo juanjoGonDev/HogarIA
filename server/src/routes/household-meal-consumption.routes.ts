@@ -89,6 +89,8 @@ function respondToConsumptionError(c: Context<AppEnv>, error: unknown) {
         return householdContextChanged(c);
       case 'VERSION_CONFLICT':
         return c.json({ success: false, code: 'MEAL_CONSUMPTION_VERSION_CONFLICT' }, 409);
+      case 'INVENTORY_UNIT_CHANGED':
+        return c.json({ success: false, code: 'MEAL_CONSUMPTION_INVENTORY_UNIT_CHANGED' }, 409);
       case 'RECIPE_SNAPSHOT_UNAVAILABLE':
         return c.json({ success: false, code: 'RECIPE_SNAPSHOT_UNAVAILABLE' }, 409);
     }

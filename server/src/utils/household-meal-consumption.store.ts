@@ -69,6 +69,7 @@ export class MealConsumptionError extends Error {
       | 'NOT_FOUND'
       | 'HOUSEHOLD_CONTEXT_CHANGED'
       | 'VERSION_CONFLICT'
+      | 'INVENTORY_UNIT_CHANGED'
       | 'RECIPE_SNAPSHOT_UNAVAILABLE',
     message: string
   ) {
@@ -281,7 +282,8 @@ function applyStockDelta(
   name: string,
   unit: string,
   previousDeducted: number,
-  target: number
+  target: number,
+  sharedPantry: number | null
 ): { deducted: number; warning?: MealConsumptionWarning } {
   const delta = target - previousDeducted;
   if (Math.abs(delta) < EPSILON) return { deducted: previousDeducted };
@@ -297,6 +299,12 @@ function applyStockDelta(
         reason: 'not_found'
       }
     };
+  }
+  if (normalizeMatchKey(latest.unit) !== normalizeMatchKey(unit)) {
+    throw new MealConsumptionError(
+      'INVENTORY_UNIT_CHANGED',
+      'La unidad del producto cambió; no se puede corregir este consumo con seguridad'
+    );
   }
 
   if (delta < 0) {
@@ -315,6 +323,13 @@ function applyStockDelta(
     }
     addMovement(db, mealId, version, lineIndex, latest.id, name, unit, restore);
     return { deducted: target };
+  }
+
+  if (sharedPantry !== 1) {
+    return {
+      deducted: previousDeducted,
+      warning: { code: 'HOUSEHOLD_PANTRY_NOT_SHARED', ingredientName: name, unit }
+    };
   }
 
   const available = Number.isFinite(latest.quantity) ? Math.max(0, latest.quantity) : 0;
@@ -440,7 +455,8 @@ function reconcileDeductions(
         line.name,
         line.unit,
         deducted,
-        target
+        target,
+        meal.shared_pantry
       );
       deducted = applied.deducted;
       if (applied.warning) warnings.push(applied.warning);
