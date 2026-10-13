@@ -92,6 +92,18 @@ export const householdPlanningAutomationPatchSchema = z
     }
   });
 
+/** Explicit, version-bound retry of one previously visible automation occurrence. */
+export const householdPlanningAutomationRetrySchema = z
+  .object({
+    expectedVersion: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+    occurrenceKey: z
+      .string()
+      .min(1)
+      .max(200)
+      .refine((value) => value === value.trim())
+  })
+  .strict();
+
 const occurrenceShape = {
   scheduledLocalDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   localDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),

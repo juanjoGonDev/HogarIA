@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import jwt from 'jsonwebtoken';
 import { Hono } from 'hono';
 
@@ -9,6 +9,11 @@ process.env.DISABLE_RATE_LIMIT = '1';
 type Sql = import('better-sqlite3').Database;
 type App = Awaited<ReturnType<typeof import('../app.js').createApp>>;
 type User = { id: string; token: string };
+
+const { startAutomationRetry } = vi.hoisted(() => ({ startAutomationRetry: vi.fn() }));
+vi.mock('../utils/household-planning-automation.worker.js', () => ({
+  startHouseholdPlanningAutomationRetry: startAutomationRetry
+}));
 
 let app: App;
 let routeOnlyApp: Hono;
@@ -51,8 +56,14 @@ function makeUserWithoutHousehold(id: string): User {
     token: jwt.sign({ sub: id, email: `${id}@hogaria.test` }, jwtSecret, { expiresIn: '1h' })
   };
 }
-function request(user: User, method: string, body?: unknown, householdId = 'home-a') {
-  return app.request('/api/household/planning-automation', {
+function request(
+  user: User,
+  method: string,
+  body?: unknown,
+  householdId = 'home-a',
+  path = '/api/household/planning-automation'
+) {
+  return app.request(path, {
     method,
     headers: {
       authorization: `Bearer ${user.token}`,
@@ -94,6 +105,7 @@ describe('household planning automation routes', () => {
   });
 
   beforeEach(() => {
+    startAutomationRetry.mockReset();
     db.prepare('DELETE FROM household_planning_automation_runs').run();
     db.prepare('DELETE FROM household_planning_automations').run();
     db.prepare('DELETE FROM household_task_weeks').run();
@@ -407,5 +419,170 @@ describe('household planning automation routes', () => {
       failureCode: 'PROVIDER_TIMEOUT_AMBIGUOUS',
       updatedAt: new Date(Date.parse(occurrence.utcInstant) + 1_000).toISOString()
     });
+  });
+
+  it('claims only an explicit retry and returns the sanitized in-progress run without awaiting it', async () => {
+    makeHousehold('home-a');
+    const manager = makeUser('manager', 'home-a', { settings: true, calendar: { edit: true } });
+    const completion = new Promise(() => undefined);
+    const run = {
+      id: 'private-run-id',
+      householdId: 'private-household-id',
+      occurrenceKey: 'household-weekly:Europe/Madrid:2026-10-12:1:09:30',
+      scheduledAt: '2026-10-12T07:30:00.000Z',
+      scheduledLocalDate: '2026-10-12',
+      timeZone: 'Europe/Madrid',
+      configVersion: 4,
+      mode: 'generate',
+      scopes: ['meals', 'tasks'],
+      targetWeekStart: '2026-10-19',
+      status: 'in_progress',
+      leaseExpiresAt: '2026-10-12T07:35:00.000Z',
+      fence: 8,
+      failureCode: null,
+      createdAt: '2026-10-12T07:30:00.000Z',
+      updatedAt: '2026-10-12T07:30:00.000Z',
+      completedAt: null
+    };
+    startAutomationRetry.mockReturnValue({ outcome: 'claimed', run, completion });
+
+    const response = await request(
+      manager,
+      'POST',
+      {
+        expectedVersion: 4,
+        occurrenceKey: run.occurrenceKey
+      },
+      'home-a',
+      '/api/household/planning-automation/retry'
+    );
+
+    expect(response.status).toBe(202);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(await response.json()).toEqual({
+      success: true,
+      data: {
+        lastRun: {
+          occurrenceKey: run.occurrenceKey,
+          targetWeekStart: '2026-10-19',
+          status: 'in_progress',
+          failureCode: null,
+          updatedAt: '2026-10-12T07:30:00.000Z'
+        }
+      }
+    });
+    expect(startAutomationRetry).toHaveBeenCalledTimes(1);
+    expect(startAutomationRetry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        householdId: 'home-a',
+        occurrenceKey: run.occurrenceKey,
+        requestedBy: manager.id,
+        expectedVersion: 4
+      })
+    );
+  });
+
+  it('rejects an invalid retry body, household context, or caller permissions before claiming', async () => {
+    makeHousehold('home-a');
+    const noPermissions = makeUser('reader', 'home-a');
+    const noCalendarEdit = makeUser('settings-only', 'home-a', { settings: true });
+    const manager = makeUser('manager', 'home-a', { settings: true, calendar: { edit: true } });
+
+    const malformed = await request(
+      manager,
+      'POST',
+      { expectedVersion: 0 },
+      'home-a',
+      '/api/household/planning-automation/retry'
+    );
+    expect(malformed.status).toBe(400);
+    expect(await malformed.json()).toMatchObject({
+      success: false,
+      code: 'INVALID_HOUSEHOLD_PLANNING_AUTOMATION_RETRY'
+    });
+
+    const malformedJson = await app.request('/api/household/planning-automation/retry', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${manager.token}`,
+        'content-type': 'application/json',
+        'x-household-id': 'home-a'
+      },
+      body: '{'
+    });
+    expect(malformedJson.status).toBe(400);
+    expect(await malformedJson.json()).toMatchObject({
+      success: false,
+      code: 'INVALID_HOUSEHOLD_PLANNING_AUTOMATION_RETRY'
+    });
+
+    const denied = await request(
+      noPermissions,
+      'POST',
+      {
+        expectedVersion: 4,
+        occurrenceKey: 'household-weekly:Europe/Madrid:2026-10-12:1:09:30'
+      },
+      'home-a',
+      '/api/household/planning-automation/retry'
+    );
+    expect(denied.status).toBe(403);
+    expect(await denied.json()).toMatchObject({ success: false });
+
+    const deniedCalendarEdit = await request(
+      noCalendarEdit,
+      'POST',
+      {
+        expectedVersion: 4,
+        occurrenceKey: 'household-weekly:Europe/Madrid:2026-10-12:1:09:30'
+      },
+      'home-a',
+      '/api/household/planning-automation/retry'
+    );
+    expect(deniedCalendarEdit.status).toBe(403);
+
+    const wrongContext = await request(
+      manager,
+      'POST',
+      {
+        expectedVersion: 4,
+        occurrenceKey: 'household-weekly:Europe/Madrid:2026-10-12:1:09:30'
+      },
+      'home-b',
+      '/api/household/planning-automation/retry'
+    );
+    expect(wrongContext.status).toBe(409);
+    expect(startAutomationRetry).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['not_authorized', 403, 'HOUSEHOLD_PLANNING_AUTOMATION_RETRY_FORBIDDEN'],
+    ['authorization_invalid', 403, 'HOUSEHOLD_PLANNING_AUTOMATION_RETRY_FORBIDDEN'],
+    ['not_found', 404, 'HOUSEHOLD_PLANNING_AUTOMATION_RUN_NOT_FOUND'],
+    ['stale_config', 409, 'HOUSEHOLD_PLANNING_AUTOMATION_RETRY_STALE'],
+    ['busy', 409, 'HOUSEHOLD_PLANNING_AUTOMATION_RUN_BUSY'],
+    ['already_completed', 409, 'HOUSEHOLD_PLANNING_AUTOMATION_RUN_NOT_RETRYABLE'],
+    ['not_retryable', 409, 'HOUSEHOLD_PLANNING_AUTOMATION_RUN_NOT_RETRYABLE'],
+    ['review_required', 409, 'HOUSEHOLD_PLANNING_AUTOMATION_RUN_RETRY_REQUIRED'],
+    ['cancelled', 409, 'HOUSEHOLD_PLANNING_AUTOMATION_RUN_TERMINAL'],
+    ['skipped', 409, 'HOUSEHOLD_PLANNING_AUTOMATION_RUN_TERMINAL']
+  ])('maps retry outcome %s to a safe HTTP response', async (outcome, status, code) => {
+    makeHousehold('home-a');
+    const manager = makeUser('manager', 'home-a', { settings: true, calendar: { edit: true } });
+    startAutomationRetry.mockReturnValue({ outcome, run: null });
+
+    const response = await request(
+      manager,
+      'POST',
+      {
+        expectedVersion: 4,
+        occurrenceKey: 'household-weekly:Europe/Madrid:2026-10-12:1:09:30'
+      },
+      'home-a',
+      '/api/household/planning-automation/retry'
+    );
+
+    expect(response.status).toBe(status);
+    expect(await response.json()).toEqual({ success: false, code });
   });
 });

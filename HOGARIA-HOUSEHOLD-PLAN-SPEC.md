@@ -1218,11 +1218,21 @@ src/utils/household-meal-shopping-preview.store.spec.ts` pasa **14/14** con `DAT
   contexto/membresía y exige `settings` para modificar; `calendar.edit` también para activar. Lectura no
   crea ni repara registros. El ledger persistente de ejecuciones ya tiene store y esquema SQLite; esta
   unidad añade al GET la última ejecución mediante una proyección allowlist estricta (sin IDs internos,
-  lease, owner ni fencing token) y normaliza los `updated_at` UTC heredados de SQLite. La spec de rutas
-  focal pasa **7/7** en memoria; incluye configuración apagada, estado `in_progress` con timestamp
-  SQLite, resumen `review_required` y ausencia de metadatos internos. Coverage focal route/schema supera
-  70 % en las cuatro métricas; `tsc` servidor pasa. Aún faltan el worker conectado, retry HTTP, flujos
-  completos de IA/repetición y gates integrados; `QA-HOME-PLANNING.AUTOMATION.1` sigue abierto.
+  lease, owner ni fencing token) y normaliza los `updated_at` UTC heredados de SQLite. Las pruebas
+  existentes cubren configuración apagada, estado `in_progress` con timestamp
+  SQLite, resumen `review_required` y ausencia de metadatos internos. El endpoint
+  `POST /api/household/planning-automation/retry` acepta solo `{expectedVersion, occurrenceKey}`; exige
+  hogar activo, header coincidente y permisos actuales `settings` + `calendar.edit`, inicia una reclamación
+  explícita y devuelve 202 sin esperar al worker. Tanto respuesta como errores son allowlist/sanitizados;
+  no exponen identificadores internos, fencing, lease ni detalles del proveedor. El test de ruta inyecta
+  un resultado sintético y verifica rechazo de body/contexto/permisos, mapeo HTTP de resultados y que no
+  se espera la promesa; la suite del worker/ledger aporta sus pruebas separadas con DB en memoria y
+  proveedor sintético. Sin llamadas al proveedor real. Evidencia: **55/55**; cobertura combinada
+  **83,64/80/94,73/86,11 %** (statements/branches/funciones/líneas); TypeScript del servidor pasa.
+  La verificación HTTP usa worker simulado, por lo que aún no prueba en un solo flujo endpoint + ledger +
+  generación IA real. Falta la conexión
+  scheduler/start-stop y gates integrados; flujos completos de repetición y publicación siguen pendientes.
+  `QA-HOME-PLANNING.AUTOMATION.1` permanece abierto.
 - **Calendario compartido y registro de consumo — backend/UI integrado:** un evento del plan se guarda
   una vez y sus asignaciones identifican usuarios del hogar. `GET /api/calendar` y `/range` muestran
   todas las comidas confirmadas del plan a cualquier miembro activo con `calendar.view`, aunque la
@@ -1432,6 +1442,21 @@ criterios inferiores permanecen sin marcar hasta validar cada condición en su a
       **4/4**, `household-planning-automation.worker.spec.ts` **14/14**, build TypeScript servidor correcto;
       smoke de arranque/`SIGINT` con `DATABASE_PATH=:memory:`, `NODE_ENV=test`, `PORT=0`, `HOST=127.0.0.1`
       mostró poller iniciado y apagado; carrera de versión probada sin llamada a IA ni publicación.
+- [x] Retry manual estricto por `expectedVersion` + `occurrenceKey`; requiere contexto del hogar activo y
+      `settings` + `calendar.edit` actuales. Una reclamación nueva retorna HTTP 202 con `lastRun` allowlist
+      sin esperar `completion`; errores por no autorizado, ausencia, configuración obsoleta, ocupación,
+      no reintentable y terminal se proyectan a estados HTTP/códigos estables, nunca a metadatos internos.
+      Evidencia focal: **55/55** schema/ruta con `DATABASE_PATH=:memory:`; worker inyectado con stub en prueba
+      HTTP (sin proveedor real), coverage **83,64/80/94,73/86,11 %**, TypeScript servidor pasa. No valida
+      en conjunto la reclamación real del ledger a través de HTTP ni el flujo E2E del proveedor.
+
+Comandos focales:
+
+```powershell
+$env:DATABASE_PATH=':memory:'; pnpm --filter @hogaria/server exec vitest run --coverage --coverage.include=src/routes/household-planning-automation.routes.ts --coverage.include=src/schemas/household-planning-automation.schema.ts src/schemas/household-planning-automation.schema.spec.ts src/routes/household-planning-automation.routes.spec.ts
+pnpm --filter @hogaria/server exec tsc --noEmit -p tsconfig.json
+```
+
 - [x] **QA-HOME-TASKS.WEEKLY.2** — asignación fija/aleatoria, equilibrio, no repetir días
       consecutivos si hay solución, excepción explicada y preservación de asignaciones manuales.
       Evidencia: `household-task-assignment.spec.ts` y `household-tasks.component.spec.ts` cubren

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   householdPlanningAutomationPatchSchema,
+  householdPlanningAutomationRetrySchema,
   householdPlanningAutomationStateSchema
 } from './household-planning-automation.schema.js';
 
@@ -25,6 +26,29 @@ const active = {
 };
 
 describe('household planning automation schemas', () => {
+  it('accepts only a versioned occurrence retry request', () => {
+    expect(
+      householdPlanningAutomationRetrySchema.parse({
+        expectedVersion: 3,
+        occurrenceKey: 'household-weekly:Europe/Madrid:2026-10-12:1:09:30'
+      })
+    ).toEqual({
+      expectedVersion: 3,
+      occurrenceKey: 'household-weekly:Europe/Madrid:2026-10-12:1:09:30'
+    });
+  });
+
+  it.each([
+    {},
+    { expectedVersion: -1, occurrenceKey: 'x' },
+    { expectedVersion: 1.5, occurrenceKey: 'x' },
+    { expectedVersion: 0, occurrenceKey: '' },
+    { expectedVersion: 0, occurrenceKey: 'x'.repeat(201) },
+    { expectedVersion: 0, occurrenceKey: 'x', extra: true }
+  ])('rejects invalid retry request: %o', (input) => {
+    expect(householdPlanningAutomationRetrySchema.safeParse(input).success).toBe(false);
+  });
+
   it('accepts the default paused state without inventing a schedule', () => {
     expect(householdPlanningAutomationStateSchema.parse(paused)).toEqual(paused);
   });
