@@ -158,6 +158,140 @@ describe('household meal-planning settings storage', () => {
     expect(JSON.stringify(result)).not.toContain('cacahuete');
   });
 
+  it('shows the member legacy schedule as personal while disabled override stays on household defaults', () => {
+    addHousehold('home');
+    addMember('home', 'person');
+    const personalProfile = {
+      theme: 'dark',
+      mealPlan: { breakfast: false, lunch: true, snack: false, dinner: true },
+      mealTimes: { breakfast: '07:45', lunch: '13:15', snack: '16:30', dinner: '19:30' },
+      taste: {
+        goals: ['balanced'],
+        allergies: ['cacahuete'],
+        likes: ['tomate'],
+        notes: 'Nota culinaria privada'
+      }
+    };
+    db.prepare('UPDATE users SET preferences = ? WHERE id = ?').run(
+      JSON.stringify(personalProfile),
+      'person'
+    );
+    store.saveHouseholdMealPlanning(db, 'home', 'person', {
+      household: {
+        mealTypes: { breakfast: true, lunch: false, snack: true, dinner: false },
+        mealTimes: { breakfast: '09:00', lunch: '14:00', snack: '17:00', dinner: '20:30' }
+      }
+    });
+
+    const memberView = store.readHouseholdMealPlanning(db, 'home', 'person');
+    const plannerContext = store.readHouseholdMealPlanningForMembers(db, 'home', 'person', [
+      'membership-person'
+    ]);
+
+    expect(memberView.member.personalSchedule).toEqual({
+      mealTypes: { breakfast: false, lunch: true, snack: false, dinner: true },
+      mealTimes: { breakfast: '07:45', lunch: '13:15', snack: '16:30', dinner: '19:30' }
+    });
+    expect(memberView.member.scheduleOverrideEnabled).toBe(false);
+    expect(memberView.effective.schedule).toMatchObject({
+      source: 'household',
+      mealTypes: { breakfast: true, lunch: false, snack: true, dinner: false },
+      mealTimes: { breakfast: '09:00', lunch: '14:00', snack: '17:00', dinner: '20:30' }
+    });
+    expect(plannerContext.members[0].schedule).toMatchObject({
+      source: 'household',
+      mealTimes: { breakfast: '09:00', lunch: '14:00', snack: '17:00', dinner: '20:30' }
+    });
+    expect(JSON.stringify(plannerContext)).not.toContain('cacahuete');
+    expect(JSON.stringify(plannerContext)).not.toContain('Nota culinaria privada');
+    expect(
+      (
+        db.prepare('SELECT preferences FROM users WHERE id = ?').get('person') as {
+          preferences: string;
+        }
+      ).preferences
+    ).toBe(JSON.stringify(personalProfile));
+  });
+
+  it('resolves the legacy personal schedule when override is enabled without a schedule patch', () => {
+    addHousehold('home');
+    const memberId = addMember('home', 'person');
+    const personalProfile = {
+      mealPlan: { breakfast: false, lunch: true, snack: true, dinner: false },
+      mealTimes: { breakfast: '08:10', lunch: '12:50', snack: '16:10', dinner: '21:10' },
+      taste: { allergies: ['sésamo'] }
+    };
+    db.prepare('UPDATE users SET preferences = ? WHERE id = ?').run(
+      JSON.stringify(personalProfile),
+      'person'
+    );
+
+    const result = store.saveHouseholdMealPlanning(db, 'home', 'person', {
+      member: { scheduleOverrideEnabled: true }
+    });
+    const context = store.readHouseholdMealPlanningForMembers(db, 'home', 'person', [memberId]);
+
+    expect(result.member.personalSchedule).toEqual({
+      mealTypes: personalProfile.mealPlan,
+      mealTimes: personalProfile.mealTimes
+    });
+    expect(result.effective.schedule).toMatchObject({
+      source: 'member',
+      mealTypes: personalProfile.mealPlan,
+      mealTimes: personalProfile.mealTimes
+    });
+    expect(context.members[0].schedule).toEqual({
+      source: 'member',
+      mealTypes: personalProfile.mealPlan,
+      mealTimes: personalProfile.mealTimes
+    });
+
+    const later = store.saveHouseholdMealPlanning(db, 'home', 'person', {
+      member: {
+        schedule: { mealTypes: { breakfast: true }, mealTimes: { dinner: '20:15' } }
+      }
+    });
+    expect(later.member.personalSchedule).toEqual({
+      mealTypes: { breakfast: true, lunch: true, snack: true, dinner: false },
+      mealTimes: { breakfast: '08:10', lunch: '12:50', snack: '16:10', dinner: '20:15' }
+    });
+    expect(later.effective.schedule).toMatchObject({
+      source: 'member',
+      mealTypes: later.member.personalSchedule.mealTypes,
+      mealTimes: later.member.personalSchedule.mealTimes
+    });
+    expect(
+      (
+        db.prepare('SELECT preferences FROM users WHERE id = ?').get('person') as {
+          preferences: string;
+        }
+      ).preferences
+    ).toBe(JSON.stringify(personalProfile));
+    expect(JSON.stringify(context)).not.toContain('sésamo');
+  });
+
+  it('uses personal schedule defaults for null or corrupt legacy preference data', () => {
+    addHousehold('home');
+    addMember('home', 'null-person');
+    addMember('home', 'corrupt-person');
+    db.prepare('UPDATE users SET preferences = NULL WHERE id = ?').run('null-person');
+    db.prepare('UPDATE users SET preferences = ? WHERE id = ?').run('{corrupt', 'corrupt-person');
+    db.prepare('UPDATE households SET meal_planning_preferences = ? WHERE id = ?').run(
+      JSON.stringify({ mealTimes: { dinner: '22:00' }, mealTypes: { breakfast: false } }),
+      'home'
+    );
+
+    for (const userId of ['null-person', 'corrupt-person']) {
+      const result = store.readHouseholdMealPlanning(db, 'home', userId);
+      expect(result.member.personalSchedule).toEqual({
+        mealTypes: { breakfast: true, lunch: true, snack: true, dinner: true },
+        mealTimes: { breakfast: '09:00', lunch: '14:00', snack: '17:00', dinner: '20:30' }
+      });
+      expect(result.effective.schedule.source).toBe('household');
+      expect(result.effective.schedule.mealTimes.dinner).toBe('22:00');
+    }
+  });
+
   it('persists partial home defaults and independent member overrides without overwriting other preferences', () => {
     addHousehold('home');
     const memberId = addMember('home', 'person');
@@ -190,8 +324,8 @@ describe('household meal-planning settings storage', () => {
     expect(result.member.goalOverrideEnabled).toBe(true);
     expect(result.member.scheduleOverrideEnabled).toBe(true);
     expect(result.member.personalSchedule).toEqual({
-      mealTypes: { breakfast: false, lunch: false, snack: true, dinner: true },
-      mealTimes: { breakfast: '09:00', lunch: '13:30', snack: '17:00', dinner: '21:15' }
+      mealTypes: { breakfast: true, lunch: false, snack: true, dinner: true },
+      mealTimes: { breakfast: '09:00', lunch: '13:30', snack: '17:00', dinner: '20:30' }
     });
     expect(result.effective.objective).toEqual({
       source: 'member',

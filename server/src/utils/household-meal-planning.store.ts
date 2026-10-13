@@ -117,12 +117,25 @@ function normalizeHouseholdPreferences(value: unknown): HouseholdMealPlanningDef
   };
 }
 
-function normalizeMemberPreferences(value: unknown, household: HouseholdMealPlanningDefaults) {
+function normalizeMemberPreferences(value: unknown, personalProfile: unknown) {
   const raw = parseJsonRecord(value);
   const rawSchedule = parseJsonRecord(raw.schedule);
+  const personal = parseJsonRecord(personalProfile);
+  // Keep legacy account schedules as the member's personal starting point, never as a fallback
+  // from household defaults. Invalid or absent legacy values use the built-in meal defaults.
+  const profileSchedule: MealPlanningSchedule = {
+    mealTypes: toMealPlan(personal.mealPlan),
+    mealTimes: toMealTimes(personal.mealTimes)
+  };
   const personalSchedule: MealPlanningSchedule = {
-    mealTypes: toMealPlan({ ...household.mealTypes, ...parseJsonRecord(rawSchedule.mealTypes) }),
-    mealTimes: toMealTimes({ ...household.mealTimes, ...parseJsonRecord(rawSchedule.mealTimes) })
+    mealTypes: toMealPlan({
+      ...profileSchedule.mealTypes,
+      ...parseJsonRecord(rawSchedule.mealTypes)
+    }),
+    mealTimes: toMealTimes({
+      ...profileSchedule.mealTimes,
+      ...parseJsonRecord(rawSchedule.mealTimes)
+    })
   };
   return {
     goalOverrideEnabled: raw.goalOverrideEnabled === true,
@@ -239,7 +252,10 @@ export function readHouseholdMealPlanningForMembers(
     household,
     members: selectedIds.map((membershipId) => {
       const row = byId.get(membershipId)!;
-      const preferences = normalizeMemberPreferences(row.meal_planning_preferences, household);
+      const preferences = normalizeMemberPreferences(
+        row.meal_planning_preferences,
+        row.preferences
+      );
       const personalTaste = toTasteProfile(parseJsonRecord(row.preferences).taste);
       const goalOverrideEnabled = preferences.goalOverrideEnabled;
       const scheduleOverrideEnabled = preferences.scheduleOverrideEnabled;
@@ -283,13 +299,14 @@ export function readHouseholdMealPlanning(
   const rawMember = db
     .prepare('SELECT meal_planning_preferences FROM household_members WHERE id = ?')
     .get(member.id) as { meal_planning_preferences: string | null };
-  const memberPreferences = normalizeMemberPreferences(
-    rawMember.meal_planning_preferences,
-    context.household
-  );
   const personalTasteRow = db.prepare('SELECT preferences FROM users WHERE id = ?').get(userId) as
     { preferences: string | null } | undefined;
-  const personalTaste = toTasteProfile(parseJsonRecord(personalTasteRow?.preferences).taste);
+  const personalProfile = parseJsonRecord(personalTasteRow?.preferences);
+  const memberPreferences = normalizeMemberPreferences(
+    rawMember.meal_planning_preferences,
+    personalProfile
+  );
+  const personalTaste = toTasteProfile(personalProfile.taste);
 
   return {
     household: context.household,
