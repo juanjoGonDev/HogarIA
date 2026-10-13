@@ -55,8 +55,9 @@ completo. `custom` permite escribir cualquier otro nombre sin modificar el enum 
   ocurrencias con fecha concreta dentro de la semana, asociarlas a una zona o a todo el hogar,
   asignar una persona, dejarlas sin asignar o solicitar un reparto aleatorio equitativo.
   No hay reglas manuales recurrentes en v1. La automatización semanal del hogar sí puede generar
-  una nueva propuesta de tareas con IA: usa el plano vigente (incluidas zonas con nombre sin dibujo)
-  y la semana de tareas confirmada más reciente como contexto; no requiere crear plantillas aparte.
+  una nueva propuesta de tareas con IA: usa las zonas vigentes del hogar (del plano interactivo o de
+  la lista simple de zonas con nombre, sin dibujo) y la semana de tareas confirmada más reciente como
+  contexto; no requiere crear plantillas aparte.
   La respuesta usa `response_format` JSON Schema estricto y pasa el schema/invariantes de servidor.
   La IA solo propone títulos, fechas y zonas; el servidor resuelve asignaciones con miembros activos,
   sin enviar nombres ni perfiles personales al proveedor, y valida equilibrio y días consecutivos.
@@ -990,7 +991,8 @@ una alergia obliga a separar o a dejar el turno sin resolver aunque el objetivo 
 - La automatización semanal distingue dos modos: **generar una planificación nueva** (llama al planificador
   cuando llegue la fecha configurada) y **repetir la planificación actual** (reutiliza el plan semanal
   confirmado más reciente del hogar, sin pedir otra respuesta a IA). En modo generar, el ámbito tareas usa
-  el plano vigente y la última semana confirmada como contexto, valida zonas y genera asignaciones en el
+  las zonas vigentes (desde el plano interactivo o la lista sencilla sin dibujo) y la última semana
+  confirmada como contexto, valida las referencias de zona y genera asignaciones en el
   servidor a partir de la membresía activa; el ámbito comidas usa el planificador y las preferencias
   efectivas vigentes. Cada ámbito publica en su almacén autoritativo (semana de tareas o eventos de comidas),
   que alimenta el calendario compartido. Si se seleccionan ambos ámbitos, ambos deben completarse y
