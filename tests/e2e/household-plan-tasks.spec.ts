@@ -926,12 +926,37 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
         wall.getAttribute('x1') !== wall.getAttribute('x2') &&
         wall.getAttribute('y1') !== wall.getAttribute('y2')
     );
-    return { nonRectangularRoom, angledWall };
+    const footprintBounds = Array.from(
+      svg.querySelectorAll<SVGGraphicsElement>('.plan-canvas__space, .plan-canvas__wall')
+    ).reduce(
+      (bounds, element) => {
+        const box = element.getBBox();
+        return {
+          left: Math.min(bounds.left, box.x),
+          top: Math.min(bounds.top, box.y),
+          right: Math.max(bounds.right, box.x + box.width),
+          bottom: Math.max(bounds.bottom, box.y + box.height)
+        };
+      },
+      { left: Number.POSITIVE_INFINITY, top: Number.POSITIVE_INFINITY, right: 0, bottom: 0 }
+    );
+    return {
+      nonRectangularRoom,
+      angledWall,
+      footprintAspectRatio:
+        (footprintBounds.right - footprintBounds.left) /
+        (footprintBounds.bottom - footprintBounds.top)
+    };
   });
   expect(starterGeometry.nonRectangularRoom, 'the guided plan shows a non-rectangular room').toBe(
     true
   );
   expect(starterGeometry.angledWall, 'the guided plan shows a diagonal wall').toBe(true);
+  expect(
+    starterGeometry.footprintAspectRatio,
+    'the starter floor footprint keeps the near-square silhouette of the approved assignment prototype'
+  ).toBeGreaterThanOrEqual(0.92);
+  expect(starterGeometry.footprintAspectRatio).toBeLessThanOrEqual(1.04);
   await expect(page.locator('.plan-canvas__door-leaf')).toHaveCount(4);
   await expect(page.locator('.plan-canvas__door-swing')).toHaveCount(4);
   await expect(page.locator('.plan-canvas__window-rail')).toHaveCount(6);
@@ -1670,9 +1695,30 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     page.locator('.plan-canvas-toolbar'),
     'zone assignment must not expose drawing controls'
   ).toBeHidden();
+  const assignmentCanvasBackground = await page
+    .locator('.plan-canvas__viewport')
+    .evaluate((viewport) => getComputedStyle(viewport).backgroundImage);
+  expect(assignmentCanvasBackground, 'assignment uses the clean prototype map surface').toBe(
+    'none'
+  );
+  await expect(
+    page.locator('[data-test="plan-selected-space"] .plan-details__selected-actions'),
+    'zone editing actions remain accessible alongside assignment choices'
+  ).toBeVisible();
+  const assignmentMoreActions = page.locator(
+    '[data-test="plan-selected-space"] .plan-details__selected-actions > summary'
+  );
+  await expect(assignmentMoreActions).toHaveAccessibleName('Más acciones');
+  await expect(
+    assignmentMoreActions.locator('svg'),
+    'the secondary zone action uses the household SVG icon system'
+  ).toBeVisible();
   if (mobile) {
     await expect(zoneAssignment.locator('[data-test="plan-zone-member"]')).toHaveCount(3);
     await expect(zoneAssignment.locator('.plan-zone-member--shared')).toBeVisible();
+    await expect(
+      page.locator('[data-test="plan-selected-space"] .plan-details__close')
+    ).toBeVisible();
     await expect(page.locator('.plan-editor__header')).toBeVisible();
     await expect(page.locator('.plan-editor__header h2')).toHaveText('Plano de tu hogar');
     const visibleAssignmentHeading = await page.locator('.plan-editor__header h2').boundingBox();
@@ -1747,6 +1793,14 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   }
   if (!mobile) {
     await expect(page.locator('.plan-editor__header h2')).toHaveText('Plano de tu hogar');
+    await expect(
+      page.locator('[data-test="plan-selected-space"] .plan-details__close'),
+      'desktop side panel keeps an explicit way to leave assignment mode'
+    ).toBeVisible();
+    await expect(
+      zoneAssignment.locator('.plan-zone-assignment__state'),
+      'desktop selected radio conveys the state without a duplicate status pill'
+    ).toBeHidden();
   }
   if (!mobile) {
     const selectedPlanCanvas = await page.locator('.plan-canvas__viewport').boundingBox();
@@ -1833,19 +1887,24 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
       })
     );
     expect(
-      Math.max(...memberTiles.map((tile) => tile.y)) -
-        Math.min(...memberTiles.map((tile) => tile.y)),
-      'desktop responsibility choices should share one aligned row'
+      Math.max(...memberTiles.map((tile) => tile.x)) -
+        Math.min(...memberTiles.map((tile) => tile.x)),
+      'desktop responsibility choices form one aligned vertical list'
     ).toBeLessThanOrEqual(1);
     expect(
       Math.max(...memberTiles.map((tile) => tile.height)) -
         Math.min(...memberTiles.map((tile) => tile.height)),
-      'desktop responsibility tiles should have equal heights'
+      'desktop responsibility rows share the same height'
     ).toBeLessThanOrEqual(1);
     expect(
       Math.min(...memberTiles.map((tile) => tile.height)),
-      'desktop responsibility choices should remain large enough to scan and tap'
-    ).toBeGreaterThanOrEqual(72);
+      'desktop responsibility rows remain easy to scan and tap'
+    ).toBeGreaterThanOrEqual(48);
+    expect(
+      Math.max(...memberTiles.map((tile) => tile.y)) -
+        Math.min(...memberTiles.map((tile) => tile.y)),
+      'desktop responsibility rows are stacked instead of compressed into tiny cards'
+    ).toBeGreaterThan(3 * 48);
     const sharedLabel = zoneAssignment.locator('.plan-zone-member--shared > span:nth-child(2)');
     const sharedTextLayout = await sharedLabel.evaluate((element) => ({
       scrollWidth: element.scrollWidth,
@@ -1859,7 +1918,25 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
       'the shared assignment label must fit as a whole word without an awkward mid-word wrap'
     ).toBeLessThanOrEqual(sharedTextLayout.clientWidth);
     expect(sharedTextLayout.overflowWrap).toBe('normal');
-    expect(sharedTextLayout.fontSize).toBeGreaterThanOrEqual(9.5);
+    expect(sharedTextLayout.fontSize).toBeGreaterThanOrEqual(14);
+    const alignedMemberContent = await memberButtons.evaluateAll((elements) =>
+      elements.map((element) => {
+        const button = element.getBoundingClientRect();
+        const avatar = element.querySelector('.plan-zone-member__avatar')?.getBoundingClientRect();
+        const label = element.querySelector('span:nth-child(2)')?.getBoundingClientRect();
+        const radio = element.querySelector('.plan-zone-member__radio')?.getBoundingClientRect();
+        if (!avatar || !label || !radio) throw new Error('Assignment row content is incomplete');
+        const buttonCenterY = button.top + button.height / 2;
+        return [
+          avatar.top + avatar.height / 2,
+          label.top + label.height / 2,
+          radio.top + radio.height / 2
+        ].map((centerY) => Math.abs(centerY - buttonCenterY));
+      })
+    );
+    for (const offsets of alignedMemberContent.flat()) {
+      expect(offsets, 'avatar, name and radio share the row centerline').toBeLessThanOrEqual(1);
+    }
   }
   if (!mobile) {
     const workspace = page.locator('.plan-editor__workspace');
@@ -1874,7 +1951,16 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   }
   const selectedZone = page.locator('.plan-canvas__space--selected');
   await expect(selectedZone).toHaveAttribute('aria-label', 'Cocina');
-  await expect(selectedZone).toHaveCSS('fill', 'rgb(255, 224, 204)');
+  await expect(selectedZone).toHaveClass(/plan-canvas__space--shared/);
+  await expect(selectedZone).toHaveCSS('fill', 'rgb(217, 246, 231)');
+  const selectedZoneDraftMarkers = await selectedZone.evaluate(
+    (element) =>
+      element.parentElement?.querySelectorAll('.plan-canvas__assignee-avatar').length ?? 0
+  );
+  expect(
+    selectedZoneDraftMarkers,
+    'the map previews all household members while the shared assignment draft is selected'
+  ).toBe(3);
   const selectedZoneColors = await selectedZone.evaluate((element) => {
     const probe = document.createElement('span');
     probe.style.color = 'var(--primary)';
@@ -1891,7 +1977,7 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     selectedZoneColors.stroke,
     'orange selection outline must remain distinct from the responsibility fill'
   ).toBe(selectedZoneColors.primary);
-  expect(selectedZoneColors.fill).toBe('rgb(255, 224, 204)');
+  expect(selectedZoneColors.fill).toBe('rgb(217, 246, 231)');
   const overlappingAssignmentLabels = await page
     .locator('.plan-canvas__space-label')
     .evaluateAll((labels) =>

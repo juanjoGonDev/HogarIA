@@ -791,8 +791,15 @@ export class HouseholdPlanEditorComponent implements OnChanges, OnDestroy {
     return space.polygon.map((point) => `${point.x},${point.y}`).join(' ');
   }
 
+  displayedAssignmentMemberIds(spaceId: string): readonly string[] {
+    if (this.assignmentViewActive() && this.selectedSpaceId() === spaceId) {
+      return this.assignmentDraftMemberIds();
+    }
+    return this.assignmentSnapshot().assignments[spaceId] ?? [];
+  }
+
   assignmentMemberX(space: HouseholdPlanSpace, memberIndex: number): number {
-    const assignedCount = Math.max(1, this.assignmentSnapshot().assignments[space.id]?.length ?? 1);
+    const assignedCount = Math.max(1, this.displayedAssignmentMemberIds(space.id).length);
     if (assignedCount === 1) return this.spaceCenter(space).x;
     const bounds = this.spaceBounds(space);
     const radius = this.assignmentMemberRadius(space);
@@ -811,7 +818,7 @@ export class HouseholdPlanEditorComponent implements OnChanges, OnDestroy {
 
   assignmentMemberRadius(space: HouseholdPlanSpace): number {
     const bounds = this.spaceBounds(space);
-    const assignedCount = Math.max(1, this.assignmentSnapshot().assignments[space.id]?.length ?? 1);
+    const assignedCount = Math.max(1, this.displayedAssignmentMemberIds(space.id).length);
     const perMemberWidth = (bounds.maxX - bounds.minX - 100) / assignedCount;
     const fontSize = this.spaceLabelFontSize(space);
     const labelHeight = fontSize * this.spaceLabelLines(space).length;
@@ -873,10 +880,7 @@ export class HouseholdPlanEditorComponent implements OnChanges, OnDestroy {
       100,
       Math.floor(Math.min(800, width * 0.28, height - labelHeight - 120))
     );
-    if (
-      !this.assignmentViewActive() ||
-      !(this.assignmentSnapshot().assignments[space.id]?.length ?? 0)
-    ) {
+    if (!this.assignmentViewActive() || !this.displayedAssignmentMemberIds(space.id).length) {
       return naturalSize;
     }
 
@@ -894,10 +898,7 @@ export class HouseholdPlanEditorComponent implements OnChanges, OnDestroy {
     const glyphSize = this.spaceGlyphSize(space);
     const totalHeight = glyphSize + labelHeight + gap;
     const naturalTop = this.spaceCenter(space).y - totalHeight / 2;
-    if (
-      !this.assignmentViewActive() ||
-      !(this.assignmentSnapshot().assignments[space.id]?.length ?? 0)
-    ) {
+    if (!this.assignmentViewActive() || !this.displayedAssignmentMemberIds(space.id).length) {
       return naturalTop;
     }
 
@@ -916,7 +917,7 @@ export class HouseholdPlanEditorComponent implements OnChanges, OnDestroy {
 
   private spaceGlyphLabelGap(space: HouseholdPlanSpace): number {
     const fontSize = this.spaceLabelFontSize(space);
-    const hasAssignments = (this.assignmentSnapshot().assignments[space.id]?.length ?? 0) > 0;
+    const hasAssignments = this.displayedAssignmentMemberIds(space.id).length > 0;
     return this.assignmentViewActive() && hasAssignments
       ? Math.min(90, Math.round(fontSize * 0.31))
       : Math.min(130, Math.round(fontSize * 0.45));
@@ -1306,7 +1307,7 @@ export class HouseholdPlanEditorComponent implements OnChanges, OnDestroy {
   }
 
   spaceResponsibilityClass(spaceId: string): string {
-    const memberIds = this.assignmentSnapshot().assignments[spaceId] ?? [];
+    const memberIds = this.displayedAssignmentMemberIds(spaceId);
     if (memberIds.length > 1) return 'plan-canvas__space--shared';
     if (!memberIds.length) return '';
     const memberIndex = this.memberIndexForId(memberIds[0]);
@@ -1453,6 +1454,11 @@ export class HouseholdPlanEditorComponent implements OnChanges, OnDestroy {
   }
 
   private createStarterFloor(floor: HouseholdPlanFloor): HouseholdPlanFloor {
+    const starterFootprintYScale = 1.35;
+    const scalePoint = (point: HouseholdPlanPoint): HouseholdPlanPoint => ({
+      x: point.x,
+      y: Math.round(5_000 + (point.y - 5_000) * starterFootprintYScale)
+    });
     const spaces: Array<[HouseholdAreaKind, string, HouseholdPlanPoint, HouseholdPlanPoint]> = [
       ['kitchen', this.areaLabel('kitchen'), { x: 300, y: 1_400 }, { x: 3_600, y: 4_000 }],
       [
@@ -1492,8 +1498,8 @@ export class HouseholdPlanEditorComponent implements OnChanges, OnDestroy {
         const id = this.newId('space');
         const polygon = irregularShapes[kind];
         return polygon
-          ? createHouseholdPlanPolygon(kind, label, id, polygon)
-          : createHouseholdPlanSpace(kind, label, id, from, to);
+          ? createHouseholdPlanPolygon(kind, label, id, polygon.map(scalePoint))
+          : createHouseholdPlanSpace(kind, label, id, scalePoint(from), scalePoint(to));
       })
       .filter((space): space is HouseholdPlanSpace => space !== null);
     const wallSegments: Array<['interior' | 'exterior', HouseholdPlanPoint, HouseholdPlanPoint]> = [
@@ -1512,29 +1518,44 @@ export class HouseholdPlanEditorComponent implements OnChanges, OnDestroy {
     const walls = wallSegments.map(([kind, from, to]) => ({
       id: this.newId('wall'),
       kind,
-      from,
-      to
+      from: scalePoint(from),
+      to: scalePoint(to)
     }));
+    const wallForSource = (matches: (segment: (typeof wallSegments)[number]) => boolean) => {
+      const index = wallSegments.findIndex(matches);
+      return index < 0 ? undefined : walls[index];
+    };
     const openingOn = (
       wall: (typeof walls)[number] | undefined,
       kind: HouseholdPlanOpening['kind'],
       offset: number,
       width: number,
       isMainEntrance = false
-    ): HouseholdPlanOpening | null =>
-      wall
-        ? {
-            id: this.newId('opening'),
-            wallId: wall.id,
-            kind,
-            offset,
-            width,
-            isMainEntrance
-          }
-        : null;
+    ): HouseholdPlanOpening | null => {
+      if (!wall) return null;
+      const sourceSegment = wallSegments[walls.indexOf(wall)];
+      const sourceLength = sourceSegment
+        ? Math.hypot(
+            sourceSegment[2].x - sourceSegment[1].x,
+            sourceSegment[2].y - sourceSegment[1].y
+          )
+        : 0;
+      const scaledLength = Math.hypot(wall.to.x - wall.from.x, wall.to.y - wall.from.y);
+      const lengthScale = sourceLength > 0 ? scaledLength / sourceLength : 1;
+      return {
+        id: this.newId('opening'),
+        wallId: wall.id,
+        kind,
+        offset: Math.round(offset * lengthScale),
+        width: Math.round(width * lengthScale),
+        isMainEntrance
+      };
+    };
     const openings = [
       openingOn(
-        walls.find((wall) => wall.kind === 'exterior' && wall.from.y === 8_600),
+        wallForSource(
+          ([kind, from, to]) => kind === 'exterior' && from.y === 8_600 && to.y === 8_600
+        ),
         'door',
         4_900,
         900,

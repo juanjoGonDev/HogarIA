@@ -12,7 +12,7 @@ import type {
   VersionedHouseholdPlan
 } from '../../shared/models/household-plan.model';
 import type { HouseholdMember } from '../../shared/models/household.model';
-import { emptyHouseholdPlan } from './household-plan-editor.utils';
+import { emptyHouseholdPlan, openingSegment } from './household-plan-editor.utils';
 import { HouseholdPlanEditorComponent } from './household-plan-editor.component';
 
 describe('HouseholdPlanEditorComponent', () => {
@@ -170,7 +170,7 @@ describe('HouseholdPlanEditorComponent', () => {
     ).not.toBeNull();
   });
 
-  it('uses a landscape starter floor proportioned for the plan canvas reference', async () => {
+  it('uses a near-square starter footprint inside the landscape plan canvas', async () => {
     await mount();
     component.selectEntryMethod('guided');
     component.startPlan();
@@ -188,12 +188,17 @@ describe('HouseholdPlanEditorComponent', () => {
     const height = Math.max(...ys) - Math.min(...ys);
     const [viewX, viewY, viewWidth, viewHeight] = component.canvasViewBox.split(' ').map(Number);
 
-    expect(width / height).toBeGreaterThanOrEqual(1.25);
+    expect(width / height).toBeGreaterThanOrEqual(0.92);
+    expect(width / height).toBeLessThanOrEqual(1.04);
     expect(viewX).toBeLessThan(Math.min(...xs));
     expect(viewY).toBeLessThan(Math.min(...ys));
     expect(viewX + viewWidth).toBeGreaterThan(Math.max(...xs));
     expect(viewY + viewHeight).toBeGreaterThan(Math.max(...ys));
-    expect(viewWidth / viewHeight).toBeCloseTo(1.25, 1);
+    expect(viewWidth / viewHeight).toBeGreaterThanOrEqual(0.92);
+    expect(viewWidth / viewHeight).toBeLessThanOrEqual(1.25);
+    expect(floor.openings.every((opening) => openingSegment(floor.walls, opening) !== null)).toBe(
+      true
+    );
   });
 
   it('places guided areas inside the existing footprint without covering another zone', async () => {
@@ -437,6 +442,33 @@ describe('HouseholdPlanEditorComponent', () => {
     component.toggleAssignmentMember('member-a');
     expect(component.assignmentDraftMemberIds()).toEqual(['member-a']);
     expect(component.assignmentDraftIsShared()).toBeFalse();
+  });
+
+  it('previews the selected zone assignment draft on the map before saving', async () => {
+    await mount();
+    component.selectEntryMethod('guided');
+    component.startPlan();
+    component.members = [
+      { userId: 'member-a', name: 'Ana', isActive: true } as HouseholdMember,
+      { userId: 'member-b', name: 'Bea', isActive: true } as HouseholdMember
+    ];
+    const space = component.draft().floors[0].spaces[0];
+    component.assignmentSnapshot.set({
+      planVersion: 0,
+      version: 1,
+      assignments: { [space.id]: ['member-a'] }
+    });
+
+    component.selectSpace(space);
+    component.setZoneShared();
+
+    expect(component.displayedAssignmentMemberIds(space.id)).toEqual(['member-a', 'member-b']);
+    expect(component.spaceResponsibilityClass(space.id)).toBe('plan-canvas__space--shared');
+
+    component.closeSpaceDetails();
+
+    expect(component.displayedAssignmentMemberIds(space.id)).toEqual(['member-a']);
+    expect(component.spaceResponsibilityClass(space.id)).toBe('plan-canvas__space--member-0');
   });
 
   it('notifies the household task view after a zone assignment is persisted', async () => {

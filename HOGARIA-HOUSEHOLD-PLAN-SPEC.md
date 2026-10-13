@@ -416,15 +416,20 @@ mockups.
       en imágenes. A 320–359 px verificar que el descarte no tapa título/estado y que la decisión
       y la continuación mantienen un margen ≥8 px frente a las acciones fijas; el plano sigue
       legible sin ocupar más altura de la disponible en pantallas estrechas.
-- [ ] **Asignación:** mantener mapa + selector lateral en escritorio. En móvil igualar la
+- [x] **Asignación:** mantener mapa + selector lateral en escritorio. En móvil igualar la
       prominencia vertical del mapa y presentar la edición en una hoja inferior con nombre/estado,
       cuatro opciones y CTA visible, no una tarjeta compacta con estado guardado/Más acciones que
       desplacen la decisión.
-- [x] En escritorio, las cuatro opciones de responsabilidad aparecen en una fila de tarjetas
-      iguales, centradas y legibles como en el prototipo (sin apilarlas); en móvil siguen en la hoja
-      de asignación. Al seleccionar una estancia, el contorno naranja indica selección sin borrar
-      el relleno que comunica quién se encarga de ella. Playwright mide alineación/altura común y
-      conserva una aserción de color para la selección.
+- [x] **Selector de escritorio:** corregir el criterio anterior, que contradecía el mockup: las
+      cuatro responsabilidades se muestran como filas verticales de ancho completo, con avatar,
+      nombre y selector en una misma línea y «Compartida» legible; móvil mantiene las cuatro
+      opciones en la hoja inferior. La pantalla de asignación usa un mapa limpio, no la cuadrícula
+      de edición; conserva cierre y acciones secundarias accesibles sin duplicar el estado de
+      asignación. El menú usa un SVG del mismo sistema, no puntos tipográficos. El mapa previsualiza
+      los miembros/colores del borrador sin guardarlo hasta «Guardar», conserva el relleno de
+      responsabilidad bajo el borde naranja y ajusta el plano de ejemplo a una huella irregular
+      casi cuadrada (relación ancho/alto 0,92–1,04) como en el prototipo. Playwright mide filas,
+      lectura, consistencia del borrador y geometría PC/móvil.
 - [x] **Tareas:** cotejar el peso visual del plano y la jerarquía del panel semanal. Los controles
       funcionales avanzados deben quedar accesibles sin sobrecargar la vista principal.
   - [x] **Resumen semanal:** mostrar «Asignación de la semana» en escritorio; integrar el cambio
@@ -532,6 +537,7 @@ Evidencia visual y regresión:
 - Corrección del encabezado de propuesta por chat (13-10-2026): el cotejo 06 reveló que «Volver al lienzo» se partía en dos y «Subir nueva foto o boceto» también se partía al dar ancho al primer botón. El E2E falló primero con dos líneas en el regreso; se redistribuyó el grupo sin tapar subtítulo y se compactó solo el padding horizontal de subida. Verde: Playwright verifica ambos rótulos en una línea, icono/texto centrados y ancho ≥164 px en escritorio a 1280 y 1920, y mantiene el layout móvil. La ejecución aislada `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/household-plan-tasks.spec.ts` pasa **2/2 en 54,9 s**; se regeneraron y revisaron `06-chat-adjustment-{desktop,mobile}.png`.
 - Revisión crítica de tareas (13-10-2026): la regresión reprodujo la retícula doble del mapa, el cambio de semana ocupando una fila móvil y solo dos filas de tareas visibles antes del CTA. Se dejó el fondo limpio, se integró la navegación con la zona, se compactó el formulario sin reducir el plano ni los objetivos táctiles y el test mide **3 filas completas** con margen ≥8 px sobre el footer. Se añadieron iconos SVG al añadir, navegación, resumen, menú y CTA; la banda equitativa mantiene unidos el nombre y su recuento para evitar que un número quede huérfano. E2E verifica título semanal visible en PC/móvil, CTA ≥ancho del footer−16 px, menú accesible, mapa sin patrón e iconos. `pnpm --filter @hogaria/web exec ng test --no-watch --include=src/app/features/household/household-tasks.component.spec.ts` — **18/18**; `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/household-plan-tasks.spec.ts` — **2/2 en 51,1 s**, DB/servidor temporales, captura sintética, IA simulada y cleanup confirmado. `pnpm run check:ui` (228 ficheros/21 reglas) y `pnpm run typecheck:e2e` pasan. Capturas regeneradas e inspeccionadas: `.e2e-screenshots/household-plan-tasks/chromium/05-weekly-tasks.png` y `.e2e-screenshots/household-plan-tasks/mobile-chrome/05-weekly-tasks.png`.
 - TDD de superficie del editor (13-10-2026): la prueba aislada falló primero en Chromium y Mobile Chrome porque el SVG pintaba una hoja y otra cuadrícula dentro del viewport punteado. Se quitó la hoja interior; ahora una única retícula clara ocupa todo el campo y queda visible bajo el plano, como en el prototipo. La E2E rechaza ambos fondos anidados y mide que los iconos/textos de las tres acciones de dibujo estén centrados con tolerancia ≤1 px. Verde: `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/household-plan-tasks.spec.ts` — **2/2 en 54,7 s**, DB y servidor aislados, IA simulada y limpieza confirmada; editor `ng test` **28/28**, `pnpm run check:ui` (228 ficheros/21 reglas) y `pnpm run typecheck:e2e`. Capturas sintéticas regeneradas e inspeccionadas: `.e2e-screenshots/household-plan-tasks/chromium/02-plan-editor-empty-freeform.png` y `.e2e-screenshots/household-plan-tasks/mobile-chrome/02-plan-editor-empty-freeform.png`.
+- Revisión crítica de asignación (13-10-2026): una E2E roja midió la huella del ejemplo en **1,306** frente a la silueta casi cuadrada del mockup (**0,967**); se reescalaron estancias, paredes y offsets/anchos de huecos, y se verificó que sigan abriéndose las cuatro puertas y seis raíles de ventana. La captura también mostró el borrador «Compartida» en el panel mientras el mapa conservaba color/avatar anterior. Ahora el mapa previsualiza los miembros y relleno seleccionados antes de guardar; al cerrar sin guardar vuelve a la asignación persistida. La selección conserva el color semántico bajo su contorno naranja. En escritorio las cuatro opciones son filas de ancho completo con avatar/nombre/radio centrados a ≤1 px; móvil mantiene cuatro tarjetas y CTA táctiles. Validación final: `pnpm --filter @hogaria/web exec ng test --no-watch --include=src/app/features/household/household-plan-editor.component.spec.ts` **29/29**; `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/household-plan-tasks.spec.ts` **2/2 en 51,1 s**; `pnpm run check:ui` (**228 ficheros/21 reglas**), `pnpm run typecheck:e2e` y `git diff --check`. Comparaciones sintéticas PC/móvil regeneradas e inspeccionadas: `.e2e-screenshots/household-plan-comparison/04-zone-assignment-{desktop,mobile}.png`. La auditoría global sigue abierta en inicio, foto/propuesta, cotejo de iconos y acabado del chat.
 
 ### Puertas generales
 
