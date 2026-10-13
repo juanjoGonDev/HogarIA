@@ -288,10 +288,15 @@ export class HouseholdPlanningAutomationComponent implements OnChanges {
 
     const requestId = this.requestId;
     const householdId = this.householdId;
+    // The persistent notice may mutate this household's configuration while this subtab stays mounted.
+    const latestSharedSnapshot = this.service.snapshotFor(householdId);
+    const expectedVersion = latestSharedSnapshot
+      ? Math.max(this.response.version, latestSharedSnapshot.version)
+      : this.response.version;
     this.saving = true;
     this.saveSubscription = this.service
       .save(householdId, {
-        expectedVersion: this.response.version,
+        expectedVersion,
         mode: this.draft.mode,
         scopes: [...this.draft.scopes],
         weekday: this.draft.weekday,

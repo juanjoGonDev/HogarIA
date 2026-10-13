@@ -171,6 +171,42 @@ describe('HouseholdPlanningAutomationComponent', () => {
     );
   });
 
+  it('uses a newer shared-service version after the persistent notice toggles activation', () => {
+    savedConfig = {
+      ...DEFAULT_CONFIG,
+      mode: 'generate',
+      scopes: ['tasks'],
+      weekday: 1,
+      localTime: '20:30',
+      timeZone: 'Europe/Madrid',
+      version: 1
+    };
+    service.load.and.returnValue(of(savedConfig));
+    fixture.detectChanges();
+
+    savedConfig = { ...savedConfig, version: 3 };
+    service.snapshotFor.and.returnValue(savedConfig);
+    component.setMode('repeat');
+    component.setScope('tasks', false);
+    component.setScope('meals', true);
+    fixture.detectChanges();
+
+    (
+      fixture.nativeElement.querySelector(
+        '[data-test="planning-automation-save"] button'
+      ) as HTMLButtonElement
+    ).click();
+
+    expect(service.save).toHaveBeenCalledOnceWith('synthetic-home', {
+      expectedVersion: 3,
+      mode: 'repeat',
+      scopes: ['meals'],
+      weekday: 1,
+      localTime: '20:30',
+      timeZone: 'Europe/Madrid'
+    });
+  });
+
   it('rejects invalid time zones locally and keeps the validation error accessible', () => {
     fixture.detectChanges();
     component.setMode('repeat');
