@@ -1,4 +1,4 @@
-import { primaryKey, sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core';
+import { primaryKey, sqliteTable, text, integer, real, uniqueIndex } from 'drizzle-orm/sqlite-core';
 import { relations } from 'drizzle-orm';
 
 // ═══════════════════════════════════════════════════════════════════
@@ -318,6 +318,68 @@ export const mealParticipantsRelations = relations(mealParticipants, ({ one }) =
     references: [users.id]
   })
 }));
+
+// ═══════════════════════════════════════════════════════════════════
+// Shared meal consumption and idempotent inventory ledger
+// ═══════════════════════════════════════════════════════════════════
+
+export const mealConsumptions = sqliteTable('meal_consumptions', {
+  mealId: text('meal_id')
+    .primaryKey()
+    .references(() => meals.id, { onDelete: 'cascade' }),
+  householdId: text('household_id')
+    .notNull()
+    .references(() => households.id, { onDelete: 'cascade' }),
+  status: text('status').notNull(),
+  servings: integer('servings').notNull(),
+  version: integer('version').notNull(),
+  recordedBy: text('recorded_by').references(() => users.id, { onDelete: 'set null' }),
+  warningsJson: text('warnings_json').notNull().default('[]'),
+  recipeSnapshotHash: text('recipe_snapshot_hash'),
+  recordedAt: text('recorded_at').default('CURRENT_TIMESTAMP'),
+  updatedAt: text('updated_at').default('CURRENT_TIMESTAMP')
+});
+
+export const mealConsumptionDeductions = sqliteTable(
+  'meal_consumption_deductions',
+  {
+    mealId: text('meal_id')
+      .notNull()
+      .references(() => mealConsumptions.mealId, { onDelete: 'cascade' }),
+    lineIndex: integer('line_index').notNull(),
+    ingredientId: text('ingredient_id').references(() => ingredients.id, { onDelete: 'set null' }),
+    ingredientName: text('ingredient_name').notNull(),
+    unit: text('unit').notNull(),
+    targetQuantity: real('target_quantity').notNull(),
+    deductedQuantity: real('deducted_quantity').notNull(),
+    updatedAt: text('updated_at').default('CURRENT_TIMESTAMP')
+  },
+  (table) => [primaryKey({ columns: [table.mealId, table.lineIndex] })]
+);
+
+export const mealInventoryMovements = sqliteTable(
+  'meal_inventory_movements',
+  {
+    id: text('id').primaryKey(),
+    mealId: text('meal_id')
+      .notNull()
+      .references(() => meals.id, { onDelete: 'cascade' }),
+    consumptionVersion: integer('consumption_version').notNull(),
+    lineIndex: integer('line_index').notNull(),
+    ingredientId: text('ingredient_id').references(() => ingredients.id, { onDelete: 'set null' }),
+    ingredientName: text('ingredient_name').notNull(),
+    unit: text('unit').notNull(),
+    deltaQuantity: real('delta_quantity').notNull(),
+    createdAt: text('created_at').default('CURRENT_TIMESTAMP')
+  },
+  (table) => [
+    uniqueIndex('idx_meal_inventory_movement_once').on(
+      table.mealId,
+      table.consumptionVersion,
+      table.lineIndex
+    )
+  ]
+);
 
 // ═══════════════════════════════════════════════════════════════════
 // AI Configurations

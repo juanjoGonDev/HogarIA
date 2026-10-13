@@ -2551,9 +2551,13 @@ por miembro y confirma de forma explícita tras revalidar; el `POST /api/ai/plan
 lee preferencias antiguas y escribe sin esa vista previa. La UI de ajustes de Hogar > Planificación y
 el ajuste local de recetas por ración ya están integrados en la rama. Una E2E aislada sintética de
 ajustes pasa 2/2 (PC/móvil); sigue pendiente verificar el flujo integrado completo de generación,
-confirmación y varios miembros. Consumo real, borrador de compra y automatización no están implementados.
-Evidencia y límites reproducibles están en `HOGARIA-HOUSEHOLD-PLAN-SPEC.md`, «Estado de implementación
-y evidencia»; no se declara `QA-HOME-MEALS.SETTINGS.1` ni `QA-HOME-MEALS.PLAN.1` completo.
+confirmación y varios miembros. La API backend de consumo está integrada en PR #47: solo participantes explícitos con
+`calendar.view` registran/corrigen; el stock doméstico se ajusta de forma atómica, versionada e
+idempotente desde el snapshot por ración, con warnings conservadores ante falta/ambigüedad. Su UI,
+integración visual en el calendario y E2E siguen pendientes; no se marca `QA-HOME-MEALS.CONSUMPTION.1`
+completo. El borrador de compra y la automatización tampoco están implementados. Evidencia y límites
+reproducibles están en `HOGARIA-HOUSEHOLD-PLAN-SPEC.md`, «Estado de implementación y evidencia»; no se
+declara `QA-HOME-MEALS.SETTINGS.1` ni `QA-HOME-MEALS.PLAN.1` completo.
 
 ### R. Recurrencia de los eventos de la casa
 

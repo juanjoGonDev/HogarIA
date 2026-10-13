@@ -929,6 +929,29 @@ una alergia obliga a separar o a dejar el turno sin resolver aunque el objetivo 
   puede confirmar **realizada** e indicar las raciones realmente cocinadas/servidas, o marcar **no
   realizada**. Planificar o saltar una comida no descuenta stock. Solo la confirmación de raciones
   descuenta los ingredientes estimados de la receta; la misma confirmación no puede aplicarse dos veces.
+- La regla de acceso al consumo es por evento: cualquier miembro activo incluido en
+  `meal_participants` y con el permiso existente `calendar.view` puede registrar/corregir el consumo de
+  esa comida; no necesita `calendar.edit`, porque no está editando la planificación. Una persona con
+  acceso al calendario pero no asignada no puede cambiarla. Las escrituras requieren `x-household-id`
+  vigente y comprueban el hogar de nuevo dentro de la transacción.
+- `PUT /api/household/meal-planning/meals/:mealId/consumption` recibe el estado absoluto y
+  `expectedVersion`: `realized` requiere 1–100 raciones; `not_realized` exige 0. Una repetición del
+  estado/raciones ya persistido es idempotente aunque llegue con una versión anterior; una corrección
+  distinta requiere la versión actual. Cada corrección ajusta solo la diferencia de stock registrada,
+  repone lo deducido al pasar a no realizada y escribe estado, stock y movimientos en una transacción.
+  El endpoint GET adyacente devuelve `unrecorded`/estado actual y versión para una edición segura. La
+  huella de las líneas del snapshot se conserva al registrar el consumo: una receta que cambió no sirve
+  para una nueva deducción/corrección, aunque sí se puede marcar no realizada y reponer el débito previo.
+- Solo se descuenta del inventario explícito del hogar (`ingredients.household_id`) si `shared_pantry`
+  está activado; el stock privado `household_id IS NULL` de cualquier miembro no se atribuye a una comida
+  común. Cada ingrediente de la receta por ración se escala por las raciones reales y se resuelve por
+  nombre normalizado exactamente igual (Unicode NFKC, mayúsculas/minúsculas y espacios) **y unidad exacta**.
+  No hay fuzzy matching ni conversión de unidades. Sin coincidencia o con más de una ficha coincidente no
+  se descuenta; un stock insuficiente se consume solo hasta cero. La API devuelve avisos específicos.
+  Un libro de deducciones netas y movimientos con clave única comida/versión/línea evita duplicar cambios
+  al reintentar o corregir. La huella persistida de las líneas impide que una edición posterior de la
+  receta cambie cantidades de una corrección; sigue permitiendo revertir el débito con «no realizada».
+  Sin receta válida se registra el consumo, pero no se inventan cantidades.
 - Después de registrar lo realmente comido, la IA puede comparar menús próximos con el inventario y
   proponer una lista de compra. Antes de crearla, la UI pide revisar las existencias —en especial lo que
   se necesita para las próximas comidas—, permite corregirlas y presenta un borrador editable. Solo la
@@ -1036,14 +1059,37 @@ solo su backend o sus pruebas unitarias.
   `POST /api/ai/plan-week` heredado no se declara sustituido.
 - **Calendario compartido — backend parcial integrado:** un evento compartido se guarda una vez y sus
   participantes son usuarios del hogar con permiso de lectura; las lecturas existentes exponen el
-  evento solo a las personas asignadas, sin notas/objetivos privados. Pendiente recorrido E2E real y
-  consumo/compras.
+  evento solo a las personas asignadas, sin notas/objetivos privados. El consumo dispone de GET/PUT
+  separado, permiso por miembro asignado con `calendar.view`, versiones optimistas, idempotencia,
+  correcciones y un ledger de movimientos de stock transaccional. La coincidencia del producto es
+  estricta por nombre normalizado y unidad; inventario privado, conversión de unidades y sugerencias
+  aproximadas quedan excluidos deliberadamente. La lectura existente del calendario aún no incluye este
+  estado; la futura UI puede obtenerlo desde el endpoint GET. Pendiente recorrido E2E real, UI e integración
+  de compra.
 - **Recetas por ración — backend/UI integrado:** el contrato nuevo usa `baseServings: 1`; la generación
   normaliza cantidades para una ración, el cliente escala cantidades localmente y conserva tiempos y
   receta base, con aviso de cocción por tandas. Los cambios del worktree ya están en esta rama; su
   regresión completa en el árbol integrado se actualizará con el gate final. No se llama a IA para
   volver a escalar una receta guardada.
 - **Validación reproducible ejecutada en Windows:**
+
+  ```powershell
+  $env:DATABASE_PATH=':memory:'
+  pnpm --filter @hogaria/server exec vitest run src/schemas/household-meal-consumption.schema.spec.ts src/utils/household-meal-consumption.store.spec.ts src/routes/household-meal-consumption.routes.spec.ts
+  pnpm --filter @hogaria/server exec vitest run --coverage --coverage.include=src/routes/household-meal-consumption.routes.ts --coverage.include=src/utils/household-meal-consumption.store.ts src/utils/household-meal-consumption.store.spec.ts src/routes/household-meal-consumption.routes.spec.ts
+  pnpm --filter @hogaria/server exec vitest run --coverage --coverage.include=src/schemas/household-meal-consumption.schema.ts src/schemas/household-meal-consumption.schema.spec.ts
+  pnpm --filter @hogaria/server exec tsc --noEmit -p tsconfig.json
+  ```
+
+  Para consumo, la prueba focal aprueba **3 archivos / 25 tests** (schema, store y ruta); la ruta/store
+  suman **17 tests**, con cobertura por fichero de **88,46/79,16/100/91,66 %** y
+  **87,79/78,88/100/89,93 %** (statements/branches/funciones/líneas). El esquema suma **8 tests** y
+  **100/100/100/100 %**. El contrato cubre valores positivos, cero solo para «no realizada», límites,
+  versión y propiedades no permitidas. Se ejercitaron retries, correcciones, receta alterada/corrupta,
+  rollback, contexto y permisos, stock insuficiente, unidades incompatibles, producto ambiguo y despensa
+  no compartida. `tsc --noEmit -p tsconfig.json` pasa. Los tests usan `DATABASE_PATH=:memory:` y datos
+  sintéticos; no llaman a servidor, inventario persistente ni proveedor real. La suite completa de
+  servidor y E2E UI no forman parte de esta unidad aislada.
 
   ```powershell
   $env:DATABASE_PATH=':memory:'

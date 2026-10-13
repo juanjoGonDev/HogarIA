@@ -27,6 +27,7 @@ import {
 import { householdRoutes } from './routes/household.routes.js';
 import { householdMealPlanningRoutes } from './routes/household-meal-planning.routes.js';
 import { householdMealProposalRoutes } from './routes/household-meal-proposals.routes.js';
+import { householdMealConsumptionRoutes } from './routes/household-meal-consumption.routes.js';
 import { householdPlanRoutes } from './routes/household-plan.routes.js';
 import { householdTasksRoutes } from './routes/household-tasks.routes.js';
 import { calendarRoutes } from './routes/calendar.routes.js';
@@ -455,6 +456,7 @@ export function createApp(options: AppOptions = {}): Hono {
   app.route('/api/household', householdRoutes);
   app.route('/api/household', householdMealPlanningRoutes);
   app.route('/api/household', householdMealProposalRoutes);
+  app.route('/api/household', householdMealConsumptionRoutes);
   app.route('/api/household', householdPlanRoutes);
   app.route('/api/household', householdTasksRoutes);
   app.route('/api/calendar', calendarRoutes);

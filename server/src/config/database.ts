@@ -337,6 +337,62 @@ async function runMigrations(db: Database.Database): Promise<void> {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    -- One current consumption state per explicitly shared meal; corrections reconcile against
+    -- the net deductions below instead of applying the same stock change again on retries.
+    CREATE TABLE IF NOT EXISTS meal_consumptions (
+      meal_id TEXT PRIMARY KEY NOT NULL,
+      household_id TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('realized', 'not_realized')),
+      servings INTEGER NOT NULL CHECK (
+        (status = 'realized' AND servings > 0 AND servings <= 100) OR
+        (status = 'not_realized' AND servings = 0)
+      ),
+      version INTEGER NOT NULL CHECK (version >= 1),
+      recorded_by TEXT,
+      warnings_json TEXT NOT NULL DEFAULT '[]',
+      recipe_snapshot_hash TEXT,
+      recorded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (meal_id) REFERENCES meals(id) ON DELETE CASCADE,
+      FOREIGN KEY (household_id) REFERENCES households(id) ON DELETE CASCADE,
+      FOREIGN KEY (recorded_by) REFERENCES users(id) ON DELETE SET NULL
+    );
+
+    -- Current net stock deduction per immutable recipe-snapshot line; deleted catalog products
+    -- leave their historical name/unit and net quantity behind for safe correction warnings.
+    CREATE TABLE IF NOT EXISTS meal_consumption_deductions (
+      meal_id TEXT NOT NULL,
+      line_index INTEGER NOT NULL CHECK (line_index >= 0),
+      ingredient_id TEXT,
+      ingredient_name TEXT NOT NULL,
+      unit TEXT NOT NULL,
+      target_quantity REAL NOT NULL CHECK (target_quantity >= 0),
+      deducted_quantity REAL NOT NULL CHECK (deducted_quantity >= 0),
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (meal_id, line_index),
+      FOREIGN KEY (meal_id) REFERENCES meal_consumptions(meal_id) ON DELETE CASCADE,
+      FOREIGN KEY (ingredient_id) REFERENCES ingredients(id) ON DELETE SET NULL
+    );
+
+    -- Immutable signed movements provide an audit trail and a uniqueness guard per event-version-line.
+    CREATE TABLE IF NOT EXISTS meal_inventory_movements (
+      id TEXT PRIMARY KEY,
+      meal_id TEXT NOT NULL,
+      consumption_version INTEGER NOT NULL CHECK (consumption_version >= 1),
+      line_index INTEGER NOT NULL CHECK (line_index >= 0),
+      ingredient_id TEXT,
+      ingredient_name TEXT NOT NULL,
+      unit TEXT NOT NULL,
+      delta_quantity REAL NOT NULL CHECK (delta_quantity <> 0),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (meal_id) REFERENCES meals(id) ON DELETE CASCADE,
+      FOREIGN KEY (ingredient_id) REFERENCES ingredients(id) ON DELETE SET NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_meal_inventory_movement_once
+      ON meal_inventory_movements(meal_id, consumption_version, line_index);
+    CREATE INDEX IF NOT EXISTS idx_meal_inventory_movements_ingredient
+      ON meal_inventory_movements(ingredient_id, created_at);
+
     -- AI configurations table
     CREATE TABLE IF NOT EXISTS ai_configs (
       id TEXT PRIMARY KEY,
