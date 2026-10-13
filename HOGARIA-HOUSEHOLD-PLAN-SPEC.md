@@ -904,10 +904,13 @@ una alergia obliga a separar o a dejar el turno sin resolver aunque el objetivo 
   calendario paralelo: las comidas y tareas planificadas aparecen en el calendario actual, con persona(s)
   asignada(s), estado y hora cuando exista. Un evento de comida compartido se guarda una sola vez con su
   conjunto de participantes y raciones; comidas diferentes son eventos diferentes asignados a sus
-  participantes. La asignación de una comida es un permiso explícito solo para ese evento: lo ven sus
-  participantes activos con `calendar.view`; no expone otros eventos/calendarios personales. La
-  confirmación exige `calendar.edit` al autor. La opción general `shareCalendar` no amplía este acceso
-  limitado por evento ni oculta una asignación aceptada por sus participantes.
+  participantes. **Decisión del usuario (2026-10-13):** las comidas confirmadas de la planificación del
+  hogar son visibles para todos sus miembros activos con `calendar.view`, aunque una comida individual
+  esté asignada a una sola persona; la asignación indica para quién se planificó, no limita quién puede
+  verla. La lista de compra también agrega las comidas individuales del plan del hogar y es visible en
+  ese ámbito. Esto no comparte calendarios personales, notas privadas, objetivos, alergias ni prompts;
+  el autor aún necesita `calendar.edit` para confirmar. `shareCalendar` continúa gobernando solo los
+  eventos personales ajenos, no la planificación compartida del hogar.
 - Para las tareas, el hogar puede gestionar zonas de dos formas: (a) dibujar/editar un plano interactivo,
   o (b) crear una lista sencilla de zonas con nombre, sin dibujo. Ambas admiten asignar tareas y verlas en
   Planificación; dibujar el plano es opcional. El menú permite eliminar el plano actual y empezar desde
@@ -1184,8 +1187,9 @@ criterios inferiores permanecen sin marcar hasta validar cada condición en su a
 - [ ] **QA-HOME-MEALS.CONSUMPTION.1** — realizada/no realizada, raciones cero/positivas/fuera de
       rango, ajustes, inventario sin cambios antes de confirmar e idempotencia; la receta base y los
       movimientos de stock no se duplican.
-- [ ] **QA-HOME-MEALS.SHOPPING.1** — preview de solo lectura a partir de comidas futuras confirmadas,
-      snapshots inmutables y raciones planificadas; consolidación por nombre normalizado + unidad exacta,
+- [ ] **QA-HOME-MEALS.SHOPPING.1** — preview visible a miembros activos con `calendar.view`, de solo
+      lectura y a partir de todas las comidas futuras confirmadas del hogar, incluidas las asignadas
+      individualmente; snapshots inmutables y raciones planificadas; consolidación por nombre normalizado + unidad exacta,
       cálculo de faltantes usando únicamente despensa compartida del hogar, avisos ante ausencias,
       ambigüedad o unidad distinta y exclusión inicial de ingredientes opcionales; UI con revisión editable
       en paso separado, cancelar/rechazar sin escritura y aprobación que crea/actualiza Compra conservando

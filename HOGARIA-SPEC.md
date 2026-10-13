@@ -2555,8 +2555,11 @@ navegación entre subtabs y limpieza de contexto al cambiar de hogar. Faltan com
 preferencias y casos completos de restricciones. Una guarda adicional devuelve
 `409 MEAL_PLAN_OVERRIDE_INCOMPLETE` antes de IA cuando un override personal activo carece de valor
 explícito válido; su cobertura focal y E2E de ajustes pasan, pero no cierra el criterio completo de
-configuración. La API backend de consumo está integrada en PR #47: solo participantes explícitos con
-`calendar.view` registran/corrigen; el stock doméstico se ajusta de forma atómica, versionada e
+configuración. Decisión del 13-10-2026: toda comida confirmada del plan del hogar será visible para
+miembros activos con `calendar.view`, aunque esté asignada individualmente; esto no expone calendarios
+personales ni metas, alergias, notas o prompts privados. Solo los participantes asignados podrán
+registrar/corregir su consumo: la lectura no concede permiso de escritura. La API backend de consumo
+está integrada en PR #47: solo participantes explícitos con `calendar.view` registran/corrigen; el stock doméstico se ajusta de forma atómica, versionada e
 idempotente desde el snapshot por ración, con warnings conservadores ante falta/ambigüedad. Su UI,
 integración visual en el calendario y E2E siguen pendientes; no se marca `QA-HOME-MEALS.CONSUMPTION.1`
 completo. El borrador de compra y la automatización tampoco están implementados. Evidencia y límites
