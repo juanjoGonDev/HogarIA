@@ -28,7 +28,7 @@ describe('RegisterComponent', () => {
       'loadHousehold',
       'joinByCode'
     ]);
-    household.joinByCode.and.returnValue(of({} as never));
+    household.joinByCode.and.returnValue(of({ success: true } as never));
     translate = jasmine.createSpy('t').and.callFake((key: string) => key);
 
     await TestBed.configureTestingModule({
@@ -98,7 +98,7 @@ describe('RegisterComponent', () => {
     expect(auth.register).not.toHaveBeenCalled();
   });
 
-  it('creates a valid account, loads the household and sends the user to onboarding', () => {
+  it('creates a valid account and sends the user to required household setup', () => {
     makeFormValid();
 
     component.onSubmit();
@@ -109,8 +109,8 @@ describe('RegisterComponent', () => {
       password: 'Abc123'
     });
     expect(toast.success).toHaveBeenCalledWith('auth.cuenta_creada', 'auth.tu_cuenta_ha_sido');
-    expect(household.loadHousehold).toHaveBeenCalled();
-    expect(navigate).toHaveBeenCalledWith(['/onboarding']);
+    expect(household.loadHousehold).not.toHaveBeenCalled();
+    expect(navigate).toHaveBeenCalledWith(['/household']);
     expect(component.isLoading()).toBeTrue();
   });
 
@@ -153,10 +153,10 @@ describe('RegisterComponent', () => {
     expect(auth.register).not.toHaveBeenCalled();
   });
 
-  it('joins the invitation household and falls back to dashboard when the code fails', () => {
+  it('joins the invitation household and keeps failed invitations recoverable', () => {
     makeFormValid();
     routeCode.and.returnValue('invite-code');
-    household.joinByCode.and.returnValue(of({} as never));
+    household.joinByCode.and.returnValue(of({ success: true } as never));
 
     component.onSubmit();
 
@@ -168,6 +168,17 @@ describe('RegisterComponent', () => {
     component.isLoading.set(false);
     component.onSubmit();
 
-    expect(navigate).toHaveBeenCalledWith(['/dashboard']);
+    expect(navigate).toHaveBeenCalledWith(['/invite', 'invite-code']);
+  });
+
+  it('does not treat a rejected invite response as a successful membership', () => {
+    makeFormValid();
+    routeCode.and.returnValue('invite-code');
+    household.joinByCode.and.returnValue(of({ success: false } as never));
+
+    component.onSubmit();
+
+    expect(toast.success).not.toHaveBeenCalledWith('auth.unido', 'auth.te_has_unido_al');
+    expect(navigate).toHaveBeenCalledWith(['/invite', 'invite-code']);
   });
 });

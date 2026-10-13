@@ -181,16 +181,22 @@ export class RegisterComponent {
     const code = this.route.snapshot.queryParamMap.get('code');
     if (code) {
       this.householdService.joinByCode(code).subscribe({
-        next: () => {
+        next: (result) => {
+          if (result?.success !== true) {
+            // Keep the invitation available for retry; invalid/expired links can still
+            // return to the household screen to create a home or enter another code.
+            void this.router.navigate(['/invite', code]);
+            return;
+          }
           this.toastService.success(this.i18n.t('auth.unido'), this.i18n.t('auth.te_has_unido_al'));
           this.router.navigate(['/household']);
         },
-        error: () => this.router.navigate(['/dashboard'])
+        error: () => this.router.navigate(['/invite', code])
       });
     } else {
-      // Antes del dashboard, cuatro preguntas de configuración (alergias,
-      // gustos, objetivo y utensilios). Es saltable desde el propio flujo.
-      this.router.navigate(['/onboarding']);
+      // Household is the mandatory account setup step. The household screen offers
+      // create/join actions and remains available after interruption or reload.
+      void this.router.navigate(['/household']);
     }
   }
 
@@ -235,7 +241,6 @@ export class RegisterComponent {
             this.i18n.t('auth.cuenta_creada'),
             this.i18n.t('auth.tu_cuenta_ha_sido')
           );
-          this.householdService.loadHousehold();
           this.redirectAfterAuth();
         },
         error: (error) => {
