@@ -983,8 +983,9 @@ una alergia obliga a separar o a dejar el turno sin resolver aunque el objetivo 
 El registro no termina con una cuenta sin hogar: antes de entrar al resto de la aplicación, la persona
 elige explícitamente **Crear un hogar** o **Unirme a uno existente** mediante una invitación válida. No
 hay ruta de omisión ni acceso al dashboard/calendario con membresía pendiente. Si se interrumpe el flujo,
-se puede reanudar sin crear cuentas, hogares o membresías duplicadas. Un código inválido, vencido, una
+se puede reanudar sin crear cuentas, hogares o membresías duplicadas. Un código inválido o revocado, una
 denegación o un fallo de red deja un error recuperable y conserva la opción de crear hogar o reintentar.
+El contrato actual no define caducidad temporal de invitaciones; no se inventa un plazo.
 El servidor comprueba la membresía activa en cada ruta protegida; el estado local del cliente no basta.
 
 Se recomienda copiar una sola vez los valores iniciales de planificación vigentes del creador al crear un
@@ -1044,7 +1045,11 @@ solo su backend o sus pruebas unitarias.
   la operación es idempotente y `join` no reemplaza la configuración existente. Las pruebas de
   rutas de cuenta ahora preparan una membresía sintética para ejercitar perfil/avatar/password después
   del onboarding; la puerta real tiene su propio test con `createApp`. Falta E2E real de alta,
-  invitación, interrupción/reanudación y móvil.
+  invitación, interrupción/reanudación y móvil. E2E sintética aislada pasa **4/4** PC/móvil para crear,
+  bloqueo server-side e invitación inválida recuperable con reintento válido; falta cubrir error transitorio
+  de red y doble envío. El schema `households` y las rutas `GET /invite/:code`, `POST /join` y
+  `POST /regenerate-invite` no definen `expires_at`: se puede revocar regenerando el código, pero no se
+  promete caducidad temporal hasta acordar e implementar un contrato para ella.
 - **Configuración de comidas — backend/UI parcial:** `GET/PATCH /api/household/meal-planning`, columnas
   de hogar/miembro, validación de permiso existente, resolución por miembro e inicialización del hogar
   están implementados. Los overrides empiezan apagados; la preferencia de horario personal procede de
@@ -1181,9 +1186,10 @@ criterios inferiores permanecen sin marcar hasta validar cada condición en su a
       elegir tareas/comidas.
 - [ ] **QA-HOME-TASKS.WEEKLY.2** — asignación fija/aleatoria, equilibrio, no repetir días
       consecutivos si hay solución, excepción explicada y preservación de asignaciones manuales.
-- [ ] **QA-AUTH.HOUSEHOLD-REQUIRED.1** — alta obligatoria crear/unirse, invitación inválida/vencida,
-      error recuperable, reanudación, doble envío, membership activo antes de dashboard y rechazo
-      server-side; sin acceso al resto con hogar pendiente.
+- [ ] **QA-AUTH.HOUSEHOLD-REQUIRED.1** — alta obligatoria crear/unirse, invitación inválida/revocada,
+      error recuperable de red, reanudación, doble envío, membership activo antes de dashboard y rechazo
+      server-side; sin acceso al resto con hogar pendiente. La caducidad no se prueba ni promete mientras
+      el contrato no la defina.
 - [ ] E2E real contra app local para PC y móvil: configuración de hogar, override por dos miembros,
       generación y aprobación, calendario, confirmación de raciones, borrador de compra, automatización y
       alta crear/unirse; usar DB temporal/semillas únicas y capturas sin datos personales.
