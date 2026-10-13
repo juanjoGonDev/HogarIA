@@ -202,7 +202,7 @@ describe('HouseholdTasksComponent', () => {
     );
   });
 
-  it('omits owner captions from compact room footprints without changing their accessible assignment', async () => {
+  it('omits secondary room details from compact map spaces without changing their assignment', async () => {
     await mount();
     const source = plan.floors[0].spaces[0];
     const compactRoom: HouseholdPlanSpace = {
@@ -225,7 +225,9 @@ describe('HouseholdTasksComponent', () => {
     };
 
     expect(component.spaceMapAssigneeLabelVisible(compactRoom)).toBe(false);
+    expect(component.spaceMapGlyphVisible(compactRoom)).toBe(false);
     expect(component.spaceMapAssigneeLabelVisible(readableRoom)).toBe(true);
+    expect(component.spaceMapGlyphVisible(readableRoom)).toBe(true);
     expect(component.spaceAssignmentLabel(compactRoom.id)).toBe('household.plan_zone_unassigned');
   });
 

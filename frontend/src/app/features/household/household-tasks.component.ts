@@ -435,13 +435,18 @@ export class HouseholdTasksComponent implements OnChanges {
   }
 
   spaceMapAssigneeLabelVisible(space: HouseholdPlanSpace): boolean {
-    if (space.polygon.length < 3) return false;
+    return this.spaceMapSpan(space) >= MAP_OWNER_LABEL_MIN_SPAN;
+  }
+
+  spaceMapGlyphVisible(space: HouseholdPlanSpace): boolean {
+    return this.spaceMapSpan(space) >= MAP_OWNER_LABEL_MIN_SPAN;
+  }
+
+  private spaceMapSpan(space: HouseholdPlanSpace): number {
+    if (space.polygon.length < 3) return 0;
     const xs = space.polygon.map((point) => point.x);
     const ys = space.polygon.map((point) => point.y);
-    return (
-      Math.min(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) >=
-      MAP_OWNER_LABEL_MIN_SPAN
-    );
+    return Math.min(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
   }
 
   memberInitials(member: HouseholdMember): string {

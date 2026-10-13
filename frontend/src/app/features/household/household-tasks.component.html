@@ -127,6 +127,7 @@
                 aria-hidden="true"
               >
                 <svg
+                  *ngIf="spaceMapGlyphVisible(space)"
                   householdAreaGlyph
                   [kind]="space.kind"
                   [attr.x]="spaceCenter(space).x - 400"

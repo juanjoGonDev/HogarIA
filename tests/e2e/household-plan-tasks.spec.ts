@@ -9,7 +9,7 @@ import type {
 
 function fitSyntheticPlan(
   source: HouseholdPlan,
-  shape: 'landscape' | 'portrait' | 'photo' | 'task'
+  shape: 'landscape' | 'portrait' | 'photo' | 'task' | 'task-mobile'
 ): HouseholdPlan {
   const plan = structuredClone(source);
   for (const floor of plan.floors) {
@@ -33,8 +33,10 @@ function fitSyntheticPlan(
       shape === 'portrait'
         ? 8800 / height
         : shape === 'task'
-          ? Math.min(1.05, 9600 / height, (width * scaleX) / (height * 1.3))
-          : Math.min(1.15, 9600 / height);
+          ? Math.min(1.05, 9600 / height, (width * scaleX) / height)
+          : shape === 'task-mobile'
+            ? Math.min(1.05, 9600 / height, (width * scaleX) / (height * 1.3))
+            : Math.min(1.15, 9600 / height);
     const centerX = (minX + maxX) / 2;
     const centerY = (minY + maxY) / 2;
     const transformPoint = (point: HouseholdPlanPoint): HouseholdPlanPoint => ({
@@ -140,8 +142,8 @@ function portraitPlan(source: HouseholdPlan): HouseholdPlan {
   return fitSyntheticPlan(source, 'portrait');
 }
 
-function taskPlan(source: HouseholdPlan): HouseholdPlan {
-  return fitSyntheticPlan(source, 'task');
+function taskPlan(source: HouseholdPlan, mobile: boolean): HouseholdPlan {
+  return fitSyntheticPlan(source, mobile ? 'task-mobile' : 'task');
 }
 
 function addAseoByBedrooms(source: HouseholdPlan): HouseholdPlan {
@@ -2240,7 +2242,7 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
         ? proposedPlan
         : requestNumber === 2
           ? chatProposalPlan
-          : taskPlan(followupPlan);
+          : taskPlan(followupPlan, mobile);
     const modifiedLivingRoomId = proposedPlan.floors[0].spaces.find(
       (space) => space.kind === 'living_room'
     )!.id;
@@ -3062,7 +3064,10 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     'the task map uses the clean paper treatment from the approved screen'
   ).toHaveCount(0);
   await expect(page.locator('.tasks-map-viewport')).toHaveCSS('background-image', 'none');
-  await expect(page.locator('.tasks-plan-canvas svg[householdAreaGlyph]')).toHaveCount(8);
+  await expect(
+    page.locator('.tasks-plan-canvas svg[householdAreaGlyph]'),
+    'the map omits a glyph from one compact space but keeps its polygon and accessible name'
+  ).toHaveCount(7);
   await expect(page.locator('.tasks-zone-heading__title h3')).toHaveText('Cocina');
   await expect(page.locator('.tasks-weekbar button svg')).toHaveCount(2);
   await expect(page.locator('[data-test="tasks-add"] svg')).toBeVisible();
@@ -3221,6 +3226,24 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     expect(assignmentMode!.height).toBeGreaterThanOrEqual(44);
   }
   const taskCanvas = await page.locator('.tasks-plan-canvas').boundingBox();
+  const taskPlanFootprint = await page.locator('.tasks-plan-canvas').evaluate((svg) => {
+    const regions = Array.from(svg.querySelectorAll<SVGPolygonElement>('.tasks-map__area')).map(
+      (space) => space.getBBox()
+    );
+    if (!regions.length) return null;
+    const left = Math.min(...regions.map((bounds) => bounds.x));
+    const right = Math.max(...regions.map((bounds) => bounds.x + bounds.width));
+    const top = Math.min(...regions.map((bounds) => bounds.y));
+    const bottom = Math.max(...regions.map((bounds) => bounds.y + bounds.height));
+    return { width: right - left, height: bottom - top };
+  });
+  expect(taskPlanFootprint).not.toBeNull();
+  const taskPlanAspect = taskPlanFootprint!.width / taskPlanFootprint!.height;
+  const expectedTaskPlanAspect = mobile ? 1.3 : 1.0;
+  expect(
+    Math.abs(taskPlanAspect - expectedTaskPlanAspect),
+    `the synthetic floor matches the approved ${mobile ? 'mobile' : 'desktop'} silhouette`
+  ).toBeLessThanOrEqual(0.04);
   const taskAreas = await page.locator('.tasks-map__area').evaluateAll((areas) =>
     areas.map((area) => {
       const bounds = area.getBoundingClientRect();
@@ -3256,6 +3279,10 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   await expect(page.locator('.tasks-map__area--shared')).toHaveCount(2);
   const compactAseoLabel = page.locator('.tasks-map__label[data-space-id="space-followup-aseo"]');
   await expect(compactAseoLabel.locator('.tasks-map__name')).toHaveText('Aseo');
+  await expect(
+    compactAseoLabel.locator('.tasks-map__glyph'),
+    'a glyph is omitted when its compact room cannot give it a clear margin'
+  ).toHaveCount(0);
   await expect(
     compactAseoLabel.locator('.tasks-map__owner'),
     'a compact room keeps its room name while removing an owner caption that cannot fit'
