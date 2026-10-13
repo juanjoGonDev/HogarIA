@@ -580,8 +580,8 @@ Evidencia visual y regresión:
       registrar comando, resultado y limitación exactos.
 - [x] Hooks pre-commit/pre-push obligatorios ejecutados sin bypass: Prettier, `check:ui`, build,
       typecheck E2E y tests completos.
-- [x] CI manual final `38212052262` completó correctamente los nueve jobs; PR #47 permaneció Draft
-      hasta pasar todos los gates.
+- [ ] CI manual final de esta auditoría: ejecutar sobre el commit con la matriz responsive corregida;
+      registrar resultado de los nueve jobs y mantener PR #47 en Draft.
 - [x] Inspección Playwright con servidor aislado y datos sintéticos; PC y móvil, capturas comparables,
       geometría equivalente con tolerancia ≤1 CSS px, teclado/labels y ninguna información privada.
 - [x] PR #47 continúa Draft como se solicitó; no se hizo merge.
@@ -745,3 +745,8 @@ inspección visual y geométrica de forma crítica.
   pre-push pasaron sin bypass: Prettier, check:ui, build, typecheck E2E y `pnpm run test`
   (11 config, 1.418 cliente, 1.330 servidor y 1 skip). PR #47 continúa Draft; no se cambió su base
   ni se hizo merge.
+- **Matriz responsive en CI:** la ejecución manual `38369051262` sobre `e139a934` detectó que el
+  media query `max-width: 339px` no incluía las anchuras B−1/B/B+1 (`338/339/340px`). Se añadió
+  ese breakpoint a `WIDTH_BREAKPOINTS`; el spec completo `tests/e2e/layout-gutters.spec.ts` pasó
+  **7/7 en 1,3 min** con servidor y SQLite aislados. Falta repetir CI completa sobre el commit de
+  esta corrección antes de dar la auditoría por cerrada.
