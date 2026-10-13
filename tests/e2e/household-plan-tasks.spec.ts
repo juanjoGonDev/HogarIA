@@ -2986,6 +2986,23 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   await page.locator('[data-test="plan-request-proposal"]').click();
   await expect(page.locator('[data-test="plan-proposal-chat-view"]')).toBeVisible();
   await expect(page.locator('.plan-chat h4')).toHaveText('Asistente IA');
+  const assistantHeadingIcon = await page.locator('.plan-chat h4 > svg').evaluate((svg) => {
+    const icon = svg.getBoundingClientRect();
+    const heading = svg.parentElement?.getBoundingClientRect();
+    return {
+      width: icon.width,
+      height: icon.height,
+      verticalOffset: heading
+        ? Math.abs(icon.top + icon.height / 2 - heading.top - heading.height / 2)
+        : Infinity
+    };
+  });
+  expect(assistantHeadingIcon.width, 'assistant sparkle matches the prototype size').toBe(24);
+  expect(assistantHeadingIcon.height, 'assistant sparkle remains square').toBe(24);
+  expect(
+    assistantHeadingIcon.verticalOffset,
+    'assistant sparkle aligns with the heading'
+  ).toBeLessThanOrEqual(1);
   await expect.poll(() => proposalRequestBodies.length).toBe(2);
   expect(proposalRequestBodies[1]).toContain('"draftPlan"');
   expect(proposalRequestBodies[1]).toContain('"prompt"');
