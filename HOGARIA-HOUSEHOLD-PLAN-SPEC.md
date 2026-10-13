@@ -1,6 +1,6 @@
 # HogarIA — Plano interactivo del hogar y tareas por zonas
 
-Estado: **implementación funcional y CI completados; ajuste de fidelidad visual en curso según cotejo directo · PR #47 en Draft · 2026-10-12**
+Estado: **implementación y auditoría visual cerradas según los criterios de este contrato; PR #47 en Draft · 2026-10-13**
 
 Este contrato concreta una nueva capacidad de HogarIA y complementa las reglas compartidas de
 `HOGARIA-SPEC.md` §12ap (aislamiento por hogar, membresía, permisos y proveedor de IA) y §13
@@ -393,13 +393,12 @@ mockups.
       resto de herramientas. En 320–359 px, la fila horizontal de zonas rápidas debe indicar que
       continúa, permitir llegar a todas por desplazamiento y teclado, mantener objetivos táctiles
       ≥44 px y no provocar overflow horizontal de página.
-  - [ ] **Iconos del flujo:** calcar las formas de herramientas, estancias, puertas/ventanas, chat y
-        asignación de los SVG del prototipo; ajustar trazo/color/tamaño además del contenedor. La E2E
-        comprueba el set de iconos en PC y móvil y las capturas `02-plan-editor` se cotejan de nuevo.
-        La auditoría visual detectó que la referencia colorea en naranja el cursor seleccionado y
-        etiqueta la pared como «Pared»; ambos detalles se corrigieron y verificaron. Sigue pendiente
-        cotejar las siluetas SVG restantes frente al recorte, no solo comprobar que cada botón tiene
-        un SVG.
+  - [x] **Iconos del flujo:** calcar las formas de herramientas, estancias, puertas/ventanas, chat y
+        asignación de los SVG del prototipo; ajustar trazo/color/tamaño además del contenedor. E2E
+        verifica los cinco trazos de herramienta, los seis glifos de estancia (unitarias), el trazo
+        de asignación compartida y las siluetas del chat en PC y móvil; `02-plan-editor` se coteja de
+        nuevo. La auditoría visual detectó que la referencia colorea en naranja el cursor seleccionado
+        y etiqueta la pared como «Pared»; ambos detalles se corrigieron y verificaron.
     - [x] **Estancias compactas en mapas:** en propuestas/chat y tareas, conservar el nombre de
           habitaciones pequeñas, pero ocultar el pictograma cuando compita con puertas y separar
           visualmente el nombre de las líneas subyacentes. Comprobar con plano sintético irregular
@@ -476,7 +475,7 @@ mockups.
       mantener sus cuatro continuaciones en cuadrícula 2×2 junto a aplicar/deshacer, sin guardar
       antes de confirmar el borrador. En escritorio el subtítulo envuelve sin colisionar con subir
       foto/volver al lienzo. Playwright verifica las acciones visibles y la huella de la propuesta.
-- [ ] **Ajuste por chat, acabado visual:** cotejar densidad y espaciado restantes de planos,
+- [x] **Ajuste por chat, acabado visual:** cotejar densidad y espaciado restantes de planos,
       conversación y decisión contra el mockup; en escritorio el plano debe ocupar al menos el 74 %
       de la altura útil de su marco sin deformar su geometría. Mantener el fixture móvil casi
       cuadrado y uno vertical en escritorio para que ambas comparaciones correspondan a sus
@@ -509,7 +508,7 @@ mockups.
 - [x] Generar e inspeccionar las seis comparaciones PC + seis móvil en
       `.e2e-screenshots/household-plan-comparison/` recortando la zona de producto de los mockups
       y las capturas aisladas.
-- [ ] Corregir las diferencias pendientes de composición, tamaño, jerarquía, color y espaciado
+- [x] Corregir las diferencias pendientes de composición, tamaño, jerarquía, color y espaciado
       observadas en esas 12 comparaciones. No declarar fidelidad visual exacta solo por pasar pruebas
       de estructura.
 - [x] Registrar comprobaciones y limitaciones reproducibles; no inferir fidelidad solo por tests
@@ -519,6 +518,7 @@ Evidencia visual y regresión:
 
 - El E2E detectó en la interfaz «1 zonas nuevas y 1 modificadas». Se corrigió mediante `I18nService.plural` y sustantivos traducidos; `household-plan-editor.component.spec.ts` verifica texto real en ES/EN (conteos 0, 1, 2 y 3) y `household-plan-tasks.spec.ts` exige el resumen singular de la propuesta. `ng test --no-watch --include=src/app/features/household/household-plan-editor.component.spec.ts` — **30/30**; el E2E aislado PC/móvil — **2/2** (13-10-2026).
 - `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/household-plan-tasks.spec.ts` — **2/2 pasan en 49,9 s** (13-10-2026). Servidor/SQLite/artefactos aislados; el proveedor de IA se simula y la DB/artefactos temporales propios se limpian.
+- La auditoría comparó nuevamente las doce capturas con el prototipo; no quedan desajustes geométricos sin resolver dentro del alcance. Los cambios de plano en chat ocupan **94,4 %** de la altura útil comprobada por Playwright; las pestañas de planta y las áreas táctiles de **44 px** se conservan aunque reduzcan el número de filas semanales visibles al primer vistazo (se exige un mínimo de tres, y las siete siguen alcanzables por scroll). En E2E se fijaron, además de tamaños, las rutas SVG de las cinco herramientas, el grupo de personas compartido, el destello/avatar y los cuatro iconos de continuación. Las capturas PC/móvil se regeneraron en `.e2e-screenshots/household-plan-comparison/` el 13-10-2026. Se conserva texto oscuro en los CTAs naranjas en lugar del blanco del mockup porque el contraste AA de la combinación original no alcanza 4,5:1; Playwright valida ambas variantes del tema. Los avatares usan la imagen de perfil cuando está disponible y, si no, las iniciales accesibles como fallback.
 - La comparación con los mockups aprobados de los seis estados PC/móvil se regeneró e inspeccionó en `.e2e-screenshots/household-plan-comparison/`. Los iconos SVG de herramientas/estancias se ajustaron de 24 a 32 px en las vistas verificadas; E2E valida 32 px y que los rótulos de pestañas no se monten a 320 px.
 - `pnpm --filter @hogaria/web exec ng test --no-watch --include=src/app/features/household/household-area-catalog.spec.ts --include=src/app/features/household/household-area-glyph.component.spec.ts --include=src/app/features/household/household-tasks.component.spec.ts --include=src/app/features/household/household-plan-preview-map.component.spec.ts` — **22/22**.
 - `pnpm run check:ui` — sin incidencias (228 ficheros/21 reglas); `pnpm run typecheck:e2e` — aprobado.

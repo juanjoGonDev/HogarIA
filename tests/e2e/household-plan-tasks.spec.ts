@@ -1115,6 +1115,22 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   const drawingTools = page.locator('.plan-canvas-toolbar__tools .plan-tool');
   await expect(drawingTools).toHaveCount(5);
   await expect(drawingTools.nth(1)).toHaveText('Pared');
+  const primaryToolGlyphs = await drawingTools.evaluateAll((buttons) =>
+    buttons.map((button) => ({
+      viewBox: button.querySelector('svg')?.getAttribute('viewBox'),
+      path: button.querySelector('svg path')?.getAttribute('d')
+    }))
+  );
+  expect(primaryToolGlyphs, 'the five drawing tools keep the prototype icon silhouettes').toEqual([
+    { viewBox: '0 0 64 64', path: 'M18 8v45l12-13 8 17 8-4-8-17h16L18 8Z' },
+    { viewBox: '0 0 64 64', path: 'M10 32h44' },
+    { viewBox: '0 0 64 64', path: 'm12 17 31-6 10 24-22 20-19-17z' },
+    { viewBox: '0 0 64 64', path: 'M14 52V30a20 20 0 0 1 20-20h14v42H14Z' },
+    {
+      viewBox: '0 0 64 64',
+      path: 'M10 17h44v30H10zM11 27h42M11 37h42M32 27v10'
+    }
+  ]);
   const doorGlyph = await drawingTools.nth(3).locator('svg path').getAttribute('d');
   expect(doorGlyph, 'the prototype door has a rounded upper-left contour').toContain(
     'a20 20 0 0 1 20-20'
@@ -1747,6 +1763,18 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
 
   const zoneAssignment = page.locator('[data-test="plan-zone-assignment"]');
   await expect(zoneAssignment).toBeVisible();
+  const sharedAssignmentGlyph = zoneAssignment.locator(
+    '.plan-zone-member--shared .plan-zone-member__avatar svg'
+  );
+  await expect(
+    sharedAssignmentGlyph,
+    'shared responsibility uses the prototype people glyph'
+  ).toBeVisible();
+  await expect(sharedAssignmentGlyph.locator('circle')).toHaveCount(2);
+  await expect(sharedAssignmentGlyph.locator('path')).toHaveAttribute(
+    'd',
+    'M3.5 19a5.5 5.5 0 0 1 11 0m-.5-4a4.5 4.5 0 0 1 7.5 3.5'
+  );
   await expect(
     page.locator('.plan-canvas-toolbar'),
     'zone assignment must not expose drawing controls'
@@ -2767,6 +2795,10 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     page.locator('.plan-chat__assistant-avatar svg'),
     'the assistant reply retains its home mark'
   ).toBeVisible();
+  await expect(page.locator('.plan-chat__assistant-avatar svg path')).toHaveAttribute(
+    'd',
+    'm2 11 10-8 10 8v10a1 1 0 0 1-1 1h-6v-7H9v7H3a1 1 0 0 1-1-1V11Z'
+  );
   const assistantAvatarGeometry = await page
     .locator('.plan-chat__assistant-avatar')
     .evaluate((avatar) => {
@@ -3025,6 +3057,15 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     assistantHeadingIcon.verticalOffset,
     'assistant sparkle aligns with the heading'
   ).toBeLessThanOrEqual(1);
+  await expect(page.locator('.plan-chat h4 > svg path')).toHaveCount(2);
+  await expect(page.locator('.plan-chat h4 > svg path').first()).toHaveAttribute(
+    'd',
+    'm12 2 2.2 6.4L20.5 11l-6.3 2.6L12 20l-2.2-6.4L3.5 11l6.3-2.6L12 2Z'
+  );
+  await expect(page.locator('.plan-chat h4 > svg path').nth(1)).toHaveAttribute(
+    'd',
+    'm19 14 .9 2.6 2.6.9-2.6.9-.9 2.6-.9-2.6-2.6-.9 2.6-.9.9-2.6Z'
+  );
   await expect.poll(() => proposalRequestBodies.length).toBe(2);
   expect(proposalRequestBodies[1]).toContain('"draftPlan"');
   expect(proposalRequestBodies[1]).toContain('"prompt"');
@@ -3101,6 +3142,22 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
       'continuation icons align with single- or multi-line labels'
     ).toBeLessThanOrEqual(4);
   }
+  const continuationGlyphs = await page
+    .locator('[data-test="plan-chat-continuation"] svg')
+    .evaluateAll((icons) =>
+      icons.map((icon) =>
+        Array.from(icon.querySelectorAll('path'), (path) => path.getAttribute('d'))
+      )
+    );
+  expect(
+    continuationGlyphs,
+    'chat continuation actions match their four distinct prototype icons'
+  ).toEqual([
+    ['M4 5h16v11H9l-5 4V5Z', 'M8 9h8M8 12h5'],
+    ['M5 4h14v16H5zM8 8h8M8 12h8M8 16h5'],
+    ['M12 16V4m-5 5 5-5 5 5M4 14v5h16v-5'],
+    ['M19 12H5m0 0 6-6m-6 6 6 6']
+  ]);
   if (mobile) await expect(page.locator('.plan-review__mobile-tabs')).toBeVisible();
   if (mobile) {
     const mobileChatPlan = page.locator(
