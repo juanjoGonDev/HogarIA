@@ -9,7 +9,7 @@ import { seededEmail } from './helpers/seed';
 const TEST_PASSWORD = 'Test1234';
 const INVALID_INVITE = 'INVALID1';
 
-test.use({ trace: 'off', screenshot: 'off', video: 'off' });
+test.use({ serviceWorkers: 'block', trace: 'off', screenshot: 'off', video: 'off' });
 
 function localUrl(path: string, baseURL: string): string {
   return new URL(path, baseURL).toString();
@@ -54,6 +54,133 @@ async function createHousehold(page: Page, name: string): Promise<void> {
   await page.locator('app-modal button[type="submit"]').click();
   expect((await createResponse).status()).toBe(201);
   await expect(page.locator('.household-info__name')).toHaveText(name);
+}
+
+async function expectNoRequestDuringPendingSubmission(
+  page: Page,
+  predicate: (request: import('@playwright/test').Request) => boolean
+): Promise<void> {
+  const duplicateRequest = page
+    .waitForRequest(predicate, { timeout: 750 })
+    .then(() => true)
+    .catch((error: { name?: string }) => {
+      if (error.name === 'TimeoutError') return false;
+      throw error;
+    });
+  expect(await duplicateRequest, 'un doble envío no debe crear una segunda petición').toBe(false);
+}
+
+async function createHouseholdWithDoubleSubmit(page: Page, name: string): Promise<void> {
+  let releaseCreate!: () => void;
+  const createGate = new Promise<void>((resolve) => {
+    releaseCreate = resolve;
+  });
+  let signalCreateObserved!: () => void;
+  const createObserved = new Promise<void>((resolve) => {
+    signalCreateObserved = resolve;
+  });
+  let createAttempts = 0;
+
+  await page.route('**/api/household', async (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    createAttempts += 1;
+    if (createAttempts === 1) {
+      signalCreateObserved();
+      await createGate;
+      return route.continue();
+    }
+    return route.fulfill({
+      status: 409,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: false, code: 'SYNTHETIC_DUPLICATE_CREATE' })
+    });
+  });
+
+  await page.getByRole('button', { name: /Crear hogar/i }).click();
+  await page.locator('input#householdName').fill(name);
+  const submit = page.locator('app-modal .create-form button[type="submit"]');
+  const createResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'POST' &&
+      new URL(response.url()).pathname === '/api/household'
+  );
+  const firstSubmission = submit.click();
+
+  try {
+    await createObserved;
+    await expect(submit).toBeDisabled();
+    await page.locator('app-modal .create-form').evaluate((form) => {
+      (form as HTMLFormElement).requestSubmit();
+    });
+    await expectNoRequestDuringPendingSubmission(
+      page,
+      (request) =>
+        request.method() === 'POST' && new URL(request.url()).pathname === '/api/household'
+    );
+
+    releaseCreate();
+    expect((await createResponse).status()).toBe(201);
+    await firstSubmission;
+    expect(createAttempts).toBe(1);
+    await expect(page.locator('.household-info__name')).toHaveText(name);
+  } finally {
+    releaseCreate();
+  }
+}
+
+async function submitJoinWithDoubleSubmit(page: Page): Promise<void> {
+  let releaseJoin!: () => void;
+  const joinGate = new Promise<void>((resolve) => {
+    releaseJoin = resolve;
+  });
+  let signalJoinObserved!: () => void;
+  const joinObserved = new Promise<void>((resolve) => {
+    signalJoinObserved = resolve;
+  });
+  let joinAttempts = 0;
+
+  await page.route('**/api/household/join', async (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    joinAttempts += 1;
+    if (joinAttempts === 1) {
+      signalJoinObserved();
+      await joinGate;
+      return route.continue();
+    }
+    return route.fulfill({
+      status: 409,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: false, code: 'SYNTHETIC_DUPLICATE_JOIN' })
+    });
+  });
+
+  const submit = page.locator('app-modal .join-form button[type="submit"]');
+  const joinResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'POST' &&
+      new URL(response.url()).pathname === '/api/household/join'
+  );
+  const firstSubmission = submit.click();
+
+  try {
+    await joinObserved;
+    await expect(submit).toBeDisabled();
+    await page.locator('app-modal .join-form').evaluate((form) => {
+      (form as HTMLFormElement).requestSubmit();
+    });
+    await expectNoRequestDuringPendingSubmission(
+      page,
+      (request) =>
+        request.method() === 'POST' && new URL(request.url()).pathname === '/api/household/join'
+    );
+
+    releaseJoin();
+    expect((await joinResponse).status()).toBe(200);
+    await firstSubmission;
+    expect(joinAttempts).toBe(1);
+  } finally {
+    releaseJoin();
+  }
 }
 
 async function readSetupGate(page: Page): Promise<{
@@ -126,7 +253,12 @@ async function createContext(
   projectName: string,
   baseURL: string
 ): Promise<BrowserContext> {
-  return browser.newContext({ ...householdDevice(projectName), baseURL, locale: 'es-ES' });
+  return browser.newContext({
+    ...householdDevice(projectName),
+    baseURL,
+    locale: 'es-ES',
+    serviceWorkers: 'block'
+  });
 }
 
 test.describe('Mandatory household setup after registration', () => {
@@ -178,7 +310,7 @@ test.describe('Mandatory household setup after registration', () => {
         response.request().method() === 'GET' &&
         new URL(response.url()).pathname === '/api/auth/taste'
     );
-    await createHousehold(page, homeName);
+    await createHouseholdWithDoubleSubmit(page, homeName);
     expect((await tasteResponse).status(), 'el perfil vuelve a cargarse al activar un hogar').toBe(
       200
     );
@@ -194,6 +326,77 @@ test.describe('Mandatory household setup after registration', () => {
     await page.goto(localUrl('/dashboard', baseURL));
     await expect(page).toHaveURL(/\/dashboard(?:$|[?#])/);
     await expect(page.locator('h1.dashboard__title')).toBeVisible();
+  });
+
+  test('ignores a second registration submit while the account request is pending', async ({
+    page
+  }, testInfo) => {
+    const baseURL = String(testInfo.project.use.baseURL);
+    await page.setViewportSize(testViewport(testInfo.project.name));
+
+    let releaseRegistration!: () => void;
+    const registrationGate = new Promise<void>((resolve) => {
+      releaseRegistration = resolve;
+    });
+    let signalRegistrationObserved!: () => void;
+    const registrationObserved = new Promise<void>((resolve) => {
+      signalRegistrationObserved = resolve;
+    });
+    let registrationAttempts = 0;
+
+    await page.route('**/api/auth/register', async (route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      registrationAttempts += 1;
+      if (registrationAttempts === 1) {
+        signalRegistrationObserved();
+        await registrationGate;
+        return route.continue();
+      }
+      return route.fulfill({
+        status: 409,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: false, code: 'SYNTHETIC_DUPLICATE_REGISTRATION' })
+      });
+    });
+
+    await page.goto(localUrl('/auth/register', baseURL));
+    await page.locator('input#name').fill('Usuario de pruebas');
+    await page.locator('input#email').fill(seededEmail());
+    await page.locator('input#password').fill(TEST_PASSWORD);
+    const submit = page.locator('button[type="submit"]');
+    const registrationResponse = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'POST' &&
+        new URL(response.url()).pathname.endsWith('/api/auth/register')
+    );
+    const firstSubmission = submit.click();
+
+    try {
+      await registrationObserved;
+      await expect(submit).toBeDisabled();
+      await page.locator('form.register-form').evaluate((form) => {
+        (form as HTMLFormElement).requestSubmit();
+      });
+      await expectNoRequestDuringPendingSubmission(
+        page,
+        (request) =>
+          request.method() === 'POST' &&
+          new URL(request.url()).pathname.endsWith('/api/auth/register')
+      );
+
+      releaseRegistration();
+      expect((await registrationResponse).status()).toBe(201);
+      await firstSubmission;
+      expect(registrationAttempts).toBe(1);
+      await expect(page).toHaveURL(/\/household(?:$|[?#])/);
+      expect(await readMembershipState(page)).toMatchObject({
+        status: 200,
+        count: 0,
+        activeMatches: false
+      });
+    } finally {
+      releaseRegistration();
+    }
   });
 
   test('keeps invalid-invite registration recoverable and joins after retrying with a valid code', async ({
@@ -212,9 +415,20 @@ test.describe('Mandatory household setup after registration', () => {
       const homeName = `Casa invitación QA ${Date.now().toString(36)}`;
       await createHousehold(ownerPage, homeName);
 
+      const revokedLink = (await ownerPage.locator('.invite-card__code').innerText()).trim();
+      const revokedCode = new URL(revokedLink, baseURL).pathname.split('/').filter(Boolean).at(-1);
+      if (!revokedCode) throw new Error('La invitación sintética no contiene código.');
+      const revokeResponse = ownerPage.waitForResponse(
+        (response) =>
+          response.request().method() === 'POST' &&
+          new URL(response.url()).pathname === '/api/household/regenerate-invite'
+      );
+      await ownerPage.getByRole('button', { name: /Regenerar/i }).click();
+      expect((await revokeResponse).status()).toBe(200);
       const inviteLink = (await ownerPage.locator('.invite-card__code').innerText()).trim();
       const inviteCode = new URL(inviteLink, baseURL).pathname.split('/').filter(Boolean).at(-1);
-      if (!inviteCode) throw new Error('La invitación sintética no contiene código.');
+      if (!inviteCode) throw new Error('La invitación regenerada sintética no contiene código.');
+      expect(inviteCode).not.toBe(revokedCode);
       await ownerContext.close();
 
       memberContext = await createContext(browser, testInfo.project.name, baseURL);
@@ -225,7 +439,9 @@ test.describe('Mandatory household setup after registration', () => {
       // The invalid link is reported, but the signed-in account can still resume setup.
       await expect(memberPage).toHaveURL(new RegExp(`/invite/${INVALID_INVITE}$`));
       await expect(memberPage.locator('.invite-card__title')).toContainText(/no válida|no válida/i);
-      await memberPage.goto(localUrl('/household', baseURL));
+      await memberPage.goto(localUrl(`/invite/${revokedCode}`, baseURL));
+      await expect(memberPage.locator('.invite-card__title')).toContainText(/no válida|no válida/i);
+      await memberPage.getByRole('link', { name: /Ir al inicio/i }).click();
       await expect(memberPage.locator('.no-household')).toBeVisible();
       await expect(memberPage).toHaveURL(/\/household(?:$|[?#])/);
       expect(await readSetupGate(memberPage)).toEqual({ status: 409, code: 'HOUSEHOLD_REQUIRED' });
@@ -235,13 +451,7 @@ test.describe('Mandatory household setup after registration', () => {
 
       await memberPage.getByRole('button', { name: /Unirse con código/i }).click();
       await memberPage.locator('input#inviteCode').fill(inviteCode);
-      const joinResponse = memberPage.waitForResponse(
-        (response) =>
-          response.request().method() === 'POST' &&
-          new URL(response.url()).pathname === '/api/household/join'
-      );
-      await memberPage.locator('app-modal .join-form button[type="submit"]').click();
-      expect((await joinResponse).status()).toBe(200);
+      await submitJoinWithDoubleSubmit(memberPage);
       await expect(memberPage.locator('.household-info__name')).toHaveText(homeName);
       expect(await readMembershipState(memberPage)).toMatchObject({
         status: 200,
@@ -259,7 +469,7 @@ test.describe('Mandatory household setup after registration', () => {
     }
   });
 
-  test('keeps household creation retryable after a transient server failure', async ({
+  test('recovers from a network failure, resumes after reload, and creates one household', async ({
     page
   }, testInfo) => {
     const baseURL = String(testInfo.project.use.baseURL);
@@ -272,41 +482,40 @@ test.describe('Mandatory household setup after registration', () => {
       if (route.request().method() !== 'POST') return route.continue();
       createAttempts += 1;
       if (createAttempts === 1) {
-        return route.fulfill({
-          status: 503,
-          contentType: 'application/json',
-          body: JSON.stringify({ success: false, code: 'SYNTHETIC_TEMPORARY_UNAVAILABLE' })
-        });
+        return route.abort('failed');
       }
       return route.continue();
     });
 
     await page.getByRole('button', { name: /Crear hogar/i }).click();
     await page.locator('input#householdName').fill(`Casa reintento QA ${Date.now().toString(36)}`);
-    const createResponse = page.waitForResponse(
-      (response) =>
-        response.request().method() === 'POST' &&
-        new URL(response.url()).pathname === '/api/household'
+    const failedCreateRequest = page.waitForEvent(
+      'requestfailed',
+      (request) =>
+        request.method() === 'POST' && new URL(request.url()).pathname === '/api/household'
     );
     await page.locator('app-modal button[type="submit"]').click();
-    expect((await createResponse).status()).toBe(503);
+    await failedCreateRequest;
     await expect(page.locator('.toast--error')).toBeVisible();
     await expect(page.locator('input#householdName')).toBeVisible();
     await expect(page.locator('.household-info__name')).toHaveCount(0);
+    await page.reload();
+    await expect(page.locator('.no-household')).toBeVisible();
+    expect(await readSetupGate(page)).toEqual({ status: 409, code: 'HOUSEHOLD_REQUIRED' });
+    expect(await readMembershipState(page)).toMatchObject({
+      status: 200,
+      count: 0,
+      activeMatches: false
+    });
 
-    const retryResponse = page.waitForResponse(
-      (response) =>
-        response.request().method() === 'POST' &&
-        new URL(response.url()).pathname === '/api/household'
-    );
-    await page.locator('app-modal button[type="submit"]').click();
-    expect((await retryResponse).status()).toBe(201);
+    const homeName = `Casa reintento QA ${Date.now().toString(36)}`;
+    await createHousehold(page, homeName);
     expect(createAttempts).toBe(2);
-    await expect(page.locator('.household-info__name')).toContainText('Casa reintento QA');
     expect(await readMembershipState(page)).toMatchObject({
       status: 200,
       count: 1,
-      activeMatches: true
+      activeMatches: true,
+      activeName: homeName
     });
   });
 });
