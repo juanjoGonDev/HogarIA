@@ -531,7 +531,7 @@ function completeMemberPermissions(value: unknown, role: MemberRole): MemberPerm
             data-test="household-planning-panel-meals"
           >
             <app-household-meal-planner
-              *ngIf="activePlanningTab() === 'meals'"
+              *ngIf="mealPlannerVisited()"
               [householdId]="household.id"
               [canEdit]="household.myPermissions?.calendar?.edit ?? household.myRole === 'admin'"
               [members]="household.members"
@@ -1289,6 +1289,7 @@ export class HouseholdComponent implements OnInit {
 
   readonly activeTab = signal<HouseholdTab>('home');
   readonly activePlanningTab = signal<HouseholdPlanningTab>('tasks');
+  readonly mealPlannerVisited = signal(false);
   readonly selectedTaskSpaceId = signal<string | null>(null);
   readonly tasksRefreshToken = signal(0);
   readonly tabOptions: Array<{ value: HouseholdTab; label: TranslationKey }> = [
@@ -1386,7 +1387,9 @@ export class HouseholdComponent implements OnInit {
       const queryTab = params.get('tab');
       const planningQuery = params.get('planning');
       this.activeTab.set(resolveHouseholdTab(queryTab));
-      this.activePlanningTab.set(resolveHouseholdPlanningTab(planningQuery));
+      const planningTab = resolveHouseholdPlanningTab(planningQuery);
+      this.activePlanningTab.set(planningTab);
+      if (planningTab === 'meals') this.mealPlannerVisited.set(true);
       this.selectedTaskSpaceId.set(params.get('space'));
       requestAnimationFrame(() => this.revealHouseholdTab(this.activeTab()));
       if (!isCanonicalHouseholdTabQuery(queryTab)) {
@@ -1428,6 +1431,7 @@ export class HouseholdComponent implements OnInit {
 
   selectPlanningTab(tab: HouseholdPlanningTab): void {
     this.activePlanningTab.set(tab);
+    if (tab === 'meals') this.mealPlannerVisited.set(true);
     void this.router.navigate([], {
       relativeTo: this.route,
       queryParams: { planning: tab === 'tasks' ? null : tab },

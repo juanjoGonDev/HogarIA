@@ -313,6 +313,30 @@ test('genera, revisa y confirma comidas con navegación de planificación en esc
     await expect(review).toContainText('Individual');
     await reviewDay.locator('button[aria-haspopup="listbox"]').click();
     await page.getByRole('option').nth(0).click();
+    const selectedProposalDay = await reviewDay.locator('.picker__trigger').innerText();
+    await page.locator('[data-test="household-planning-tab-tasks"]').click();
+    await expectOneActivePanel(page, '[data-test^="household-planning-panel-"]');
+    await expect(review).toBeHidden();
+    await page.locator('[data-test="household-planning-tab-settings"]').click();
+    await expectOneActivePanel(page, '[data-test^="household-planning-panel-"]');
+    await expect(review).toBeHidden();
+    await page.locator('[data-test="household-planning-tab-meals"]').click();
+    await expect
+      .poll(() => {
+        const query = new URL(page.url()).searchParams;
+        return [query.get('planning'), query.get('source')];
+      })
+      .toEqual(['meals', 'synthetic-e2e']);
+    await expectTabsToReferencePanels(page, '.household-planning-tabs');
+    await expectOneActivePanel(page, '[data-test^="household-planning-panel-"]');
+    await expect(page.locator('[data-test="meal-proposal-step-tab-review"]')).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
+    await expect(review).toBeVisible();
+    await expect(reviewDay.locator('.picker__trigger')).toHaveText(selectedProposalDay);
+    await expect(page.locator('[data-test^="meal-proposal-event-"]')).toHaveCount(1);
+    expect(providerRequests).toHaveLength(1);
     if (testInfo.project.name === 'mobile-chrome') {
       const reviewHeight = await review.evaluate((element) => element.scrollHeight);
       expect(reviewHeight).toBeLessThan(1600);
@@ -435,6 +459,35 @@ test('genera, revisa y confirma comidas con navegación de planificación en esc
       data: { meals: Array<{ date: string; mealType: string; servings: number }> };
     };
     expect(persistedBody.data.meals.length).toBeGreaterThan(0);
+
+    const sidebar = page.locator('.sidebar');
+    if (
+      testInfo.project.name === 'mobile-chrome' &&
+      !(await sidebar.evaluate((element) => element.classList.contains('sidebar--open')))
+    ) {
+      await page.locator('.header__menu').click();
+    }
+    const householdPicker = page.locator('[data-test="active-household-select"]');
+    await expect(householdPicker).toBeVisible();
+    await householdPicker.locator('.picker__trigger').click();
+    await page.getByRole('option').filter({ hasText: 'Hogar sintético de comidas' }).click();
+    await expect(page.locator('.household-info__name')).toHaveText('Hogar sintético de comidas');
+    if (
+      testInfo.project.name === 'mobile-chrome' &&
+      (await sidebar.evaluate((element) => element.classList.contains('sidebar--open')))
+    ) {
+      await page.locator('.sidebar__close').click();
+    }
+    await page.locator('[data-test="household-tab-tasks"]').click();
+    await page.locator('[data-test="household-planning-tab-meals"]').click();
+    await expectOneActivePanel(page, '[data-test^="household-planning-panel-"]');
+    await expect(page.locator('[data-test="meal-proposal-step-tab-prepare"]')).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
+    await expect(page.locator('[data-test="meal-proposal-review"]')).toHaveCount(0);
+    await expect(page.locator('[data-test="meal-proposal-review-day"]')).toHaveCount(0);
+    expect(providerRequests).toHaveLength(1);
   } finally {
     await secondPage.close();
     await new Promise<void>((resolveClose, rejectClose) =>
