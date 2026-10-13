@@ -488,6 +488,8 @@ mockups.
         y móvil y se mantienen traducciones ES/EN separadas.
   - [x] **Acciones del encabezado desktop:** «Volver al lienzo» y «Subir nueva foto o boceto» se
         muestran completos en una línea con iconos y centrado vertical; E2E comprueba 1280/1920 px.
+  - [x] **Resumen del chat:** concordar cantidades en singular/plural para zonas nuevas y modificadas;
+        E2E comprueba una zona de cada tipo y unitarias verifican conteos singulares/plurales en ES/EN.
 - [x] **Ajuste por chat, alineación PC:** los controles de zoom/encaje quedan ≤24 px bajo las
       tarjetas comparadas y no se desplazan con la altura de la conversación; E2E reproduce primero
       el desfase de 103 px y verifica la separación corregida.
@@ -515,7 +517,8 @@ mockups.
 
 Evidencia visual y regresión:
 
-- `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/household-plan-tasks.spec.ts` — **2/2 pasan en 49,6 s** (12-10-2026, última ejecución). Servidor/SQLite/artefactos aislados; el proveedor de IA se simula y la DB/artefactos temporales propios se limpian.
+- El E2E detectó en la interfaz «1 zonas nuevas y 1 modificadas». Se corrigió mediante `I18nService.plural` y sustantivos traducidos; `household-plan-editor.component.spec.ts` verifica texto real en ES/EN (conteos 0, 1, 2 y 3) y `household-plan-tasks.spec.ts` exige el resumen singular de la propuesta. `ng test --no-watch --include=src/app/features/household/household-plan-editor.component.spec.ts` — **30/30**; el E2E aislado PC/móvil — **2/2** (13-10-2026).
+- `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/household-plan-tasks.spec.ts` — **2/2 pasan en 49,9 s** (13-10-2026). Servidor/SQLite/artefactos aislados; el proveedor de IA se simula y la DB/artefactos temporales propios se limpian.
 - La comparación con los mockups aprobados de los seis estados PC/móvil se regeneró e inspeccionó en `.e2e-screenshots/household-plan-comparison/`. Los iconos SVG de herramientas/estancias se ajustaron de 24 a 32 px en las vistas verificadas; E2E valida 32 px y que los rótulos de pestañas no se monten a 320 px.
 - `pnpm --filter @hogaria/web exec ng test --no-watch --include=src/app/features/household/household-area-catalog.spec.ts --include=src/app/features/household/household-area-glyph.component.spec.ts --include=src/app/features/household/household-tasks.component.spec.ts --include=src/app/features/household/household-plan-preview-map.component.spec.ts` — **22/22**.
 - `pnpm run check:ui` — sin incidencias (228 ficheros/21 reglas); `pnpm run typecheck:e2e` — aprobado.

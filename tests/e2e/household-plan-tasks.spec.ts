@@ -3056,6 +3056,9 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   await expect(page.locator('.plan-chat__user-message')).toContainText(
     'Añade un aseo junto a los dormitorios'
   );
+  await expect(page.locator('.plan-chat__assistant-copy')).toHaveText(
+    'He preparado la propuesta: 1 zona nueva y 1 zona modificada. Revisa el resultado antes de aplicarlo.'
+  );
   await expect(page.locator('[data-test="plan-proposal-apply"]')).toBeVisible();
   await expect(page.locator('[data-test="plan-chat-continuation"]')).toHaveCount(4);
   const continuationGeometry = await page

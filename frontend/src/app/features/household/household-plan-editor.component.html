@@ -739,12 +739,10 @@
                 </svg>
               </span>
               <span class="plan-chat__assistant-copy">{{
-                'household.plan_chat_proposal_message'
-                  | t
-                    : {
-                        added: proposed.diff.addedSpaceIds.length,
-                        changed: proposed.diff.modifiedSpaceIds.length
-                      }
+                chatProposalMessage(
+                  proposed.diff.addedSpaceIds.length,
+                  proposed.diff.modifiedSpaceIds.length
+                )
               }}</span>
             </p>
           </div>

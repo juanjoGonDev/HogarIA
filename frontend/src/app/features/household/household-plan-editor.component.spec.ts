@@ -5,7 +5,7 @@ import { of, Subject, throwError } from 'rxjs';
 import { I18nService } from '../../core/services/i18n.service';
 import { HouseholdPlanService } from '../../core/services/household-plan.service';
 import { ConfirmService } from '../../core/services/confirm.service';
-import type { TranslationKey } from '../../core/i18n';
+import { DICTS, type TranslationKey, type TranslationParams } from '../../core/i18n';
 import type {
   HouseholdPlan,
   HouseholdPlanProposal,
@@ -25,7 +25,12 @@ describe('HouseholdPlanEditorComponent', () => {
   const i18n = {
     resolved: signal<'es' | 'en'>('es'),
     changeTick: signal(0),
-    t: (key: string) => key
+    t: jasmine.createSpy('t').and.callFake((key: string) => key),
+    plural: jasmine
+      .createSpy('plural')
+      .and.callFake((count: number, oneKey: string, manyKey: string) =>
+        count === 1 ? oneKey : manyKey
+      )
   };
 
   function fakeCanvas(
@@ -92,7 +97,14 @@ describe('HouseholdPlanEditorComponent', () => {
     fixture.detectChanges();
   }
 
-  beforeEach(() => TestBed.resetTestingModule());
+  beforeEach(() => {
+    TestBed.resetTestingModule();
+    i18n.resolved.set('es');
+    i18n.t.and.callFake((key: string) => key);
+    i18n.plural.and.callFake((count: number, oneKey: string, manyKey: string) =>
+      count === 1 ? oneKey : manyKey
+    );
+  });
 
   it('loads a home plan and prevents read-only members from changing or saving it', async () => {
     await mount(false);
@@ -148,6 +160,37 @@ describe('HouseholdPlanEditorComponent', () => {
     expect(component.snapshot()).toEqual(emptySnapshot);
     expect(planService.save).not.toHaveBeenCalled();
     expect(component.isDirty()).toBeTrue();
+  });
+
+  it('renders grammatically correct chat summaries in Spanish and English', async () => {
+    await mount();
+    i18n.resolved.set('es');
+    i18n.t.and.callFake((key: string, params?: TranslationParams) => {
+      let message = DICTS[i18n.resolved()][key as TranslationKey];
+      for (const [name, value] of Object.entries(params ?? {})) {
+        message = message.replaceAll(`{${name}}`, String(value ?? ''));
+      }
+      return message;
+    });
+    i18n.plural.and.callFake(
+      (count: number, oneKey: string, manyKey: string, params?: TranslationParams) =>
+        i18n.t(count === 1 ? oneKey : manyKey, params)
+    );
+
+    expect(component.chatProposalMessage(1, 1)).toBe(
+      'He preparado la propuesta: 1 zona nueva y 1 zona modificada. Revisa el resultado antes de aplicarlo.'
+    );
+    expect(component.chatProposalMessage(0, 3)).toBe(
+      'He preparado la propuesta: 0 zonas nuevas y 3 zonas modificadas. Revisa el resultado antes de aplicarlo.'
+    );
+
+    i18n.resolved.set('en');
+    expect(component.chatProposalMessage(2, 1)).toBe(
+      'I prepared the proposal: 2 new areas and 1 modified area. Review it before applying.'
+    );
+    expect(component.chatProposalMessage(1, 0)).toBe(
+      'I prepared the proposal: 1 new area and 0 modified areas. Review it before applying.'
+    );
   });
 
   it('hides the generic empty-plan prompt while freehand drawing instructions are active', async () => {

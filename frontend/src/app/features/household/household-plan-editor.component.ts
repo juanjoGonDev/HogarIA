@@ -1281,6 +1281,25 @@ export class HouseholdPlanEditorComponent implements OnChanges, OnDestroy {
     return getHouseholdAreaLabel(kind, this.i18n.resolved());
   }
 
+  chatProposalMessage(added: number, changed: number): string {
+    const addedLabel = this.i18n.plural(
+      added,
+      'household.plan_chat_added_area_uno',
+      'household.plan_chat_added_area_varios'
+    );
+    const changedLabel = this.i18n.plural(
+      changed,
+      'household.plan_chat_modified_area_uno',
+      'household.plan_chat_modified_area_varios'
+    );
+    return this.i18n.t('household.plan_chat_proposal_message', {
+      added,
+      addedLabel,
+      changed,
+      changedLabel
+    });
+  }
+
   dwellingTypeLabel(type: HouseholdDwellingType): string {
     return this.i18n.t(DWELLING_TYPE_KEYS[type]);
   }
