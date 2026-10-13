@@ -479,6 +479,98 @@ describe('household meal proposal preview route', () => {
     expect(prompt.match(/"objectiveSource":"member"/g)).toHaveLength(2);
   });
 
+  it('sends the personal override and inherited household goal for their respective members', async () => {
+    addHousehold('home');
+    const planner = addUser('planner', 'home', undefined, {
+      goals: ['weight-loss'],
+      goalNotes: 'PERSONAL_OVERRIDE_GOAL_621',
+      allergies: [],
+      likes: [],
+      dislikes: []
+    });
+    const inheriting = addUser('inheriting', 'home', undefined, {
+      goals: ['muscle-gain'],
+      goalNotes: 'IGNORED_INHERITED_PERSONAL_GOAL_621',
+      allergies: [],
+      likes: [],
+      dislikes: []
+    });
+    const excluded = addUser('excluded', 'home', undefined, {
+      goals: ['weight-gain'],
+      goalNotes: 'EXCLUDED_MEMBER_GOAL_621',
+      allergies: [],
+      likes: [],
+      dislikes: []
+    });
+    setGoalOverride(planner);
+    const householdPreferences = JSON.parse(
+      (
+        db.prepare('SELECT meal_planning_preferences FROM households WHERE id = ?').get('home') as {
+          meal_planning_preferences: string;
+        }
+      ).meal_planning_preferences
+    );
+    householdPreferences.objective = {
+      goals: ['variety'],
+      notes: 'SHARED_HOUSEHOLD_GOAL_621'
+    };
+    db.prepare('UPDATE households SET meal_planning_preferences = ? WHERE id = ?').run(
+      JSON.stringify(householdPreferences),
+      'home'
+    );
+    addAiConfig(planner.id, 'home');
+
+    let providerBody: any;
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      providerBody = JSON.parse(String(init.body));
+      return new Response(
+        JSON.stringify({
+          choices: [
+            { finish_reason: 'stop', message: { content: JSON.stringify(validProposal()) } }
+          ]
+        }),
+        { status: 200 }
+      );
+    });
+
+    const response = await call(planner, {
+      weekStart: WEEK_START,
+      householdMemberIds: [planner.membershipId, inheriting.membershipId]
+    });
+    const json = await read(response);
+    const prompt = String(providerBody.messages[1].content);
+    const serializedProviderRequest = JSON.stringify(providerBody);
+    const participantsJson = prompt
+      .split('Participantes seleccionados (usa únicamente los alias opacos):\n')[1]
+      ?.split('\n\nTurnos que deben quedar resueltos exactamente una vez por participante:')[0];
+
+    expect(response.status).toBe(200);
+    expect(json.success).toBe(true);
+    expect(participantsJson).toBeDefined();
+    expect(JSON.parse(participantsJson!)).toMatchObject([
+      {
+        participant: 'P1',
+        objectiveSource: 'member',
+        effectiveObjective: {
+          goals: ['weight-loss'],
+          notes: 'PERSONAL_OVERRIDE_GOAL_621'
+        }
+      },
+      {
+        participant: 'P2',
+        objectiveSource: 'household',
+        effectiveObjective: {
+          goals: ['variety'],
+          notes: 'SHARED_HOUSEHOLD_GOAL_621'
+        }
+      }
+    ]);
+    expect(prompt).not.toContain('IGNORED_INHERITED_PERSONAL_GOAL_621');
+    expect(serializedProviderRequest).not.toContain('EXCLUDED_MEMBER_GOAL_621');
+    expect(serializedProviderRequest).not.toContain('Private name excluded');
+    expect(serializedProviderRequest).not.toContain(excluded.membershipId);
+  });
+
   it('uses only the pantry and recipes accessible to the household planner', async () => {
     addHousehold('home', true);
     const planner = addUser('planner', 'home');

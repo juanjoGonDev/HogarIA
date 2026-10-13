@@ -1098,6 +1098,20 @@ tests/e2e/household-required-onboarding.spec.ts` (**6/6**, 13-10-2026). Usa inte
   revalida el contexto tras parsearlo y el store verifica dentro de la transacción que siga activo el
   hogar capturado. El máximo del store (2.800 eventos) coincide con el schema estructurado. El
   `POST /api/ai/plan-week` heredado no se declara sustituido.
+  Una regresión integrada cubre un participante con objetivo personal activo junto a otro que hereda
+  el objetivo común: el prompt conserva ambos orígenes/valores y excluye el nombre y objetivo de un
+  tercer miembro no seleccionado. Con `DATABASE_PATH=:memory:`, el test focal
+  `pnpm exec vitest run src/routes/household-meal-proposals.routes.spec.ts -t "sends the personal override and inherited household goal for their respective members"`
+  pasa **1/1**; `pnpm exec vitest run src/routes/household-meal-proposals.routes.spec.ts
+src/utils/household-meal-proposal.planner.spec.ts --coverage
+--coverage.include=src/routes/household-meal-proposals.routes.ts
+--coverage.include=src/utils/household-meal-proposal.planner.ts` pasa **37/37**. Cobertura de ruta
+  **89,91/72,61/98,24/92,68 %** y planner **91,73/81,6/100/93,39 %**
+  (statements/branches/funciones/líneas); `pnpm exec tsc --noEmit`, `pnpm exec prettier --check
+HOGARIA-HOUSEHOLD-PLAN-SPEC.md server/src/routes/household-meal-proposals.routes.spec.ts` y
+  `git diff --check` pasan. DB aislada y proveedor sintético interceptado, sin llamadas reales.
+  Límite: verifica la resolución enviada al prompt, no que el proveedor elija platos
+  compartidos/separados ni su persistencia; `QA-HOME-MEALS.PLAN.1` sigue abierto.
 - **Plan semanal — UI parcial integrada:** `Hogar > Planificación` separa `Comidas`, `Tareas` y
   `Ajustes`; dentro de Comidas, `Preparar` y `Revisar propuesta` son etapas excluyentes. Solo un
   tabpanel queda visible; los shells ARIA existen y el planificador se monta al abrir Comidas, luego
