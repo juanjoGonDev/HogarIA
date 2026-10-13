@@ -66,7 +66,7 @@ const mealProposalRecipeSchema = z
   })
   .strict();
 
-const mealProposalEventObjectSchema = z
+export const mealProposalEventSchema = z
   .object({
     date: z.iso.date(),
     mealType: z.enum(MEAL_TYPE_KEYS),
@@ -100,7 +100,7 @@ const mealProposalEventObjectSchema = z
 /** Structural contract sent to Structured Outputs; cross-event rules are checked locally below. */
 export const mealProposalObjectSchema = z
   .object({
-    events: z.array(mealProposalEventObjectSchema).max(MEAL_PROPOSAL_LIMITS.maxEvents)
+    events: z.array(mealProposalEventSchema).max(MEAL_PROPOSAL_LIMITS.maxEvents)
   })
   .strict();
 

@@ -62,6 +62,10 @@ import {
 } from './household-task.schema.js';
 import { householdPlanAssignmentWriteSchema } from './household-plan-assignment.schema.js';
 import { householdMealPlanningPatchSchema } from './household-meal-planning.schema.js';
+import {
+  householdMealProposalConfirmRequestSchema,
+  householdMealProposalRequestSchema
+} from './household-meal-proposal-request.schema.js';
 import { generatedRecipeCandidateSchema } from './generated-recipe.schema.js';
 import {
   applyLinesSchema,
@@ -251,6 +255,53 @@ const ROWS: Row[] = [
       member:
         'El bloque vacío no contiene cambios; al menos un ajuste del hogar o de un miembro debe enviarse.'
     }
+  },
+  {
+    name: 'householdMealProposalRequestSchema',
+    schema: householdMealProposalRequestSchema,
+    required: { weekStart: '2026-10-12', householdMemberIds: ['membership-1'] },
+    note: 'La propuesta requiere lunes válido y al menos un miembro activo seleccionado explícitamente.'
+  },
+  {
+    name: 'householdMealProposalConfirmRequestSchema',
+    schema: householdMealProposalConfirmRequestSchema,
+    required: {
+      proposalId: 'proposal-1',
+      weekStart: '2026-10-12',
+      householdMemberIds: ['membership-1'],
+      events: [
+        {
+          id: 'event-1',
+          date: '2026-10-12',
+          mealType: 'lunch',
+          time: '13:00',
+          recipe: {
+            name: 'Lentejas',
+            description: 'Plato sencillo.',
+            baseServings: 1,
+            prepTimeMinutes: 10,
+            cookTimeMinutes: 30,
+            ingredients: [
+              {
+                name: 'lentejas',
+                quantity: 80,
+                unit: 'g',
+                preparation: null,
+                isOptional: false,
+                notes: null
+              }
+            ],
+            instructions: ['Cocer las lentejas.']
+          },
+          participantAliases: ['P1'],
+          servings: 1,
+          objectiveSummary: 'Plato sencillo.',
+          status: 'scheduled',
+          reason: null
+        }
+      ]
+    },
+    note: 'La confirmación acepta solo alias opacos; el servidor resuelve las membresías y vuelve a validar receta y turnos.'
   },
   {
     name: 'householdPlanWriteSchema',

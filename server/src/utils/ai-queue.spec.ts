@@ -218,6 +218,68 @@ describe('AI provider queue dispatcher', () => {
     expect(jobRow(job.id)).toMatchObject({ household_id: 'home-a', status: 'done' });
   });
 
+  it('resolves AI config from the prompt household instead of a changed active selection', async () => {
+    const { dispatchAI } = await import('./ticket-queue.js');
+    const configOwnerId = 'scoped-config-owner';
+    db.prepare('INSERT INTO users (id, email, name, password_hash) VALUES (?, ?, ?, ?)').run(
+      configOwnerId,
+      'scoped-owner@test.local',
+      'Scoped config owner',
+      'hash'
+    );
+    db.prepare('INSERT INTO households (id, name, invite_code) VALUES (?, ?, ?), (?, ?, ?)').run(
+      'scope-home-a',
+      'Scope A',
+      'scope-a',
+      'scope-home-b',
+      'Scope B',
+      'scope-b'
+    );
+    db.prepare(
+      `INSERT INTO household_members (id, household_id, user_id, role, permissions)
+       VALUES (?, 'scope-home-a', ?, 'member', '{}'), (?, 'scope-home-a', ?, 'admin', '{}'),
+              (?, 'scope-home-b', ?, 'member', '{}')`
+    ).run('scope-a-actor', userId, 'scope-a-owner', configOwnerId, 'scope-b-actor', userId);
+    db.prepare('UPDATE users SET household_id = ? WHERE id = ?').run('scope-home-b', userId);
+    db.prepare(
+      `INSERT INTO ai_configs
+        (id, user_id, household_id, name, provider, base_url, api_key, model, concurrency, is_active)
+       VALUES ('scope-a-config', ?, 'scope-home-a', 'Scope A', 'custom', 'http://provider.test/v1',
+         'scope-a-secret', 'model-a', 1, 1),
+              ('scope-b-config', ?, 'scope-home-b', 'Scope B', 'custom', 'http://provider.test/v1',
+         'scope-b-secret', 'model-b', 1, 1)`
+    ).run(configOwnerId, configOwnerId);
+
+    const provider = vi.fn(async (_url: string, init: RequestInit) => {
+      const request = JSON.parse(String(init.body));
+      expect(request.model).toBe('model-a');
+      expect(init.headers).toMatchObject({ Authorization: 'Bearer scope-a-secret' });
+      return new Response(
+        JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: '{}' } }] }),
+        { status: 200 }
+      );
+    });
+    vi.stubGlobal('fetch', provider);
+
+    const result = await dispatchAI(
+      userId,
+      [{ role: 'user', content: 'synthetic' }],
+      db,
+      RECIPE_RESPONSE_FORMAT,
+      'household_plan',
+      undefined,
+      'scope-home-a'
+    );
+
+    expect(result).toBe('{}');
+    expect(provider).toHaveBeenCalledTimes(1);
+    expect(db.prepare('SELECT household_id, config_id, status FROM ai_jobs').get()).toMatchObject({
+      household_id: 'scope-home-a',
+      config_id: 'scope-a-config',
+      status: 'done'
+    });
+  });
+
   it('pins a receipt job and its provider from the receipt home, not the current selection', async () => {
     const { encolarTicket, stopWorker } = await import('./ticket-queue.js');
     const configOwnerId = 'receipt-config-owner';

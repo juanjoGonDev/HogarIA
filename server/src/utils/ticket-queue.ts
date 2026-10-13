@@ -217,9 +217,15 @@ export function dispatchAI(
   db: SqlDb,
   responseFormat: AiResponseFormat,
   kind: AiJobKind = 'recipe',
-  externalSignal?: AbortSignal
+  externalSignal?: AbortSignal,
+  householdId?: string | null
 ): Promise<string> {
-  const config = activeAiConfig(db, userId);
+  // Callers with a captured household scope must never resolve configuration from a later
+  // `users.household_id` selection; otherwise a switch while building the prompt can cross homes.
+  const config =
+    householdId === undefined
+      ? activeAiConfig(db, userId)
+      : activeAiConfigForScope(db, userId, householdId);
   if (!config)
     return Promise.reject(new AiCallError('NO_CONFIG', 'No active AI configuration found'));
   const payloadBytes = Buffer.byteLength(
@@ -229,6 +235,7 @@ export function dispatchAI(
   return submitAiTask({
     db,
     userId,
+    householdId,
     config,
     kind,
     payloadBytes,

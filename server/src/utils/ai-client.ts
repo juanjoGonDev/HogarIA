@@ -204,10 +204,11 @@ export async function callAI(
   db: SqlDb,
   responseFormat: AiResponseFormat,
   kind: AiJobKind = 'recipe',
-  externalSignal?: AbortSignal
+  externalSignal?: AbortSignal,
+  householdId?: string | null
 ): Promise<string> {
   const { dispatchAI } = await import('./ticket-queue.js');
-  return dispatchAI(userId, messages, db, responseFormat, kind, externalSignal);
+  return dispatchAI(userId, messages, db, responseFormat, kind, externalSignal, householdId);
 }
 
 /** Transporte de una configuración ya fijada por el dispatcher. */

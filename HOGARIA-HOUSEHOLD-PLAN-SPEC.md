@@ -1004,22 +1004,37 @@ solo su backend o sus pruebas unitarias.
   están implementados. Los overrides empiezan apagados; la preferencia de horario personal procede de
   `users.preferences.mealPlan/mealTimes` al activar override, sin copiar alergias ni gustos al hogar.
   Aún falta integrar esta resolución con el planificador y cerrar la UI.
-- **Plan semanal aún no cumple el contrato nuevo:** en el estado de este commit, `POST /api/ai/plan-week`
-  todavía usa preferencias/horarios de la cuenta, persiste durante la generación en vez de devolver
-  una vista previa sin escrituras, y el modelo/calendario actual no guarda participantes compartidos.
-  La receta IA existente también genera para las raciones solicitadas, no una base normalizada a una
-  ración. Estas son brechas pendientes, no validaciones aprobadas.
+- **Plan semanal — backend de vista previa parcial:** se añadió `POST /api/household/meal-planning/proposal`
+  con selección explícita de miembros, permisos `calendar.edit`, datos del perfil de quienes participan,
+  despacho IA fijado al hogar capturado, `response_format` JSON Schema estricto y validación local de
+  cobertura, turnos, alergias incluidas en texto/instrucciones, privacidad de notas/nombres/alergias y
+  raciones. Las alergias no catalogadas producen turnos pendientes sin enviarlas al proveedor. La
+  respuesta incluye alias opacos y eventos normalizados; la vista previa no escribe comidas ni calendario.
+  La petición de confirmación estricta ya está definida, pero la API de confirmación aún no está integrada.
+  El `POST /api/ai/plan-week` heredado no se declara sustituido.
+- **Recetas por ración — backend parcial:** el contrato nuevo usa `baseServings: 1`; ajuste local de
+  raciones y su smoke visual sintético de escritorio/móvil están en otra unidad aislada, aún sin integrar
+  en esta rama. No se llama a IA para volver a escalar una receta guardada.
 - **Validación reproducible ejecutada en Windows:**
 
   ```powershell
   $env:DATABASE_PATH=':memory:'
-  pnpm --filter @hogaria/server exec vitest run src/utils/household-meal-planning.store.spec.ts src/routes/household-meal-planning.routes.spec.ts src/routes/household.routes.spec.ts src/middleware/household-required.middleware.spec.ts src/routes/auth.routes.spec.ts
+  pnpm --filter @hogaria/server exec vitest run src/routes/household-meal-proposals.routes.spec.ts src/utils/household-meal-proposal.planner.spec.ts src/utils/ai-queue.spec.ts src/schemas/household-meal-proposal-request.schema.spec.ts src/schemas/form-contract.spec.ts
   pnpm --filter @hogaria/server exec tsc --noEmit -p tsconfig.json
+  pnpm --filter @hogaria/server run test:coverage
   ```
 
-  Resultado: **5 archivos / 65 tests aprobados**, TypeScript limpio. El hook pre-commit también pasó
-  Prettier y `check:ui` (**230 ficheros / 21 reglas**). No se llamó a proveedor real. La cobertura
-  agregada del criterio, UI/E2E y comportamiento completo del planificador siguen sin validarse.
+  Resultado: **5 archivos / 439 tests aprobados** en la focal con el contrato de formulario, TypeScript
+  limpio y suite servidor **74 archivos / 1407 tests aprobados / 1 omitido**. Cobertura focal del preview:
+  88.88 % statements, **70 % branches**, 97.05 % funciones y 93.1 % líneas; planner: 91.81 %, 81.15 %,
+  100 % y 95.6 % respectivamente. Cobertura global de servidor: 91.76 % statements, 83.29 % branches,
+  95.88 % funciones y 94.35 % líneas. La suite usa `DATABASE_PATH=:memory:` y proveedor sintético; no se
+  llamó a IA real. **Runtime:** el Hono route harness usa SQLite en memoria y proveedor simulado; el
+  recorrido real app+servidor/E2E de esta vista aún no se ejecuta. **Rollback de esta unidad:** retirar
+  el montaje/endpoint de preview, su request schema y planner, el parámetro de scope hogar del dispatcher,
+  sus tests/cobertura y esta evidencia; no revierte el contrato Structured Outputs ya integrado ni las
+  unidades independientes de receta/UI/calendario. Aún faltan confirmación/persistencia integrada,
+  UI/E2E reproducible PC+móvil y verificar toda la matriz antes de marcar cualquier casilla.
 
 El análisis previo del planificador está reflejado arriba para orientar la próxima unidad; todos los
 criterios inferiores permanecen sin marcar hasta validar cada condición en su alcance completo.
