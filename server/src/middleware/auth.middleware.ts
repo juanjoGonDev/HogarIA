@@ -102,6 +102,14 @@ export async function authMiddleware(c: Context, next: Next): Promise<Response |
       }
     }
 
+    // Accounts without any active membership must finish setup before calling the rest of the
+    // authenticated API. Keep only discovery and create/join routes available so registration can
+    // recover after reload, invalid invitation, or a network failure. The client guard is UX only;
+    // this server-side gate is the authorization boundary.
+    if (activeMemberships.count === 0 && !selectionRoute && !isHouseholdSetupRoute(c)) {
+      return c.json({ success: false, code: 'HOUSEHOLD_REQUIRED' }, 409);
+    }
+
     await next();
   } catch (error) {
     return c.json(
@@ -120,6 +128,16 @@ function isHouseholdSelectionRoute(c: Context): boolean {
     (c.req.method === 'GET' &&
       (path.endsWith('/api/household/memberships') || path.endsWith('/api/household'))) ||
     (c.req.method === 'POST' && path.endsWith('/api/household/active'))
+  );
+}
+
+function isHouseholdSetupRoute(c: Context): boolean {
+  if (c.req.method !== 'POST') return false;
+  const path = new URL(c.req.url).pathname.replace(/\/+$/, '') || '/';
+  return (
+    path === '/api/household' ||
+    path === '/api/household/join' ||
+    /^\/api\/household\/join\/[^/]+$/.test(path)
   );
 }
 

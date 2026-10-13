@@ -392,7 +392,9 @@ describe('household create and join transactions', () => {
     expect(result.success).toBe(true);
     expect(result.data.id).toBeTruthy();
     const copiedConfig = db
-      .prepare('SELECT id, user_id, household_id, name, base_url, api_key, model, is_active FROM ai_configs WHERE household_id = ?')
+      .prepare(
+        'SELECT id, user_id, household_id, name, base_url, api_key, model, is_active FROM ai_configs WHERE household_id = ?'
+      )
       .get(result.data.id);
     expect(copiedConfig).toMatchObject({
       user_id: owner.id,
@@ -405,7 +407,11 @@ describe('household create and join transactions', () => {
     });
     expect((copiedConfig as { id: string }).id).not.toBe('personal-active');
     expect(
-      db.prepare('SELECT id, household_id FROM ai_configs WHERE user_id = ? AND household_id IS NULL ORDER BY id').all(owner.id)
+      db
+        .prepare(
+          'SELECT id, household_id FROM ai_configs WHERE user_id = ? AND household_id IS NULL ORDER BY id'
+        )
+        .all(owner.id)
     ).toEqual([
       { id: 'personal-active', household_id: null },
       { id: 'personal-alt', household_id: null }
@@ -767,11 +773,9 @@ describe('household create and join transactions', () => {
       `INSERT INTO household_members (id, household_id, user_id, role, permissions)
        VALUES (?, ?, ?, 'member', '{}')`
     ).run('target-no-kick-membership', 'target-house', target.id);
-    db.prepare('UPDATE household_members SET permissions = ? WHERE household_id = ? AND user_id = ?').run(
-      JSON.stringify({ members: { kick: false } }),
-      'target-house',
-      admin.id
-    );
+    db.prepare(
+      'UPDATE household_members SET permissions = ? WHERE household_id = ? AND user_id = ?'
+    ).run(JSON.stringify({ members: { kick: false } }), 'target-house', admin.id);
 
     const denied = await call(admin, 'PATCH', '', {
       memberId: 'target-no-kick-membership',
@@ -867,11 +871,16 @@ describe('household create and join transactions', () => {
     expect((await call(admin, 'PATCH', '', {})).status).toBe(200);
   });
 
-  it('regenera el enlace y distingue una cuenta todavía sin hogar', async () => {
+  it('requiere completar el hogar antes de usar las rutas protegidas de hogar', async () => {
     const personalUser = await makeUser('personal-user', null);
-    expect((await call(personalUser, 'PATCH', '', { name: 'No disponible' })).status).toBe(404);
-    expect((await call(personalUser, 'POST', '/regenerate-invite', {})).status).toBe(404);
-    expect((await call(personalUser, 'DELETE', '/leave')).status).toBe(404);
+    for (const response of [
+      await call(personalUser, 'PATCH', '', { name: 'No disponible' }),
+      await call(personalUser, 'POST', '/regenerate-invite', {}),
+      await call(personalUser, 'DELETE', '/leave')
+    ]) {
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({ code: 'HOUSEHOLD_REQUIRED' });
+    }
 
     const { admin } = await createJoinFixture();
     const regenerated = await call(admin, 'POST', '/regenerate-invite', {});
