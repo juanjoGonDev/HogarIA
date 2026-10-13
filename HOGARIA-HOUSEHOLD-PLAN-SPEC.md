@@ -844,6 +844,15 @@ parecer un único grupo de controles diseñado; no basta con que los controles f
 
 ### Decisión de producto
 
+**Decisión del usuario (13-10-2026, «Generar» en tareas):** crea una propuesta semanal nueva con
+IA; no requiere plantillas ni copia automáticamente la semana anterior. La IA recibe las zonas
+vigentes del hogar y la semana de tareas confirmada más reciente solo como contexto. El proveedor no
+recibe nombres, perfiles ni asignaciones personales: devuelve título/fecha/zona y el servidor reparte
+entre miembros activos. La propuesta se publica automáticamente únicamente después de validar todos
+los ámbitos seleccionados y confirmar que la semana destino no contiene datos ni conflictos manuales.
+Esta decisión resuelve la contradicción anterior que excluía la generación automática de tareas de v1;
+la regla vigente es la propuesta nueva con IA descrita aquí.
+
 La generación de comidas debe configurarse en **Hogar > Planificación**, porque produce una agenda
 para el hogar y necesita considerar a sus miembros. No debe ser un interruptor global de la cuenta.
 Cada persona mantiene su perfil alimentario propio; el hogar define valores compartidos por defecto.
