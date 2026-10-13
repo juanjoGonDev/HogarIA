@@ -1251,12 +1251,20 @@ src/utils/household-meal-shopping-preview.store.spec.ts` pasa **14/14** con `DAT
   se espera la promesa; la suite del worker/ledger aporta sus pruebas separadas con DB en memoria y
   proveedor sintético. Sin llamadas al proveedor real. Evidencia: **55/55**; cobertura combinada
   **83,64/80/94,73/86,11 %** (statements/branches/funciones/líneas); TypeScript del servidor pasa.
-  La verificación HTTP usa worker simulado; scheduler (**5/5**) y worker (14/14, incluida generación, repetición,
+  La verificación HTTP usa worker simulado; scheduler (**6/6**) y worker (14/14, incluida generación, repetición,
   rollback de ámbitos y conflictos de destino) están validados con DB en memoria. El smoke de arranque/parada
   del scheduler también pasó. La nueva prueba `polls through the real worker once, records completion, and publishes without duplicates`
   ejercita ocurrencia vencida → ledger → worker → proveedor sintético → publicación; sondea dos veces la
   misma ocurrencia y comprueba una llamada al proveedor, una ejecución completada y una semana publicada.
   Usa `DATABASE_PATH=:memory:`, `NODE_ENV=test`; no llama a IA real. Otros modos/fallos siguen abiertos.
+  Una segunda regresión guarda por el endpoint HTTP real una automatización activa, procesa el `nextRun`
+  devuelto mediante el poller y worker, y comprueba ledger completado, proveedor sintético y una sola
+  semana publicada aunque vuelva a sondear. La fecha no está hardcodeada: se deriva de la respuesta del
+  API para respetar el reloj UTC de SQLite. Está incluida en `household-planning-automation.scheduler.spec.ts`;
+  los tests del scheduler pasan **6/6** con DB en memoria. No es todavía un solo recorrido de navegador
+  desde guardar ajustes hasta la ocurrencia; la E2E de ajustes y esta integración prueban esos límites por
+  separado. Rollback: retirar el test `runs an HTTP-saved schedule through the due poller, worker, and one publication`
+  y esta evidencia; no cambia código de producción ni datos persistentes.
   La E2E aislada de ajustes pasa **2/2 en Chromium/Mobile Chrome** y cubre guardar → reanudar → pausar →
   cambiar a repetir/comidas → guardar con la versión actual (regresión de un 409 por usar la versión vieja
   del editor). Comprueba que día/hora/zona y CTA son alcanzables sin solaparse con el aviso fijo tras
@@ -1498,9 +1506,10 @@ también las condiciones que aún están abiertas.
       retry explícito de timeout ambiguo e idempotencia; repetir no llama a IA ni duplica eventos y protege
       ediciones manuales; generación de tareas basada en plano + última semana confirmada, asignación local
       equitativa sin nombres personales enviados al proveedor, selección de tareas/comidas, publicación
-      atómica de todos los ámbitos seleccionados y aprobación explícita para Compra. Pendiente: cubrir por
-      enlazar una E2E desde configuración guardada hasta ocurrencia automática/publicación; hoy el flujo
-      scheduler→worker→proveedor sintético→publicación se prueba en una integración separada, no desde UI.
+      atómica de todos los ámbitos seleccionados y aprobación explícita para Compra. La E2E de ajustes
+      guarda/reanuda/pausa en UI; una integración separada guarda por el endpoint HTTP, procesa el `nextRun`
+      mediante scheduler y worker con proveedor sintético, publica una semana y comprueba idempotencia.
+      Pendiente: enlazar ambos límites en un único recorrido de navegador y cerrar los otros modos/fallos.
       La cobertura actual de la UI es **87,08/75,25/97,61/94,56 %** (sentencias/ramas/funciones/líneas);
       no se llama a IA real.
 - [x] El GET de automatización incluye `lastRun` como proyección estricta allowlist: ocurrencia, semana
@@ -1516,12 +1525,15 @@ también las condiciones que aún están abiertas.
       del ledger evita duplicados entre ticks/procesos y una ejecución `review_required` no se reintenta
       sin acción explícita. El harness Vitest fija `DATABASE_PATH=:memory:` antes de cargar módulos; los
       casos con archivos usan rutas temporales propias. Evidencia: `household-planning-automation.scheduler.spec.ts`
-      **5/5**, `household-planning-automation.worker.spec.ts` **14/14**, build TypeScript servidor correcto;
+      **6/6**, `household-planning-automation.worker.spec.ts` **14/14**, build TypeScript servidor correcto;
       smoke de arranque/`SIGINT` con `DATABASE_PATH=:memory:`, `NODE_ENV=test`, `PORT=0`, `HOST=127.0.0.1`
       mostró poller iniciado y apagado; carrera de versión probada sin llamada a IA ni publicación. La prueba
       `polls through the real worker once, records completion, and publishes without duplicates` pasa la
       misma ocurrencia dos veces a través del worker real y proveedor sintético; verifica una llamada, una
       fila de ledger completada y una publicación única. No se invocó al proveedor real.
+      `runs an HTTP-saved schedule through the due poller, worker, and one publication` configura vía PATCH,
+      deriva el vencimiento del `nextRun` HTTP y vuelve a sondear; verifica ejecución completada y semana
+      publicada una sola vez. No usa IA real ni cambia datos persistentes.
 - [x] Retry manual estricto por `expectedVersion` + `occurrenceKey`; requiere contexto del hogar activo y
       `settings` + `calendar.edit` actuales. Una reclamación nueva retorna HTTP 202 con `lastRun` allowlist
       sin esperar `completion`; errores por no autorizado, ausencia, configuración obsoleta, ocupación,

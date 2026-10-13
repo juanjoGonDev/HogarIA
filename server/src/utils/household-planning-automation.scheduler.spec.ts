@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import jwt from 'jsonwebtoken';
+import { Hono } from 'hono';
 import type { HouseholdWeeklyOccurrence } from './household-weekly-schedule.js';
 import type {
   HouseholdPlanningAutomationProvider,
@@ -16,6 +18,8 @@ let db: Sql;
 let closeDatabase: () => void;
 let scheduler: typeof import('./household-planning-automation.scheduler.js');
 let saveAutomation: (typeof import('./household-planning-automation.store.js'))['saveHouseholdPlanningAutomation'];
+let api: Hono;
+let jwtSecret = '';
 
 const schedule = {
   weekday: 1 as const,
@@ -71,10 +75,16 @@ describe('household planning automation scheduler', () => {
     const database = await import('../config/database.js');
     scheduler = await import('./household-planning-automation.scheduler.js');
     const automationStore = await import('./household-planning-automation.store.js');
+    const { config } = await import('../config/app.config.js');
+    const { householdPlanningAutomationRoutes } =
+      await import('../routes/household-planning-automation.routes.js');
     saveAutomation = automationStore.saveHouseholdPlanningAutomation;
     await database.initializeDatabase();
     db = database.getDatabase();
     closeDatabase = database.closeDatabase;
+    api = new Hono();
+    api.route('/api/household', householdPlanningAutomationRoutes);
+    jwtSecret = config.auth.jwtSecret;
   });
 
   afterAll(() => {
@@ -186,6 +196,95 @@ describe('household planning automation scheduler', () => {
           'SELECT COUNT(*) AS count FROM household_task_weeks WHERE household_id = ? AND week_start = ?'
         )
         .get('home-a', '2026-10-19')
+    ).toEqual({ count: 1 });
+  });
+
+  it('runs an HTTP-saved schedule through the due poller, worker, and one publication', async () => {
+    makeHousehold('home-route');
+    const ownerId = 'home-route-owner';
+    const token = jwt.sign({ sub: ownerId, email: 'home-route@hogaria.test' }, jwtSecret, {
+      expiresIn: '1h'
+    });
+
+    const saved = await api.request('/api/household/planning-automation', {
+      method: 'PATCH',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+        'x-household-id': 'home-route'
+      },
+      body: JSON.stringify({
+        expectedVersion: 0,
+        enabled: true,
+        mode: 'generate',
+        scopes: ['tasks'],
+        weekday: 1,
+        localTime: '09:30',
+        timeZone: 'Europe/Madrid'
+      })
+    });
+    expect(saved.status).toBe(200);
+    const savedPayload = (await saved.json()) as {
+      data: {
+        nextRun: { localDate: string; localTime: string; timeZone: string; utcInstant: string };
+      };
+    };
+    expect(savedPayload).toMatchObject({
+      success: true,
+      data: {
+        enabled: true,
+        version: 1,
+        nextRun: {
+          localTime: '09:30',
+          timeZone: 'Europe/Madrid'
+        }
+      }
+    });
+
+    const scheduledAt = Date.parse(savedPayload.data.nextRun.utcInstant);
+    expect(scheduledAt).toBeGreaterThan(Date.now());
+    const now = new Date(scheduledAt + 60_000);
+    const targetWeek = new Date(`${savedPayload.data.nextRun.localDate}T00:00:00.000Z`);
+    targetWeek.setUTCDate(targetWeek.getUTCDate() + 7);
+    const targetWeekStart = targetWeek.toISOString().slice(0, 10);
+    const provider = vi.fn<HouseholdPlanningAutomationProvider>(
+      async (_messages, responseFormat) => {
+        expect(responseFormat.json_schema.name).toBe('household_task_proposal');
+        return JSON.stringify({
+          tasks: [{ title: 'Limpiar la encimera', scheduledDate: targetWeekStart, spaceId: null }]
+        });
+      }
+    );
+    const options = {
+      workerId: 'http-config-scheduler-integration',
+      workerDependencies: { provider, random: () => 0.5 }
+    };
+    const firstPoll = await scheduler.pollHouseholdPlanningAutomations(db, now, options);
+    const secondPoll = await scheduler.pollHouseholdPlanningAutomations(db, now, options);
+
+    expect(firstPoll).toEqual({ checkedHouseholds: 1, dueOccurrences: 1, attempted: 1, failed: 0 });
+    expect(secondPoll).toEqual({
+      checkedHouseholds: 1,
+      dueOccurrences: 1,
+      attempted: 1,
+      failed: 0
+    });
+    expect(provider).toHaveBeenCalledTimes(1);
+    expect(
+      db
+        .prepare(
+          `SELECT status, target_week_start AS targetWeekStart
+             FROM household_planning_automation_runs WHERE household_id = ?`
+        )
+        .get('home-route')
+    ).toMatchObject({ status: 'completed', targetWeekStart });
+    expect(
+      db
+        .prepare(
+          `SELECT COUNT(*) AS count FROM household_task_weeks
+            WHERE household_id = ? AND week_start = ?`
+        )
+        .get('home-route', targetWeekStart)
     ).toEqual({ count: 1 });
   });
 
