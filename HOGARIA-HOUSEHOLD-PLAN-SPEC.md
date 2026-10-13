@@ -1216,12 +1216,13 @@ src/utils/household-meal-shopping-preview.store.spec.ts` pasa **14/14** con `DAT
   por hogar, apagada por defecto, con GET/PATCH, Zod estricto, versión/CAS, día/hora/zona IANA explícitos,
   próximo instante mediante el helper DST ya probado y pausa conservadora. El servidor vuelve a comprobar
   contexto/membresía y exige `settings` para modificar; `calendar.edit` también para activar. Lectura no
-  crea ni repara registros. Focal con `DATABASE_PATH=:memory:`: 4 archivos/57 pruebas, cobertura por
-  archivo ≥70 % en todas las métricas; TypeScript, Prettier, `git diff --check` y hook pre-commit pasan.
-  La primera suite completa del servidor tras integrarlo dio 1.578 aprobadas, 1 omitida y una falla del
-  contrato que no tenía fila para `householdMealShoppingApprovalSchema`; se añadió la fila y su prueba
-  focal pasa **2/2**, pero la suite completa aún se debe repetir. No hay worker/ledger, ejecución de IA,
-  repetición de planes ni UI de configuración/indicador; `QA-HOME-PLANNING.AUTOMATION.1` sigue abierto.
+  crea ni repara registros. El ledger persistente de ejecuciones ya tiene store y esquema SQLite; esta
+  unidad añade al GET la última ejecución mediante una proyección allowlist estricta (sin IDs internos,
+  lease, owner ni fencing token) y normaliza los `updated_at` UTC heredados de SQLite. La spec de rutas
+  focal pasa **7/7** en memoria; incluye configuración apagada, estado `in_progress` con timestamp
+  SQLite, resumen `review_required` y ausencia de metadatos internos. Coverage focal route/schema supera
+  70 % en las cuatro métricas; `tsc` servidor pasa. Aún faltan el worker conectado, retry HTTP, flujos
+  completos de IA/repetición y gates integrados; `QA-HOME-PLANNING.AUTOMATION.1` sigue abierto.
 - **Calendario compartido y registro de consumo — backend/UI integrado:** un evento del plan se guarda
   una vez y sus asignaciones identifican usuarios del hogar. `GET /api/calendar` y `/range` muestran
   todas las comidas confirmadas del plan a cualquier miembro activo con `calendar.view`, aunque la
@@ -1415,6 +1416,12 @@ criterios inferiores permanecen sin marcar hasta validar cada condición en su a
       ediciones manuales; generación de tareas basada en plano + última semana confirmada, asignación local
       equitativa sin nombres personales enviados al proveedor, selección de tareas/comidas, publicación
       atómica de todos los ámbitos seleccionados y aprobación explícita para Compra.
+- [x] El GET de automatización incluye `lastRun` como proyección estricta allowlist: ocurrencia, semana
+      objetivo, estado, código de fallo y fecha de actualización; nunca filtra ID de ejecución/hogar,
+      lease, worker o fence. Normaliza a ISO-8601 UTC los timestamps SQLite del estado en progreso.
+      Evidencia: prueba HTTP con ledger sintético y `DATABASE_PATH=:memory:`;
+      `pnpm --filter @hogaria/server exec vitest run src/routes/household-planning-automation.routes.spec.ts`
+      — **7/7**. No invoca IA ni escribe planes.
 - [x] **QA-HOME-TASKS.WEEKLY.2** — asignación fija/aleatoria, equilibrio, no repetir días
       consecutivos si hay solución, excepción explicada y preservación de asignaciones manuales.
       Evidencia: `household-task-assignment.spec.ts` y `household-tasks.component.spec.ts` cubren

@@ -94,6 +94,7 @@ describe('household planning automation routes', () => {
   });
 
   beforeEach(() => {
+    db.prepare('DELETE FROM household_planning_automation_runs').run();
     db.prepare('DELETE FROM household_planning_automations').run();
     db.prepare('DELETE FROM household_task_weeks').run();
     db.prepare('DELETE FROM household_plans').run();
@@ -121,7 +122,8 @@ describe('household planning automation routes', () => {
         timeZone: null,
         version: 0,
         nextRunAt: null,
-        nextRun: null
+        nextRun: null,
+        lastRun: null
       }
     });
     expect(
@@ -320,5 +322,90 @@ describe('household planning automation routes', () => {
       (db.prepare('SELECT COUNT(*) AS count FROM household_task_weeks').get() as { count: number })
         .count
     ).toBe(0);
+  });
+
+  it('projects only a sanitized latest run to the settings GET response', async () => {
+    makeHousehold('home-a');
+    const manager = makeUser('manager', 'home-a', { settings: true, calendar: { edit: true } });
+    const enabled = await request(manager, 'PATCH', {
+      expectedVersion: 0,
+      enabled: true,
+      ...scheduledConfig
+    });
+    expect(enabled.status).toBe(200);
+
+    const { nextHouseholdWeeklyOccurrence } = await import('../utils/household-weekly-schedule.js');
+    const { claimHouseholdPlanningAutomationOccurrence, failHouseholdPlanningAutomationRun } =
+      await import('../utils/household-planning-automation-runs.store.js');
+    const schedule = {
+      weekday: scheduledConfig.weekday as 1,
+      localTime: scheduledConfig.localTime,
+      timeZone: scheduledConfig.timeZone
+    };
+    const occurrence = nextHouseholdWeeklyOccurrence(
+      schedule,
+      new Date('2026-10-11T10:00:00.000Z')
+    );
+    const claimed = claimHouseholdPlanningAutomationOccurrence(db, {
+      householdId: 'home-a',
+      expectedConfigVersion: 1,
+      mode: 'generate',
+      scopes: ['meals', 'tasks'],
+      schedule,
+      occurrence,
+      targetWeekStart: '2026-10-19',
+      workerId: 'route-test-worker',
+      leaseMs: 30_000,
+      now: new Date(occurrence.utcInstant)
+    });
+    expect(claimed.outcome).toBe('claimed');
+    if (!claimed.run) throw new Error('The synthetic occurrence was not claimed.');
+    db.prepare('UPDATE household_planning_automation_runs SET updated_at = ? WHERE id = ?').run(
+      '2026-10-12 07:30:00',
+      claimed.run.id
+    );
+
+    const inProgress = await request(manager, 'GET');
+    expect(inProgress.status).toBe(200);
+    const inProgressBody = (await inProgress.json()) as { data: { lastRun: unknown } };
+    expect(inProgressBody.data.lastRun).toEqual({
+      occurrenceKey: occurrence.occurrenceKey,
+      targetWeekStart: '2026-10-19',
+      status: 'in_progress',
+      failureCode: null,
+      updatedAt: '2026-10-12T07:30:00.000Z'
+    });
+
+    failHouseholdPlanningAutomationRun(db, {
+      runId: claimed.run.id,
+      workerId: 'route-test-worker',
+      fence: claimed.run.fence,
+      now: new Date(Date.parse(occurrence.utcInstant) + 1_000),
+      failureCode: 'PROVIDER_TIMEOUT_AMBIGUOUS'
+    });
+
+    const response = await request(manager, 'GET');
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toMatchObject({
+      success: true,
+      data: expect.objectContaining({
+        lastRun: {
+          occurrenceKey: occurrence.occurrenceKey,
+          targetWeekStart: '2026-10-19',
+          status: 'review_required',
+          failureCode: 'PROVIDER_TIMEOUT_AMBIGUOUS',
+          updatedAt: new Date(Date.parse(occurrence.utcInstant) + 1_000).toISOString()
+        }
+      })
+    });
+    const { lastRun } = (body as { data: { lastRun: unknown } }).data;
+    expect(lastRun).toEqual({
+      occurrenceKey: occurrence.occurrenceKey,
+      targetWeekStart: '2026-10-19',
+      status: 'review_required',
+      failureCode: 'PROVIDER_TIMEOUT_AMBIGUOUS',
+      updatedAt: new Date(Date.parse(occurrence.utcInstant) + 1_000).toISOString()
+    });
   });
 });

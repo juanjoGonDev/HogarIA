@@ -1,7 +1,10 @@
 import { Hono, type Context } from 'hono';
 import { getDatabase } from '../config/database.js';
 import { authMiddleware } from '../middleware/auth.middleware.js';
-import { householdPlanningAutomationPatchSchema } from '../schemas/household-planning-automation.schema.js';
+import {
+  householdPlanningAutomationPatchSchema,
+  householdPlanningAutomationRunSummarySchema
+} from '../schemas/household-planning-automation.schema.js';
 import type { AppEnv } from '../types/hono-env.js';
 import {
   activeHouseholdId,
@@ -13,6 +16,7 @@ import {
   readHouseholdPlanningAutomation,
   saveHouseholdPlanningAutomation
 } from '../utils/household-planning-automation.store.js';
+import { readLatestHouseholdPlanningAutomationRun } from '../utils/household-planning-automation-runs.store.js';
 
 export const householdPlanningAutomationRoutes = new Hono<AppEnv>();
 householdPlanningAutomationRoutes.use('*', authMiddleware);
@@ -25,7 +29,21 @@ householdPlanningAutomationRoutes.get('/planning-automation', (c) => {
   if (c.req.header('x-household-id') !== householdId) return householdContextChanged(c);
 
   try {
-    const data = readHouseholdPlanningAutomation(db, householdId, new Date());
+    const automation = readHouseholdPlanningAutomation(db, householdId, new Date());
+    const latestRun = readLatestHouseholdPlanningAutomationRun(db, householdId);
+    const parsedRun = latestRun
+      ? householdPlanningAutomationRunSummarySchema.safeParse({
+          occurrenceKey: latestRun.occurrenceKey,
+          targetWeekStart: latestRun.targetWeekStart,
+          status: latestRun.status,
+          failureCode: latestRun.failureCode,
+          updatedAt: normalizeLedgerTimestamp(latestRun.updatedAt)
+        })
+      : null;
+    if (parsedRun && !parsedRun.success) {
+      return c.json({ success: false, code: 'HOUSEHOLD_PLANNING_AUTOMATION_UNAVAILABLE' }, 500);
+    }
+    const data = { ...automation, lastRun: parsedRun?.data ?? null };
     c.header('Cache-Control', 'no-store');
     return c.json({ success: true, data });
   } catch (error) {
@@ -130,4 +148,12 @@ function householdContextChanged(c: Context<AppEnv>) {
     },
     409
   );
+}
+
+function normalizeLedgerTimestamp(value: string): string {
+  const timestamp = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value)
+    ? `${value.replace(' ', 'T')}Z`
+    : value;
+  const instant = new Date(timestamp);
+  return Number.isNaN(instant.getTime()) ? value : instant.toISOString();
 }

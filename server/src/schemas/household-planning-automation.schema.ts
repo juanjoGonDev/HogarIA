@@ -2,6 +2,35 @@ import { z } from 'zod';
 
 export const householdPlanningAutomationModeSchema = z.enum(['generate', 'repeat']);
 export const householdPlanningAutomationScopeSchema = z.enum(['tasks', 'meals']);
+export const householdPlanningAutomationRunStatusSchema = z.enum([
+  'in_progress',
+  'review_required',
+  'completed',
+  'cancelled',
+  'skipped'
+]);
+export const householdPlanningAutomationRunFailureCodeSchema = z.enum([
+  'AUTOMATION_PAUSED',
+  'CONFIG_STALE',
+  'AUTHORIZATION_INVALID',
+  'LEASE_EXPIRED_AMBIGUOUS',
+  'PROVIDER_TIMEOUT_AMBIGUOUS',
+  'PROVIDER_REJECTED',
+  'INVALID_PROPOSAL',
+  'PUBLISH_CONFLICT',
+  'TARGET_WEEK_MISSED',
+  'WORKER_FAILURE'
+]);
+
+export const householdPlanningAutomationRunSummarySchema = z
+  .object({
+    occurrenceKey: z.string().min(1),
+    targetWeekStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    status: householdPlanningAutomationRunStatusSchema,
+    failureCode: householdPlanningAutomationRunFailureCodeSchema.nullable(),
+    updatedAt: z.string().datetime()
+  })
+  .strict();
 
 const weekdaySchema = z.number().int().min(1).max(7);
 const localTimeSchema = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/);
@@ -114,6 +143,9 @@ export const householdPlanningAutomationResponseSchema = z
 export type HouseholdPlanningAutomationMode = z.infer<typeof householdPlanningAutomationModeSchema>;
 export type HouseholdPlanningAutomationScope = z.infer<
   typeof householdPlanningAutomationScopeSchema
+>;
+export type HouseholdPlanningAutomationRunSummary = z.infer<
+  typeof householdPlanningAutomationRunSummarySchema
 >;
 export type HouseholdPlanningAutomationState = z.infer<
   typeof householdPlanningAutomationStateSchema
