@@ -79,6 +79,7 @@ const COVERED = [
   'src/utils/shared-meal-calendar.store.ts',
   'src/utils/household-meal-consumption.store.ts',
   'src/utils/household-meal-shopping-preview.store.ts',
+  'src/utils/household-weekly-schedule.ts',
   'src/utils/household-context.ts',
   'src/utils/ingredient-match.ts',
   'src/utils/household-plan.store.ts',
