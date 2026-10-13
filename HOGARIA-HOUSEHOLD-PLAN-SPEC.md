@@ -895,7 +895,10 @@ una alergia obliga a separar o a dejar el turno sin resolver aunque el objetivo 
   calendario paralelo: las comidas y tareas planificadas aparecen en el calendario actual, con persona(s)
   asignada(s), estado y hora cuando exista. Un evento de comida compartido se guarda una sola vez con su
   conjunto de participantes y raciones; comidas diferentes son eventos diferentes asignados a sus
-  participantes.
+  participantes. La asignación de una comida es un permiso explícito solo para ese evento: lo ven sus
+  participantes activos con `calendar.view`; no expone otros eventos/calendarios personales. La
+  confirmación exige `calendar.edit` al autor. La opción general `shareCalendar` no amplía este acceso
+  limitado por evento ni oculta una asignación aceptada por sus participantes.
 - Para las tareas, el hogar puede gestionar zonas de dos formas: (a) dibujar/editar un plano interactivo,
   o (b) crear una lista sencilla de zonas con nombre, sin dibujo. Ambas admiten asignar tareas y verlas en
   Planificación; dibujar el plano es opcional. El menú permite eliminar el plano actual y empezar desde
