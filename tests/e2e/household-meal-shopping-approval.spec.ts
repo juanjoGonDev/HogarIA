@@ -49,6 +49,55 @@ async function registerAndCreateSyntheticHousehold(page: import('@playwright/tes
   await createHousehold(page, 'Hogar sintético de compra');
 }
 
+async function expectMobileShoppingLayout(
+  page: import('@playwright/test').Page,
+  viewport: { width: number; height: number }
+) {
+  await page.setViewportSize(viewport);
+  const layout = await page.evaluate(() => {
+    const tabList = document.querySelector<HTMLElement>('.meal-planner__steps');
+    const tabs = Array.from(tabList?.querySelectorAll<HTMLElement>('[role="tab"]') ?? []);
+    const header = document.querySelector<HTMLElement>('.meal-planner__shopping-header');
+    const heading = header?.querySelector('h3')?.getBoundingClientRect();
+    const count = header?.querySelector('.meal-planner__event-count')?.getBoundingClientRect();
+    const listBounds = tabList?.getBoundingClientRect();
+    return {
+      tabClientWidth: tabList?.clientWidth ?? 0,
+      tabScrollWidth: tabList?.scrollWidth ?? 0,
+      tabBounds: listBounds ? { left: listBounds.left, right: listBounds.right } : null,
+      tabs: tabs.map((tab) => {
+        const bounds = tab.getBoundingClientRect();
+        return {
+          text: tab.innerText.trim(),
+          width: bounds.width,
+          height: bounds.height,
+          left: bounds.left,
+          right: bounds.right
+        };
+      }),
+      heading: heading ? { top: heading.top, bottom: heading.bottom } : null,
+      count: count ? { top: count.top, bottom: count.bottom } : null
+    };
+  });
+
+  expect(layout.tabs.map((tab) => tab.text)).toEqual([
+    'Preparar',
+    'Revisar propuesta',
+    'Revisar compra'
+  ]);
+  expect(layout.tabScrollWidth).toBeLessThanOrEqual(layout.tabClientWidth + 1);
+  expect(layout.tabBounds).toBeTruthy();
+  for (const tab of layout.tabs) {
+    expect(tab.width).toBeGreaterThan(0);
+    expect(tab.height).toBeGreaterThanOrEqual(44);
+    expect(tab.left).toBeGreaterThanOrEqual(layout.tabBounds!.left - 1);
+    expect(tab.right).toBeLessThanOrEqual(layout.tabBounds!.right + 1);
+  }
+  expect(layout.heading).toBeTruthy();
+  expect(layout.count).toBeTruthy();
+  expect(layout.heading!.bottom).toBeLessThanOrEqual(layout.count!.top);
+}
+
 test('plan semanal de compra permite revisar, editar, cancelar y aprobar sin tocar el inventario', async ({
   page
 }, testInfo) => {
@@ -251,6 +300,13 @@ test('plan semanal de compra permite revisar, editar, cancelar y aprobar sin toc
     source: 'manual'
   });
   expect(await readPantrySnapshot()).toEqual(pantryBefore);
+
+  if (testInfo.project.name === 'mobile-chrome') {
+    await expectMobileShoppingLayout(page, { width: 390, height: 844 });
+    await expectMobileShoppingLayout(page, { width: 320, height: 740 });
+    await page.setViewportSize(viewport);
+    await page.evaluate(() => window.scrollTo(0, 0));
+  }
 
   const screenshotDirectory = resolve('.e2e-screenshots/household-meal-shopping-approval');
   await mkdir(screenshotDirectory, { recursive: true });

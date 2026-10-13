@@ -595,6 +595,30 @@
 }
 
 @media (max-width: 767px) {
+  .meal-planner__steps {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-1);
+    overflow: visible;
+  }
+
+  .meal-planner__steps [role='tab'] {
+    min-width: 0;
+    padding-inline: var(--space-1);
+    text-align: center;
+    white-space: normal;
+    line-height: var(--leading-tight);
+  }
+
+  .meal-planner__shopping-header {
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .meal-planner__event-count {
+    align-self: flex-start;
+  }
+
   .meal-planner__controls {
     grid-template-columns: minmax(0, 1fr);
     gap: var(--space-4);
