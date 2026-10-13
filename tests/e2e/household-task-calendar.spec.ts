@@ -3,9 +3,24 @@ import { mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { expect, test, type Page } from './fixtures';
 import { registerWithHousehold } from './helpers/auth';
+import { selectCalendarView } from './helpers/calendar-ui';
 
 const TASK_DATE = '2026-10-12';
 const TASK_TITLE = 'Revisar reciclaje del hogar';
+const responsiveViewports = [
+  { label: 'mobile-min', width: 320, height: 568 },
+  { label: 'mobile-standard', width: 393, height: 851 },
+  { label: 'mobile-landscape', width: 568, height: 320 },
+  { label: 'tablet-pre-breakpoint', width: 767, height: 1024 },
+  { label: 'tablet-breakpoint', width: 768, height: 1024 },
+  { label: 'desktop', width: 1440, height: 900 }
+] as const;
+const calendarViews = [
+  { value: 'agenda', label: 'Agenda' },
+  { value: 'week', label: 'Semana' },
+  { value: 'month', label: 'Mes' },
+  { value: 'year', label: 'Año' }
+] as const;
 
 const taskPlan = {
   schemaVersion: 1,
@@ -103,6 +118,36 @@ async function capture(page: Page, name: string): Promise<void> {
   await page.screenshot({ path, fullPage: false, scale: 'css', animations: 'disabled' });
 }
 
+async function expectTaskWithinCalendarPanel(page: Page): Promise<void> {
+  const task = page.locator('[data-test="calendar-household-task"]');
+  await expect(task).toBeVisible();
+  await expect(task).toContainText(TASK_TITLE);
+
+  const [taskBounds, panelBounds] = await Promise.all([
+    task.boundingBox(),
+    page.locator('.calendar__panel').boundingBox()
+  ]);
+  expect(taskBounds).not.toBeNull();
+  expect(panelBounds).not.toBeNull();
+  expect(taskBounds!.x).toBeGreaterThanOrEqual(panelBounds!.x - 1);
+  expect(taskBounds!.x + taskBounds!.width).toBeLessThanOrEqual(
+    panelBounds!.x + panelBounds!.width + 1
+  );
+}
+
+async function expectNoPageHorizontalOverflow(page: Page, viewportLabel: string): Promise<void> {
+  const geometry = await page.evaluate(() => ({
+    viewportWidth: document.documentElement.clientWidth,
+    documentWidth: document.documentElement.scrollWidth,
+    scrollX: window.scrollX
+  }));
+  expect(
+    geometry.documentWidth,
+    `${viewportLabel}: el documento no debe desbordar horizontalmente`
+  ).toBeLessThanOrEqual(geometry.viewportWidth + 1);
+  expect(geometry.scrollX, `${viewportLabel}: no debe quedar scroll horizontal de página`).toBe(0);
+}
+
 test('el calendario actual muestra tareas del hogar, zona, estado y persona asignada', async ({
   page
 }) => {
@@ -159,4 +204,58 @@ test('el calendario actual muestra tareas del hogar, zona, estado y persona asig
 
   await page.goto(`/calendar?view=year&date=${TASK_DATE}`);
   await expect(page.locator('.year-month__day.has-items').first()).toBeVisible();
+});
+
+test('las tareas del hogar se mantienen legibles, visibles y accesibles en las vistas y breakpoints del calendario', async ({
+  page
+}) => {
+  await registerWithHousehold(
+    page,
+    `/calendar?view=agenda&date=${TASK_DATE}`,
+    `Calendar Matrix ${randomUUID().slice(0, 6)}`
+  );
+  await seedHouseholdTask(page);
+
+  const taskLayer = page.locator('[data-test="layer-tasks"]');
+  const task = page.locator('[data-test="calendar-household-task"]');
+  await expect(taskLayer).toHaveAccessibleName(/Tareas del hogar/);
+
+  for (const viewport of responsiveViewports) {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+        )
+    );
+    await expectNoPageHorizontalOverflow(page, viewport.label);
+
+    for (const view of calendarViews) {
+      await selectCalendarView(page, view.value, view.label);
+      if (view.value === 'year') {
+        await expect(page.locator('.year-month__day.has-items').first()).toBeVisible();
+      } else {
+        await expectTaskWithinCalendarPanel(page);
+      }
+      await expectNoPageHorizontalOverflow(page, `${viewport.label}/${view.value}`);
+    }
+
+    if (viewport.label === 'mobile-min') {
+      await selectCalendarView(page, 'agenda', 'Agenda');
+      const eventAdd = page.locator('[data-test="event-add"]');
+      await eventAdd.focus();
+      await page.keyboard.press('Tab');
+      if ((await page.locator('[data-test="layer-meals"]').count()) > 0) {
+        await page.keyboard.press('Tab');
+      }
+      await expect(taskLayer).toBeFocused();
+      await page.keyboard.press('Space');
+      await expect(taskLayer).toHaveAttribute('aria-pressed', 'false');
+      await expect(task).toHaveCount(0);
+
+      await page.keyboard.press('Enter');
+      await expect(taskLayer).toHaveAttribute('aria-pressed', 'true');
+      await expectTaskWithinCalendarPanel(page);
+    }
+  }
 });
