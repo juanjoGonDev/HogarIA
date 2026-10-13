@@ -54,7 +54,14 @@ completo. `custom` permite escribir cualquier otro nombre sin modificar el enum 
 - En **Hogar > Tareas**, seleccionar una zona del plano abre sus tareas. Se pueden crear/editar
   ocurrencias con fecha concreta dentro de la semana, asociarlas a una zona o a todo el hogar,
   asignar una persona, dejarlas sin asignar o solicitar un reparto aleatorio equitativo.
-  Las reglas recurrentes y la generación automática de ocurrencias quedan fuera de v1.
+  No hay reglas manuales recurrentes en v1. La automatización semanal del hogar sí puede generar
+  una nueva propuesta de tareas con IA: usa el plano vigente (incluidas zonas con nombre sin dibujo)
+  y la semana de tareas confirmada más reciente como contexto; no requiere crear plantillas aparte.
+  La respuesta usa `response_format` JSON Schema estricto y pasa el schema/invariantes de servidor.
+  La IA solo propone títulos, fechas y zonas; el servidor resuelve asignaciones con miembros activos,
+  sin enviar nombres ni perfiles personales al proveedor, y valida equilibrio y días consecutivos.
+  Una zona inexistente, una asignación irresoluble, una semana destino ya ocupada o cualquier salida
+  inválida deja toda la ejecución para revisión, sin escribir parcialmente ni pisar tareas manuales.
 - Una modificación por chat incluye siempre la revisión actual del plano como JSON y la petición
   nueva; puede añadir una foto/boceto. Continuar el chat anterior no es requisito de corrección:
   una conversación nueva también recibe el último plano confirmado. La IA devuelve una propuesta
@@ -982,12 +989,19 @@ una alergia obliga a separar o a dejar el turno sin resolver aunque el objetivo 
   estar en el calendario.
 - La automatización semanal distingue dos modos: **generar una planificación nueva** (llama al planificador
   cuando llegue la fecha configurada) y **repetir la planificación actual** (reutiliza el plan semanal
-  confirmado más reciente del hogar, sin pedir otra respuesta a IA). Repetir no duplica eventos ni
-  reemplaza cambios manuales; la lista de compra se vuelve a calcular con las existencias actuales y su
-  escritura sigue requiriendo aprobación explícita. El usuario autoriza que, en modo de generación nueva,
-  el resultado validado se publique automáticamente al calendario; los turnos sin resolver, errores,
-  conflictos de versión o respuestas inválidas no escriben parcialmente ni sustituyen el plan actual y
-  quedan señalados para revisión. Solo se publican eventos en huecos sin conflicto con eventos ya
+  confirmado más reciente del hogar, sin pedir otra respuesta a IA). En modo generar, el ámbito tareas usa
+  el plano vigente y la última semana confirmada como contexto, valida zonas y genera asignaciones en el
+  servidor a partir de la membresía activa; el ámbito comidas usa el planificador y las preferencias
+  efectivas vigentes. Cada ámbito publica en su almacén autoritativo (semana de tareas o eventos de comidas),
+  que alimenta el calendario compartido. Si se seleccionan ambos ámbitos, ambos deben completarse y
+  validarse antes de publicar cualquiera: el fallo de uno no deja un calendario semanal a medias. El usuario
+  autoriza que, al completar y validar todos los ámbitos seleccionados, se publiquen automáticamente; los turnos sin
+  resolver, errores, conflictos de versión, asignaciones imposibles o respuestas inválidas no escriben
+  parcialmente ni sustituyen el plan actual y quedan señalados para revisión. Repetir no llama a IA,
+  conserva el contenido de la última semana confirmada con nuevos IDs/fechas, marca tareas como no
+  completadas y no duplica ni reemplaza cambios manuales: si la semana destino ya tiene datos, se detiene
+  para revisión. La lista de compra se vuelve a calcular con las existencias actuales y su escritura
+  sigue requiriendo aprobación explícita. Solo se publican eventos en huecos sin conflicto con eventos
   confirmados o cambios manuales. Un indicador pequeño y persistente muestra la próxima ejecución
   automática y tiene un único botón alternable de play/pause; al pausar conserva plan y configuración, y
   al reanudar programa la siguiente ocurrencia futura sin ejecutar en ráfaga las omitidas. Puede
@@ -1364,7 +1378,9 @@ criterios inferiores permanecen sin marcar hasta validar cada condición en su a
       → primera ocurrencia única. Generar/repetir, publicación automática validada de propuestas completas,
       play/pause, siguiente fecha, omisión de ejecuciones vencidas al reanudar, conflictos sin sobrescritura,
       retry explícito de timeout ambiguo e idempotencia; repetir no llama a IA ni duplica eventos y protege
-      ediciones manuales; seleccionar tareas/comidas y conservar aprobación explícita para Compra.
+      ediciones manuales; generación de tareas basada en plano + última semana confirmada, asignación local
+      equitativa sin nombres personales enviados al proveedor, selección de tareas/comidas, publicación
+      atómica de todos los ámbitos seleccionados y aprobación explícita para Compra.
 - [x] **QA-HOME-TASKS.WEEKLY.2** — asignación fija/aleatoria, equilibrio, no repetir días
       consecutivos si hay solución, excepción explicada y preservación de asignaciones manuales.
       Evidencia: `household-task-assignment.spec.ts` y `household-tasks.component.spec.ts` cubren
