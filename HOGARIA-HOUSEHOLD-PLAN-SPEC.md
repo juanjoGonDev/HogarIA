@@ -751,3 +751,30 @@ inspección visual y geométrica de forma crítica.
   **7/7 en 1,3 min** con servidor y SQLite aislados. La CI final [#38370834683](https://github.com/juanjoGonDev/MiCocinAI/actions/runs/38370834683),
   sobre `91f18268972ea2b088e634d6e79ca2673cacf873`, terminó **success en los nueve jobs**: cuatro
   shards E2E, full-stack E2E, build de producción, servidor y typecheck. PR #47 continúa Draft.
+
+## Seguimiento de acabado visual — menú de opciones del plano
+
+La captura de usuario del 13-10-2026 descubre una discrepancia no cubierta por la auditoría anterior:
+el menú móvil de «Más opciones» mezcla alturas y alineaciones de botones, pone acciones de gestión
+de plantas al mismo nivel visual, y «Eliminar planta» no tiene apariencia destructiva. El menú debe
+parecer un único grupo de controles diseñado; no basta con que los controles funcionen.
+
+### Aceptación
+
+- [ ] Reproducir el menú abierto en Playwright en escritorio y móvil; medir tamaños/alineación de
+      botones actuales y guardar capturas «antes» sintéticas.
+- [ ] Agrupar visual y semánticamente edición del plano, tipo de vivienda y acciones de plantas;
+      respetar los componentes/paleta existentes y no cambiar persistencia ni comportamiento.
+- [ ] Normalizar acciones del mismo grupo a altura y ancho coherentes (mínimo táctil 44×44 px),
+      tipografía, padding, icono y separación; iconos y texto forman una unidad centrada.
+- [ ] Diferenciar el modo de dibujo seleccionado con el acento HogarIA; mostrar añadir planta/sótano
+      como acciones secundarias consistentes; destacar «Eliminar planta» con el token de peligro y
+      pictograma de eliminar, sin quitar ni debilitar su confirmación existente. «Descartar cambios»
+      conserva apariencia secundaria y un estado deshabilitado legible.
+- [ ] Medir que controles comparables comparten rectángulos con tolerancia de 1 CSS px donde deban
+      ser equivalentes; el menú no recorta el contenido ni tapa el dock/CTA con 320×568, 390×844,
+      escritorio y orientación apaisada. Si excede la altura disponible, su contenido puede desplazarse.
+- [ ] Verificar contraste, nombre accesible, teclado/foco y estado deshabilitado; guardar e inspeccionar
+      capturas finales de escritorio y móvil bajo `.e2e-screenshots/`.
+- [ ] Actualizar esta evidencia solo después de pruebas reproducibles; mantener PR #47 Draft y correr
+      todos los hooks sin bypass antes de commit/push.
