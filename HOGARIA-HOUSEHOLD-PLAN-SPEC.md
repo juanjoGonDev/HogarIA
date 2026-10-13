@@ -999,12 +999,14 @@ solo su backend o sus pruebas unitarias.
   rutas de cuenta ahora preparan una membresía sintética para ejercitar perfil/avatar/password después
   del onboarding; la puerta real tiene su propio test con `createApp`. Falta E2E real de alta,
   invitación, interrupción/reanudación y móvil.
-- **Configuración de comidas — backend parcial:** `GET/PATCH /api/household/meal-planning`, columnas
+- **Configuración de comidas — backend/UI parcial:** `GET/PATCH /api/household/meal-planning`, columnas
   de hogar/miembro, validación de permiso existente, resolución por miembro e inicialización del hogar
   están implementados. Los overrides empiezan apagados; la preferencia de horario personal procede de
   `users.preferences.mealPlan/mealTimes` al activar override, sin copiar alergias ni gustos al hogar.
   La nueva ruta de propuesta ya consume esta resolución; `plan-week` heredado no se declara migrado.
-  Falta cerrar la UI y E2E del flujo de ajustes.
+  La UI está integrada en Hogar > Planificación con errores recuperables, guardado parcial y overrides
+  separados; E2E aislada sintética pasa 2/2 en Chromium y Mobile Chrome. Falta cobertura de preferencias
+  de varios miembros en el recorrido integrado y revisión completa de breakpoints/estados.
 - **Plan semanal — backend parcial:** se añadió `POST /api/household/meal-planning/proposal`
   con selección explícita de miembros, permisos `calendar.edit`, datos del perfil de quienes participan,
   despacho IA fijado al hogar capturado, `response_format` JSON Schema estricto y validación local de
@@ -1027,9 +1029,11 @@ solo su backend o sus pruebas unitarias.
   participantes son usuarios del hogar con permiso de lectura; las lecturas existentes exponen el
   evento solo a las personas asignadas, sin notas/objetivos privados. Pendiente recorrido E2E real y
   consumo/compras.
-- **Recetas por ración — backend/UI parcial:** el contrato nuevo usa `baseServings: 1`; ajuste local de
-  raciones y smoke visual sintético de escritorio/móvil están implementados en un worktree separado,
-  pendientes de integrar en esta rama. No se llama a IA para volver a escalar una receta guardada.
+- **Recetas por ración — backend/UI integrado:** el contrato nuevo usa `baseServings: 1`; la generación
+  normaliza cantidades para una ración, el cliente escala cantidades localmente y conserva tiempos y
+  receta base, con aviso de cocción por tandas. Los cambios del worktree ya están en esta rama; su
+  regresión completa en el árbol integrado se actualizará con el gate final. No se llama a IA para
+  volver a escalar una receta guardada.
 - **Validación reproducible ejecutada en Windows:**
 
   ```powershell
