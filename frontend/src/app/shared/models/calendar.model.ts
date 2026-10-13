@@ -188,6 +188,19 @@ export interface CalendarMeal {
   canRecordConsumption?: boolean;
 }
 
+/** Household checklist task projected read-only into the existing calendar range. */
+export interface CalendarHouseholdTask {
+  id: string;
+  title: string;
+  date: string;
+  /** Household task occurrences currently do not carry a time. */
+  time: string | null;
+  zoneName: string | null;
+  assignedMemberId: string | null;
+  assignedMemberName: string | null;
+  completed: boolean;
+}
+
 /** Un día tal y como lo consume una vista: fecha + sus comidas + resumen. */
 export interface CalendarDay {
   date: Date;
@@ -196,6 +209,7 @@ export interface CalendarDay {
   inCurrentMonth: boolean;
   isToday: boolean;
   meals: CalendarMeal[];
+  tasks: CalendarHouseholdTask[];
   calories: number;
   /** true si alguna comida del día trae datos nutricionales. */
   hasNutrition: boolean;

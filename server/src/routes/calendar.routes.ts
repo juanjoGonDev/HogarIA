@@ -31,6 +31,7 @@ import {
   canViewSharedMeals,
   listSharedMealsForHouseholdViewer
 } from '../utils/shared-meal-calendar.store.js';
+import { listHouseholdTasksForCalendarViewer } from '../utils/household-task-calendar.store.js';
 import type { AppEnv } from '../types/hono-env.js';
 
 const calendarRoutes = new Hono<AppEnv>();
@@ -224,7 +225,9 @@ calendarRoutes.get('/range', async (c) => {
     goals = {};
   }
 
-  return c.json({ success: true, data: { startDate, endDate, goals, meals } });
+  const tasks = listHouseholdTasksForCalendarViewer(db, userId, householdId, startDate, endDate);
+
+  return c.json({ success: true, data: { startDate, endDate, goals, meals, tasks } });
 });
 
 // POST /api/calendar

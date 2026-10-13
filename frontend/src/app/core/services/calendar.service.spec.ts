@@ -25,7 +25,12 @@ const eventRequest =
     request.params.get('from') === range.start &&
     request.params.get('to') === range.end;
 
-function rangeResponse(date: string, title: string, calories: number) {
+function rangeResponse(
+  date: string,
+  title: string,
+  calories: number,
+  tasks: Array<Record<string, unknown>> = []
+) {
   return {
     data: {
       startDate: date,
@@ -45,8 +50,22 @@ function rangeResponse(date: string, title: string, calories: number) {
           notes: null,
           completed: false
         }
-      ]
+      ],
+      tasks
     }
+  };
+}
+
+function householdTask(date: string, id = 'task-1') {
+  return {
+    id,
+    title: 'Limpiar cocina',
+    date,
+    time: null,
+    zoneName: 'Cocina',
+    assignedMemberId: 'member-1',
+    assignedMemberName: 'Ana',
+    completed: false
   };
 }
 
@@ -153,6 +172,30 @@ describe('CalendarService visible range concurrency', () => {
     expect(service.meals().map((meal) => meal.title)).toEqual(['Latest meal']);
     expect(service.targetCalories()).toBe(2100);
     expect(service.isLoading()).toBeFalse();
+  });
+
+  it('loads and indexes household tasks from the requested calendar range', () => {
+    service.loadRange(RANGE_A.start, RANGE_A.end);
+    http
+      .expectOne(rangeRequest(RANGE_A))
+      .flush(rangeResponse(RANGE_A.start, 'Comida visible', 1800, [householdTask(RANGE_A.start)]));
+
+    expect(service.tasks()).toEqual([
+      {
+        ...householdTask(RANGE_A.start),
+        time: null,
+        zoneName: 'Cocina',
+        assignedMemberId: 'member-1',
+        assignedMemberName: 'Ana',
+        completed: false
+      }
+    ]);
+    expect(service.tasksByDate().get(RANGE_A.start)?.[0].title).toBe('Limpiar cocina');
+
+    contextRevision.set(1);
+    switchingHousehold.set(true);
+    TestBed.flushEffects();
+    expect(service.tasks()).toEqual([]);
   });
 
   it('reads a planning week without replacing the currently visible calendar', () => {

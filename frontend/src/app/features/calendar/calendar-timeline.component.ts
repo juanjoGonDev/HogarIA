@@ -56,6 +56,7 @@ import { IconButtonComponent } from '../../shared/components/ui/icon-button/icon
 import { AvatarComponent } from '../../shared/components/ui/avatar/avatar.component';
 import { MEAL_LABEL_KEYS } from '../../core/i18n/labels';
 import { TranslatePipe } from '../../core/pipes/translate.pipe';
+import { CalendarHouseholdTasksComponent } from './calendar-household-tasks.component';
 
 const TIMELINE_GUTTER_WIDTH_PX = 60;
 const MIN_DAY_COLUMN_WIDTH_PX = 48;
@@ -79,7 +80,13 @@ const MIN_DAY_COLUMN_WIDTH_PX = 48;
 @Component({
   selector: 'app-calendar-timeline',
   standalone: true,
-  imports: [TranslatePipe, CommonModule, IconButtonComponent, AvatarComponent],
+  imports: [
+    TranslatePipe,
+    CommonModule,
+    IconButtonComponent,
+    AvatarComponent,
+    CalendarHouseholdTasksComponent
+  ],
   template: `
     <div class="tl" [class.tl--single]="single()" [style.--hour-px]="hourPx">
       <div
@@ -130,7 +137,7 @@ const MIN_DAY_COLUMN_WIDTH_PX = 48;
         <div class="tl__band" [style.grid-template-columns]="columns()">
           <span class="tl__gutter tl__gutter--band">{{ 'calendar.todo_el_dia' | t }}</span>
           @for (day of days; track day.iso) {
-            <div class="tl__bandcol" data-test="timeline-band" (click)="onBandClick(day)">
+            <div class="tl__bandcol" data-test="timeline-band" (click)="onBandClick(day, $event)">
               @for (item of bandOf(day); track item.id) {
                 <button
                   type="button"
@@ -142,7 +149,8 @@ const MIN_DAY_COLUMN_WIDTH_PX = 48;
                   {{ titleOf(item) }}
                 </button>
               }
-              @if (!bandOf(day).length) {
+              <app-calendar-household-tasks [tasks]="day.tasks" [dense]="true" [maxVisible]="2" />
+              @if (!bandOf(day).length && !day.tasks.length) {
                 <span class="tl__bandempty" aria-hidden="true">—</span>
               }
             </div>
@@ -831,7 +839,13 @@ export class CalendarTimelineComponent implements AfterViewInit, OnChanges {
     this.addEvent.emit({ date, startTime: timeFromMinutes(minutes) });
   }
 
-  protected onBandClick(day: CalendarDayView): void {
+  protected onBandClick(day: CalendarDayView, event?: MouseEvent): void {
+    if (
+      event?.target instanceof Element &&
+      event.target.closest('[data-test="calendar-household-task"]')
+    ) {
+      return;
+    }
     // «Todo el día» sin hora: un evento que ocupa la franja, no las 00:00.
     this.addEvent.emit({ date: day.iso, startTime: '' });
   }

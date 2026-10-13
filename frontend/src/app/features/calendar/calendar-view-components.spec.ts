@@ -1,13 +1,16 @@
 import { TestBed } from '@angular/core/testing';
+import { signal } from '@angular/core';
 import { I18nService } from '../../core/services/i18n.service';
 import type {
   CalendarDayView,
+  CalendarHouseholdTask,
   CalendarMeal,
   HouseholdEvent
 } from '../../shared/models/calendar.model';
 import { CalendarAgendaViewComponent } from './calendar-agenda-view.component';
 import { CalendarEventComponent } from './calendar-event.component';
 import { CalendarHouseholdEventsComponent } from './calendar-household-events.component';
+import { CalendarHouseholdTasksComponent } from './calendar-household-tasks.component';
 import { CalendarMiniMonthComponent } from './calendar-mini-month.component';
 import { CalendarMonthComponent } from './calendar-month.component';
 import { CalendarYearComponent } from './calendar-year.component';
@@ -39,6 +42,7 @@ function day(iso: string, overrides: Partial<CalendarDayView> = {}): CalendarDay
     planned: 0,
     done: 0,
     events: [],
+    tasks: [],
     ...overrides
   };
 }
@@ -63,28 +67,73 @@ function event(overrides: Partial<HouseholdEvent> = {}): HouseholdEvent {
   };
 }
 
+function task(overrides: Partial<CalendarHouseholdTask> = {}): CalendarHouseholdTask {
+  return {
+    id: 'task-1',
+    title: 'Limpiar cocina',
+    date: '2026-10-05',
+    time: null,
+    zoneName: 'Cocina',
+    assignedMemberId: 'member-1',
+    assignedMemberName: 'Ana',
+    completed: false,
+    ...overrides
+  };
+}
+
 describe('calendar view presentation components', () => {
   let i18n: jasmine.SpyObj<I18nService>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     i18n = jasmine.createSpyObj<I18nService>('I18nService', ['t']);
     i18n.t.and.callFake((key, params) =>
       params ? `${String(key)} ${Object.values(params).join(' ')}` : String(key)
     );
-    TestBed.configureTestingModule({ providers: [{ provide: I18nService, useValue: i18n }] });
+    Object.defineProperty(i18n, 'changeTick', { value: signal(0) });
+    await TestBed.configureTestingModule({
+      imports: [CalendarHouseholdTasksComponent],
+      providers: [{ provide: I18nService, useValue: i18n }]
+    }).compileComponents();
   });
 
   it('filters the agenda to days with content and formats each weekday', () => {
     const component = new CalendarAgendaViewComponent();
     const withMeal = day('2026-10-05', { meals: [meal('meal-1')] });
     const withEvent = day('2026-10-06', { events: [event()] });
-    const empty = day('2026-10-07');
-    component.days = [withMeal, withEvent, empty];
+    const withTask = day('2026-10-07', { tasks: [task()] });
+    const empty = day('2026-10-08');
+    component.days = [withMeal, withEvent, withTask, empty];
 
-    expect(component.visibleDays()).toEqual([withMeal, withEvent]);
+    expect(component.visibleDays()).toEqual([withMeal, withEvent, withTask]);
     expect(component.weekday(withMeal)).toBeTruthy();
     component.days = [];
     expect(component.visibleDays()).toEqual([]);
+  });
+
+  it('shows household task assignee, zone, status and compact overflow count', () => {
+    const component = TestBed.runInInjectionContext(() => new CalendarHouseholdTasksComponent());
+    component.tasks = [task(), task({ id: 'task-2', completed: true })];
+    component.maxVisible = 1;
+
+    expect(component.visibleTasks().map((entry) => entry.id)).toEqual(['task-1']);
+    expect(component.hiddenCount()).toBe(1);
+    const label = component.description(component.tasks[1]);
+    expect(label).toContain('calendar.task_zone Cocina');
+    expect(label).toContain('calendar.task_assignee Ana');
+    expect(label).toContain('calendar.task_completed');
+  });
+
+  it('renders the household task as a read-only accessible calendar item', () => {
+    const fixture = TestBed.createComponent(CalendarHouseholdTasksComponent);
+    fixture.componentRef.setInput('tasks', [task({ completed: true })]);
+    fixture.detectChanges();
+
+    const item = fixture.nativeElement.querySelector('[data-test="calendar-household-task"]');
+    expect(item.getAttribute('role')).toBe('listitem');
+    expect(item.getAttribute('aria-label')).toContain('calendar.task_assignee Ana');
+    expect(item.getAttribute('aria-label')).toContain('calendar.task_completed');
+    expect(item.textContent).toContain('calendar.task_zone Cocina');
+    expect(item.textContent).toContain('calendar.task_completed');
   });
 
   it('builds the mini-month and distinguishes today from other dates', () => {
@@ -156,6 +205,10 @@ describe('calendar view presentation components', () => {
     component.addMeal.subscribe((value) => (added = value));
     component.openDay.subscribe((value) => (opened = value));
     component.onCellClick(first);
+    expect(added).toEqual({ date: first.iso, mealType: 'lunch' });
+    const taskTarget = document.createElement('span');
+    taskTarget.setAttribute('data-test', 'calendar-household-task');
+    component.onCellClick(first, { target: taskTarget } as unknown as MouseEvent);
     expect(added).toEqual({ date: first.iso, mealType: 'lunch' });
     component.kitchen = false;
     component.onCellClick(first);

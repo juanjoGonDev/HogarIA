@@ -590,6 +590,15 @@ export function canViewSharedMeals(
   householdId: string | null,
   userId: string
 ): householdId is string {
+  return canViewSharedCalendar(db, householdId, userId);
+}
+
+/** Active household members with `calendar.view` can read household-wide calendar projections. */
+export function canViewSharedCalendar(
+  db: SqliteDb,
+  householdId: string | null,
+  userId: string
+): householdId is string {
   return Boolean(householdId && canUseCalendarPermission(db, householdId, userId, 'view'));
 }
 

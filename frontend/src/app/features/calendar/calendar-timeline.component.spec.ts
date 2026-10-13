@@ -24,7 +24,8 @@ function day(iso: string, isToday = false): CalendarDayView {
     slots: { breakfast: [], lunch: [], snack: [], dinner: [] },
     planned: 0,
     done: 0,
-    events: []
+    events: [],
+    tasks: []
   };
 }
 
@@ -236,6 +237,10 @@ describe('CalendarTimelineComponent grid geometry', () => {
     expect(createdMeals[0]).toEqual({ date: future.iso, mealType: 'lunch', time: undefined });
     api.onBandClick(future);
     expect(createdEvents[0]).toEqual({ date: future.iso, startTime: '' });
+    const taskTarget = document.createElement('span');
+    taskTarget.setAttribute('data-test', 'calendar-household-task');
+    api.onBandClick(future, { target: taskTarget } as unknown as MouseEvent);
+    expect(createdEvents.length).toBe(1);
 
     api.window.set({ startMinutes: 0, endMinutes: 1440 });
     const column = {
@@ -292,7 +297,7 @@ function access(component: CalendarTimelineComponent) {
     onOpen(item: TimelineItemFixture): void;
     onAddMeal(day: CalendarDayView): void;
     onGridClick(event: MouseEvent): void;
-    onBandClick(day: CalendarDayView): void;
+    onBandClick(day: CalendarDayView, event?: MouseEvent): void;
   };
 }
 

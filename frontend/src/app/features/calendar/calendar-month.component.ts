@@ -8,6 +8,7 @@ import {
 } from '../../shared/models/calendar.model';
 import { formatNumber, labels } from './calendar.util';
 import { CalendarHouseholdEventsComponent } from './calendar-household-events.component';
+import { CalendarHouseholdTasksComponent } from './calendar-household-tasks.component';
 import { HouseholdEvent } from '../../shared/models/calendar.model';
 import { CalendarEventComponent } from './calendar-event.component';
 import { TranslatePipe } from '../../core/pipes/translate.pipe';
@@ -24,11 +25,17 @@ import { TranslatePipe } from '../../core/pipes/translate.pipe';
   standalone: true,
   imports: [
     TranslatePipe,
-    CommonModule, CalendarHouseholdEventsComponent, CalendarEventComponent],
+    CommonModule,
+    CalendarHouseholdEventsComponent,
+    CalendarHouseholdTasksComponent,
+    CalendarEventComponent
+  ],
   template: `
     <div class="cal-month">
       <div class="cal-month__head" role="row">
-        <span *ngFor="let label of weekLabels" class="cal-month__dow" role="columnheader">{{ label }}</span>
+        <span *ngFor="let label of weekLabels" class="cal-month__dow" role="columnheader">{{
+          label
+        }}</span>
       </div>
 
       <div class="cal-month__grid" role="rowgroup">
@@ -41,13 +48,13 @@ import { TranslatePipe } from '../../core/pipes/translate.pipe';
             [class.is-today]="day.isToday"
             [class.is-anchor]="day.iso === anchorIso"
             [class.has-plans]="day.planned > 0"
-            (click)="onCellClick(day)"
+            (click)="onCellClick(day, $event)"
           >
             <div class="cal-cell__head">
               <button
                 type="button"
                 class="cal-cell__num"
-                [attr.aria-label]="'calendar.view_day_of' | t:{day: dayLabel(day)}"
+                [attr.aria-label]="'calendar.view_day_of' | t: { day: dayLabel(day) }"
                 (click)="$event.stopPropagation(); openDay.emit(day.iso)"
               >
                 {{ day.date.getDate() }}
@@ -57,7 +64,12 @@ import { TranslatePipe } from '../../core/pipes/translate.pipe';
             </div>
 
             <div class="cal-cell__events">
-              <app-calendar-household-events [events]="day.events" [dense]="true" (edit)="editEvent.emit($event)" />
+              <app-calendar-household-events
+                [events]="day.events"
+                [dense]="true"
+                (edit)="editEvent.emit($event)"
+              />
+              <app-calendar-household-tasks [tasks]="day.tasks" [dense]="true" [maxVisible]="1" />
 
               <app-calendar-event
                 *ngFor="let meal of visible(day)"
@@ -72,7 +84,7 @@ import { TranslatePipe } from '../../core/pipes/translate.pipe';
                 class="cal-cell__more"
                 (click)="$event.stopPropagation(); openDay.emit(day.iso)"
               >
-                {{ 'calendar.month_more' | t:{n: day.planned - maxVisible} }}
+                {{ 'calendar.month_more' | t: { n: day.planned - maxVisible } }}
               </button>
             </div>
 
@@ -82,7 +94,10 @@ import { TranslatePipe } from '../../core/pipes/translate.pipe';
               class="cal-cell__plus"
               [attr.aria-label]="'calendar.anadir_comida' | t"
               [attr.title]="'calendar.anadir_comida' | t"
-              (click)="$event.stopPropagation(); addMeal.emit({ date: day.iso, mealType: firstFreeMealType(day) })"
+              (click)="
+                $event.stopPropagation();
+                addMeal.emit({ date: day.iso, mealType: firstFreeMealType(day) })
+              "
             >
               +
             </button>
@@ -91,210 +106,212 @@ import { TranslatePipe } from '../../core/pipes/translate.pipe';
       </div>
     </div>
   `,
-  styles: [`
-    :host {
-      display: block;
-    }
+  styles: [
+    `
+      :host {
+        display: block;
+      }
 
-    .cal-month {
-      display: grid;
-      grid-template-rows: auto 1fr;
-      border-top: 1px solid var(--border-default);
-    }
+      .cal-month {
+        display: grid;
+        grid-template-rows: auto 1fr;
+        border-top: 1px solid var(--border-default);
+      }
 
-    .cal-month__head {
-      display: grid;
-      grid-template-columns: repeat(7, minmax(0, 1fr));
-      background: var(--bg-secondary);
-      border-bottom: 1px solid var(--border-default);
-    }
+      .cal-month__head {
+        display: grid;
+        grid-template-columns: repeat(7, minmax(0, 1fr));
+        background: var(--bg-secondary);
+        border-bottom: 1px solid var(--border-default);
+      }
 
-    .cal-month__dow {
-      padding: 6px var(--space-2);
-      font-size: 10px;
-      font-weight: var(--font-semibold);
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      text-align: center;
-      color: var(--text-secondary);
-      border-right: 1px solid var(--border-default);
-    }
+      .cal-month__dow {
+        padding: 6px var(--space-2);
+        font-size: 10px;
+        font-weight: var(--font-semibold);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        text-align: center;
+        color: var(--text-secondary);
+        border-right: 1px solid var(--border-default);
+      }
 
-    .cal-month__dow:last-child {
-      border-right: none;
-    }
+      .cal-month__dow:last-child {
+        border-right: none;
+      }
 
-    .cal-month__grid {
-      display: grid;
-      grid-auto-rows: minmax(104px, 1fr);
-    }
-
-    .cal-month__row {
-      display: grid;
-      grid-template-columns: repeat(7, minmax(0, 1fr));
-      border-bottom: 1px solid var(--border-default);
-    }
-
-    .cal-month__row:last-child {
-      border-bottom: none;
-    }
-
-    /* ── Celda ── */
-    .cal-cell {
-      position: relative;
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-      min-width: 0;
-      padding: 4px 5px 6px;
-      border-right: 1px solid var(--border-default);
-      background: var(--bg-secondary);
-      cursor: pointer;
-      transition: background var(--duration-150) var(--ease-out);
-    }
-
-    .cal-cell:last-child {
-      border-right: none;
-    }
-
-    .cal-cell:hover {
-      background: color-mix(in srgb, var(--bg-tertiary) 65%, var(--bg-secondary));
-    }
-
-    .cal-cell.is-outside {
-      background: color-mix(in srgb, var(--bg-tertiary) 40%, var(--bg-secondary));
-    }
-
-    .cal-cell.is-outside .cal-cell__num,
-    .cal-cell.is-outside .cal-cell__kcal {
-      color: var(--text-tertiary);
-    }
-
-    .cal-cell__head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 4px;
-    }
-
-    .cal-cell__num {
-      display: grid;
-      place-items: center;
-      min-width: 22px;
-      height: 22px;
-      padding: 0 4px;
-      font: inherit;
-      font-size: var(--text-sm);
-      font-variant-numeric: tabular-nums;
-      color: var(--text-primary);
-      background: none;
-      border: none;
-      border-radius: var(--radius-full);
-      cursor: pointer;
-      transition: var(--transition-fast);
-    }
-
-    .cal-cell__num:hover {
-      background: var(--bg-tertiary);
-    }
-
-    .cal-cell__num:focus-visible {
-      outline: 2px solid var(--primary);
-      outline-offset: 1px;
-    }
-
-    .cal-cell.is-today .cal-cell__num {
-      color: var(--text-inverse);
-      background: var(--primary);
-    }
-
-    .cal-cell.is-anchor:not(.is-today) .cal-cell__num {
-      box-shadow: inset 0 0 0 1px var(--primary);
-    }
-
-    .cal-cell__count {
-      margin-left: auto;
-      font-size: 9px;
-      color: var(--text-tertiary);
-      font-variant-numeric: tabular-nums;
-    }
-
-    .cal-cell__kcal {
-      font-size: 9px;
-      color: var(--text-tertiary);
-      font-variant-numeric: tabular-nums;
-    }
-
-    .cal-cell__events {
-      display: flex;
-      flex-direction: column;
-      gap: 1px;
-      min-height: 0;
-      overflow: hidden;
-    }
-
-    .cal-cell__more {
-      align-self: flex-start;
-      padding: 0 4px;
-      font: inherit;
-      font-size: 10px;
-      color: var(--text-secondary);
-      background: none;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-    }
-
-    .cal-cell__more:hover {
-      color: var(--primary-dark);
-      background: var(--bg-tertiary);
-    }
-
-    .cal-cell__plus {
-      position: absolute;
-      top: 4px;
-      right: 5px;
-      display: grid;
-      place-items: center;
-      width: 18px;
-      height: 18px;
-      padding: 0;
-      font-size: 13px;
-      line-height: 1;
-      color: var(--text-secondary);
-      background: var(--bg-secondary);
-      border: 1px solid var(--border-default);
-      border-radius: var(--radius-full);
-      box-shadow: var(--shadow-xs);
-      opacity: 0;
-      cursor: pointer;
-      transition: var(--transition-fast);
-    }
-
-    .cal-cell:hover .cal-cell__plus,
-    .cal-cell__plus:focus-visible {
-      opacity: 1;
-    }
-
-    .cal-cell__plus:hover {
-      color: var(--primary-dark);
-      border-color: var(--primary);
-    }
-
-    /* En móvil la rejilla de mes se apila por semana: celdas legibles sin zoom. */
-    @media (max-width: 767px) {
       .cal-month__grid {
-        grid-auto-rows: minmax(64px, auto);
+        display: grid;
+        grid-auto-rows: minmax(104px, 1fr);
       }
-      .cal-cell__kcal,
+
+      .cal-month__row {
+        display: grid;
+        grid-template-columns: repeat(7, minmax(0, 1fr));
+        border-bottom: 1px solid var(--border-default);
+      }
+
+      .cal-month__row:last-child {
+        border-bottom: none;
+      }
+
+      /* ── Celda ── */
+      .cal-cell {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+        padding: 4px 5px 6px;
+        border-right: 1px solid var(--border-default);
+        background: var(--bg-secondary);
+        cursor: pointer;
+        transition: background var(--duration-150) var(--ease-out);
+      }
+
+      .cal-cell:last-child {
+        border-right: none;
+      }
+
+      .cal-cell:hover {
+        background: color-mix(in srgb, var(--bg-tertiary) 65%, var(--bg-secondary));
+      }
+
+      .cal-cell.is-outside {
+        background: color-mix(in srgb, var(--bg-tertiary) 40%, var(--bg-secondary));
+      }
+
+      .cal-cell.is-outside .cal-cell__num,
+      .cal-cell.is-outside .cal-cell__kcal {
+        color: var(--text-tertiary);
+      }
+
+      .cal-cell__head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 4px;
+      }
+
+      .cal-cell__num {
+        display: grid;
+        place-items: center;
+        min-width: 22px;
+        height: 22px;
+        padding: 0 4px;
+        font: inherit;
+        font-size: var(--text-sm);
+        font-variant-numeric: tabular-nums;
+        color: var(--text-primary);
+        background: none;
+        border: none;
+        border-radius: var(--radius-full);
+        cursor: pointer;
+        transition: var(--transition-fast);
+      }
+
+      .cal-cell__num:hover {
+        background: var(--bg-tertiary);
+      }
+
+      .cal-cell__num:focus-visible {
+        outline: 2px solid var(--primary);
+        outline-offset: 1px;
+      }
+
+      .cal-cell.is-today .cal-cell__num {
+        color: var(--text-inverse);
+        background: var(--primary);
+      }
+
+      .cal-cell.is-anchor:not(.is-today) .cal-cell__num {
+        box-shadow: inset 0 0 0 1px var(--primary);
+      }
+
       .cal-cell__count {
-        display: none;
+        margin-left: auto;
+        font-size: 9px;
+        color: var(--text-tertiary);
+        font-variant-numeric: tabular-nums;
       }
+
+      .cal-cell__kcal {
+        font-size: 9px;
+        color: var(--text-tertiary);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .cal-cell__events {
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+        min-height: 0;
+        overflow: hidden;
+      }
+
+      .cal-cell__more {
+        align-self: flex-start;
+        padding: 0 4px;
+        font: inherit;
+        font-size: 10px;
+        color: var(--text-secondary);
+        background: none;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+
+      .cal-cell__more:hover {
+        color: var(--primary-dark);
+        background: var(--bg-tertiary);
+      }
+
       .cal-cell__plus {
+        position: absolute;
+        top: 4px;
+        right: 5px;
+        display: grid;
+        place-items: center;
+        width: 18px;
+        height: 18px;
+        padding: 0;
+        font-size: 13px;
+        line-height: 1;
+        color: var(--text-secondary);
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-default);
+        border-radius: var(--radius-full);
+        box-shadow: var(--shadow-xs);
+        opacity: 0;
+        cursor: pointer;
+        transition: var(--transition-fast);
+      }
+
+      .cal-cell:hover .cal-cell__plus,
+      .cal-cell__plus:focus-visible {
         opacity: 1;
       }
-    }
-  `]
+
+      .cal-cell__plus:hover {
+        color: var(--primary-dark);
+        border-color: var(--primary);
+      }
+
+      /* En móvil la rejilla de mes se apila por semana: celdas legibles sin zoom. */
+      @media (max-width: 767px) {
+        .cal-month__grid {
+          grid-auto-rows: minmax(64px, auto);
+        }
+        .cal-cell__kcal,
+        .cal-cell__count {
+          display: none;
+        }
+        .cal-cell__plus {
+          opacity: 1;
+        }
+      }
+    `
+  ]
 })
 export class CalendarMonthComponent {
   @Input({ required: true }) days!: CalendarDayView[];
@@ -333,7 +350,13 @@ export class CalendarMonthComponent {
   }
 
   /** La primera franja libre del día: añadir desde el mes no debería imponer una. */
-  onCellClick(day: CalendarDayView): void {
+  onCellClick(day: CalendarDayView, event?: MouseEvent): void {
+    if (
+      event?.target instanceof Element &&
+      event.target.closest('[data-test="calendar-household-task"]')
+    ) {
+      return;
+    }
     if (!this.kitchen) {
       this.openDay.emit(day.iso);
       return;

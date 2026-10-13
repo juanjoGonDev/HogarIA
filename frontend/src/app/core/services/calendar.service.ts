@@ -6,6 +6,7 @@ import {
   HouseholdEvent,
   HouseholdEventKind,
   CalendarMeal,
+  CalendarHouseholdTask,
   Meal,
   MealType,
   NutritionalGoals,
@@ -40,7 +41,19 @@ interface RangeResponse {
     endDate: string;
     goals: NutritionalGoals | null;
     meals: MealRow[];
+    tasks: HouseholdTaskRow[];
   } | null;
+}
+
+interface HouseholdTaskRow {
+  id: string;
+  title: string;
+  date: string;
+  time: string | null;
+  zoneName: string | null;
+  assignedMemberId: string | null;
+  assignedMemberName: string | null;
+  completed: boolean;
 }
 
 export interface CalendarRange {
@@ -68,6 +81,19 @@ function toMeal(row: MealRow): CalendarMeal {
   };
 }
 
+function toHouseholdTask(row: HouseholdTaskRow): CalendarHouseholdTask {
+  return {
+    id: row.id,
+    title: row.title,
+    date: row.date,
+    time: row.time ?? null,
+    zoneName: row.zoneName ?? null,
+    assignedMemberId: row.assignedMemberId ?? null,
+    assignedMemberName: row.assignedMemberName ?? null,
+    completed: row.completed === true
+  };
+}
+
 /**
  * Datos del calendario.
  *
@@ -90,6 +116,7 @@ export class CalendarService {
   private householdContextNeedsReload = false;
 
   private mealsSignal = signal<CalendarMeal[]>([]);
+  private tasksSignal = signal<CalendarHouseholdTask[]>([]);
   private goalsSignal = signal<NutritionalGoals | null>(null);
   private rangeSignal = signal<CalendarRange | null>(null);
   private retainedRange: CalendarRange | null = null;
@@ -126,6 +153,7 @@ export class CalendarService {
   private calendarSignal = signal<WeeklyCalendar | null>(null);
 
   readonly meals = this.mealsSignal.asReadonly();
+  readonly tasks = this.tasksSignal.asReadonly();
   readonly range = this.rangeSignal.asReadonly();
   readonly goals = this.goalsSignal.asReadonly();
   readonly isLoading = this.isLoadingSignal.asReadonly();
@@ -142,6 +170,7 @@ export class CalendarService {
     this.lastRequested = '';
     this.eventsWindow = null;
     this.mealsSignal.set([]);
+    this.tasksSignal.set([]);
     this.goalsSignal.set(null);
     this.errorSignal.set(null);
     this.isLoadingSignal.set(false);
@@ -170,6 +199,17 @@ export class CalendarService {
     return byDate;
   });
 
+  /** Date -> household checklist tasks from the same visible calendar range. */
+  readonly tasksByDate = computed(() => {
+    const byDate = new Map<string, CalendarHouseholdTask[]>();
+    for (const task of this.tasksSignal()) {
+      const list = byDate.get(task.date);
+      if (list) list.push(task);
+      else byDate.set(task.date, [task]);
+    }
+    return byDate;
+  });
+
   loadRange(start: string, end: string, force = false): void {
     const key = `${start}|${end}`;
     if (!force && key === this.lastRequested) return;
@@ -190,6 +230,7 @@ export class CalendarService {
           this.lastRequested = key;
           this.rangeSignal.set({ start, end });
           this.mealsSignal.set((response.data?.meals ?? []).map(toMeal));
+          this.tasksSignal.set((response.data?.tasks ?? []).map(toHouseholdTask));
           this.goalsSignal.set(response.data?.goals ?? null);
           this.errorSignal.set(null);
           this.isLoadingSignal.set(false);

@@ -302,6 +302,22 @@ const emptyDraft = (date: string, mealType: MealType): MealDraft => ({
               {{ 'calendar.comidas' | t }}
             </button>
           }
+          @if (householdService.activeHouseholdId()) {
+            <button
+              type="button"
+              class="cal-layer"
+              [class.is-on]="showTasks()"
+              [attr.aria-pressed]="showTasks()"
+              data-test="layer-tasks"
+              (click)="showTasks.set(!showTasks()); writeLayers()"
+            >
+              <span class="cal-layer__dot" style="background: var(--secondary)"></span>
+              {{ 'calendar.household_tasks' | t }}
+              @if (calendarService.tasks().length > 0) {
+                <span class="cal-layer__count">{{ calendarService.tasks().length }}</span>
+              }
+            </button>
+          }
           @for (kind of eventKinds; track kind) {
             <button
               type="button"
@@ -1409,6 +1425,9 @@ export class CalendarComponent implements OnInit {
   readonly kitchen = computed(() => this.modules.isEnabled('meals'));
   /** Lo que de verdad se pinta: la capa elegida Y el modulo encendido. */
   readonly mealsVisible = computed(() => this.kitchen() && this.showMeals());
+  readonly tasksVisible = computed(
+    () => !!this.householdService.activeHouseholdId() && this.showTasks()
+  );
 
   readonly viewOptions = CALENDAR_VIEWS;
   readonly CALENDAR_VIEW_LABELS = CALENDAR_VIEW_LABELS;
@@ -1597,6 +1616,7 @@ export class CalendarComponent implements OnInit {
     const anchor = this.anchor();
     const dates = calendarViewDates(view, anchor);
     const byDate = this.calendarService.mealsByDate();
+    const tasksByDate = this.calendarService.tasksByDate();
     const monthAnchor = anchor;
 
     return dates.map((date) => {
@@ -1610,6 +1630,7 @@ export class CalendarComponent implements OnInit {
               : meal
           )
         : [];
+      const tasks = this.tasksVisible() ? (tasksByDate.get(iso) ?? []) : [];
       const slots = { breakfast: [], lunch: [], dinner: [], snack: [] } as Record<
         MealType,
         CalendarMeal[]
@@ -1636,6 +1657,7 @@ export class CalendarComponent implements OnInit {
             date.getFullYear() === monthAnchor.getFullYear()),
         isToday: isSameDayAsToday(date),
         meals,
+        tasks,
         slots,
         calories: Math.round(calories),
         hasNutrition,
@@ -2591,6 +2613,7 @@ export class CalendarComponent implements OnInit {
   // ----------------------------------------------- eventos de la casa (§8f)
 
   readonly showMeals = signal(true);
+  readonly showTasks = signal(true);
   readonly eventKinds = HOUSEHOLD_EVENT_KINDS;
   readonly eventColors = HOUSEHOLD_EVENT_COLORS;
   readonly isEventModalOpen = signal(false);
@@ -2909,11 +2932,16 @@ export class CalendarComponent implements OnInit {
     const visible = this.calendarService.visibleKinds();
     // `mealsVisible`, no `showMeals`: con la cocina apagada no se escribe `meals` en la URL, que
     // seria re-anadir por enlace lo que la cuenta acaba de apagar —y dejar un enlace que miente.
+    const allLayersVisible =
+      visible.length === all.length && this.mealsVisible() && this.tasksVisible();
     const params: Record<string, string | null> = {
-      layers:
-        visible.length === all.length && this.mealsVisible()
-          ? null
-          : (this.mealsVisible() ? 'meals,' : '') + visible.join(',')
+      layers: allLayersVisible
+        ? null
+        : [
+            ...(this.mealsVisible() ? ['meals'] : []),
+            ...(this.tasksVisible() ? ['tasks'] : []),
+            ...visible
+          ].join(',')
     };
     void this.router.navigate([], {
       queryParams: params,
@@ -2932,6 +2960,7 @@ export class CalendarComponent implements OnInit {
     // Se respeta lo que pide el enlace... si la cuenta tiene cocina. Si no, `meals` se ignora:
     // no es un error, y no se escribe de vuelta (arriba se usa `mealsVisible`).
     this.showMeals.set(this.kitchen() && wanted.includes('meals'));
+    this.showTasks.set(wanted.includes('tasks'));
     const kinds = wanted.filter((entry): entry is HouseholdEventKind =>
       (HOUSEHOLD_EVENT_KINDS as readonly string[]).includes(entry)
     );
@@ -3083,6 +3112,7 @@ export class CalendarComponent implements OnInit {
         inCurrentMonth: true,
         isToday: true,
         meals: [],
+        tasks: [],
         slots: { breakfast: [], lunch: [], dinner: [], snack: [] } as never,
         calories: 0,
         hasNutrition: false,

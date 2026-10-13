@@ -47,7 +47,8 @@ describe('CalendarTimelineComponent shared meal access', () => {
       slots: { breakfast: [], lunch: [sharedMeal], snack: [], dinner: [] },
       planned: 1,
       done: 0,
-      events: []
+      events: [],
+      tasks: []
     };
     fixture.componentRef.setInput('days', [day]);
     fixture.detectChanges();

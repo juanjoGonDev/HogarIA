@@ -1265,6 +1265,54 @@ test:coverage` pasa **1455 tests**, cobertura **93,49/84,12/93,66/95,4 %**. Los 
   Se usó DB/artifacts temporales limpiados por el harness; no se llamó a IA real ni se escribieron datos
   de hogar persistentes. La auditoría visual de familias/rutas globales queda fuera de esta unidad.
 
+- **Proyección de tareas semanales en el calendario existente — backend/UI integrada, aceptación
+  pendiente:** `GET /api/calendar/range` agrega tareas de semanas solapadas con el rango y filtra por
+  fecha antes de responder; no se crea un calendario paralelo ni se modifica el checklist. Solo las
+  personas activas con `calendar.view` pueden leerlas. La respuesta incluye título, fecha, estado, zona
+  resuelta desde el plano y asignatario activo; el modelo semanal no guarda hora, así que `time` es
+  `null` y no se inventa. Un asignatario inactivo se devuelve como no asignado. El JSON de calendario
+  no incluye el campo `details` de las tareas. La lectura usa un número constante de consultas
+  (autorización, semanas, plano y miembros activos), no una consulta por tarea;
+  errores de JSON/esquema, semana vacía, fecha fuera de rango y hogar ajeno fallan cerrados. En la UI,
+  una capa independiente «Tareas del hogar» puede ocultarlas; las tarjetas aparecen en agenda, mes,
+  año y banda del timeline. Son de solo lectura y no interceptan los controles de crear comida/evento.
+  Los eventos/comidas personales y los permisos de escritura permanecen sin cambios.
+
+  TDD: el test de ruta `proyecta tareas semanales` fallaba antes del endpoint (`data.tasks` ausente).
+  Tras el cambio, en Windows y con `DATABASE_PATH=:memory:`: `calendar.routes.spec.ts` +
+  `shared-meal-calendar.store.spec.ts`, **62/62**; cobertura de los archivos tocados **89,14/80,45/
+  95,29/91,23 %** (statements/branches/funciones/líneas), superior al 70 % requerido. El almacén de
+  proyección aislado queda en **97,14/92,3/100/100 %**. La UI focal (`calendar.service.spec.ts`,
+  `calendar.component.spec.ts`, `calendar-view-components.spec.ts`, `calendar-timeline.component.spec.ts`
+  y `calendar-timeline-consumption-permissions.spec.ts`) pasa **94/94**; `pnpm run typecheck:e2e`,
+  `pnpm --filter @hogaria/server exec tsc --noEmit -p tsconfig.json` y `pnpm run check:ui`
+  (240 archivos/21 reglas) pasan. E2E sintética aislada de Chromium y Mobile Chrome: **2/2** en
+  `household-task-calendar.spec.ts`; valida respuesta API, zona, persona, estado, capa y lectura en
+  ambos tamaños; también comprueba semana/timeline, mes y año, la capa y que detalles de tarea no se
+  filtran al JSON. DB y artefactos temporales se limpian; no hay llamadas a proveedor ni escrituras al
+  inventario real. La captura móvil se toma con la tarea encuadrada y ambas imágenes se inspeccionaron.
+  Capturas:
+  `.e2e-screenshots/household-task-calendar/chromium/household-task-in-agenda.png` y
+  `.e2e-screenshots/household-task-calendar/mobile-chrome/household-task-in-agenda.png`.
+  El resto de comandos reproducibles (con resultados arriba; E2E **2/2**, 13-10-2026):
+
+  ```powershell
+  $env:DATABASE_PATH=':memory:'
+  pnpm --filter @hogaria/server exec vitest run --coverage --coverage.include=src/routes/calendar.routes.ts --coverage.include=src/utils/household-task-calendar.store.ts --coverage.include=src/utils/shared-meal-calendar.store.ts src/routes/calendar.routes.spec.ts src/utils/shared-meal-calendar.store.spec.ts
+  pnpm --filter @hogaria/server exec tsc --noEmit -p tsconfig.json
+  pnpm --filter @hogaria/web run ng test --no-watch --browsers=ChromeHeadless --include=src/app/core/services/calendar.service.spec.ts --include=src/app/features/calendar/calendar.component.spec.ts --include=src/app/features/calendar/calendar-view-components.spec.ts --include=src/app/features/calendar/calendar-timeline.component.spec.ts --include=src/app/features/calendar/calendar-timeline-consumption-permissions.spec.ts
+  pnpm run typecheck:e2e
+  pnpm run check:ui
+  node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome --workers=1 tests/e2e/household-task-calendar.spec.ts
+  git diff --check
+  ```
+
+  La matriz de interfaz completa y el gate global continúan pendientes; por eso no se marca la aceptación.
+  **Rollback:** retirar esta proyección del endpoint/rango, su mapeo y capa/componentes del calendario,
+  pruebas y evidencia; conserva intactos calendario personal, gestión semanal de tareas y persistencia.
+  Prettier: TypeScript afectado y `HOGARIA-SPEC.md` pasan; el check de este documento completo ya
+  fallaba en la base `cf7283c`, por formato histórico fuera de esta unidad, y no se reformateó en bloque.
+
 El análisis previo del planificador está reflejado arriba para orientar la próxima unidad; todos los
 criterios inferiores permanecen sin marcar hasta validar cada condición en su alcance completo.
 
@@ -1316,6 +1364,13 @@ criterios inferiores permanecen sin marcar hasta validar cada condición en su a
       asignación manual persistida, propuesta aleatoria sin mutar borrador/BD, adopción solo con
       «Usar este reparto» y persistencia distinta solo tras Guardar. E2E aislada sintética en Chromium
       y Mobile Chrome: 2/2 (13-10-2026); comando y límites en «Estado de implementación y evidencia».
+- [ ] **QA-HOME-TASKS.CALENDAR.1** — proyección de tareas en el calendario actual para el rango visible;
+      fechas/rangos y semanas vacías correctos, límite entre hogares, permiso `calendar.view` y membresía
+      activa revalidados en servidor; mostrar zona, estado y persona asignada (sin hora si el modelo no la
+      define); capa de visibilidad accesible, todas las vistas relevantes y sin cambiar permisos de
+      escritura, comidas ni calendarios personales. Tests focales de API/servicio/UI pasan; E2E sintético
+      PC+móvil pasa 2/2 e inspecciona agenda, semana/timeline, mes y año. La auditoría completa de
+      breakpoints/teclado de toda la UI y el gate global quedan pendientes.
 - [ ] **QA-AUTH.HOUSEHOLD-REQUIRED.1** — alta obligatoria crear/unirse, invitación inválida/revocada,
       error recuperable de red, reanudación, doble envío, membership activo antes de dashboard y rechazo
       server-side; sin acceso al resto con hogar pendiente. La caducidad no se prueba ni promete mientras

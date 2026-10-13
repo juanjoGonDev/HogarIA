@@ -81,6 +81,8 @@ describe('calendario de la casa (§8f)', () => {
     // Borrar TODO (y no solo lo de esta suite) es lo que permite repetir el mismo id
     // en cada test y leer el fallo sin ambiguedad cuando algo se queda atras.
     for (const sql of [
+      'DELETE FROM household_task_weeks',
+      'DELETE FROM household_plans',
       'DELETE FROM calendar_event_attendees',
       'DELETE FROM calendar_events',
       'DELETE FROM household_members',
@@ -105,6 +107,200 @@ describe('calendario de la casa (§8f)', () => {
     startTime: '17:30',
     endTime: '18:15'
   } as const;
+
+  it('proyecta tareas semanales del hogar en el rango del calendario solo a miembros activos con calendar.view', async () => {
+    db.prepare('INSERT INTO households (id, name, invite_code) VALUES (?, ?, ?)').run(
+      'other-household',
+      'Otra casa',
+      'OTHER123'
+    );
+    const alice = await makeUser('task-cal-alice', householdId, 'Alice');
+    const bob = await makeUser('task-cal-bob', householdId, 'Bob');
+    const hidden = await makeUser('task-cal-hidden', householdId, 'Hidden');
+    const inactive = await makeUser('task-cal-inactive', householdId, 'Inactive');
+    const outsider = await makeUser('task-cal-outsider', 'other-household', 'Outsider');
+
+    for (const user of [alice, bob, hidden, inactive, outsider]) {
+      db.prepare(
+        `INSERT INTO household_members (id, household_id, user_id, role, permissions, is_active)
+         VALUES (?, ?, ?, 'member', ?, ?)`
+      ).run(
+        `hm-${user.id}`,
+        user.id === outsider.id ? 'other-household' : householdId,
+        user.id,
+        JSON.stringify({ calendar: { view: user.id !== hidden.id, edit: false } }),
+        user.id === inactive.id ? 0 : 1
+      );
+    }
+    db.prepare(
+      `INSERT INTO household_plans (household_id, version, plan_json, updated_by)
+       VALUES (?, 1, ?, ?)`
+    ).run(
+      householdId,
+      JSON.stringify({
+        schemaVersion: 1,
+        dwellingType: 'apartment',
+        dwellingTypeLabel: null,
+        summary: '',
+        warnings: [],
+        floors: [
+          {
+            id: 'floor-0',
+            name: 'Planta baja',
+            level: 0,
+            walls: [],
+            openings: [],
+            spaces: [
+              {
+                id: 'kitchen',
+                kind: 'kitchen',
+                label: 'Cocina',
+                polygon: [
+                  { x: 100, y: 100 },
+                  { x: 900, y: 100 },
+                  { x: 900, y: 900 },
+                  { x: 100, y: 900 }
+                ],
+                parentSpaceId: null
+              }
+            ]
+          }
+        ]
+      }),
+      alice.id
+    );
+    const taskWeek = (household: string, weekStart: string, task: unknown) =>
+      db
+        .prepare(
+          `INSERT INTO household_task_weeks
+           (household_id, week_start, version, tasks_json, updated_by)
+         VALUES (?, ?, 1, ?, ?)`
+        )
+        .run(household, weekStart, JSON.stringify([task]), alice.id);
+    taskWeek(householdId, '2026-10-05', {
+      id: 'task-saturday',
+      title: 'Limpiar la cocina',
+      details: null,
+      spaceId: 'kitchen',
+      scheduledDate: '2026-10-10',
+      assignedMemberId: bob.id,
+      completed: true
+    });
+    taskWeek(householdId, '2026-10-12', {
+      id: 'task-monday',
+      title: 'Sacar reciclaje',
+      details: 'Separar cartón',
+      spaceId: null,
+      scheduledDate: '2026-10-12',
+      assignedMemberId: null,
+      completed: false
+    });
+    taskWeek('other-household', '2026-10-12', {
+      id: 'foreign-task',
+      title: 'Privado de otra casa',
+      details: null,
+      spaceId: null,
+      scheduledDate: '2026-10-12',
+      assignedMemberId: outsider.id,
+      completed: false
+    });
+
+    const range = '/range?startDate=2026-10-10&endDate=2026-10-12';
+    const aliceData = (await data(await call(alice, 'GET', range))) as any;
+    expect(aliceData.tasks).toEqual([
+      {
+        id: 'task-saturday',
+        title: 'Limpiar la cocina',
+        date: '2026-10-10',
+        time: null,
+        zoneName: 'Cocina',
+        assignedMemberId: bob.id,
+        assignedMemberName: 'Bob',
+        completed: true
+      },
+      {
+        id: 'task-monday',
+        title: 'Sacar reciclaje',
+        date: '2026-10-12',
+        time: null,
+        zoneName: null,
+        assignedMemberId: null,
+        assignedMemberName: null,
+        completed: false
+      }
+    ]);
+    expect(JSON.stringify(aliceData.tasks)).not.toContain('Privado de otra casa');
+    expect(((await data(await call(bob, 'GET', range))) as any).tasks).toEqual(aliceData.tasks);
+    expect(((await data(await call(hidden, 'GET', range))) as any).tasks).toEqual([]);
+    expect(((await data(await call(inactive, 'GET', range))) as any).tasks).toEqual([]);
+    expect(((await data(await call(outsider, 'GET', range))) as any).tasks).toEqual([
+      expect.objectContaining({ title: 'Privado de otra casa' })
+    ]);
+
+    const nextDays = (await data(
+      await call(alice, 'GET', '/range?startDate=2026-10-13&endDate=2026-10-14')
+    )) as any;
+    expect(nextDays.tasks).toEqual([]);
+    db.prepare('UPDATE household_members SET is_active = 0 WHERE user_id = ?').run(bob.id);
+    const unassignedFormerMember = (await data(await call(alice, 'GET', range))) as any;
+    expect(unassignedFormerMember.tasks[0]).toMatchObject({
+      assignedMemberId: null,
+      assignedMemberName: null
+    });
+
+    db.prepare('DELETE FROM household_plans WHERE household_id = ?').run(householdId);
+    const missingPlan = (await data(await call(alice, 'GET', range))) as any;
+    expect(missingPlan.tasks[0].zoneName).toBeNull();
+
+    db.prepare(
+      'INSERT INTO household_plans (household_id, version, plan_json, updated_by) VALUES (?, 1, ?, ?)'
+    ).run(householdId, '{invalid json', alice.id);
+    const corruptedPlan = (await data(await call(alice, 'GET', range))) as any;
+    expect(corruptedPlan.tasks[0].zoneName).toBeNull();
+  });
+
+  it('fails closed for malformed task weeks and keeps the calendar range empty when no tasks exist', async () => {
+    const alice = await makeUser('task-cal-empty', householdId, 'Alice');
+    db.prepare(
+      `INSERT INTO household_members (id, household_id, user_id, role, permissions)
+       VALUES (?, ?, ?, 'member', ?)`
+    ).run(
+      `hm-${alice.id}`,
+      householdId,
+      alice.id,
+      JSON.stringify({ calendar: { view: true, edit: false } })
+    );
+    db.prepare(
+      `INSERT INTO household_task_weeks
+         (household_id, week_start, version, tasks_json, updated_by)
+       VALUES (?, ?, 1, ?, ?)`
+    ).run(householdId, '2026-10-05', '[{"malformed":true}]', alice.id);
+
+    const malformed = (await data(
+      await call(alice, 'GET', '/range?startDate=2026-10-05&endDate=2026-10-11')
+    )) as any;
+    expect(malformed.tasks).toEqual([]);
+
+    const emptyWeek = (await data(
+      await call(alice, 'GET', '/range?startDate=2026-10-12&endDate=2026-10-18')
+    )) as any;
+    expect(emptyWeek.tasks).toEqual([]);
+
+    db.prepare(
+      `INSERT INTO household_task_weeks
+         (household_id, week_start, version, tasks_json, updated_by)
+       VALUES (?, ?, 1, ?, ?)`
+    ).run(householdId, '2026-10-12', '{invalid json', alice.id);
+    const invalidJson = (await data(
+      await call(alice, 'GET', '/range?startDate=2026-10-12&endDate=2026-10-18')
+    )) as any;
+    expect(invalidJson.tasks).toEqual([]);
+
+    const noTaskRows = (await data(
+      await call(alice, 'GET', '/range?startDate=2026-10-19&endDate=2026-10-25')
+    )) as any;
+    expect(noTaskRows.tasks).toEqual([]);
+  });
 
   it('crea, lee y borra una suelta', async () => {
     const alice = await makeUser('cal-alice', householdId, 'Alice');

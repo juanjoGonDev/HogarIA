@@ -2572,19 +2572,29 @@ de ruta 88,67/80/100/91,83 % y store 89,77/80,83/100/92,59 % S/B/F/L; 92 tests d
 E2E sintético de escritorio/móvil 2/2 verifica propuesta con proveedor local, confirmación, calendario,
 teclado, persistencia de consumo y breakpoints estrechos. Capturas y comandos reproducibles están en
 `HOGARIA-HOUSEHOLD-PLAN-SPEC.md`. La suite web/cobertura global integrada queda pendiente; por eso no
-se marca `QA-HOME-MEALS.CONSUMPTION.1` completo todavía. El endpoint backend de preview de compra ya es de solo lectura; incluye comidas pendientes
-de hoy, excluye comidas con consumo registrado y asigna primero el stock a ingredientes obligatorios.
-Tests focales pasan 41/41, TSC y hooks pasan; el coverage aislado del store supera todos los umbrales.
-Faltan la revalidación de la suite completa en el árbol integrado, revisión UI y aprobación hacia
-Compra; la automatización tampoco está implementada. Evidencia y límites
-reproducibles están en `HOGARIA-HOUSEHOLD-PLAN-SPEC.md`, «Estado de implementación y evidencia»; no se
-declara `QA-HOME-MEALS.SETTINGS.1` ni `QA-HOME-MEALS.PLAN.1` completo.
+se marca `QA-HOME-MEALS.CONSUMPTION.1` completo todavía. La compra doméstica tiene preview de solo
+lectura, UI de revisión editable y aprobación explícita que reconcilia filas `meal_plan` sin tocar
+inventario ni borrar filas compradas/manuales. La ruta de aprobación pasa 14/14 focales; el E2E
+sintético de escritorio/móvil pasa 2/2 e incluye cancelar/error sin escritura, aprobación, retry
+idempotente y conservación de filas. La spec activa contiene capturas, comandos, cobertura y límites;
+`QA-HOME-MEALS.SHOPPING.1` sigue pendiente de los gates integrados.
+
+La proyección de tareas semanales en el calendario actual pasa 62/62 backend (cobertura de alcance
+89,14/80,45/95,29/91,23 % S/B/F/L), 94/94 frontend y E2E sintética PC/móvil 2/2. Requiere membresía
+activa y `calendar.view`; muestra título, fecha, estado, zona y asignatario activo, sin detalles de tarea
+ni una hora inexistente en el modelo. Es de solo lectura y no modifica calendarios o permisos de
+escritura. `QA-HOME-TASKS.CALENDAR.1` sigue pendiente de la matriz completa de breakpoints/teclado y
+del gate global; sus capturas y comandos están en `HOGARIA-HOUSEHOLD-PLAN-SPEC.md`.
 
 **Decisión de automatización (13-10-2026):** cada hogar debe elegir explícitamente día, hora local y
 zona IANA antes de activarla; no se inferirá la zona del servidor o del navegador. Una hora local que
 no existe por DST se ejecuta en la primera hora válida posterior; una hora duplicada se ejecuta una vez,
-en la primera ocurrencia. El contrato y el trabajo pendiente están en
-`HOGARIA-HOUSEHOLD-PLAN-SPEC.md`; todavía no hay scheduler ni configuración persistente.
+en la primera ocurrencia. Ante una ejecución automática de generación nueva, el usuario autorizó
+publicar al calendario solo después de la misma validación del servidor; la propuesta manual mantiene
+confirmación explícita y Compra siempre requiere aprobación. El helper puro de siguiente ocurrencia
+pasa 16/16 con cobertura 96,1/97,36/100/95,94 %; todavía no hay configuración persistente, worker ni
+ledger de ejecuciones. Contrato, decisiones de seguridad, comandos y pendientes en
+`HOGARIA-HOUSEHOLD-PLAN-SPEC.md`.
 
 **Trazabilidad de tareas semanales (2026-10-13):** la unidad `QA-HOME-TASKS.WEEKLY.2` de la
 extensión de planificación está verificada en desktop y móvil, incluyendo equilibrio, días no
