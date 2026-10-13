@@ -2552,7 +2552,10 @@ lee preferencias antiguas y escribe sin esa vista previa. La UI de ajustes y pro
 Hogar > Planificación, más el ajuste local de recetas por ración, están integrados. E2E aislada
 sintética de ajustes pasa 2/2 (PC/móvil); propuesta pasa 2/2 con dos miembros, revisión/confirmación,
 navegación entre subtabs y limpieza de contexto al cambiar de hogar. Faltan combinaciones de
-preferencias y casos completos de restricciones. Una guarda adicional devuelve
+preferencias y casos completos de restricciones. La E2E de onboarding verifica en Chromium y Mobile
+Chrome que un HTTP 503 sintético conserva el formulario para reintentar y que el retry crea una sola
+membership; el archivo pasa 6/6. Siguen faltando doble envío, alta/invitación real e
+interrupción/reanudación, por lo que la casilla global permanece abierta. Una guarda adicional devuelve
 `409 MEAL_PLAN_OVERRIDE_INCOMPLETE` antes de IA cuando un override personal activo carece de valor
 explícito válido; su cobertura focal y E2E de ajustes pasan, pero no cierra el criterio completo de
 configuración. Decisión del 13-10-2026: toda comida confirmada del plan del hogar será visible para

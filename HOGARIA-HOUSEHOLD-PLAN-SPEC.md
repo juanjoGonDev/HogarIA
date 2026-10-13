@@ -1047,10 +1047,17 @@ solo su backend o sus pruebas unitarias.
   descubrimiento/crear/unirse. `createHousehold` inicializa preferencias compartidas desde el creador;
   la operación es idempotente y `join` no reemplaza la configuración existente. Las pruebas de
   rutas de cuenta ahora preparan una membresía sintética para ejercitar perfil/avatar/password después
-  del onboarding; la puerta real tiene su propio test con `createApp`. Falta E2E real de alta,
-  invitación, interrupción/reanudación y móvil. E2E sintética aislada pasa **4/4** PC/móvil para crear,
-  bloqueo server-side e invitación inválida recuperable con reintento válido; falta cubrir error transitorio
-  de red y doble envío. El schema `households` y las rutas `GET /invite/:code`, `POST /join` y
+  del onboarding; la puerta real tiene su propio test con `createApp`. E2E sintética aislada en
+  Chromium/Mobile Chrome pasa **6/6** para crear, bloqueo server-side, invitación inválida recuperable
+  con reintento válido y recuperación tras un HTTP 503 sintético al crear el hogar. La prueba del 503
+  se ejecuta también sola (**2/2**) y confirma que el formulario sigue reintentable, el primer fallo
+  no crea membership y el reintento genera exactamente una membership activa. No se ha probado doble
+  envío, una alta/invitación real ni interrupción/reanudación; el criterio continúa abierto.
+  Comando integrado: `pnpm run test:e2e -- --project=chromium --project=mobile-chrome --workers=1
+tests/e2e/household-required-onboarding.spec.ts` (**6/6**, 13-10-2026). Usa interceptación HTTP
+  sintética y la DB temporal del harness, sin proveedor real ni datos persistentes. Rollback de esta
+  cobertura: retirar el test de retry HTTP 503 y su evidencia, conservando onboarding previo.
+  El schema `households` y las rutas `GET /invite/:code`, `POST /join` y
   `POST /regenerate-invite` no definen `expires_at`: se puede revocar regenerando el código, pero no se
   promete caducidad temporal hasta acordar e implementar un contrato para ella.
 - **Configuración de comidas — backend/UI parcial:** `GET/PATCH /api/household/meal-planning`, columnas
@@ -1188,7 +1195,8 @@ solo su backend o sus pruebas unitarias.
   en memoria y flujo integrado aislado app+servidor para generación/revisión/confirmación en PC y
   móvil; no se llamó a proveedor real ni se usó inventario persistente. `pnpm --filter @hogaria/web run
 test:coverage` pasa **1455 tests**, cobertura **93,49/84,12/93,66/95,4 %**. Los E2E sintéticos
-  aislados pasan: plan **2/2**, onboarding obligatorio **4/4**, ajustes **2/2** en Chromium/Mobile Chrome.
+  aislados pasan: plan **2/2**, onboarding obligatorio **6/6** (incluye retry tras HTTP 503 sintético),
+  ajustes **2/2** en Chromium/Mobile Chrome.
   `pnpm run typecheck:e2e`, `pnpm run check:ui` (237 ficheros/21 reglas) y `git diff --check` pasan.
   **Rollback de la
   unidad de confirmación:** retirar endpoint, esquema de confirmación, tests/cobertura y esta evidencia;

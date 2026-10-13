@@ -258,4 +258,55 @@ test.describe('Mandatory household setup after registration', () => {
       await memberContext?.close().catch(() => undefined);
     }
   });
+
+  test('keeps household creation retryable after a transient server failure', async ({
+    page
+  }, testInfo) => {
+    const baseURL = String(testInfo.project.use.baseURL);
+    await page.setViewportSize(testViewport(testInfo.project.name));
+    await registerAccount(page, baseURL);
+    await expect(page).toHaveURL(/\/household(?:$|[?#])/);
+
+    let createAttempts = 0;
+    await page.route('**/api/household', async (route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      createAttempts += 1;
+      if (createAttempts === 1) {
+        return route.fulfill({
+          status: 503,
+          contentType: 'application/json',
+          body: JSON.stringify({ success: false, code: 'SYNTHETIC_TEMPORARY_UNAVAILABLE' })
+        });
+      }
+      return route.continue();
+    });
+
+    await page.getByRole('button', { name: /Crear hogar/i }).click();
+    await page.locator('input#householdName').fill(`Casa reintento QA ${Date.now().toString(36)}`);
+    const createResponse = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'POST' &&
+        new URL(response.url()).pathname === '/api/household'
+    );
+    await page.locator('app-modal button[type="submit"]').click();
+    expect((await createResponse).status()).toBe(503);
+    await expect(page.locator('.toast--error')).toBeVisible();
+    await expect(page.locator('input#householdName')).toBeVisible();
+    await expect(page.locator('.household-info__name')).toHaveCount(0);
+
+    const retryResponse = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'POST' &&
+        new URL(response.url()).pathname === '/api/household'
+    );
+    await page.locator('app-modal button[type="submit"]').click();
+    expect((await retryResponse).status()).toBe(201);
+    expect(createAttempts).toBe(2);
+    await expect(page.locator('.household-info__name')).toContainText('Casa reintento QA');
+    expect(await readMembershipState(page)).toMatchObject({
+      status: 200,
+      count: 1,
+      activeMatches: true
+    });
+  });
 });
