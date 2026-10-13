@@ -1261,7 +1261,9 @@ src/utils/household-meal-shopping-preview.store.spec.ts` pasa **14/14** con `DAT
   devuelto mediante el poller y worker, y comprueba ledger completado, proveedor sintético y una sola
   semana publicada aunque vuelva a sondear. La fecha no está hardcodeada: se deriva de la respuesta del
   API para respetar el reloj UTC de SQLite. Está incluida en `household-planning-automation.scheduler.spec.ts`;
-  los tests del scheduler pasan **6/6** con DB en memoria. No es todavía un solo recorrido de navegador
+  los tests del scheduler pasan **6/6** con DB en memoria. En `pnpm run test:server:coverage`, la
+  cobertura del scheduler es **77,77/72,22/76,92/80,3 %** (sentencias/ramas/funciones/líneas), supera
+  cada gate del 70 % y la suite completa pasa **1693 tests + 1 omitido**. No es todavía un solo recorrido de navegador
   desde guardar ajustes hasta la ocurrencia; la E2E de ajustes y esta integración prueban esos límites por
   separado. Rollback: retirar el test `runs an HTTP-saved schedule through the due poller, worker, and one publication`
   y esta evidencia; no cambia código de producción ni datos persistentes.
@@ -1341,7 +1343,7 @@ tests/e2e/household-planning-automation.spec.ts --workers=1`; `pnpm run typechec
   ```
 
   Resultado previo a los últimos fixes: **5 archivos / 452 tests aprobados** en la focal. Revalidación
-  integrada actual: suite de servidor **93 archivos aprobados / 1 omitido; 1692 tests aprobados / 1
+  integrada actual: suite de servidor **93 archivos aprobados / 1 omitido; 1693 tests aprobados / 1
   omitido**, con cobertura **90,54/82,54/96,1/93,41 %** (statements/branches/funciones/líneas); el
   contrato de formulario incluye ahora el esquema de consumo. TypeScript del servidor pasa.
   Cobertura de la ruta propuesta+confirmación: **90.47 % statements, 70.83 % branches, 98.07 % funciones

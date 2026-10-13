@@ -2634,7 +2634,7 @@ comandos y capturas sintéticas en
 individuales y compartidas aparecen por API a ambos miembros, que ambos calendarios semanales muestran
 los mismos títulos y asignaciones, pero solo el participante registra consumo; la vista previa de Compra
 consolida el mismo ingrediente de comidas individuales y compartidas en una sola cantidad (**90 g**).
-Suite de servidor: **1692/1692 aprobados + 1 omitido**;
+Suite de servidor: **1693/1693 aprobados + 1 omitido**;
 cobertura agregada **90,54/82,54/96,1/93,41 %** (S/B/F/L). Suite frontend: **1526/1526**, cobertura
 **93,55/84,25/94/95,7 %**. Planificador de comidas: **90,48/81,08/92,55/96,2 %**; servicio de
 propuestas **100/100/100/100 %**; UI de automatización **87,08/75,25/97,61/94,56 %** (S/B/F/L).
