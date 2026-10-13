@@ -213,8 +213,10 @@
   }
 
   .plan-editor:has(.plan-review__photo) .plan-review__photo-result .plan-compare-canvas {
-    height: 380px;
-    max-height: 380px;
+    width: min(100%, 340px);
+    height: 340px;
+    max-height: 340px;
+    justify-self: center;
   }
 }
 
@@ -244,8 +246,10 @@
   }
 
   .plan-editor:has(.plan-review__photo) .plan-review__photo-result .plan-compare-canvas {
+    width: min(100%, 300px);
     height: clamp(195px, 54vw, 205px);
     max-height: 205px;
+    justify-self: center;
   }
 
   .tasks-map-viewport {

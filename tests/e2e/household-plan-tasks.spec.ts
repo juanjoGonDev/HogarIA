@@ -2348,9 +2348,10 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
       })
     )
     .toBeGreaterThan(300);
+  let sourceImageVisualWidth = 0;
   if (mobile) {
     const sourceImage = page.locator('[data-test="plan-attachment-preview"]');
-    const sourceImageWidth = await sourceImage.evaluate((element) => {
+    sourceImageVisualWidth = await sourceImage.evaluate((element) => {
       const image = element as HTMLImageElement;
       const bounds = image.getBoundingClientRect();
       const scale = Math.min(
@@ -2364,7 +2365,7 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
       .locator('.plan-review__photo-source-actions')
       .boundingBox();
     expect(
-      sourceImageWidth,
+      sourceImageVisualWidth,
       'the uploaded sketch should be readable at the same prominence as the reference'
     ).toBeGreaterThanOrEqual(260);
     expect(sourceImageBounds).not.toBeNull();
@@ -2423,6 +2424,23 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
       proposalMap!.height,
       'the mobile proposal map should match the approved portrait proportion'
     ).toBeLessThanOrEqual(220);
+    expect(
+      Math.abs(proposalMap!.width - sourceImageVisualWidth),
+      'the uploaded sketch and generated plan keep the same visual width on mobile'
+    ).toBeLessThanOrEqual(12);
+  } else {
+    const proposalMap = await proposedMap.boundingBox();
+    expect(proposalMap).not.toBeNull();
+    expect(
+      proposalMap!.width,
+      'the desktop proposal plan matches the roughly 340px canvas in the approved mockup'
+    ).toBeGreaterThanOrEqual(336);
+    expect(proposalMap!.width).toBeLessThanOrEqual(344);
+    expect(
+      proposalMap!.height,
+      'the desktop proposal plan remains square and matches the approved mockup'
+    ).toBeGreaterThanOrEqual(336);
+    expect(proposalMap!.height).toBeLessThanOrEqual(344);
   }
   if (mobile) {
     await page.evaluate(() => window.scrollTo(0, 0));
