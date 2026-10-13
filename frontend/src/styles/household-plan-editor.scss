@@ -500,6 +500,10 @@
   display: none;
   width: 18px;
   height: 18px;
+  color: #203449;
+}
+
+[data-theme='dark'] .plan-method-card__chevron {
   color: var(--text-primary);
 }
 

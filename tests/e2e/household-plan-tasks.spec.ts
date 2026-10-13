@@ -737,22 +737,26 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
       expect(geometry.strokeWidth, 'method chevrons match the prototype stroke weight').toBe(
         '2.2px'
       );
-      const primaryTextColor = await page.locator('html').evaluate((html) => {
-        const probe = document.createElement('span');
-        probe.style.color = 'var(--text-primary)';
-        html.append(probe);
-        const color = getComputedStyle(probe).color;
-        probe.remove();
-        return color;
-      });
-      expect(geometry.stroke, 'method chevrons use the prototype primary text color').toBe(
-        primaryTextColor
+      expect(geometry.stroke, 'method chevrons use the prototype navy icon color').toBe(
+        'rgb(32, 52, 73)'
       );
       expect(
         geometry.verticalOffset,
         'method chevrons align to the card center'
       ).toBeLessThanOrEqual(1);
     }
+    const darkThemeChevronColor = await page.locator('html').evaluate((html) => {
+      const previousTheme = html.getAttribute('data-theme');
+      html.setAttribute('data-theme', 'dark');
+      const chevronPath = html.querySelector('.plan-method-card__chevron path');
+      const color = chevronPath ? getComputedStyle(chevronPath).stroke : '';
+      if (previousTheme === null) html.removeAttribute('data-theme');
+      else html.setAttribute('data-theme', previousTheme);
+      return color;
+    });
+    expect(darkThemeChevronColor, 'method chevrons retain contrast in dark theme').toBe(
+      'rgb(250, 250, 249)'
+    );
   } else {
     await expect(
       page.locator('.plan-method-card__chevron').first(),
