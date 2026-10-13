@@ -347,14 +347,26 @@ test('genera, revisa y confirma comidas con navegación de planificación en esc
     }
 
     await mkdir(screenshotDirectory, { recursive: true });
-    if (testInfo.project.name !== 'mobile-chrome') {
+    if (testInfo.project.name === 'mobile-chrome') {
       await page.evaluate(() => window.scrollTo(0, 0));
+      await page.screenshot({
+        path: resolve(screenshotDirectory, 'mobile-chrome-proposal-top.png'),
+        fullPage: true,
+        animations: 'disabled'
+      });
+      await confirmButton.scrollIntoViewIfNeeded();
+      await page.screenshot({
+        path: resolve(screenshotDirectory, 'mobile-chrome-proposal.png'),
+        animations: 'disabled'
+      });
+    } else {
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await page.screenshot({
+        path: resolve(screenshotDirectory, 'chromium-proposal.png'),
+        fullPage: true,
+        animations: 'disabled'
+      });
     }
-    await page.screenshot({
-      path: resolve(screenshotDirectory, `${testInfo.project.name}-proposal.png`),
-      fullPage: testInfo.project.name !== 'mobile-chrome',
-      animations: 'disabled'
-    });
 
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
       viewport.width
