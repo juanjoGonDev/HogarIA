@@ -1,0 +1,209 @@
+<section
+  class="meal-settings"
+  [attr.aria-busy]="loading || saving"
+  aria-labelledby="meal-settings-title"
+>
+  <header class="meal-settings__header">
+    <h2 id="meal-settings-title">{{ 'household.meal_settings_title' | t }}</h2>
+  </header>
+
+  <p *ngIf="loadState === 'loading'" class="meal-settings__status" role="status">
+    {{ 'common.loading' | t }}
+  </p>
+
+  <div *ngIf="loadState === 'error'" class="meal-settings__error" role="alert">
+    <p>{{ 'household.meal_settings_load_error' | t }}</p>
+    <app-button
+      variant="outline"
+      size="md"
+      [disabled]="loading"
+      (onClick)="load()"
+      data-test="meal-settings-retry"
+    >
+      {{ 'calendar.reintentar' | t }}
+    </app-button>
+  </div>
+
+  <ng-container *ngIf="loadState === 'ready' && settings">
+    <p *ngIf="!canEdit" class="meal-settings__permission">
+      {{ 'household.meal_settings_home_read_only' | t }}
+    </p>
+
+    <div class="meal-settings__sections" data-test="meal-settings-content">
+      <section class="meal-settings__section" aria-labelledby="meal-settings-home-title">
+        <header class="meal-settings__section-header">
+          <h3 id="meal-settings-home-title">{{ 'household.hogar' | t }}</h3>
+        </header>
+
+        <fieldset class="meal-settings__fieldset">
+          <legend>{{ 'preferences.cual_es_tu_objetivo' | t }}</legend>
+          <div class="meal-settings__goal-list">
+            <app-checkbox
+              *ngFor="let option of goalOptions; trackBy: trackGoalOption"
+              [label]="option.labelKey | t"
+              [checked]="householdObjective.goals.includes(option.value)"
+              [disabled]="!canEdit || controlsDisabled"
+              [attr.data-test]="'household-goal-' + option.value"
+              (checkedChange)="toggleHouseholdGoal(option.value, $event)"
+            />
+          </div>
+
+          <label class="meal-settings__label" for="household-objective-notes">
+            {{ 'preferences.otras_notas_para_la' | t }}
+          </label>
+          <textarea
+            id="household-objective-notes"
+            class="meal-settings__textarea"
+            maxlength="500"
+            rows="3"
+            [disabled]="!canEdit || controlsDisabled"
+            [value]="householdObjective.notes"
+            (input)="setHouseholdNotes($any($event.target).value)"
+            data-test="household-objective-notes"
+          ></textarea>
+        </fieldset>
+
+        <fieldset class="meal-settings__fieldset">
+          <legend>{{ 'preferences.tab_meals' | t }}</legend>
+          <div class="meal-settings__meal-grid">
+            <div class="meal-settings__meal-row" *ngFor="let row of mealRows; trackBy: trackMeal">
+              <app-checkbox
+                [label]="row.labelKey | t"
+                [checked]="householdSchedule.mealTypes[row.type]"
+                [disabled]="!canEdit || controlsDisabled"
+                [attr.data-test]="'household-meal-' + row.type"
+                (checkedChange)="setMealType('household', row.type, $event)"
+              />
+              <label [for]="'household-' + row.type + '-time'" class="meal-settings__label">
+                {{ 'household.meal_settings_time' | t }} · {{ row.labelKey | t }}
+              </label>
+              <input
+                type="time"
+                class="meal-settings__time"
+                [id]="'household-' + row.type + '-time'"
+                [name]="'household-' + row.type + '-time'"
+                required
+                [disabled]="!canEdit || controlsDisabled"
+                [value]="householdSchedule.mealTimes[row.type]"
+                (input)="setMealTime('household', row.type, $any($event.target).value)"
+                [attr.aria-invalid]="isInvalidTime('household', row.type) ? 'true' : null"
+                [attr.data-test]="'household-' + row.type + '-time'"
+              />
+            </div>
+          </div>
+        </fieldset>
+      </section>
+
+      <section class="meal-settings__section" aria-labelledby="meal-settings-personal-title">
+        <header class="meal-settings__section-header">
+          <h3 id="meal-settings-personal-title">{{ 'preferences.tu_perfil' | t }}</h3>
+        </header>
+
+        <div class="meal-settings__override">
+          <app-switch
+            [checked]="goalOverrideEnabled"
+            [disabled]="controlsDisabled"
+            [labelledBy]="'member-goal-override-label'"
+            [describedBy]="'member-goal-override-help'"
+            [visibleLabel]="true"
+            (checkedChange)="setGoalOverride($event)"
+            data-test="member-goal-override"
+          >
+            <span id="member-goal-override-label">{{
+              'household.meal_settings_goal_override' | t
+            }}</span>
+          </app-switch>
+          <p id="member-goal-override-help" class="meal-settings__hint">
+            {{ 'household.meal_settings_goal_override_help' | t }}
+          </p>
+        </div>
+
+        <div *ngIf="goalOverrideEnabled" class="meal-settings__personal-goal">
+          <h4>{{ 'preferences.cual_es_tu_objetivo' | t }}</h4>
+          <ul class="meal-settings__goal-summary">
+            <li *ngFor="let goal of settings.member.personalObjective.goals; trackBy: trackGoal">
+              {{ goalLabels[goal] | t }}
+            </li>
+          </ul>
+          <p *ngIf="settings.member.personalObjective.notes" class="meal-settings__personal-note">
+            {{ settings.member.personalObjective.notes }}
+          </p>
+          <a routerLink="/preferences" class="meal-settings__link">
+            {{ 'preferences.tab_profile' | t }}
+          </a>
+        </div>
+
+        <div class="meal-settings__override">
+          <app-switch
+            [checked]="scheduleOverrideEnabled"
+            [disabled]="controlsDisabled"
+            [labelledBy]="'member-schedule-override-label'"
+            [describedBy]="'member-schedule-override-help'"
+            [visibleLabel]="true"
+            (checkedChange)="setScheduleOverride($event)"
+            data-test="member-schedule-override"
+          >
+            <span id="member-schedule-override-label">
+              {{ 'household.meal_settings_schedule_override' | t }}
+            </span>
+          </app-switch>
+          <p id="member-schedule-override-help" class="meal-settings__hint">
+            {{ 'household.meal_settings_schedule_override_help' | t }}
+          </p>
+        </div>
+
+        <fieldset *ngIf="scheduleOverrideEnabled" class="meal-settings__fieldset">
+          <legend>{{ 'preferences.tab_meals' | t }}</legend>
+          <div class="meal-settings__meal-grid">
+            <div class="meal-settings__meal-row" *ngFor="let row of mealRows; trackBy: trackMeal">
+              <app-checkbox
+                [label]="row.labelKey | t"
+                [checked]="personalSchedule.mealTypes[row.type]"
+                [disabled]="controlsDisabled"
+                [attr.data-test]="'member-meal-' + row.type"
+                (checkedChange)="setMealType('member', row.type, $event)"
+              />
+              <label [for]="'member-' + row.type + '-time'" class="meal-settings__label">
+                {{ 'household.meal_settings_time' | t }} · {{ row.labelKey | t }}
+              </label>
+              <input
+                type="time"
+                class="meal-settings__time"
+                [id]="'member-' + row.type + '-time'"
+                [name]="'member-' + row.type + '-time'"
+                required
+                [disabled]="controlsDisabled"
+                [value]="personalSchedule.mealTimes[row.type]"
+                (input)="setMealTime('member', row.type, $any($event.target).value)"
+                [attr.aria-invalid]="isInvalidTime('member', row.type) ? 'true' : null"
+                [attr.data-test]="'member-' + row.type + '-time'"
+              />
+            </div>
+          </div>
+        </fieldset>
+      </section>
+    </div>
+
+    <footer class="meal-settings__footer">
+      <p *ngIf="hasInvalidTime" class="meal-settings__error-text" role="alert">
+        {{ 'ui.datos_de_entrada_invalidos' | t }}
+      </p>
+      <p *ngIf="saveErrorKey" class="meal-settings__error-text" role="alert">
+        {{ saveErrorKey | t }}
+      </p>
+      <p *ngIf="noticeKey" class="meal-settings__success" role="status" aria-live="polite">
+        {{ noticeKey | t }}
+      </p>
+      <app-button
+        variant="primary"
+        size="md"
+        [loading]="saving"
+        [disabled]="!canSave"
+        (onClick)="save()"
+        data-test="meal-settings-save"
+      >
+        {{ (saving ? 'ui.guardando' : 'preferences.guardar_preferencias') | t }}
+      </app-button>
+    </footer>
+  </ng-container>
+</section>
