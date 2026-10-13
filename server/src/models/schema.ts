@@ -25,7 +25,8 @@ export const usersRelations = relations(users, ({ one, many }) => ({
   }),
   ingredients: many(ingredients),
   recipes: many(recipes),
-  aiConfigs: many(aiConfigs)
+  aiConfigs: many(aiConfigs),
+  mealParticipants: many(mealParticipants)
 }));
 
 // ═══════════════════════════════════════════════════════════════════
@@ -275,10 +276,13 @@ export const meals = sqliteTable('meals', {
   notes: text('notes'),
   completed: integer('completed', { mode: 'boolean' }).default(false),
   completedAt: text('completed_at'),
+  sourceProposalId: text('source_proposal_id'),
+  proposalId: text('proposal_id'),
+  recipeSnapshot: text('recipe_snapshot'),
   createdAt: text('created_at').default('CURRENT_TIMESTAMP')
 });
 
-export const mealsRelations = relations(meals, ({ one }) => ({
+export const mealsRelations = relations(meals, ({ one, many }) => ({
   calendar: one(weeklyCalendars, {
     fields: [meals.calendarId],
     references: [weeklyCalendars.id]
@@ -286,6 +290,32 @@ export const mealsRelations = relations(meals, ({ one }) => ({
   recipe: one(recipes, {
     fields: [meals.recipeId],
     references: [recipes.id]
+  }),
+  participants: many(mealParticipants)
+}));
+
+export const mealParticipants = sqliteTable(
+  'meal_participants',
+  {
+    mealId: text('meal_id')
+      .notNull()
+      .references(() => meals.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: text('created_at').default('CURRENT_TIMESTAMP')
+  },
+  (table) => [primaryKey({ columns: [table.mealId, table.userId] })]
+);
+
+export const mealParticipantsRelations = relations(mealParticipants, ({ one }) => ({
+  meal: one(meals, {
+    fields: [mealParticipants.mealId],
+    references: [meals.id]
+  }),
+  user: one(users, {
+    fields: [mealParticipants.userId],
+    references: [users.id]
   })
 }));
 

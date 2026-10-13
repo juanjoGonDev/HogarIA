@@ -27,10 +27,23 @@ import {
 import { readForm } from '../utils/form-body.js';
 import { describeIssues } from '../schemas/form.js';
 import { activeHouseholdId, activeHouseholdMemberCount } from '../utils/household-context.js';
+import { listSharedMealsForParticipant } from '../utils/shared-meal-calendar.store.js';
 import type { AppEnv } from '../types/hono-env.js';
 
 const calendarRoutes = new Hono<AppEnv>();
 calendarRoutes.use('*', authMiddleware);
+
+function sortMeals<T extends Record<string, unknown>>(meals: T[]): T[] {
+  const order: Record<string, number> = { breakfast: 1, lunch: 2, snack: 3, dinner: 4 };
+  return meals.sort((left, right) => {
+    const dateOrder = String(left.date).localeCompare(String(right.date));
+    if (dateOrder) return dateOrder;
+    const typeOrder =
+      (order[String(left.meal_type)] ?? 99) - (order[String(right.meal_type)] ?? 99);
+    if (typeOrder) return typeOrder;
+    return String(left.time ?? '').localeCompare(String(right.time ?? ''));
+  });
+}
 
 // GET /api/calendar
 calendarRoutes.get('/', async (c) => {
@@ -54,13 +67,13 @@ calendarRoutes.get('/', async (c) => {
     return c.json({ success: true, data: null });
   }
 
-  const meals = db
+  const personalMeals = db
     .prepare(
       `
     SELECT m.*, r.name as recipe_name
     FROM meals m
     LEFT JOIN recipes r ON r.id = m.recipe_id
-    WHERE m.calendar_id = ?
+    WHERE m.calendar_id = ? AND m.source_proposal_id IS NULL
     ORDER BY m.date,
       -- El orden del dia: merienda antes que cena. Ver MEAL_ORDER en el modelo del frontend.
       CASE m.meal_type
@@ -71,7 +84,17 @@ calendarRoutes.get('/', async (c) => {
       END
   `
     )
-    .all(calendar.id);
+    .all(calendar.id) as Array<Record<string, unknown>>;
+  const meals = sortMeals([
+    ...personalMeals.map(({ source_proposal_id: _sourceProposalId, ...meal }) => meal),
+    ...listSharedMealsForParticipant(
+      db,
+      userId,
+      householdId,
+      calendar.week_start,
+      calendar.week_end
+    )
+  ]);
 
   return c.json({
     success: true,
@@ -111,13 +134,14 @@ calendarRoutes.get('/range', async (c) => {
     return c.json({ success: false, message: 'startDate debe ser anterior a endDate' }, 400);
   }
 
-  const meals = db
+  const personalMeals = db
     .prepare(
       `
     SELECT m.*, r.name AS recipe_name, r.calories AS recipe_calories
     FROM meals m
     LEFT JOIN recipes r ON r.id = m.recipe_id
     WHERE m.date BETWEEN ? AND ?
+      AND m.source_proposal_id IS NULL
       AND m.calendar_id IN (
         SELECT id FROM weekly_calendars WHERE user_id = ? AND household_id IS ?
       )
@@ -131,7 +155,15 @@ calendarRoutes.get('/range', async (c) => {
       m.time
   `
     )
-    .all(startDate, endDate, userId, householdId);
+    .all(startDate, endDate, userId, householdId) as Array<Record<string, unknown>>;
+
+  // Una comida confirmada sigue siendo una sola fila de `meals`. La otra persona solo recibe las
+  // filas que la nombran explícitamente y conserva sus propios objetivos del calendario; no se
+  // comparte el resto del calendario personal ni se usa el switch general `shareCalendar`.
+  const meals = sortMeals([
+    ...personalMeals.map(({ source_proposal_id: _sourceProposalId, ...meal }) => meal),
+    ...listSharedMealsForParticipant(db, userId, householdId, startDate, endDate)
+  ]);
 
   // Objetivos de la semana que se esta mirando (si no existe, los ultimos).
   const goalsRow =

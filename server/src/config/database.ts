@@ -326,6 +326,17 @@ async function runMigrations(db: Database.Database): Promise<void> {
       FOREIGN KEY (recipe_id) REFERENCES recipes(id)
     );
 
+    -- Una fila de comida compartida sigue viviendo en meals; esta relacion guarda solo quienes
+    -- participan, sin copiar comidas ni exponer los otros calendarios de cada persona.
+    CREATE TABLE IF NOT EXISTS meal_participants (
+      meal_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (meal_id, user_id),
+      FOREIGN KEY (meal_id) REFERENCES meals(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
     -- AI configurations table
     CREATE TABLE IF NOT EXISTS ai_configs (
       id TEXT PRIMARY KEY,
@@ -783,6 +794,21 @@ async function runMigrations(db: Database.Database): Promise<void> {
   addColumnIfMissing('calendar_events', 'recurrence', "TEXT NOT NULL DEFAULT 'none'");
   addColumnIfMissing('calendar_events', 'recurrence_rule', 'TEXT');
   addColumnIfMissing('calendar_events', 'exceptions', "TEXT NOT NULL DEFAULT '[]'");
+  // `source_proposal_id` identifica el evento confirmado por el planner: los retries de una misma
+  // confirmacion recuperan la fila y nunca crean una copia. Las comidas historicas quedan NULL.
+  addColumnIfMissing('meals', 'source_proposal_id', 'TEXT');
+  // `proposal_id` identifica el lote confirmado; al reintentar se compara el set completo de
+  // eventIds. El snapshot conserva solo la receta pública necesaria para representar el evento.
+  addColumnIfMissing('meals', 'proposal_id', 'TEXT');
+  addColumnIfMissing('meals', 'recipe_snapshot', 'TEXT');
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_meals_source_proposal
+      ON meals(source_proposal_id) WHERE source_proposal_id IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_meals_proposal_group
+      ON meals(proposal_id) WHERE proposal_id IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_meal_participants_user
+      ON meal_participants(user_id, meal_id);
+  `);
   // Las dianas del descuento: `target` se queda para las filas ya escritas (una sola
   // diana) y `targets` es el JSON con las demas. Reconstruir la tabla para migrar el
   // formato antiguo habria sido una forma cara de perder datos si algo iba mal.

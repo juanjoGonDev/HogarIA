@@ -73,6 +73,7 @@ const COVERED = [
   'src/routes/recipe-step-photos.routes.ts',
   'src/routes/pantry.routes.ts',
   'src/utils/week-calendar.ts',
+  'src/utils/shared-meal-calendar.store.ts',
   'src/utils/household-plan.store.ts',
   'src/utils/household-meal-planning.store.ts',
   'src/utils/household-meal-proposal.planner.ts',

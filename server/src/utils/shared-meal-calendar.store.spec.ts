@@ -1,0 +1,408 @@
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+
+process.env.DATABASE_PATH = ':memory:';
+process.env.NODE_ENV = 'test';
+
+type SqliteDb = import('better-sqlite3').Database;
+
+let db: SqliteDb;
+let getDrizzle: typeof import('../config/database.js').getDrizzle;
+let closeDatabase: () => void;
+let persistSharedMeal: typeof import('./shared-meal-calendar.store.js').persistSharedMeal;
+let persistSharedMeals: typeof import('./shared-meal-calendar.store.js').persistSharedMeals;
+let SharedMealPersistenceError: typeof import('./shared-meal-calendar.store.js').SharedMealPersistenceError;
+
+const householdId = 'shared-meal-home';
+const input = {
+  proposalId: 'proposal-shared-lunch-1',
+  date: '2026-10-14',
+  mealType: 'lunch' as const,
+  customMeal: 'Guiso común',
+  time: '13:30',
+  servings: 5,
+  participantIds: ['alice', 'bob']
+};
+
+const recipeSnapshot = {
+  name: 'Arroz de prueba',
+  description: 'Receta pública para el evento',
+  baseServings: 1 as const,
+  times: { prepTimeMinutes: 10, cookTimeMinutes: 20, totalTimeMinutes: 30 },
+  ingredients: [{ name: 'arroz', quantity: 100, unit: 'g', notes: 'normal' }],
+  instructions: ['Lavar el arroz', 'Cocerlo'],
+  privatePrompt: 'no persistir este dato',
+  personalGoal: 'no persistir este dato'
+};
+
+function makeMember(
+  userId: string,
+  permissions: { calendar?: { view?: boolean; edit?: boolean } } = {
+    calendar: { view: true, edit: true }
+  },
+  memberHouseholdId = householdId,
+  isActive = 1
+) {
+  db.prepare(
+    'INSERT INTO users (id, email, name, password_hash, household_id) VALUES (?, ?, ?, ?, ?)'
+  ).run(userId, `${userId}@hogaria.test`, userId, 'hash', memberHouseholdId);
+  db.prepare(
+    'INSERT INTO household_members (id, household_id, user_id, role, permissions, is_active) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(
+    `member-${userId}`,
+    memberHouseholdId,
+    userId,
+    'member',
+    JSON.stringify(permissions),
+    isActive
+  );
+}
+
+describe('persistSharedMeal', () => {
+  beforeAll(async () => {
+    const database = await import('../config/database.js');
+    await database.initializeDatabase();
+    db = database.getDatabase();
+    getDrizzle = database.getDrizzle;
+    closeDatabase = database.closeDatabase;
+    const store = await import('./shared-meal-calendar.store.js');
+    persistSharedMeal = store.persistSharedMeal;
+    persistSharedMeals = store.persistSharedMeals;
+    SharedMealPersistenceError = store.SharedMealPersistenceError;
+  });
+
+  afterAll(() => closeDatabase?.());
+
+  beforeEach(() => {
+    db.prepare('DELETE FROM meal_participants').run();
+    db.prepare('DELETE FROM meals').run();
+    db.prepare('DELETE FROM weekly_calendars').run();
+    db.prepare('DELETE FROM household_members').run();
+    db.prepare('DELETE FROM users').run();
+    db.prepare('DELETE FROM households').run();
+    db.prepare(
+      'INSERT INTO households (id, name, invite_code, share_calendar) VALUES (?, ?, ?, 0)'
+    ).run(householdId, 'Casa de prueba', 'SHARE001');
+    makeMember('alice');
+    makeMember('bob');
+    makeMember('carol');
+  });
+
+  it('confirma una comida compartida una vez y reintentos del mismo proposalId no duplican evento ni participantes', () => {
+    const first = persistSharedMeal(db, 'alice', input);
+    const retry = persistSharedMeal(db, 'alice', input);
+
+    expect(first.meal.id).toBe(retry.meal.id);
+    expect(first.idempotent).toBe(false);
+    expect(retry.idempotent).toBe(true);
+    expect(
+      db
+        .prepare('SELECT COUNT(*) AS count FROM meals WHERE source_proposal_id = ?')
+        .get(`${input.proposalId}:single`)
+    ).toEqual({ count: 1 });
+    expect(
+      db
+        .prepare('SELECT user_id FROM meal_participants WHERE meal_id = ? ORDER BY user_id')
+        .all(first.meal.id)
+    ).toEqual([{ user_id: 'alice' }, { user_id: 'bob' }]);
+    expect(first.meal.servings).toBe(5);
+    expect(first.meal.notes).toBeNull();
+  });
+
+  it('expone los participantes asociados desde el modelo Drizzle sin duplicar la comida', async () => {
+    persistSharedMeal(db, 'alice', input);
+    const rows = (await (getDrizzle() as any).query.meals.findMany({
+      with: { participants: true }
+    })) as Array<{ participants: Array<{ userId: string }> }>;
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].participants.map(({ userId }) => userId).sort()).toEqual(['alice', 'bob']);
+  });
+
+  it('declara en el modelo las columnas de idempotencia/snapshot y la clave compuesta de participantes', async () => {
+    const schema = await import('../models/schema.js');
+    const { getTableConfig } = await import('drizzle-orm/sqlite-core');
+    const mealConfig = getTableConfig(schema.meals);
+    const participantConfig = getTableConfig(schema.mealParticipants);
+
+    expect(mealConfig.columns.map(({ name }) => name)).toEqual(
+      expect.arrayContaining(['source_proposal_id', 'proposal_id', 'recipe_snapshot'])
+    );
+    expect(participantConfig.primaryKeys).toHaveLength(1);
+    expect(participantConfig.columns.map(({ name }) => name)).toEqual(
+      expect.arrayContaining(['meal_id', 'user_id'])
+    );
+    // Exercise Drizzle's lazy FK callbacks in this model file as part of the focused schema gate.
+    for (const table of [
+      schema.householdPlans,
+      schema.householdPlanRevisions,
+      schema.householdPlanAssignments,
+      schema.householdTaskWeeks,
+      schema.mealParticipants,
+      schema.aiConfigs
+    ]) {
+      const config = getTableConfig(table);
+      for (const foreignKey of config.foreignKeys) foreignKey.reference();
+    }
+  });
+
+  it('no reutiliza una proposalId con contenido o participantes distintos y conserva el primer guardado', () => {
+    const first = persistSharedMeal(db, 'alice', input);
+
+    expect(() =>
+      persistSharedMeal(db, 'alice', { ...input, servings: 6, participantIds: ['alice', 'carol'] })
+    ).toThrowError(SharedMealPersistenceError);
+    expect(db.prepare('SELECT servings FROM meals WHERE id = ?').get(first.meal.id)).toEqual({
+      servings: 5
+    });
+    expect(
+      db
+        .prepare('SELECT user_id FROM meal_participants WHERE meal_id = ? ORDER BY user_id')
+        .all(first.meal.id)
+    ).toEqual([{ user_id: 'alice' }, { user_id: 'bob' }]);
+  });
+
+  it('guarda solo el snapshot whitelisted, devuelve el objeto y considera el snapshot en la idempotencia', () => {
+    const recipeCountBefore = (
+      db.prepare('SELECT COUNT(*) AS count FROM recipes').get() as { count: number }
+    ).count;
+    const first = persistSharedMeal(db, 'alice', { ...input, recipeSnapshot });
+    const stored = db
+      .prepare('SELECT recipe_snapshot FROM meals WHERE id = ?')
+      .get(first.meal.id) as {
+      recipe_snapshot: string;
+    };
+    const safeSnapshot = {
+      name: 'Arroz de prueba',
+      description: 'Receta pública para el evento',
+      baseServings: 1,
+      times: { prepTimeMinutes: 10, cookTimeMinutes: 20, totalTimeMinutes: 30 },
+      ingredients: [{ name: 'arroz', quantity: 100, unit: 'g', notes: 'normal' }],
+      instructions: ['Lavar el arroz', 'Cocerlo']
+    };
+    expect(JSON.parse(stored.recipe_snapshot)).toEqual(safeSnapshot);
+    expect(first.meal.recipe_snapshot).toEqual(JSON.stringify(safeSnapshot));
+    expect(first.meal.recipe_id).toBeNull();
+    expect(
+      (db.prepare('SELECT COUNT(*) AS count FROM recipes').get() as { count: number }).count
+    ).toBe(recipeCountBefore);
+    expect(
+      db.prepare('SELECT COUNT(*) AS count FROM recipes WHERE name = ?').get('Arroz de prueba')
+    ).toEqual({ count: 0 });
+    expect(persistSharedMeal(db, 'alice', { ...input, recipeSnapshot }).idempotent).toBe(true);
+    expect(() =>
+      persistSharedMeal(db, 'alice', {
+        ...input,
+        recipeSnapshot: { ...recipeSnapshot, instructions: ['contenido distinto'] }
+      })
+    ).toThrowError(SharedMealPersistenceError);
+  });
+
+  it('confirma de forma atómica un lote con keys proposalId:eventId y rechaza el mismo lote si cambia', () => {
+    const proposal = {
+      proposalId: 'week-2026-10-12',
+      events: [
+        {
+          eventId: 'event-lunch',
+          date: '2026-10-14',
+          mealType: 'lunch' as const,
+          customMeal: 'Arroz',
+          servings: 2,
+          participantIds: ['alice', 'bob'],
+          recipeSnapshot
+        },
+        {
+          eventId: 'event-dinner',
+          date: '2026-10-14',
+          mealType: 'dinner' as const,
+          customMeal: 'Sopa',
+          servings: 1,
+          participantIds: ['alice'],
+          recipeSnapshot: null
+        }
+      ]
+    };
+    const first = persistSharedMeals(db, 'alice', proposal);
+    const retry = persistSharedMeals(db, 'alice', proposal);
+
+    expect(first.meals.map(({ source_proposal_id }) => source_proposal_id)).toEqual([
+      'week-2026-10-12:event-lunch',
+      'week-2026-10-12:event-dinner'
+    ]);
+    expect(retry.meals.map(({ id }) => id)).toEqual(first.meals.map(({ id }) => id));
+    expect(first.idempotent).toBe(false);
+    expect(retry.idempotent).toBe(true);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM meals').get()).toEqual({ count: 2 });
+
+    expect(() =>
+      persistSharedMeals(db, 'alice', {
+        ...proposal,
+        events: [proposal.events[0]]
+      })
+    ).toThrowError(SharedMealPersistenceError);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM meals').get()).toEqual({ count: 2 });
+  });
+
+  it('revierte un lote entero si un evento choca con otra propuesta para mismo participante/fecha/turno', () => {
+    persistSharedMeals(db, 'alice', {
+      proposalId: 'week-first',
+      events: [
+        {
+          eventId: 'shared-lunch',
+          date: '2026-10-14',
+          mealType: 'lunch',
+          customMeal: 'Guiso',
+          servings: 2,
+          participantIds: ['alice', 'bob']
+        }
+      ]
+    });
+
+    let conflict: unknown;
+    try {
+      persistSharedMeals(db, 'alice', {
+        proposalId: 'week-second',
+        events: [
+          {
+            eventId: 'non-conflicting-breakfast',
+            date: '2026-10-14',
+            mealType: 'breakfast',
+            customMeal: 'Pan',
+            servings: 1,
+            participantIds: ['alice']
+          },
+          {
+            eventId: 'conflicting-lunch',
+            date: '2026-10-14',
+            mealType: 'lunch',
+            customMeal: 'Ensalada',
+            servings: 1,
+            participantIds: ['bob']
+          }
+        ]
+      });
+    } catch (error) {
+      conflict = error;
+    }
+    expect(conflict).toBeInstanceOf(SharedMealPersistenceError);
+    expect(conflict).toMatchObject({ code: 'SLOT_CONFLICT' });
+
+    expect(db.prepare('SELECT COUNT(*) AS count FROM meals').get()).toEqual({ count: 1 });
+    expect(
+      db.prepare("SELECT COUNT(*) AS count FROM meals WHERE meal_type = 'breakfast'").get()
+    ).toEqual({
+      count: 0
+    });
+  });
+
+  it('rechaza colisiones de turno dentro del mismo lote, pero permite grupos disjuntos', () => {
+    expect(() =>
+      persistSharedMeals(db, 'alice', {
+        proposalId: 'week-overlap',
+        events: [
+          {
+            eventId: 'one',
+            date: '2026-10-14',
+            mealType: 'dinner',
+            customMeal: 'Opción uno',
+            servings: 1,
+            participantIds: ['alice']
+          },
+          {
+            eventId: 'two',
+            date: '2026-10-14',
+            mealType: 'dinner',
+            customMeal: 'Opción dos',
+            servings: 1,
+            participantIds: ['alice', 'bob']
+          }
+        ]
+      })
+    ).toThrowError(SharedMealPersistenceError);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM meals').get()).toEqual({ count: 0 });
+
+    const disjoint = persistSharedMeals(db, 'alice', {
+      proposalId: 'week-disjoint',
+      events: [
+        {
+          eventId: 'one',
+          date: '2026-10-14',
+          mealType: 'dinner',
+          customMeal: 'Opción Alice',
+          servings: 1,
+          participantIds: ['alice']
+        },
+        {
+          eventId: 'two',
+          date: '2026-10-14',
+          mealType: 'dinner',
+          customMeal: 'Opción Bob',
+          servings: 1,
+          participantIds: ['bob']
+        }
+      ]
+    });
+    expect(disjoint.meals).toHaveLength(2);
+  });
+
+  it('exige calendar.edit al confirmante y calendar.view a cada participante antes de escribir', () => {
+    db.prepare('UPDATE household_members SET permissions = ? WHERE user_id = ?').run(
+      JSON.stringify({ calendar: { view: true, edit: false } }),
+      'alice'
+    );
+    expect(() => persistSharedMeal(db, 'alice', input)).toThrowError(SharedMealPersistenceError);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM meals').get()).toEqual({ count: 0 });
+
+    db.prepare('UPDATE household_members SET permissions = ? WHERE user_id = ?').run(
+      JSON.stringify({ calendar: { view: false, edit: true } }),
+      'bob'
+    );
+    expect(() => persistSharedMeal(db, 'alice', input)).toThrowError(SharedMealPersistenceError);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM meals').get()).toEqual({ count: 0 });
+  });
+
+  it('rechaza participantes inactivos o de otro hogar sin guardar parcialmente', () => {
+    db.prepare('UPDATE household_members SET is_active = 0 WHERE user_id = ?').run('bob');
+    expect(() => persistSharedMeal(db, 'alice', input)).toThrowError(SharedMealPersistenceError);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM meals').get()).toEqual({ count: 0 });
+
+    db.prepare('UPDATE household_members SET is_active = 1 WHERE user_id = ?').run('bob');
+    db.prepare('INSERT INTO households (id, name, invite_code) VALUES (?, ?, ?)').run(
+      'other-home',
+      'Otra casa',
+      'OTHER001'
+    );
+    makeMember('outsider', { calendar: { view: true, edit: true } }, 'other-home');
+    expect(() =>
+      persistSharedMeal(db, 'alice', { ...input, participantIds: ['alice', 'outsider'] })
+    ).toThrowError(SharedMealPersistenceError);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM meals').get()).toEqual({ count: 0 });
+  });
+
+  it('rechaza datos de comida inválidos sin crear calendario ni comida', () => {
+    expect(() => persistSharedMeal(db, 'alice', { ...input, date: '2026-02-30' })).toThrowError(
+      SharedMealPersistenceError
+    );
+    expect(() => persistSharedMeal(db, 'alice', { ...input, servings: 0 })).toThrowError(
+      SharedMealPersistenceError
+    );
+    expect(() => persistSharedMeal(db, 'alice', { ...input, time: '25:00' })).toThrowError(
+      SharedMealPersistenceError
+    );
+    expect(() =>
+      persistSharedMeal(db, 'alice', { ...input, participantIds: ['alice', 'alice'] })
+    ).toThrowError(SharedMealPersistenceError);
+    expect(() =>
+      persistSharedMeal(db, 'alice', { ...input, recipeId: 42 as unknown as string })
+    ).toThrowError(SharedMealPersistenceError);
+    expect(() =>
+      persistSharedMeal(db, 'alice', {
+        ...input,
+        recipeSnapshot: { ...recipeSnapshot, baseServings: 2 }
+      })
+    ).toThrowError(SharedMealPersistenceError);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM weekly_calendars').get()).toEqual({
+      count: 0
+    });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM meals').get()).toEqual({ count: 0 });
+  });
+});

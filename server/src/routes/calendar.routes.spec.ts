@@ -20,6 +20,7 @@ type Sql = import('better-sqlite3').Database;
 let app: Hono;
 let db: Sql;
 let closeDatabase: () => void;
+let persistSharedMeal: typeof import('../utils/shared-meal-calendar.store.js').persistSharedMeal;
 
 async function makeUser(id: string, householdId: string | null, name = 'Alguien') {
   const email = `${id}@hogaria.test`;
@@ -46,7 +47,13 @@ function call(user: User, method: string, path: string, body?: unknown) {
 
 /** Igual que en la compra: `Response.json()` es `unknown` y aqui se ancha una vez. */
 async function data(response: Response) {
-  const body = (await response.json()) as any;
+  const raw = await response.text();
+  let body: any;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    throw new Error(`respuesta no JSON ${response.status}: ${raw}`);
+  }
   if (body?.success !== true) throw new Error(`respuesta inesperada: ${JSON.stringify(body)}`);
   return body.data;
 }
@@ -60,6 +67,7 @@ describe('calendario de la casa (§8f)', () => {
     await database.initializeDatabase();
     closeDatabase = database.closeDatabase;
     db = database.getDatabase();
+    persistSharedMeal = (await import('../utils/shared-meal-calendar.store.js')).persistSharedMeal;
     app = new Hono();
     app.route('/api/calendar', calendarRoutes);
   });
@@ -151,6 +159,162 @@ describe('calendario de la casa (§8f)', () => {
     expect(
       await data(await call(alice, 'GET', '/events?from=2026-03-01&to=2026-03-31'))
     ).toHaveLength(2);
+  });
+
+  it('proyecta una comida confirmada una vez solo a participantes con permiso, sin compartir notas ni objetivos privados', async () => {
+    const alice = await makeUser('meal-alice', householdId, 'Alice');
+    const bob = await makeUser('meal-bob', householdId, 'Bob');
+    const carol = await makeUser('meal-carol', householdId, 'Carol');
+    for (const user of [alice, bob, carol]) {
+      db.prepare(
+        'INSERT INTO household_members (id, household_id, user_id, role, permissions) VALUES (?, ?, ?, ?, ?)'
+      ).run(
+        `hm-${user.id}`,
+        householdId,
+        user.id,
+        'member',
+        JSON.stringify({ calendar: { view: true, edit: true } })
+      );
+    }
+    db.prepare('UPDATE households SET share_calendar = 0 WHERE id = ?').run(householdId);
+    db.prepare(
+      `INSERT INTO weekly_calendars (id, household_id, user_id, week_start, week_end, goals)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(
+      'meal-bob-calendar',
+      householdId,
+      bob.id,
+      '2026-10-12',
+      '2026-10-18',
+      '{"private":"bob-goal"}'
+    );
+
+    const saved = persistSharedMeal(db, alice.id, {
+      proposalId: 'proposal-calendar-shared-meal',
+      date: '2026-10-14',
+      mealType: 'lunch',
+      customMeal: 'Guiso común',
+      time: '13:30',
+      servings: 5,
+      participantIds: [alice.id, bob.id],
+      recipeSnapshot: {
+        name: 'Guiso común',
+        description: 'Receta compartida sintética',
+        baseServings: 1,
+        times: { prepTimeMinutes: 10, cookTimeMinutes: 20, totalTimeMinutes: 30 },
+        ingredients: [{ name: 'arroz', quantity: 100, unit: 'g' }],
+        instructions: ['Lavar', 'Cocer'],
+        prompt: 'dato privado que no debe viajar'
+      }
+    });
+    db.prepare('UPDATE meals SET notes = ? WHERE id = ?').run(
+      'nota privada de Alice',
+      saved.meal.id
+    );
+    db.prepare('UPDATE weekly_calendars SET goals = ? WHERE user_id = ?').run(
+      '{"private":"alice-goal"}',
+      alice.id
+    );
+
+    const bobData = (await data(
+      await call(bob, 'GET', '/range?startDate=2026-10-14&endDate=2026-10-14')
+    )) as any;
+    const sharedForBob = bobData.meals.filter((meal: any) => meal.isShared);
+    expect(sharedForBob).toHaveLength(1);
+    expect(sharedForBob[0]).toMatchObject({
+      id: saved.meal.id,
+      servings: 5,
+      notes: null,
+      calendar_id: null,
+      participantIds: [alice.id, bob.id]
+    });
+    expect(sharedForBob[0].recipe_snapshot).toEqual({
+      name: 'Guiso común',
+      description: 'Receta compartida sintética',
+      baseServings: 1,
+      times: { prepTimeMinutes: 10, cookTimeMinutes: 20, totalTimeMinutes: 30 },
+      ingredients: [{ name: 'arroz', quantity: 100, unit: 'g' }],
+      instructions: ['Lavar', 'Cocer']
+    });
+    expect(JSON.stringify(sharedForBob[0])).not.toContain('dato privado');
+    expect(sharedForBob[0]).not.toHaveProperty('source_proposal_id');
+    expect(bobData.goals).toEqual({ private: 'bob-goal' });
+
+    const aliceData = (await data(
+      await call(alice, 'GET', '/range?startDate=2026-10-14&endDate=2026-10-14')
+    )) as any;
+    expect(aliceData.meals.filter((meal: any) => meal.isShared)).toHaveLength(1);
+    expect(aliceData.goals).toEqual({ private: 'alice-goal' });
+
+    const carolData = (await data(
+      await call(carol, 'GET', '/range?startDate=2026-10-14&endDate=2026-10-14')
+    )) as any;
+    expect(carolData.meals).toEqual([]);
+    expect(
+      db
+        .prepare('SELECT COUNT(*) AS count FROM meals WHERE source_proposal_id = ?')
+        .get('proposal-calendar-shared-meal:single')
+    ).toEqual({ count: 1 });
+  });
+
+  it('oculta la comida compartida si posteriormente se revoca calendar.view o se desactiva la membresía', async () => {
+    const alice = await makeUser('meal-acl-alice', householdId, 'Alice');
+    const bob = await makeUser('meal-acl-bob', householdId, 'Bob');
+    for (const user of [alice, bob]) {
+      db.prepare(
+        'INSERT INTO household_members (id, household_id, user_id, role, permissions) VALUES (?, ?, ?, ?, ?)'
+      ).run(
+        `hm-${user.id}`,
+        householdId,
+        user.id,
+        'member',
+        JSON.stringify({ calendar: { view: true, edit: true } })
+      );
+    }
+    persistSharedMeal(db, alice.id, {
+      proposalId: 'proposal-calendar-acl-meal',
+      date: '2026-10-14',
+      mealType: 'lunch',
+      customMeal: 'Arroz',
+      servings: 2,
+      participantIds: [bob.id]
+    });
+    db.prepare(
+      `INSERT INTO weekly_calendars (id, household_id, user_id, week_start, week_end, goals)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(
+      'meal-acl-bob-calendar',
+      householdId,
+      bob.id,
+      '2026-10-12',
+      '2026-10-18',
+      '{"private":"bob-goal"}'
+    );
+
+    const bobWeek = (await data(await call(bob, 'GET', ''))) as any;
+    expect(bobWeek.meals.filter((meal: any) => meal.isShared)).toHaveLength(1);
+    expect(bobWeek.meals.find((meal: any) => meal.isShared).calendar_id).toBeNull();
+    expect(bobWeek.goals).toEqual({ private: 'bob-goal' });
+    expect(((await data(await call(alice, 'GET', ''))) as any).meals).toEqual([]);
+
+    db.prepare('UPDATE household_members SET permissions = ? WHERE user_id = ?').run(
+      JSON.stringify({ calendar: { view: false, edit: true } }),
+      bob.id
+    );
+    const revoked = (await data(
+      await call(bob, 'GET', '/range?startDate=2026-10-14&endDate=2026-10-14')
+    )) as any;
+    expect(revoked.meals).toEqual([]);
+
+    db.prepare('UPDATE household_members SET permissions = ?, is_active = 1 WHERE user_id = ?').run(
+      JSON.stringify({ calendar: { view: true, edit: true } }),
+      bob.id
+    );
+    db.prepare('UPDATE household_members SET is_active = 0 WHERE user_id = ?').run(bob.id);
+    const inactive = (await data(
+      await call(bob, 'GET', '/range?startDate=2026-10-14&endDate=2026-10-14')
+    )) as any;
+    expect(inactive.meals).toEqual([]);
   });
 
   it('ver el evento de otra persona no es poder reescribirlo', async () => {

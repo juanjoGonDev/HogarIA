@@ -103,6 +103,85 @@ describe('adoptLegacyDatabase', () => {
 });
 
 describe('initializeDatabase con fichero heredado', () => {
+  it('añade claves idempotentes a meals legacy conservando la comida y crea las asignaciones aditivas', async () => {
+    const databaseFile = target();
+    const previous = new Database(databaseFile);
+    previous.exec(`
+      CREATE TABLE meals (
+        id TEXT PRIMARY KEY,
+        calendar_id TEXT NOT NULL,
+        date DATE NOT NULL,
+        meal_type TEXT NOT NULL,
+        recipe_id TEXT,
+        custom_meal TEXT,
+        time TEXT,
+        servings INTEGER DEFAULT 1,
+        notes TEXT,
+        completed INTEGER DEFAULT 0,
+        completed_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      INSERT INTO meals (id, calendar_id, date, meal_type, custom_meal, servings, notes)
+      VALUES ('legacy-meal', 'legacy-calendar', '2026-10-14', 'dinner', 'Comida heredada', 3, 'nota antigua');
+    `);
+    previous.close();
+
+    const mod = await dbModuleWith(databaseFile);
+    let restarted: DbModule | undefined;
+    try {
+      await mod.initializeDatabase();
+      const db = mod.getDatabase();
+      expect(
+        db
+          .prepare(
+            'SELECT id, custom_meal, servings, notes, source_proposal_id, proposal_id, recipe_snapshot FROM meals WHERE id = ?'
+          )
+          .get('legacy-meal')
+      ).toEqual({
+        id: 'legacy-meal',
+        custom_meal: 'Comida heredada',
+        servings: 3,
+        notes: 'nota antigua',
+        source_proposal_id: null,
+        proposal_id: null,
+        recipe_snapshot: null
+      });
+      expect(
+        db
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'meal_participants'"
+          )
+          .get()
+      ).toEqual({ name: 'meal_participants' });
+      const mealIndexes = db.prepare("PRAGMA index_list('meals')").all() as Array<{
+        name: string;
+        unique: number;
+      }>;
+      expect(mealIndexes.find(({ name }) => name === 'idx_meals_source_proposal')?.unique).toBe(1);
+      expect(mealIndexes.find(({ name }) => name === 'idx_meals_proposal_group')?.unique).toBe(0);
+
+      mod.closeDatabase();
+      restarted = await dbModuleWith(databaseFile);
+      await restarted.initializeDatabase();
+      expect(
+        restarted
+          .getDatabase()
+          .prepare(
+            'SELECT id, source_proposal_id, proposal_id, recipe_snapshot FROM meals WHERE id = ?'
+          )
+          .get('legacy-meal')
+      ).toEqual({
+        id: 'legacy-meal',
+        source_proposal_id: null,
+        proposal_id: null,
+        recipe_snapshot: null
+      });
+    } finally {
+      restarted?.closeDatabase();
+      mod.closeDatabase();
+    }
+  });
+
   it('añade metadatos del libro a recetas legacy sin alterar su contenido', async () => {
     const databaseFile = target();
     const previous = new Database(databaseFile);
