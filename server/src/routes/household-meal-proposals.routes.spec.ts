@@ -572,6 +572,111 @@ describe('household meal proposal preview route', () => {
     expect(serializedProviderRequest).not.toContain(excluded.membershipId);
   });
 
+  it('uses a selected member schedule override, inherits household schedule for another selected member, and excludes unselected members', async () => {
+    addHousehold('home');
+    const planner = addUser('planner', 'home');
+    const inheriting = addUser('inheriting', 'home');
+    const excluded = addUser('excluded', 'home', undefined, {
+      goals: ['balanced'],
+      goalNotes: 'EXCLUDED_MEMBER_GOAL_833',
+      allergies: [],
+      likes: ['EXCLUDED_MEMBER_LIKE_833'],
+      dislikes: []
+    });
+    const householdPreferences = JSON.parse(
+      (
+        db.prepare('SELECT meal_planning_preferences FROM households WHERE id = ?').get('home') as {
+          meal_planning_preferences: string;
+        }
+      ).meal_planning_preferences
+    );
+    householdPreferences.mealTypes = {
+      breakfast: false,
+      lunch: true,
+      snack: false,
+      dinner: false
+    };
+    householdPreferences.mealTimes.lunch = '13:00';
+    householdPreferences.objective.notes = 'SHARED_HOUSEHOLD_GOAL_833';
+    db.prepare('UPDATE households SET meal_planning_preferences = ? WHERE id = ?').run(
+      JSON.stringify(householdPreferences),
+      'home'
+    );
+    db.prepare('UPDATE household_members SET meal_planning_preferences = ? WHERE id = ?').run(
+      JSON.stringify({
+        scheduleOverrideEnabled: true,
+        schedule: {
+          mealTypes: { breakfast: false, lunch: false, snack: false, dinner: true },
+          mealTimes: { breakfast: '08:00', lunch: '13:00', snack: '17:00', dinner: '19:30' }
+        }
+      }),
+      planner.membershipId
+    );
+    addAiConfig(planner.id, 'home');
+
+    let providerBody: any;
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      providerBody = JSON.parse(String(init.body));
+      const dinnerEvents = validProposal(['P1']).events.map((event) => ({
+        ...event,
+        mealType: 'dinner',
+        time: '19:30'
+      }));
+      return new Response(
+        JSON.stringify({
+          choices: [
+            {
+              finish_reason: 'stop',
+              message: {
+                content: JSON.stringify({
+                  events: [...dinnerEvents, ...validProposal(['P2']).events]
+                })
+              }
+            }
+          ]
+        }),
+        { status: 200 }
+      );
+    });
+
+    const response = await call(planner, {
+      weekStart: WEEK_START,
+      householdMemberIds: [planner.membershipId, inheriting.membershipId]
+    });
+    const json = await read(response);
+    const serializedProviderRequest = JSON.stringify(providerBody);
+    const prompt = String(providerBody.messages[1].content);
+    const participantsJson = prompt
+      .split('Participantes seleccionados (usa únicamente los alias opacos):\n')[1]
+      ?.split('\n\nTurnos que deben quedar resueltos exactamente una vez por participante:')[0];
+
+    expect(response.status).toBe(200);
+    expect(json.success).toBe(true);
+    expect(participantsJson).toBeDefined();
+    expect(JSON.parse(participantsJson!)).toMatchObject([
+      {
+        participant: 'P1',
+        schedule: {
+          mealTypes: { breakfast: false, lunch: false, snack: false, dinner: true },
+          mealTimes: { dinner: '19:30' }
+        }
+      },
+      {
+        participant: 'P2',
+        schedule: {
+          mealTypes: { breakfast: false, lunch: true, snack: false, dinner: false },
+          mealTimes: { lunch: '13:00' }
+        }
+      }
+    ]);
+    expect(serializedProviderRequest).not.toContain('EXCLUDED_MEMBER_GOAL_833');
+    expect(serializedProviderRequest).not.toContain('EXCLUDED_MEMBER_LIKE_833');
+    expect(serializedProviderRequest).not.toContain('Private name excluded');
+    expect(serializedProviderRequest).not.toContain(excluded.id);
+    expect(serializedProviderRequest).not.toContain(excluded.membershipId);
+    expect(serializedProviderRequest).toContain('SHARED_HOUSEHOLD_GOAL_833');
+  });
+
   it('uses only the pantry and recipes accessible to the household planner', async () => {
     addHousehold('home', true);
     const planner = addUser('planner', 'home');

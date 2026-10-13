@@ -18,6 +18,18 @@ interface ExpectedSlot {
   eligibleParticipants: string[];
 }
 
+interface CalendarMealProjection {
+  id: string;
+  date: string;
+  meal_type: string;
+  time: string | null;
+  recipe_name: string;
+  servings: number;
+  isShared: boolean;
+  participantIds: string[];
+  participants: Array<{ id: string; name: string }>;
+}
+
 const screenshotDirectory = resolve('.e2e-screenshots/household-meal-planning');
 
 async function expectTabsToReferencePanels(
@@ -214,6 +226,9 @@ test('genera, revisa y confirma comidas con navegación de planificación en esc
     const activeMembers = household.data.members.filter((member) => member.isActive);
     expect(activeMembers).toHaveLength(2);
     expect(activeMembers.map((member) => member.id)).toContain(ownerMemberId);
+    const memberByUserId = new Map(activeMembers.map((member) => [member.userId, member]));
+    const ownerMember = activeMembers.find((member) => member.id === ownerMemberId);
+    expect(ownerMember).toBeTruthy();
 
     await page.goto('/household?tab=tasks&planning=meals&source=synthetic-e2e');
     const planningTabs = page.locator('.household-planning-tabs');
@@ -247,7 +262,7 @@ test('genera, revisa y confirma comidas con navegación de planificación en esc
     );
     await expectOneActivePanel(page, '[data-test^="household-planning-panel-"]');
 
-    const settingsTab = page.getByRole('tab', { name: 'Ajustes de comidas' });
+    const settingsTab = page.locator('[data-test="household-planning-tab-settings"]');
     await settingsTab.click();
     await expect(page).toHaveURL(/planning=settings.*source=synthetic-e2e/);
     await expectOneActivePanel(page, '[data-test^="household-planning-panel-"]');
@@ -297,7 +312,7 @@ test('genera, revisa y confirma comidas con navegación de planificación en esc
     );
     await expectOneActivePanel(page, '[data-test^="meal-proposal-step-panel-"]', 2);
     await expect(review).toHaveCount(0);
-    await page.keyboard.press('End');
+    await page.keyboard.press('ArrowRight');
     await expect(reviewStepTab).toHaveAttribute('aria-selected', 'true');
     await expect(review).toContainText('Compartida');
     await expect(review).toContainText('2 raciones');
@@ -412,7 +427,14 @@ test('genera, revisa y confirma comidas con navegación de planificación en esc
 
     const noEarlyConfirm = await page.request.get('/api/calendar/range', {
       headers: firstHeaders,
-      params: { startDate: generatedRequest.weekStart, endDate: generatedRequest.weekStart }
+      params: {
+        startDate: generatedRequest.weekStart,
+        endDate: new Date(
+          new Date(`${generatedRequest.weekStart}T00:00:00.000Z`).getTime() + 6 * 86400000
+        )
+          .toISOString()
+          .slice(0, 10)
+      }
     });
     expect(noEarlyConfirm.ok(), await noEarlyConfirm.text()).toBeTruthy();
     const noEarlyConfirmBody = (await noEarlyConfirm.json()) as {
@@ -438,27 +460,158 @@ test('genera, revisa y confirma comidas con navegación de planificación en esc
       proposalId: string;
       weekStart: string;
       householdMemberIds: string[];
-      events: Array<{ id: string; participantAliases: string[] }>;
+      events: Array<{
+        id: string;
+        date: string;
+        mealType: string;
+        time: string | null;
+        recipe: { name: string } | null;
+        participantAliases: string[];
+        participantIds: string[];
+        servings: number;
+      }>;
     };
     expect(submitted.proposalId).toBeTruthy();
     expect(submitted.weekStart).toBe(generatedRequest.weekStart);
     expect(submitted.householdMemberIds).toEqual(generatedRequest.householdMemberIds);
     expect(submitted.events.length).toBeGreaterThan(0);
+    expect(submitted.events.some((event) => event.participantIds.length === 2)).toBe(true);
+    expect(submitted.events.some((event) => event.participantIds.length === 1)).toBe(true);
     const confirmation = await confirmResponse;
     const confirmationText = await confirmation.text();
     expect(confirmation.status(), confirmationText).toBe(200);
     await expect(page.getByText(/comidas añadidas al calendario/i)).toBeVisible();
     expect(confirmCalls).toBe(1);
 
-    const persistedResponse = await page.request.get('/api/calendar/range', {
+    const weekEnd = new Date(
+      new Date(`${generatedRequest.weekStart}T00:00:00.000Z`).getTime() + 6 * 86400000
+    )
+      .toISOString()
+      .slice(0, 10);
+    const calendarRange = { startDate: generatedRequest.weekStart, endDate: weekEnd };
+    const firstMemberCalendarResponse = await page.request.get('/api/calendar/range', {
       headers: firstHeaders,
-      params: { startDate: generatedRequest.weekStart, endDate: generatedRequest.weekStart }
+      params: calendarRange
     });
-    expect(persistedResponse.ok(), await persistedResponse.text()).toBeTruthy();
-    const persistedBody = (await persistedResponse.json()) as {
-      data: { meals: Array<{ date: string; mealType: string; servings: number }> };
+    expect(firstMemberCalendarResponse.ok(), await firstMemberCalendarResponse.text()).toBeTruthy();
+    const firstMemberCalendar = (await firstMemberCalendarResponse.json()) as {
+      data: { meals: CalendarMealProjection[] };
     };
-    expect(persistedBody.data.meals.length).toBeGreaterThan(0);
+    const ownerCalendarResponse = await secondPage.request.get('/api/calendar/range', {
+      headers: ownerHeaders,
+      params: calendarRange
+    });
+    expect(ownerCalendarResponse.ok(), await ownerCalendarResponse.text()).toBeTruthy();
+    const ownerCalendar = (await ownerCalendarResponse.json()) as {
+      data: { meals: CalendarMealProjection[] };
+    };
+
+    const expectedMealKeys = submitted.events
+      .map((event) =>
+        JSON.stringify([
+          event.date,
+          event.mealType,
+          event.time,
+          event.recipe?.name,
+          event.servings,
+          [...event.participantIds].sort()
+        ])
+      )
+      .sort();
+    const calendarMealKeys = (meals: CalendarMealProjection[]) =>
+      meals
+        .map((meal) =>
+          JSON.stringify([
+            meal.date,
+            meal.meal_type,
+            meal.time,
+            meal.recipe_name,
+            meal.servings,
+            [...meal.participantIds].sort()
+          ])
+        )
+        .sort();
+    for (const memberMeals of [firstMemberCalendar.data.meals, ownerCalendar.data.meals]) {
+      expect(memberMeals).toHaveLength(submitted.events.length);
+      expect(memberMeals.every((meal) => meal.isShared)).toBe(true);
+      expect(calendarMealKeys(memberMeals)).toEqual(expectedMealKeys);
+      for (const meal of memberMeals) {
+        const expectedParticipants = meal.participantIds
+          .map((userId) => {
+            const member = memberByUserId.get(userId);
+            expect(member, `calendar includes unknown participant ${userId}`).toBeTruthy();
+            return { id: userId, name: member!.name };
+          })
+          .sort((left, right) => left.id.localeCompare(right.id));
+        expect(
+          [...meal.participants].sort((left, right) => left.id.localeCompare(right.id))
+        ).toEqual(expectedParticipants);
+      }
+    }
+    expect(calendarMealKeys(firstMemberCalendar.data.meals)).toEqual(
+      calendarMealKeys(ownerCalendar.data.meals)
+    );
+
+    const expectedCalendarTitles = firstMemberCalendar.data.meals
+      .map((meal) => meal.recipe_name)
+      .sort();
+    for (const [memberPage, account] of [
+      [page, 'member'],
+      [secondPage, 'owner']
+    ] as const) {
+      await memberPage.goto(`/calendar?view=week&date=${generatedRequest.weekStart}`);
+      const renderedMeals = memberPage.locator(
+        '[data-test="timeline-block-meal"] .tl__block-title'
+      );
+      await expect(renderedMeals).toHaveCount(submitted.events.length);
+      await expect(renderedMeals.first()).toBeVisible();
+      expect((await renderedMeals.allTextContents()).map((title) => title.trim()).sort()).toEqual(
+        expectedCalendarTitles
+      );
+      await renderedMeals.first().scrollIntoViewIfNeeded();
+      const screenshotDirectoryForProject = resolve(screenshotDirectory, testInfo.project.name);
+      await mkdir(screenshotDirectoryForProject, { recursive: true });
+      await memberPage.screenshot({
+        path: resolve(screenshotDirectoryForProject, `shared-meals-calendar-${account}.png`),
+        fullPage: false,
+        animations: 'disabled'
+      });
+    }
+
+    await page.goto('/household');
+    await page.evaluate(() => window.scrollTo(0, 0));
+    // Everyone can see the household plan, but only the assigned participant can
+    // read consumption state. GET keeps this check read-only and does not alter stock.
+    const individualMeal = firstMemberCalendar.data.meals.find(
+      (meal) => meal.participantIds.length === 1
+    );
+    expect(individualMeal).toBeTruthy();
+    const assignedUserId = individualMeal!.participantIds[0]!;
+    const assignedHeaders = {
+      ...(assignedUserId === ownerMember!.userId ? ownerHeaders : firstHeaders),
+      'x-household-id': householdId
+    };
+    const unassignedHeaders = {
+      ...(assignedUserId === ownerMember!.userId ? firstHeaders : ownerHeaders),
+      'x-household-id': householdId
+    };
+    const consumptionPath = `/api/household/meal-planning/meals/${individualMeal!.id}/consumption`;
+    const assignedConsumption = await page.request.get(consumptionPath, {
+      headers: assignedHeaders
+    });
+    expect(assignedConsumption.status(), await assignedConsumption.text()).toBe(200);
+    expect(await assignedConsumption.json()).toMatchObject({
+      success: true,
+      data: { status: 'unrecorded', servings: null, version: 0 }
+    });
+    const unassignedConsumption = await page.request.get(consumptionPath, {
+      headers: unassignedHeaders
+    });
+    expect(unassignedConsumption.status(), await unassignedConsumption.text()).toBe(403);
+    expect(await unassignedConsumption.json()).toMatchObject({
+      success: false,
+      code: 'HOUSEHOLD_MEAL_PARTICIPANT_REQUIRED'
+    });
 
     const sidebar = page.locator('.sidebar');
     if (

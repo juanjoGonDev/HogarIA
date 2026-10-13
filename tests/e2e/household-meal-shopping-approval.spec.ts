@@ -135,6 +135,219 @@ async function expectMobileShoppingActionReachable(
   expect(visibility!.focused).toBe(true);
 }
 
+test('la vista previa suma las comidas futuras individuales y compartidas de todo el hogar', async ({
+  page,
+  browser
+}, testInfo) => {
+  const viewport = testInfo.project.name.startsWith('mobile-')
+    ? { width: 390, height: 844 }
+    : { width: 1440, height: 900 };
+  await page.setViewportSize(viewport);
+  await registerAndCreateSyntheticHousehold(page);
+
+  const ownerToken = await page.evaluate(() => localStorage.getItem('hogar:v1:auth_token'));
+  expect(ownerToken).toBeTruthy();
+  const ownerHeaders = { authorization: `Bearer ${ownerToken}` };
+  const ownerHouseholdResponse = await page.request.get('/api/household', {
+    headers: ownerHeaders
+  });
+  expect(ownerHouseholdResponse.ok(), await ownerHouseholdResponse.text()).toBeTruthy();
+  const ownerHousehold = (await ownerHouseholdResponse.json()) as ApiEnvelope<{
+    id: string;
+    members: Array<{ id: string; userId: string; isActive: boolean }>;
+  }>;
+  const householdId = ownerHousehold.data.id;
+  const ownerMember = ownerHousehold.data.members.find((member) => member.isActive);
+  const firstMemberId = ownerMember?.id;
+  const firstUserId = ownerMember?.userId;
+  expect(firstMemberId).toBeTruthy();
+  expect(firstUserId).toBeTruthy();
+  const inviteUrl = (await page.locator('.invite-card__code').innerText()).trim();
+  const inviteCode = new URL(inviteUrl).pathname.split('/').at(-1);
+  expect(inviteCode).toBeTruthy();
+
+  const secondContext = await browser.newContext({
+    baseURL: new URL(page.url()).origin,
+    locale: 'es-ES',
+    viewport
+  });
+  try {
+    const secondPage = await secondContext.newPage();
+    await registerAndCreateSyntheticHousehold(secondPage);
+    await secondPage.getByRole('button', { name: 'Unirse a otro hogar' }).click();
+    const joinDialog = secondPage.getByRole('dialog', { name: 'Unirse a un Hogar' });
+    await joinDialog.getByRole('textbox', { name: 'Código de invitación' }).fill(inviteCode!);
+    await joinDialog.getByRole('button', { name: 'Unirse', exact: true }).click();
+    await expect(secondPage.locator('.household-info__name')).toHaveText(
+      'Hogar sintético de compra'
+    );
+
+    const secondToken = await secondPage.evaluate(() =>
+      localStorage.getItem('hogar:v1:auth_token')
+    );
+    expect(secondToken).toBeTruthy();
+    const secondHeaders = { authorization: `Bearer ${secondToken}` };
+    const joinedHouseholdResponse = await secondPage.request.get('/api/household', {
+      headers: secondHeaders
+    });
+    expect(joinedHouseholdResponse.ok(), await joinedHouseholdResponse.text()).toBeTruthy();
+    const joinedHousehold = (await joinedHouseholdResponse.json()) as ApiEnvelope<{
+      id: string;
+      members: Array<{ id: string; userId: string; isActive: boolean }>;
+    }>;
+    expect(joinedHousehold.data.id).toBe(householdId);
+    const activeMemberIds = joinedHousehold.data.members
+      .filter((member) => member.isActive)
+      .map((member) => member.id);
+    expect(activeMemberIds).toHaveLength(2);
+    expect(activeMemberIds).toContain(firstMemberId);
+    const secondMemberId = activeMemberIds.find((id) => id !== firstMemberId);
+    expect(secondMemberId).toBeTruthy();
+    const secondUserId = joinedHousehold.data.members.find(
+      (member) => member.id === secondMemberId
+    )?.userId;
+    expect(secondUserId).toBeTruthy();
+
+    const headers = { ...ownerHeaders, 'x-household-id': householdId };
+    const settings = await page.request.patch('/api/household/meal-planning', {
+      headers,
+      data: {
+        household: {
+          mealTypes: { breakfast: false, lunch: true, snack: false, dinner: false },
+          mealTimes: { lunch: '13:00' }
+        }
+      }
+    });
+    expect(settings.ok(), await settings.text()).toBeTruthy();
+
+    const today = new Date().toISOString().slice(0, 10);
+    const weekStart = nextMonday(today);
+    const sharedIngredient = 'Ingrediente agregado entre miembros sintético';
+    const event = (
+      id: string,
+      day: number,
+      participantAliases: string[],
+      ingredientName: string,
+      quantity: number,
+      servings: number
+    ) => ({
+      id,
+      date: addDays(weekStart, day),
+      mealType: 'lunch',
+      time: '13:00',
+      recipe: {
+        name: 'Comida de prueba',
+        description: 'Receta sintética para comprobar el alcance doméstico de compra.',
+        baseServings: 1,
+        prepTimeMinutes: 5,
+        cookTimeMinutes: 10,
+        ingredients: [
+          {
+            name: ingredientName,
+            quantity,
+            unit: 'g',
+            preparation: null,
+            isOptional: false,
+            notes: null
+          }
+        ],
+        instructions: ['Preparación sintética para E2E.']
+      },
+      participantAliases,
+      servings,
+      objectiveSummary: 'Comida sintética equilibrada.',
+      status: 'scheduled',
+      reason: null
+    });
+    const decoyIngredient = 'Ingrediente secundario de prueba';
+    const events = [
+      event('member-one-meal', 0, ['P1'], sharedIngredient, 10, 1),
+      event('member-two-meal', 0, ['P2'], decoyIngredient, 1, 1),
+      event('member-one-other-meal', 1, ['P1'], decoyIngredient, 1, 1),
+      event('member-two-target-meal', 1, ['P2'], sharedIngredient, 20, 1),
+      event('shared-target-meal', 2, ['P1', 'P2'], sharedIngredient, 30, 2),
+      ...Array.from({ length: 4 }, (_, index) =>
+        event(`shared-other-meal-${index}`, index + 3, ['P1', 'P2'], decoyIngredient, 1, 2)
+      )
+    ];
+    const confirmation = await page.request.post('/api/household/meal-planning/confirm', {
+      headers,
+      data: {
+        proposalId: `shopping-members-e2e-${testInfo.workerIndex}-${testInfo.retry}`,
+        weekStart,
+        householdMemberIds: [firstMemberId, secondMemberId],
+        events
+      }
+    });
+    expect(confirmation.status(), await confirmation.text()).toBe(200);
+    const confirmed = (await confirmation.json()) as ApiEnvelope<{
+      events: Array<{ participantIds: string[]; servings: number }>;
+    }>;
+    expect(confirmed.data.events).toHaveLength(9);
+    expect(confirmed.data.events.find((meal) => meal.participantIds.length === 2)).toMatchObject({
+      participantIds: [firstUserId, secondUserId],
+      servings: 2
+    });
+
+    const endDate = addDays(today, 30);
+    const previewPath = `/api/household/meal-planning/shopping-preview?startDate=${today}&endDate=${endDate}`;
+    const ownerPreviewResponse = await page.request.get(previewPath, { headers });
+    expect(ownerPreviewResponse.ok(), await ownerPreviewResponse.text()).toBeTruthy();
+    const ownerPreview = (await ownerPreviewResponse.json()) as ApiEnvelope<{
+      plannedMealCount: number;
+      requiredIngredients: Array<{ name: string; quantity: number; unit: string }>;
+    }>;
+    expect(ownerPreview.data.plannedMealCount).toBe(9);
+    expect(
+      ownerPreview.data.requiredIngredients.find(
+        (ingredient) => ingredient.name === sharedIngredient
+      )
+    ).toMatchObject({ quantity: 90, unit: 'g' });
+
+    const secondPreviewResponse = await secondPage.request.get(previewPath, {
+      headers: { ...secondHeaders, 'x-household-id': householdId }
+    });
+    expect(secondPreviewResponse.ok(), await secondPreviewResponse.text()).toBeTruthy();
+    const secondPreview = (await secondPreviewResponse.json()) as ApiEnvelope<{
+      plannedMealCount: number;
+      requiredIngredients: Array<{ name: string; quantity: number; unit: string }>;
+    }>;
+    expect(secondPreview.data).toEqual(ownerPreview.data);
+
+    await page.goto('/household?tab=tasks&planning=meals');
+    const shoppingTab = page.locator('[data-test="meal-proposal-step-tab-shopping"]');
+    await expect(shoppingTab).toBeVisible();
+    await shoppingTab.click();
+    const shoppingPanel = page.locator('[data-test="meal-shopping-step-panel"]');
+    await expect(shoppingPanel).toBeVisible();
+    const aggregateLine = page
+      .locator('[data-test^="meal-shopping-line-"]')
+      .filter({ hasText: sharedIngredient });
+    await expect(aggregateLine).toHaveCount(1);
+    await expect(aggregateLine.locator('[data-test="meal-shopping-quantity"]')).toHaveValue('90');
+    await expect(aggregateLine).toBeVisible();
+    const screenshotDirectory = resolve('.e2e-screenshots/household-meal-shopping-approval');
+    await mkdir(screenshotDirectory, { recursive: true });
+    if (testInfo.project.name.startsWith('mobile-')) {
+      await expectMobileShoppingLayout(page, viewport);
+      await aggregateLine.scrollIntoViewIfNeeded();
+      await page.screenshot({
+        path: join(screenshotDirectory, `${testInfo.project.name}-member-scope-line.png`),
+        fullPage: false,
+        animations: 'disabled'
+      });
+      await expectMobileShoppingActionReachable(page, viewport);
+    }
+    await page.screenshot({
+      path: join(screenshotDirectory, `${testInfo.project.name}-member-scope-preview.png`),
+      fullPage: false,
+      animations: 'disabled'
+    });
+  } finally {
+    await secondContext.close();
+  }
+});
+
 test('plan semanal de compra permite revisar, editar, cancelar y aprobar sin tocar el inventario', async ({
   page
 }, testInfo) => {
