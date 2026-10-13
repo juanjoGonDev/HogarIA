@@ -39,6 +39,7 @@ import { HouseholdPlanEditorComponent } from './household-plan-editor.component'
 import { HouseholdTasksComponent } from './household-tasks.component';
 import { HouseholdMealPlannerComponent } from './household-meal-planner.component';
 import { HouseholdMealSettingsComponent } from './household-meal-settings.component';
+import { HouseholdPlanningAutomationComponent } from './household-planning-automation.component';
 
 type PermissionGroup = 'pantry' | 'recipes' | 'calendar' | 'members' | 'settings';
 type HouseholdPlanningTab = 'meals' | 'tasks' | 'settings';
@@ -115,7 +116,8 @@ function completeMemberPermissions(value: unknown, role: MemberRole): MemberPerm
     HouseholdPlanEditorComponent,
     HouseholdTasksComponent,
     HouseholdMealPlannerComponent,
-    HouseholdMealSettingsComponent
+    HouseholdMealSettingsComponent,
+    HouseholdPlanningAutomationComponent
   ],
   template: `
     <div class="household">
@@ -570,6 +572,11 @@ function completeMemberPermissions(value: unknown, role: MemberRole): MemberPerm
             tabindex="0"
             data-test="household-planning-panel-settings"
           >
+            <app-household-planning-automation
+              *ngIf="activePlanningTab() === 'settings'"
+              [householdId]="household.id"
+              [canEdit]="household.myPermissions?.settings ?? household.myRole === 'admin'"
+            />
             <app-household-meal-settings
               *ngIf="activePlanningTab() === 'settings'"
               [householdId]="household.id"

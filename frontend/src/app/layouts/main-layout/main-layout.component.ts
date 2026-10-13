@@ -13,6 +13,7 @@ import { ConfirmDialogComponent } from '../../shared/components/ui/confirm-dialo
 import { ReceiptQueueComponent } from '../../shared/components/receipts/receipt-queue.component';
 import { PageContainerComponent } from '../../shared/components/page-container/page-container.component';
 import { HouseholdSwitcherComponent } from '../../shared/components/household-switcher.component';
+import { HouseholdPlanningAutomationNoticeComponent } from '../../shared/components/household-planning-automation-notice.component';
 import { HouseholdService } from '../../core/services/household.service';
 import type { TranslationKey } from '../../core/i18n';
 
@@ -43,7 +44,8 @@ interface NavItem {
     ConfirmDialogComponent,
     ReceiptQueueComponent,
     PageContainerComponent,
-    HouseholdSwitcherComponent
+    HouseholdSwitcherComponent,
+    HouseholdPlanningAutomationNoticeComponent
   ],
   template: `
     <div class="layout">
@@ -158,6 +160,13 @@ interface NavItem {
         </a>
       </nav>
     </div>
+
+    <app-household-planning-automation-notice
+      *ngIf="activeHouseholdId() as planningHouseholdId"
+      [householdId]="planningHouseholdId"
+      [canManage]="canManagePlanningAutomation()"
+      [canActivate]="canActivatePlanningAutomation()"
+    />
 
     <app-toast></app-toast>
     <app-confirm-dialog></app-confirm-dialog>
@@ -538,6 +547,23 @@ export class MainLayoutComponent implements OnInit {
 
   /** La cola está asociada al hogar y no debe consultar datos antes de pertenecer a uno. */
   readonly hasActiveHousehold = computed(() => Boolean(this.householdService.activeHouseholdId()));
+  readonly activeHouseholdId = computed(() => this.householdService.activeHouseholdId());
+  readonly canManagePlanningAutomation = computed(() => {
+    const household = this.householdService.household();
+    return Boolean(
+      household &&
+      household.id === this.householdService.activeHouseholdId() &&
+      (household.myPermissions?.settings ?? household.myRole === 'admin')
+    );
+  });
+  readonly canActivatePlanningAutomation = computed(() => {
+    const household = this.householdService.household();
+    return Boolean(
+      household &&
+      household.id === this.householdService.activeHouseholdId() &&
+      (household.myPermissions?.calendar?.edit ?? household.myRole === 'admin')
+    );
+  });
 
   /** Personal mode stays available; inside a home, configuration requires that home's settings permission. */
   readonly canManageAiSettings = computed(() => {

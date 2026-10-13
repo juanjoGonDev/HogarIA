@@ -15,6 +15,8 @@ import { HouseholdTasksService } from '../../core/services/household-tasks.servi
 import { HouseholdMealPlanningService } from '../../core/services/household-meal-planning.service';
 import { HouseholdMealProposalService } from '../../core/services/household-meal-proposal.service';
 import { HouseholdMealShoppingService } from '../../core/services/household-meal-shopping.service';
+import { HouseholdPlanningAutomationService } from '../../core/services/household-planning-automation.service';
+import { HouseholdPlanningAutomationComponent } from './household-planning-automation.component';
 import type { Household } from '../../shared/models/household.model';
 import { householdEn, householdEs } from '../../core/i18n/dict/household';
 
@@ -53,6 +55,7 @@ describe('HouseholdComponent', () => {
   let queryParams: BehaviorSubject<ParamMap>;
   let mealPlanning: jasmine.SpyObj<HouseholdMealPlanningService>;
   let mealShopping: jasmine.SpyObj<HouseholdMealShoppingService>;
+  let planningAutomation: jasmine.SpyObj<HouseholdPlanningAutomationService>;
 
   function createHouseholdService() {
     const householdState = signal<Household | null>(null);
@@ -136,6 +139,37 @@ describe('HouseholdComponent', () => {
         warnings: []
       })
     );
+    planningAutomation = jasmine.createSpyObj<HouseholdPlanningAutomationService>(
+      'HouseholdPlanningAutomationService',
+      ['load', 'save', 'snapshotFor']
+    );
+    planningAutomation.load.and.returnValue(
+      of({
+        enabled: false,
+        mode: null,
+        scopes: [],
+        weekday: null,
+        localTime: null,
+        timeZone: null,
+        version: 0,
+        nextRunAt: null,
+        nextRun: null
+      })
+    );
+    planningAutomation.save.and.returnValue(
+      of({
+        enabled: false,
+        mode: null,
+        scopes: [],
+        weekday: null,
+        localTime: null,
+        timeZone: null,
+        version: 0,
+        nextRunAt: null,
+        nextRun: null
+      })
+    );
+    planningAutomation.snapshotFor.and.returnValue(null);
     mealShopping.approve.and.returnValue(
       of({
         listId: null,
@@ -158,6 +192,7 @@ describe('HouseholdComponent', () => {
         { provide: ToastService, useValue: toast },
         { provide: HouseholdMealPlanningService, useValue: mealPlanning },
         { provide: HouseholdMealShoppingService, useValue: mealShopping },
+        { provide: HouseholdPlanningAutomationService, useValue: planningAutomation },
         {
           provide: HouseholdMealProposalService,
           useValue: jasmine.createSpyObj<HouseholdMealProposalService>(
@@ -484,6 +519,13 @@ describe('HouseholdComponent', () => {
     expect(settingsDebugElement.componentInstance.householdId).toBe(home.id);
     expect(settingsDebugElement.componentInstance.canEdit).toBeTrue();
     expect(mealPlanning.load).toHaveBeenCalledOnceWith(home.id);
+    const automationDebugElement = fixture.debugElement.query(
+      By.directive(HouseholdPlanningAutomationComponent)
+    );
+    expect(automationDebugElement).not.toBeNull();
+    expect(automationDebugElement.componentInstance.householdId).toBe(home.id);
+    expect(automationDebugElement.componentInstance.canEdit).toBeTrue();
+    expect(planningAutomation.load).toHaveBeenCalledOnceWith(home.id);
     expect(
       fixture.nativeElement.querySelector('[data-test="household-panel-tasks"]')?.hidden
     ).toBeFalse();

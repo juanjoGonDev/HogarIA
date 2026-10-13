@@ -1,0 +1,257 @@
+<section
+  class="planning-automation"
+  aria-labelledby="planning-automation-title"
+  [attr.aria-busy]="loading || saving"
+  data-test="planning-automation-settings"
+>
+  <header class="planning-automation__header">
+    <h2 id="planning-automation-title">{{ 'household.automation.title' | t }}</h2>
+    <p>{{ 'household.automation.description' | t }}</p>
+  </header>
+
+  <p *ngIf="loading" class="planning-automation__status" role="status">
+    {{ 'household.automation.loading' | t }}
+  </p>
+
+  <div *ngIf="loadError" class="planning-automation__error" role="alert">
+    <p>{{ 'household.automation.load_error' | t }}</p>
+    <app-button
+      variant="outline"
+      size="md"
+      [disabled]="loading"
+      (onClick)="load()"
+      data-test="planning-automation-retry"
+    >
+      {{ 'household.automation.retry' | t }}
+    </app-button>
+  </div>
+
+  <ng-container *ngIf="!loading && !loadError && response">
+    <p *ngIf="!canEdit" class="planning-automation__readonly">
+      {{ 'household.automation.read_only' | t }}
+    </p>
+
+    <fieldset class="planning-automation__fields" [disabled]="controlsDisabled">
+      <legend class="planning-automation__sr-only">{{ 'household.automation.title' | t }}</legend>
+
+      <fieldset class="planning-automation__group">
+        <legend>{{ 'household.automation.mode' | t }}</legend>
+        <label class="planning-automation__choice">
+          <input
+            type="radio"
+            name="household-planning-automation-mode"
+            value="generate"
+            [checked]="draft.mode === 'generate'"
+            (change)="setMode('generate')"
+            data-test="planning-automation-mode-generate"
+          />
+          <span>
+            <strong>{{ 'household.automation.generate' | t }}</strong>
+            <span>{{ 'household.automation.generate_help' | t }}</span>
+          </span>
+        </label>
+        <label class="planning-automation__choice">
+          <input
+            type="radio"
+            name="household-planning-automation-mode"
+            value="repeat"
+            [checked]="draft.mode === 'repeat'"
+            (change)="setMode('repeat')"
+            data-test="planning-automation-mode-repeat"
+          />
+          <span>
+            <strong>{{ 'household.automation.repeat' | t }}</strong>
+            <span>{{ 'household.automation.repeat_help' | t }}</span>
+          </span>
+        </label>
+      </fieldset>
+
+      <fieldset class="planning-automation__group">
+        <legend>{{ 'household.automation.scopes' | t }}</legend>
+        <label class="planning-automation__checkbox">
+          <input
+            type="checkbox"
+            [checked]="draft.scopes.includes('tasks')"
+            (change)="setScope('tasks', $any($event.target).checked)"
+            data-test="planning-automation-scope-tasks"
+          />
+          <span>{{ 'household.automation.tasks' | t }}</span>
+        </label>
+        <label class="planning-automation__checkbox">
+          <input
+            type="checkbox"
+            [checked]="draft.scopes.includes('meals')"
+            (change)="setScope('meals', $any($event.target).checked)"
+            data-test="planning-automation-scope-meals"
+          />
+          <span>{{ 'household.automation.meals' | t }}</span>
+        </label>
+      </fieldset>
+
+      <div class="planning-automation__schedule">
+        <div class="planning-automation__field">
+          <span>{{ 'household.automation.weekday' | t }}</span>
+          <app-picker
+            id="planning-automation-weekday"
+            [label]="'household.automation.weekday' | t"
+            [placeholder]="'household.automation.select_weekday' | t"
+            [options]="weekdayOptions()"
+            [value]="weekdayValue"
+            [disabled]="controlsDisabled"
+            (valueChange)="setWeekday($event)"
+            data-test="planning-automation-weekday"
+          />
+        </div>
+
+        <label class="planning-automation__field" for="planning-automation-time">
+          <span>{{ 'household.automation.local_time' | t }}</span>
+          <input
+            id="planning-automation-time"
+            name="planning-automation-time"
+            type="time"
+            [value]="draft.localTime"
+            (input)="setLocalTime($any($event.target).value)"
+            data-test="planning-automation-local-time"
+          />
+        </label>
+
+        <label
+          class="planning-automation__field planning-automation__field--timezone"
+          for="planning-automation-timezone"
+        >
+          <span>{{ 'household.automation.time_zone' | t }}</span>
+          <input
+            id="planning-automation-timezone"
+            name="planning-automation-timezone"
+            type="text"
+            autocomplete="off"
+            autocapitalize="off"
+            spellcheck="false"
+            maxlength="100"
+            [placeholder]="'household.automation.time_zone_placeholder' | t"
+            [value]="draft.timeZone"
+            (input)="setTimeZone($any($event.target).value)"
+            [attr.aria-invalid]="validationRequested && !hasValidTimeZone ? 'true' : null"
+            [attr.aria-describedby]="'planning-automation-timezone-help'"
+            data-test="planning-automation-time-zone"
+          />
+          <span id="planning-automation-timezone-help" class="planning-automation__hint">
+            {{ 'household.automation.time_zone_help' | t }}
+          </span>
+        </label>
+      </div>
+    </fieldset>
+
+    <section
+      *ngIf="lastRun as run"
+      class="planning-automation__last-run"
+      aria-labelledby="planning-automation-last-run-title"
+      [attr.aria-busy]="retrying"
+      data-test="planning-automation-last-run"
+    >
+      <header>
+        <h3 id="planning-automation-last-run-title">{{ 'household.automation.last_run' | t }}</h3>
+        <span class="planning-automation__run-status" [attr.data-status]="run.status">
+          {{ runStatusKey(run.status) | t }}
+        </span>
+      </header>
+      <dl>
+        <div>
+          <dt>{{ 'household.automation.target_week' | t }}</dt>
+          <dd>{{ run.targetWeekStart }}</dd>
+        </div>
+        <div>
+          <dt>{{ 'household.automation.updated_at' | t }}</dt>
+          <dd>{{ run.updatedAt | date: 'short' : response?.timeZone || 'UTC' }}</dd>
+        </div>
+      </dl>
+
+      <p *ngIf="run.status === 'review_required'" class="planning-automation__review-hint">
+        {{ 'household.automation.review_required_help' | t }}
+      </p>
+      <p *ngIf="run.status === 'review_required' && !canEdit" class="planning-automation__readonly">
+        {{ 'household.automation.read_only' | t }}
+      </p>
+      <app-button
+        *ngIf="run.status === 'review_required'"
+        variant="outline"
+        size="md"
+        [loading]="retrying"
+        [disabled]="!canRetryLastRun"
+        (onClick)="retryLastRun()"
+        data-test="planning-automation-review-retry"
+      >
+        {{ 'household.automation.review_retry' | t }}
+      </app-button>
+
+      <p *ngIf="retrying" class="planning-automation__status" role="status" aria-live="polite">
+        {{ 'household.automation.retrying' | t }}
+      </p>
+      <p *ngIf="retryErrorKey" class="planning-automation__error-text" role="alert">
+        {{ retryErrorKey | t }}
+      </p>
+      <p
+        *ngIf="retryNoticeKey"
+        class="planning-automation__success"
+        role="status"
+        aria-live="polite"
+      >
+        {{ retryNoticeKey | t }}
+      </p>
+      <app-button
+        *ngIf="retryNeedsRefresh && !retrying"
+        variant="outline"
+        size="md"
+        (onClick)="refreshRetryState()"
+        data-test="planning-automation-refresh-run"
+      >
+        {{ 'household.automation.refresh_run' | t }}
+      </app-button>
+    </section>
+
+    <p
+      *ngIf="validationRequested && !hasValidSchedule"
+      class="planning-automation__error-text"
+      role="alert"
+      data-test="planning-automation-validation"
+    >
+      {{ 'household.automation.invalid_schedule' | t }}
+    </p>
+
+    <div
+      *ngIf="versionConflict && errorKey as conflictKey"
+      class="planning-automation__error"
+      role="alert"
+    >
+      <p>{{ conflictKey | t }}</p>
+      <app-button
+        variant="outline"
+        size="md"
+        (onClick)="reloadCurrent()"
+        data-test="planning-automation-reload-current"
+      >
+        {{ 'household.automation.reload_current' | t }}
+      </app-button>
+    </div>
+
+    <p *ngIf="errorKey && !versionConflict" class="planning-automation__error-text" role="alert">
+      {{ errorKey | t }}
+    </p>
+    <p *ngIf="noticeKey" class="planning-automation__success" role="status" aria-live="polite">
+      {{ noticeKey | t }}
+    </p>
+
+    <footer class="planning-automation__footer">
+      <app-button
+        variant="primary"
+        size="md"
+        [loading]="saving"
+        [disabled]="!canSave"
+        (onClick)="save()"
+        data-test="planning-automation-save"
+      >
+        {{ (saving ? 'household.automation.saving' : 'household.automation.save') | t }}
+      </app-button>
+    </footer>
+  </ng-container>
+</section>
