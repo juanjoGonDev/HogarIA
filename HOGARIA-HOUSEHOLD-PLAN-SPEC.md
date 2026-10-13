@@ -984,6 +984,43 @@ la receta base. El tiempo de preparación/cocción describe el método, no escal
 raciones; se conserva y la receta debe advertir si hace falta cocinar en tandas. La misma aritmética
 se aplica al ajustar porciones de una receta guardada con rendimiento base conocido.
 
+### Estado de implementación y evidencia (13-10-2026)
+
+Esta extensión sigue **parcial y en curso**; no se marca ningún criterio completo por haber entregado
+solo su backend o sus pruebas unitarias.
+
+- **Alta obligatoria y puerta del servidor — parcial:** el registro conduce a crear/unirse al hogar y
+  el montaje real de `/api/*` rechaza funciones protegidas sin membresía activa, dejando disponibles
+  descubrimiento/crear/unirse. `createHousehold` inicializa preferencias compartidas desde el creador;
+  la operación es idempotente y `join` no reemplaza la configuración existente. Las pruebas de
+  rutas de cuenta ahora preparan una membresía sintética para ejercitar perfil/avatar/password después
+  del onboarding; la puerta real tiene su propio test con `createApp`. Falta E2E real de alta,
+  invitación, interrupción/reanudación y móvil.
+- **Configuración de comidas — backend parcial:** `GET/PATCH /api/household/meal-planning`, columnas
+  de hogar/miembro, validación de permiso existente, resolución por miembro e inicialización del hogar
+  están implementados. Los overrides empiezan apagados; la preferencia de horario personal procede de
+  `users.preferences.mealPlan/mealTimes` al activar override, sin copiar alergias ni gustos al hogar.
+  Aún falta integrar esta resolución con el planificador y cerrar la UI.
+- **Plan semanal aún no cumple el contrato nuevo:** en el estado de este commit, `POST /api/ai/plan-week`
+  todavía usa preferencias/horarios de la cuenta, persiste durante la generación en vez de devolver
+  una vista previa sin escrituras, y el modelo/calendario actual no guarda participantes compartidos.
+  La receta IA existente también genera para las raciones solicitadas, no una base normalizada a una
+  ración. Estas son brechas pendientes, no validaciones aprobadas.
+- **Validación reproducible ejecutada en Windows:**
+
+  ```powershell
+  $env:DATABASE_PATH=':memory:'
+  pnpm --filter @hogaria/server exec vitest run src/utils/household-meal-planning.store.spec.ts src/routes/household-meal-planning.routes.spec.ts src/routes/household.routes.spec.ts src/middleware/household-required.middleware.spec.ts src/routes/auth.routes.spec.ts
+  pnpm --filter @hogaria/server exec tsc --noEmit -p tsconfig.json
+  ```
+
+  Resultado: **5 archivos / 65 tests aprobados**, TypeScript limpio. El hook pre-commit también pasó
+  Prettier y `check:ui` (**230 ficheros / 21 reglas**). No se llamó a proveedor real. La cobertura
+  agregada del criterio, UI/E2E y comportamiento completo del planificador siguen sin validarse.
+
+El análisis previo del planificador está reflejado arriba para orientar la próxima unidad; todos los
+criterios inferiores permanecen sin marcar hasta validar cada condición en su alcance completo.
+
 ### Criterios pendientes de aceptación — no implementados
 
 - [ ] **QA-HOME-MEALS.SETTINGS.1** — API, persistencia, permisos y resolución por campo; defaults de

@@ -2544,6 +2544,13 @@ reescribe automáticamente. La configuración común, los overrides y sus permis
 `HOGARIA-HOUSEHOLD-PLAN-SPEC.md` (extensión aprobada en PR #47). La sección siguiente sobre recurrencia
 de eventos es independiente y sigue vigente.
 
+**Estado del código en PR #47 (13-10-2026):** este párrafo describe el contrato de destino, no una
+entrega completa. La API/persistencia/semilla del hogar y el alta con puerta de membresía tienen
+implementación parcial y pruebas unitarias. `plan-week` aún lee las preferencias antiguas y guarda sin
+vista previa; la resolución por miembro no está conectada todavía. Evidencia y límites reproducibles
+están en `HOGARIA-HOUSEHOLD-PLAN-SPEC.md`, «Estado de implementación y evidencia»; no se declara
+`QA-HOME-MEALS.SETTINGS.1` ni `QA-HOME-MEALS.PLAN.1` completo.
+
 ### R. Recurrencia de los eventos de la casa
 
 - [ ] **El dato, dos columnas**: `calendar_events.recurrence` (`'none' | 'daily' | 'weekly'`, `NOT NULL DEFAULT
