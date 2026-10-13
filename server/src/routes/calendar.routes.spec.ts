@@ -165,7 +165,9 @@ describe('calendario de la casa (§8f)', () => {
     const alice = await makeUser('meal-alice', householdId, 'Alice');
     const bob = await makeUser('meal-bob', householdId, 'Bob');
     const carol = await makeUser('meal-carol', householdId, 'Carol');
-    for (const user of [alice, bob, carol]) {
+    const dave = await makeUser('meal-dave', householdId, 'Dave');
+    const erin = await makeUser('meal-erin', householdId, 'Erin');
+    for (const user of [alice, bob, carol, dave, erin]) {
       db.prepare(
         'INSERT INTO household_members (id, household_id, user_id, role, permissions) VALUES (?, ?, ?, ?, ?)'
       ).run(
@@ -206,6 +208,12 @@ describe('calendario de la casa (§8f)', () => {
         instructions: ['Lavar', 'Cocer'],
         prompt: 'dato privado que no debe viajar'
       }
+    });
+    await call(alice, 'POST', '/meals', {
+      date: '2026-10-14',
+      mealType: 'dinner',
+      customMeal: 'Comida personal de Alice',
+      servings: 1
     });
     db.prepare('UPDATE meals SET notes = ? WHERE id = ?').run(
       'nota privada de Alice',
@@ -249,7 +257,48 @@ describe('calendario de la casa (§8f)', () => {
     const carolData = (await data(
       await call(carol, 'GET', '/range?startDate=2026-10-14&endDate=2026-10-14')
     )) as any;
-    expect(carolData.meals).toEqual([]);
+    expect(carolData.meals.filter((meal: any) => meal.isShared)).toHaveLength(1);
+    expect(carolData.meals.map((meal: any) => meal.custom_meal)).toEqual(['Guiso común']);
+    expect(carolData.meals[0]).toMatchObject({
+      participantIds: [alice.id, bob.id],
+      participants: [
+        { id: alice.id, name: 'Alice' },
+        { id: bob.id, name: 'Bob' }
+      ],
+      calendar_id: null
+    });
+    expect(JSON.stringify(carolData.meals)).not.toContain('Alice-goal');
+    expect(JSON.stringify(carolData.meals)).not.toContain('nota privada');
+
+    // La ruta semanal también proyecta el plan del hogar si el miembro aún no tiene
+    // calendario propio, sin copiar los objetivos privados de quien confirmó la propuesta.
+    const carolWeek = (await data(await call(carol, 'GET', ''))) as any;
+    expect(carolWeek.meals.filter((meal: any) => meal.isShared)).toHaveLength(1);
+    expect(carolWeek.meals.map((meal: any) => meal.custom_meal)).toEqual(['Guiso común']);
+    expect(carolWeek.goals).toEqual({});
+    expect(carolWeek.id).toBeNull();
+
+    db.prepare('UPDATE household_members SET permissions = ? WHERE user_id = ?').run(
+      JSON.stringify({ calendar: { view: false, edit: true } }),
+      dave.id
+    );
+    db.prepare('UPDATE household_members SET is_active = 0 WHERE user_id = ?').run(erin.id);
+    expect(
+      (
+        (await data(
+          await call(dave, 'GET', '/range?startDate=2026-10-14&endDate=2026-10-14')
+        )) as any
+      ).meals
+    ).toEqual([]);
+    expect(await data(await call(dave, 'GET', ''))).toBeNull();
+    expect(
+      (
+        (await data(
+          await call(erin, 'GET', '/range?startDate=2026-10-14&endDate=2026-10-14')
+        )) as any
+      ).meals
+    ).toEqual([]);
+    expect(await data(await call(erin, 'GET', ''))).toBeNull();
     expect(
       db
         .prepare('SELECT COUNT(*) AS count FROM meals WHERE source_proposal_id = ?')
@@ -295,7 +344,9 @@ describe('calendario de la casa (§8f)', () => {
     expect(bobWeek.meals.filter((meal: any) => meal.isShared)).toHaveLength(1);
     expect(bobWeek.meals.find((meal: any) => meal.isShared).calendar_id).toBeNull();
     expect(bobWeek.goals).toEqual({ private: 'bob-goal' });
-    expect(((await data(await call(alice, 'GET', ''))) as any).meals).toEqual([]);
+    expect(
+      ((await data(await call(alice, 'GET', ''))) as any).meals.filter((meal: any) => meal.isShared)
+    ).toHaveLength(1);
 
     db.prepare('UPDATE household_members SET permissions = ? WHERE user_id = ?').run(
       JSON.stringify({ calendar: { view: false, edit: true } }),

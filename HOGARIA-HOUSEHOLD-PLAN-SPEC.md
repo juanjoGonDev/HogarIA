@@ -1099,17 +1099,21 @@ solo su backend o sus pruebas unitarias.
   `.e2e-screenshots/household-meal-planning/chromium-proposal.png`,
   `mobile-chrome-proposal-top.png` y `mobile-chrome-proposal.png` (CTA). Sin proveedor real; quedan
   pendientes el recorrido completo de combinaciones de preferencias y la auditoría visual global.
-- **Calendario compartido — backend parcial integrado:** un evento compartido se guarda una vez y sus
-  asignaciones identifican usuarios del hogar. El calendario actual todavía filtra cada comida por
-  participante (pendiente de cambiar según la decisión del 13-10-2026); la lectura del plan deberá
-  exponer el evento a todos los miembros activos con `calendar.view`, sin notas/objetivos privados.
-  Registrar/corregir consumo seguirá limitado a participantes asignados. El consumo dispone de GET/PUT
-  separado, permiso por miembro asignado con `calendar.view`, versiones optimistas, idempotencia,
-  correcciones y un ledger de movimientos de stock transaccional. La coincidencia del producto es
-  estricta por nombre normalizado y unidad; inventario privado, conversión de unidades y sugerencias
-  aproximadas quedan excluidos deliberadamente. La lectura existente del calendario aún no incluye este
-  estado; la futura UI puede obtenerlo desde el endpoint GET. Pendiente recorrido E2E real, UI e integración
-  de compra.
+- **Calendario compartido — backend parcial integrado:** un evento del plan se guarda una vez y sus
+  asignaciones identifican usuarios del hogar. `GET /api/calendar` y `/range` muestran todas las comidas
+  confirmadas del plan a cualquier miembro activo con `calendar.view`, aunque la asignación sea
+  individual; no comparten calendarios personales ni objetivos, notas o prompts privados. Si el lector
+  aún no tiene calendario semanal propio, la ruta proyecta la última semana del plan sin materializar
+  una fila ni copiar objetivos de otra persona. Registrar/corregir consumo sigue limitado a participantes
+  asignados. Test-first confirmó el fallo previo (lector activo no asignado recibía cero comidas); tras
+  el fix, tests focales de calendario/almacén pasan **60/60** con cobertura **88,43/79,56/94,52/90,74 %**
+  (statements/branches/funciones/líneas), `tsc --noEmit` y hooks pasan; la suite focal de consumo sigue
+  pasando **7/7**. Aún falta E2E integrado en escritorio/móvil y mostrar/validar el estado de consumo en
+  la UI del calendario. El consumo dispone de GET/PUT separado, permiso por miembro asignado con
+  `calendar.view`, versiones optimistas, idempotencia, correcciones y un ledger de movimientos de stock
+  transaccional. La coincidencia del producto es estricta por nombre normalizado y unidad; inventario
+  privado, conversión de unidades y sugerencias aproximadas quedan excluidos deliberadamente. Pendientes
+  el recorrido E2E real, UI e integración de compra.
 - **Recetas por ración — backend/UI integrado:** el contrato nuevo usa `baseServings: 1`; la generación
   normaliza cantidades para una ración, el cliente escala cantidades localmente y conserva tiempos y
   receta base, con aviso de cocción por tandas. Los cambios del worktree ya están en esta rama; su

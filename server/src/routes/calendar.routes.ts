@@ -27,7 +27,10 @@ import {
 import { readForm } from '../utils/form-body.js';
 import { describeIssues } from '../schemas/form.js';
 import { activeHouseholdId, activeHouseholdMemberCount } from '../utils/household-context.js';
-import { listSharedMealsForParticipant } from '../utils/shared-meal-calendar.store.js';
+import {
+  canViewSharedMeals,
+  listSharedMealsForHouseholdViewer
+} from '../utils/shared-meal-calendar.store.js';
 import type { AppEnv } from '../types/hono-env.js';
 
 const calendarRoutes = new Hono<AppEnv>();
@@ -52,7 +55,7 @@ calendarRoutes.get('/', async (c) => {
   const householdId = activeHouseholdId(db, userId);
 
   // Get current week's calendar
-  const calendar = db
+  const personalCalendar = db
     .prepare(
       `
     SELECT * FROM weekly_calendars 
@@ -63,13 +66,44 @@ calendarRoutes.get('/', async (c) => {
     )
     .get(userId, householdId) as any;
 
+  // A confirmed home plan may exist before this member has created a personal weekly calendar.
+  // In that case, project the most recent plan week without copying another member's goals or
+  // materializing a calendar row just because it was read.
+  let sharedPlanWeek: { week_start: string; week_end: string } | undefined;
+  if (!personalCalendar && canViewSharedMeals(db, householdId, userId)) {
+    sharedPlanWeek = db
+      .prepare(
+        `SELECT wc.week_start, wc.week_end
+         FROM meals m
+         JOIN weekly_calendars wc ON wc.id = m.calendar_id
+         WHERE wc.household_id = ? AND m.source_proposal_id IS NOT NULL
+         ORDER BY m.date DESC, m.created_at DESC
+         LIMIT 1`
+      )
+      .get(householdId) as { week_start: string; week_end: string } | undefined;
+  }
+
+  const calendar =
+    personalCalendar ??
+    (sharedPlanWeek
+      ? {
+          id: null,
+          household_id: householdId,
+          user_id: userId,
+          week_start: sharedPlanWeek.week_start,
+          week_end: sharedPlanWeek.week_end,
+          goals: '{}'
+        }
+      : null);
+
   if (!calendar) {
     return c.json({ success: true, data: null });
   }
 
-  const personalMeals = db
-    .prepare(
-      `
+  const personalMeals = personalCalendar
+    ? (db
+        .prepare(
+          `
     SELECT m.*, r.name as recipe_name
     FROM meals m
     LEFT JOIN recipes r ON r.id = m.recipe_id
@@ -83,11 +117,12 @@ calendarRoutes.get('/', async (c) => {
         WHEN 'dinner' THEN 4
       END
   `
-    )
-    .all(calendar.id) as Array<Record<string, unknown>>;
+        )
+        .all(personalCalendar.id) as Array<Record<string, unknown>>)
+    : [];
   const meals = sortMeals([
     ...personalMeals.map(({ source_proposal_id: _sourceProposalId, ...meal }) => meal),
-    ...listSharedMealsForParticipant(
+    ...listSharedMealsForHouseholdViewer(
       db,
       userId,
       householdId,
@@ -157,12 +192,12 @@ calendarRoutes.get('/range', async (c) => {
     )
     .all(startDate, endDate, userId, householdId) as Array<Record<string, unknown>>;
 
-  // Una comida confirmada sigue siendo una sola fila de `meals`. La otra persona solo recibe las
-  // filas que la nombran explícitamente y conserva sus propios objetivos del calendario; no se
-  // comparte el resto del calendario personal ni se usa el switch general `shareCalendar`.
+  // Una comida confirmada sigue siendo una sola fila de `meals`. Todos los lectores del calendario
+  // del hogar ven el plan; participants conserva a quién va asignada. No se comparte el resto del
+  // calendario personal ni se usa el switch general `shareCalendar`.
   const meals = sortMeals([
     ...personalMeals.map(({ source_proposal_id: _sourceProposalId, ...meal }) => meal),
-    ...listSharedMealsForParticipant(db, userId, householdId, startDate, endDate)
+    ...listSharedMealsForHouseholdViewer(db, userId, householdId, startDate, endDate)
   ]);
 
   // Objetivos de la semana que se esta mirando (si no existe, los ultimos).

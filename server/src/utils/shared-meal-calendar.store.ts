@@ -593,8 +593,8 @@ export function canViewSharedMeals(
   return Boolean(householdId && canUseCalendarPermission(db, householdId, userId, 'view'));
 }
 
-/** Returns only explicitly assigned meal rows in the viewer's active home, with private fields stripped. */
-export function listSharedMealsForParticipant(
+/** Returns household-plan meals to any active calendar reader, with private fields stripped. */
+export function listSharedMealsForHouseholdViewer(
   db: SqliteDb,
   userId: string,
   householdId: string | null,
@@ -615,10 +615,6 @@ export function listSharedMealsForParticipant(
        WHERE m.date BETWEEN ? AND ?
          AND m.source_proposal_id IS NOT NULL
          AND wc.household_id = ?
-         AND EXISTS (
-           SELECT 1 FROM meal_participants mp
-           WHERE mp.meal_id = m.id AND mp.user_id = ?
-         )
        ORDER BY m.date,
          CASE m.meal_type
            WHEN 'breakfast' THEN 1
@@ -628,7 +624,7 @@ export function listSharedMealsForParticipant(
          END,
          m.time`
     )
-    .all(userId, from, to, householdId, userId) as Array<
+    .all(userId, from, to, householdId) as Array<
     Record<string, unknown> & {
       id: string;
       recipe_snapshot: string | null;
