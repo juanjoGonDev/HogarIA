@@ -142,6 +142,7 @@
                   [attr.x]="spaceCenter(space).x"
                   [attr.y]="spaceCenter(space).y - 120"
                   class="tasks-map__name"
+                  [class.tasks-map__name--compact]="!spaceMapGlyphVisible(space)"
                 >
                   {{ areaLabel(space) }}
                 </text>

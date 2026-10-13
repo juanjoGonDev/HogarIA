@@ -10,7 +10,8 @@ import {
   openingSegment,
   openingRails,
   doorSwing,
-  polygonCentroid
+  polygonCentroid,
+  polygonMinimumSpan
 } from './household-plan-editor.utils';
 import type {
   HouseholdPlanFloor,
@@ -315,6 +316,23 @@ describe('household plan editor geometry helpers', () => {
     ]);
     expect(center.x).toBeCloseTo(309.09, 1);
     expect(center.y).toBeCloseTo(331.82, 1);
+  });
+
+  it('measures the narrowest span of irregular room footprints', () => {
+    expect(
+      polygonMinimumSpan([
+        { x: 0, y: 0 },
+        { x: 1300, y: 0 },
+        { x: 1300, y: 1200 },
+        { x: 0, y: 1200 }
+      ])
+    ).toBe(1200);
+    expect(
+      polygonMinimumSpan([
+        { x: 0, y: 0 },
+        { x: 400, y: 100 }
+      ])
+    ).toBe(0);
   });
 
   it('creates only supported additional floors and deep-clones drafts', () => {

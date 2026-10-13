@@ -40,10 +40,12 @@ import type {
 import { assignHouseholdTasksFairly } from './household-task-assignment';
 import { getHouseholdAreaLabel } from './household-area-catalog';
 import {
+  PLAN_MAP_DETAIL_MIN_SPAN,
   doorSwing as makeDoorSwing,
   openingRails as makeOpeningRails,
   openingSegment,
-  polygonCentroid
+  polygonCentroid,
+  polygonMinimumSpan
 } from './household-plan-editor.utils';
 
 interface WeekDay {
@@ -51,8 +53,6 @@ interface WeekDay {
   label: string;
   shortLabel: string;
 }
-
-const MAP_OWNER_LABEL_MIN_SPAN = 1_600;
 
 @Component({
   selector: 'app-household-tasks',
@@ -435,18 +435,15 @@ export class HouseholdTasksComponent implements OnChanges {
   }
 
   spaceMapAssigneeLabelVisible(space: HouseholdPlanSpace): boolean {
-    return this.spaceMapSpan(space) >= MAP_OWNER_LABEL_MIN_SPAN;
+    return this.spaceMapSpan(space) >= PLAN_MAP_DETAIL_MIN_SPAN;
   }
 
   spaceMapGlyphVisible(space: HouseholdPlanSpace): boolean {
-    return this.spaceMapSpan(space) >= MAP_OWNER_LABEL_MIN_SPAN;
+    return this.spaceMapSpan(space) >= PLAN_MAP_DETAIL_MIN_SPAN;
   }
 
   private spaceMapSpan(space: HouseholdPlanSpace): number {
-    if (space.polygon.length < 3) return 0;
-    const xs = space.polygon.map((point) => point.x);
-    const ys = space.polygon.map((point) => point.y);
-    return Math.min(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+    return polygonMinimumSpan(space.polygon);
   }
 
   memberInitials(member: HouseholdMember): string {

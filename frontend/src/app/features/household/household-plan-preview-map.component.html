@@ -65,23 +65,28 @@
           />
         </ng-container>
       </ng-container>
-      <svg
-        *ngFor="let space of mapFloor.spaces"
-        householdAreaGlyph
-        [kind]="space.kind"
-        [attr.x]="spaceCenter(space).x - 340"
-        [attr.y]="spaceCenter(space).y - 760"
-        width="680"
-        height="680"
-        viewBox="0 0 64 64"
-        class="plan-compare-canvas__glyph"
-        aria-hidden="true"
-      ></svg>
+      <ng-container *ngFor="let space of mapFloor.spaces">
+        <svg
+          *ngIf="spaceGlyphVisible(space)"
+          householdAreaGlyph
+          [kind]="space.kind"
+          [attr.x]="spaceCenter(space).x - 340"
+          [attr.y]="spaceCenter(space).y - 760"
+          [attr.data-space-id]="space.id"
+          width="680"
+          height="680"
+          viewBox="0 0 64 64"
+          class="plan-compare-canvas__glyph"
+          aria-hidden="true"
+        ></svg>
+      </ng-container>
       <text
         *ngFor="let space of mapFloor.spaces"
+        [attr.data-space-id]="space.id"
         [attr.x]="spaceCenter(space).x"
         [attr.y]="spaceCenter(space).y"
         class="plan-compare-canvas__label"
+        [class.plan-compare-canvas__label--compact]="!spaceGlyphVisible(space)"
       >
         {{ space.label }}
       </text>

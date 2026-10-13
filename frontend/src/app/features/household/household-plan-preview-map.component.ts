@@ -7,10 +7,12 @@ import type {
   HouseholdPlanSpace
 } from '../../shared/models/household-plan.model';
 import {
+  PLAN_MAP_DETAIL_MIN_SPAN,
   doorSwing as makeDoorSwing,
   openingRails as makeOpeningRails,
   openingSegment,
-  polygonCentroid
+  polygonCentroid,
+  polygonMinimumSpan
 } from './household-plan-editor.utils';
 import { HouseholdAreaGlyphComponent } from './household-area-glyph.component';
 
@@ -60,6 +62,10 @@ export class HouseholdPlanPreviewMapComponent {
 
   spaceCenter(space: HouseholdPlanSpace): HouseholdPlanPoint {
     return polygonCentroid(space.polygon);
+  }
+
+  spaceGlyphVisible(space: HouseholdPlanSpace): boolean {
+    return polygonMinimumSpan(space.polygon) >= PLAN_MAP_DETAIL_MIN_SPAN;
   }
 
   openingLine(

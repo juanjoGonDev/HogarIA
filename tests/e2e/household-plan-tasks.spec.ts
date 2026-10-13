@@ -2971,6 +2971,24 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
       hasText: 'Aseo'
     })
   ).toBeVisible();
+  const proposalMap = page.locator(
+    '.plan-review__compare-card--proposal .plan-compare-canvas__drawing'
+  );
+  const proposalMapCounts = await proposalMap.evaluate((drawing) => ({
+    spaces: drawing.querySelectorAll('.plan-compare-canvas__space').length,
+    labels: drawing.querySelectorAll('.plan-compare-canvas__label').length
+  }));
+  expect(proposalMapCounts.labels).toBe(proposalMapCounts.spaces);
+  const compactRoomLabel = page.locator(
+    '.plan-review__compare-card--proposal .plan-compare-canvas__label--compact[data-space-id="space-followup-aseo"]'
+  );
+  await expect(compactRoomLabel).toHaveText('Aseo');
+  await expect(compactRoomLabel).toHaveCSS('paint-order', 'stroke');
+  await expect(compactRoomLabel).toHaveCSS('stroke-width', '64px');
+  await expect(
+    proposalMap.locator('.plan-compare-canvas__glyph[data-space-id="space-followup-aseo"]'),
+    'the compact washroom remains named without a pictogram crowding its doorway'
+  ).toHaveCount(0);
   await expect(page.locator('.plan-chat__user-message')).toContainText(
     'Añade un aseo junto a los dormitorios'
   );
@@ -3309,6 +3327,10 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   await expect(page.locator('.tasks-map__area--shared')).toHaveCount(2);
   const compactAseoLabel = page.locator('.tasks-map__label[data-space-id="space-followup-aseo"]');
   await expect(compactAseoLabel.locator('.tasks-map__name')).toHaveText('Aseo');
+  await expect(compactAseoLabel.locator('.tasks-map__name')).toHaveClass(
+    /tasks-map__name--compact/
+  );
+  await expect(compactAseoLabel.locator('.tasks-map__name')).toHaveCSS('paint-order', 'stroke');
   await expect(
     compactAseoLabel.locator('.tasks-map__glyph'),
     'a glyph is omitted when its compact room cannot give it a clear margin'

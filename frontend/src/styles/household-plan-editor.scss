@@ -2274,6 +2274,13 @@
   dominant-baseline: central;
 }
 
+.plan-compare-canvas__label--compact {
+  paint-order: stroke;
+  stroke: var(--bg-primary);
+  stroke-linejoin: round;
+  stroke-width: 64px;
+}
+
 .plan-review__chat-view {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(250px, 0.82fr);

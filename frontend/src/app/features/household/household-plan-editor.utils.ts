@@ -14,6 +14,7 @@ const MIN_SHAPE_EDGE = 100;
 const GUIDED_SPACE_MAX_WIDTH = 2_600;
 const GUIDED_SPACE_MAX_HEIGHT = 2_500;
 const GUIDED_SPACE_MIN_EDGE = 700;
+export const PLAN_MAP_DETAIL_MIN_SPAN = 1_600;
 
 export function emptyHouseholdPlan(defaultFloorName: string): HouseholdPlan {
   return {
@@ -322,6 +323,21 @@ export function polygonCentroid(points: readonly HouseholdPlanPoint[]): Househol
   }
   if (!doubleArea) return { x: 0, y: 0 };
   return { x: xTotal / (3 * doubleArea), y: yTotal / (3 * doubleArea) };
+}
+
+export function polygonMinimumSpan(points: readonly HouseholdPlanPoint[]): number {
+  if (points.length < 3) return 0;
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  for (const point of points) {
+    minX = Math.min(minX, point.x);
+    minY = Math.min(minY, point.y);
+    maxX = Math.max(maxX, point.x);
+    maxY = Math.max(maxY, point.y);
+  }
+  return Math.min(maxX - minX, maxY - minY);
 }
 
 function samePoint(first: HouseholdPlanPoint, second: HouseholdPlanPoint): boolean {

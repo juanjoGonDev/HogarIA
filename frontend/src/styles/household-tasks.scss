@@ -371,6 +371,13 @@
   dominant-baseline: central;
 }
 
+.tasks-map__name--compact {
+  paint-order: stroke;
+  stroke: var(--bg-primary);
+  stroke-linejoin: round;
+  stroke-width: 48px;
+}
+
 .tasks-map__glyph {
   color: #203449;
   pointer-events: none;

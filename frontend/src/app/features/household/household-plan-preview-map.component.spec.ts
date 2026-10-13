@@ -94,6 +94,70 @@ describe('HouseholdPlanPreviewMapComponent', () => {
     ).toBe('0 0 10000 10000');
   });
 
+  it('uses normalized empty bounds when a saved floor has no drawable geometry', () => {
+    fixture.componentRef.setInput('floor', {
+      id: 'floor-empty',
+      name: 'Planta baja',
+      level: 0,
+      spaces: [],
+      walls: [],
+      openings: []
+    });
+    fixture.detectChanges();
+
+    expect(
+      fixture.nativeElement.querySelector('svg.plan-compare-canvas')?.getAttribute('viewBox')
+    ).toBe('0 0 10000 10000');
+  });
+
+  it('keeps compact room names but omits their competing pictograms', () => {
+    const floor: HouseholdPlanFloor = {
+      id: 'floor-compact',
+      name: 'Planta baja',
+      level: 0,
+      spaces: [
+        {
+          id: 'washroom',
+          kind: 'bathroom',
+          label: 'Aseo',
+          polygon: [
+            { x: 0, y: 0 },
+            { x: 1300, y: 0 },
+            { x: 1300, y: 1200 },
+            { x: 0, y: 1200 }
+          ],
+          parentSpaceId: null
+        },
+        {
+          id: 'bedroom',
+          kind: 'bedroom',
+          label: 'Dormitorio',
+          polygon: [
+            { x: 2000, y: 0 },
+            { x: 5000, y: 0 },
+            { x: 5000, y: 3000 },
+            { x: 2000, y: 3000 }
+          ],
+          parentSpaceId: null
+        }
+      ],
+      walls: [],
+      openings: []
+    };
+
+    fixture.componentRef.setInput('floor', floor);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelectorAll('.plan-compare-canvas__glyph').length).toBe(1);
+    const labels = (fixture.nativeElement as HTMLElement).querySelectorAll<SVGTextElement>(
+      '.plan-compare-canvas__label'
+    );
+    expect(Array.from(labels).map((label) => label.textContent?.trim())).toEqual([
+      'Aseo',
+      'Dormitorio'
+    ]);
+  });
+
   it('zooms the plan geometry around the center while keeping the map frame fixed', () => {
     fixture.componentRef.setInput('floor', null);
     fixture.componentRef.setInput('zoom', 120);
