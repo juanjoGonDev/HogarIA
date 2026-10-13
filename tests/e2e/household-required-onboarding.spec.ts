@@ -399,6 +399,98 @@ test.describe('Mandatory household setup after registration', () => {
     }
   });
 
+  test('joins a valid invitation during registration and restores membership after reload', async ({
+    browser
+  }, testInfo) => {
+    const baseURL = String(testInfo.project.use.baseURL);
+    const viewport = testViewport(testInfo.project.name);
+    const ownerContext = await createContext(browser, testInfo.project.name, baseURL);
+    const ownerPage = await ownerContext.newPage();
+    await ownerPage.setViewportSize(viewport);
+
+    let memberContext: BrowserContext | undefined;
+    try {
+      await registerAccount(ownerPage, baseURL);
+      await expect(ownerPage).toHaveURL(/\/household(?:$|[?#])/);
+      const homeName = `Casa enlace válido QA ${Date.now().toString(36)}`;
+      await createHousehold(ownerPage, homeName);
+
+      const invitationUrl = (await ownerPage.locator('.invite-card__code').innerText()).trim();
+      const inviteCode = new URL(invitationUrl, baseURL).pathname.split('/').filter(Boolean).at(-1);
+      if (!inviteCode) throw new Error('La invitación sintética no contiene código.');
+      await ownerContext.close();
+
+      memberContext = await createContext(browser, testInfo.project.name, baseURL);
+      const memberPage = await memberContext.newPage();
+      await memberPage.setViewportSize(viewport);
+      await memberPage.goto(localUrl(`/invite/${encodeURIComponent(inviteCode)}`, baseURL));
+      await expect(memberPage.locator('.invite-card__title')).toContainText(homeName);
+
+      const registerLink = memberPage.locator('a[href^="/auth/register"]');
+      await expect(registerLink).toHaveAttribute(
+        'href',
+        new RegExp(`[?&]code=${encodeURIComponent(inviteCode)}(?:&|$)`)
+      );
+      await registerLink.click();
+      await expect(memberPage).toHaveURL(
+        (url) => url.pathname === '/auth/register' && url.searchParams.get('code') === inviteCode
+      );
+
+      let joinRequests = 0;
+      memberPage.on('request', (request) => {
+        if (
+          request.method() === 'POST' &&
+          new URL(request.url()).pathname === `/api/household/join/${inviteCode}`
+        ) {
+          joinRequests += 1;
+        }
+      });
+      const registrationResponse = memberPage.waitForResponse(
+        (response) =>
+          response.request().method() === 'POST' &&
+          new URL(response.url()).pathname === '/api/auth/register'
+      );
+      const joinResponse = memberPage.waitForResponse(
+        (response) =>
+          response.request().method() === 'POST' &&
+          new URL(response.url()).pathname === `/api/household/join/${inviteCode}`
+      );
+      await memberPage.locator('input#name').fill('Invitado de pruebas');
+      await memberPage.locator('input#email').fill(seededEmail());
+      await memberPage.locator('input#password').fill(TEST_PASSWORD);
+      await memberPage.locator('button[type="submit"]').click();
+
+      expect((await registrationResponse).status()).toBe(201);
+      expect((await joinResponse).status()).toBe(200);
+      await expect(memberPage).toHaveURL(/\/household(?:$|[?#])/);
+      await expect(memberPage.locator('.household-info__name')).toHaveText(homeName);
+      expect(joinRequests, 'el enlace válido debe activar una única solicitud para unirse').toBe(1);
+      expect(await readMembershipState(memberPage)).toMatchObject({
+        status: 200,
+        count: 1,
+        activeMatches: true,
+        activeName: homeName
+      });
+
+      await memberPage.reload();
+      await expect(memberPage.locator('.household-info__name')).toHaveText(homeName);
+      expect(await readMembershipState(memberPage)).toMatchObject({
+        status: 200,
+        count: 1,
+        activeMatches: true,
+        activeName: homeName
+      });
+      expect(await readSetupGate(memberPage)).toMatchObject({ status: 200, code: null });
+
+      await memberPage.goto(localUrl('/dashboard', baseURL));
+      await expect(memberPage).toHaveURL(/\/dashboard(?:$|[?#])/);
+      await expect(memberPage.locator('h1.dashboard__title')).toBeVisible();
+    } finally {
+      await ownerContext.close().catch(() => undefined);
+      await memberContext?.close().catch(() => undefined);
+    }
+  });
+
   test('keeps invalid-invite registration recoverable and joins after retrying with a valid code', async ({
     browser
   }, testInfo) => {
