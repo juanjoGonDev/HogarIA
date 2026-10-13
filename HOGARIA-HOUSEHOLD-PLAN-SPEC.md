@@ -1422,6 +1422,16 @@ criterios inferiores permanecen sin marcar hasta validar cada condición en su a
       Evidencia: prueba HTTP con ledger sintético y `DATABASE_PATH=:memory:`;
       `pnpm --filter @hogaria/server exec vitest run src/routes/household-planning-automation.routes.spec.ts`
       — **7/7**. No invoca IA ni escribe planes.
+- [x] El servidor arranca un poller único tras inicializar la base de datos, detecta solo la ocurrencia
+      semanal más reciente que ya venció, no recupera semanas omitidas en ráfaga y se detiene limpiamente;
+      lee horario/versión/fecha de cambio en el mismo snapshot y pasa una versión-fence al worker; un
+      cambio de configuración concurrente invalida la ocurrencia antes de llamar a IA. La clave idempotente
+      del ledger evita duplicados entre ticks/procesos y una ejecución `review_required` no se reintenta
+      sin acción explícita. El harness Vitest fija `DATABASE_PATH=:memory:` antes de cargar módulos; los
+      casos con archivos usan rutas temporales propias. Evidencia: `household-planning-automation.scheduler.spec.ts`
+      **4/4**, `household-planning-automation.worker.spec.ts` **14/14**, build TypeScript servidor correcto;
+      smoke de arranque/`SIGINT` con `DATABASE_PATH=:memory:`, `NODE_ENV=test`, `PORT=0`, `HOST=127.0.0.1`
+      mostró poller iniciado y apagado; carrera de versión probada sin llamada a IA ni publicación.
 - [x] **QA-HOME-TASKS.WEEKLY.2** — asignación fija/aleatoria, equilibrio, no repetir días
       consecutivos si hay solución, excepción explicada y preservación de asignaciones manuales.
       Evidencia: `household-task-assignment.spec.ts` y `household-tasks.component.spec.ts` cubren

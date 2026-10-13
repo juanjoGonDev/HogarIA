@@ -84,6 +84,7 @@ const COVERED = [
   'src/utils/household-planning-automation.store.ts',
   'src/utils/household-planning-automation-runs.store.ts',
   'src/utils/household-planning-automation.worker.ts',
+  'src/utils/household-planning-automation.scheduler.ts',
   'src/routes/household-planning-automation.routes.ts',
   'src/schemas/household-planning-automation.schema.ts',
   'src/utils/household-context.ts',

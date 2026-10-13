@@ -3,11 +3,12 @@ import { writeFileSync } from 'node:fs';
 import { relative } from 'node:path';
 
 import { config } from './config/app.config.js';
-import { initializeDatabase } from './config/database.js';
+import { getDatabase, initializeDatabase } from './config/database.js';
 import { memoryMonitor } from './utils/memory-monitor.js';
 import { installConsoleCapture } from './utils/log-store.js';
 import { uploadsRoot } from './utils/uploads.js';
 import { ensureWorker } from './utils/ticket-queue.js';
+import { startHouseholdPlanningAutomationScheduler } from './utils/household-planning-automation.scheduler.js';
 import { createApp, rateLimitFromEnv, resolveStaticDir } from './app.js';
 
 // Install console capture BEFORE anything else so that startup messages
@@ -16,6 +17,8 @@ installConsoleCapture();
 
 const staticDir = resolveStaticDir();
 const app = createApp({ rateLimit: rateLimitFromEnv(), staticDir });
+let stopPlanningAutomation: (() => Promise<void>) | null = null;
+let shutdown: Promise<void> | null = null;
 
 // ═══════════════════════════════════════════════════════════════════
 // Server Startup
@@ -25,6 +28,10 @@ async function startServer() {
   try {
     await initializeDatabase();
     console.log('[SERVER] ✓ Database initialized');
+
+    const planningAutomation = startHouseholdPlanningAutomationScheduler(getDatabase());
+    stopPlanningAutomation = planningAutomation.stop;
+    console.log('[SERVER] ✓ Household planning automation scheduler started');
 
     ensureWorker();
     console.log('[SERVER] ✓ AI queue started');
@@ -62,23 +69,28 @@ async function startServer() {
       }
     );
   } catch (error) {
+    await stopPlanningAutomation?.();
+    memoryMonitor.stop();
     console.error('[SERVER] Failed to start server:', error);
     process.exit(1);
   }
 }
 
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('[SERVER] SIGTERM received. Shutting down gracefully...');
-  memoryMonitor.stop();
-  process.exit(0);
-});
+// Graceful shutdown: stop the poller first so in-flight provider work is aborted
+// and the scheduler cannot begin another occurrence while the process exits.
+function shutdownServer(signal: 'SIGTERM' | 'SIGINT'): Promise<void> {
+  if (shutdown) return shutdown;
+  console.log(`[SERVER] ${signal} received. Shutting down gracefully...`);
+  shutdown = (async () => {
+    await stopPlanningAutomation?.();
+    memoryMonitor.stop();
+    process.exit(0);
+  })();
+  return shutdown;
+}
 
-process.on('SIGINT', () => {
-  console.log('[SERVER] SIGINT received. Shutting down gracefully...');
-  memoryMonitor.stop();
-  process.exit(0);
-});
+process.on('SIGTERM', () => void shutdownServer('SIGTERM'));
+process.on('SIGINT', () => void shutdownServer('SIGINT'));
 
 startServer();
 

@@ -67,6 +67,8 @@ export interface RunHouseholdPlanningAutomationOccurrenceInput {
   householdId: string;
   workerId: string;
   occurrence: HouseholdWeeklyOccurrence;
+  /** Scheduler snapshot fence; a newer settings version invalidates the occurrence. */
+  expectedConfigVersion?: number;
   /** Deterministic override for tests/reconcilers. Production callers should omit it. */
   now?: Date;
 }
@@ -131,6 +133,9 @@ export async function runHouseholdPlanningAutomationOccurrence(
 ): Promise<HouseholdPlanningAutomationWorkerResult> {
   const now = clockFor(input.now, dependencies)();
   const state = readHouseholdPlanningAutomation(input.db, input.householdId, now);
+  if (input.expectedConfigVersion !== undefined && input.expectedConfigVersion !== state.version) {
+    return { outcome: 'stale_config', run: null };
+  }
   if (!state.enabled) return { outcome: 'disabled', run: null };
   if (
     !state.mode ||

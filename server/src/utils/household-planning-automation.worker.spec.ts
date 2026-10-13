@@ -342,6 +342,36 @@ describe('household planning automation worker', () => {
     expect(db.prepare('SELECT COUNT(*) AS count FROM meals').get()).toEqual({ count: 7 });
   });
 
+  it('does not process a due occurrence using a newer configuration than the scheduler snapshot', async () => {
+    addCurrentPlan();
+    configureAutomation('generate', ['tasks']);
+    const staleConfigVersion = automationStore.readHouseholdPlanningAutomation(
+      db,
+      HOUSEHOLD_ID,
+      RUN_NOW
+    ).version;
+    const updated = automationStore.saveHouseholdPlanningAutomation(
+      db,
+      HOUSEHOLD_ID,
+      'alice',
+      { expectedVersion: staleConfigVersion, localTime: '10:30' },
+      RUN_NOW
+    );
+    expect(updated.status).toBe('saved');
+    const provider = vi.fn(async () => mealProposal());
+
+    const result = await runHouseholdPlanningAutomationOccurrence(
+      { ...baseInput(), expectedConfigVersion: staleConfigVersion },
+      { provider }
+    );
+
+    expect(result).toEqual({ outcome: 'stale_config', run: null });
+    expect(provider).not.toHaveBeenCalled();
+    expect(
+      db.prepare('SELECT COUNT(*) AS count FROM household_planning_automation_runs').get()
+    ).toEqual({ count: 0 });
+  });
+
   it('does not blindly retry an ambiguous timeout; an explicit retry reuses the same run/fence', async () => {
     addCurrentPlan();
     configureAutomation('generate', ['tasks']);
