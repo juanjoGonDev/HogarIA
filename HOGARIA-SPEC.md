@@ -2596,6 +2596,16 @@ pasa 16/16 con cobertura 96,1/97,36/100/95,94 %; todavía no hay configuración 
 ledger de ejecuciones. Contrato, decisiones de seguridad, comandos y pendientes en
 `HOGARIA-HOUSEHOLD-PLAN-SPEC.md`.
 
+La proyección de tareas semanales en el calendario existente ya tiene implementación backend/UI y
+pruebas focales: **62/62** backend con cobertura de alcance 89,14/80,45/95,29/91,23 % S/B/F/L, **94/94**
+frontend, typecheck del servidor y E2E sintética PC/móvil **2/2**. Requiere `calendar.view` y pertenencia
+activa al hogar; las tarjetas muestran título, zona, estado y asignatario; el modelo semanal no define
+hora y el JSON del calendario no expone detalles de tarea. No crea ni altera tareas, comidas o eventos
+personales. El E2E final ya inspeccionó agenda, semana/timeline, mes y año, y las capturas PC/móvil; aún
+falta la matriz completa de breakpoints/teclado y el gate global, por lo que
+`QA-HOME-TASKS.CALENDAR.1` sigue abierto.
+La spec activa contiene comandos, rutas de capturas, límites y rollback/evidencia de esta unidad.
+
 **Trazabilidad de tareas semanales (2026-10-13):** la unidad `QA-HOME-TASKS.WEEKLY.2` de la
 extensión de planificación está verificada en desktop y móvil, incluyendo equilibrio, días no
 consecutivos, preservación de asignaciones manuales durante propuesta/uso explícito y persistencia tras
