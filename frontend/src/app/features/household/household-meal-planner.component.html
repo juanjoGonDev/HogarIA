@@ -1,0 +1,281 @@
+<section
+  class="meal-planner"
+  aria-labelledby="household-meal-planner-title"
+  [attr.aria-busy]="generating() || confirming()"
+  data-test="household-meal-planner"
+>
+  <header class="meal-planner__header">
+    <div>
+      <h2 id="household-meal-planner-title">{{ 'household.meal_proposal_title' | t }}</h2>
+      <p>{{ 'household.meal_proposal_description' | t }}</p>
+    </div>
+  </header>
+
+  <p *ngIf="!canEdit" class="meal-planner__notice" role="status">
+    {{ 'household.meal_proposal_edit_permission' | t }}
+  </p>
+
+  <div class="meal-planner__controls">
+    <section class="meal-planner__week" aria-labelledby="meal-proposal-week-label">
+      <label id="meal-proposal-week-label" for="meal-proposal-week">
+        {{ 'household.meal_proposal_week' | t }}
+      </label>
+      <div class="meal-planner__week-control">
+        <app-button
+          variant="outline"
+          size="icon"
+          [disabled]="generating() || confirming()"
+          (onClick)="shiftWeek(-1)"
+          data-test="meal-proposal-previous-week"
+        >
+          <app-icon name="chevron_left" [size]="18" [label]="null" />
+          <span class="meal-planner__visually-hidden">{{
+            'household.meal_proposal_previous_week' | t
+          }}</span>
+        </app-button>
+        <input
+          id="meal-proposal-week"
+          type="date"
+          [value]="weekStart()"
+          [disabled]="generating() || confirming()"
+          [attr.aria-label]="'household.meal_proposal_week' | t"
+          (change)="setWeekFromInput($any($event.target).value)"
+          data-test="meal-proposal-week"
+        />
+        <app-button
+          variant="outline"
+          size="icon"
+          [disabled]="generating() || confirming()"
+          (onClick)="shiftWeek(1)"
+          data-test="meal-proposal-next-week"
+        >
+          <app-icon name="chevron_right" [size]="18" [label]="null" />
+          <span class="meal-planner__visually-hidden">{{
+            'household.meal_proposal_next_week' | t
+          }}</span>
+        </app-button>
+      </div>
+      <p class="meal-planner__week-range">{{ formatWeekRange() }}</p>
+    </section>
+
+    <fieldset class="meal-planner__members" [disabled]="generating() || confirming()">
+      <legend>{{ 'household.meal_proposal_participants' | t }}</legend>
+      <p class="meal-planner__helper">
+        {{ 'household.meal_proposal_participants_help' | t }}
+      </p>
+      <div *ngIf="eligibleMembers().length" class="meal-planner__member-list">
+        <app-checkbox
+          *ngFor="let member of eligibleMembers(); trackBy: trackMember"
+          [label]="member.name"
+          [checked]="isSelected(member.id)"
+          [disabled]="!canEdit || generating() || confirming()"
+          [attr.data-test]="'meal-proposal-member-' + member.id"
+          (checkedChange)="toggleMember(member.id, $event)"
+        />
+      </div>
+      <p *ngIf="!eligibleMembers().length" class="meal-planner__notice" role="status">
+        {{ 'household.meal_proposal_no_eligible_members' | t }}
+      </p>
+    </fieldset>
+  </div>
+
+  <div class="meal-planner__actions">
+    <app-button
+      variant="primary"
+      size="md"
+      [disabled]="!canGenerate()"
+      [loading]="generating()"
+      (onClick)="generateProposal()"
+      data-test="meal-proposal-generate"
+    >
+      <app-icon *ngIf="!generating()" name="calendar_today" [size]="18" [label]="null" />
+      {{
+        (generating()
+          ? 'household.meal_proposal_generating'
+          : proposal()
+            ? 'household.meal_proposal_regenerate'
+            : 'household.meal_proposal_generate'
+        ) | t
+      }}
+    </app-button>
+    <span class="meal-planner__selection-count" aria-live="polite">
+      {{ 'household.meal_proposal_selected_count' | t: { count: selectedMemberIds().length } }}
+    </span>
+  </div>
+
+  <p *ngIf="generating()" class="meal-planner__status" role="status" aria-live="polite">
+    {{ 'household.meal_proposal_generating_status' | t }}
+  </p>
+  <p *ngIf="confirming()" class="meal-planner__status" role="status" aria-live="polite">
+    {{ 'household.meal_proposal_confirming' | t }}
+  </p>
+  <p *ngIf="errorKey() as key" class="meal-planner__error" role="alert">{{ key | t }}</p>
+  <p *ngIf="successKey() as key" class="meal-planner__success" role="status" aria-live="polite">
+    {{
+      key
+        | t
+          : {
+              count: savedEventsCount(),
+              unresolved: unresolvedEventsCount()
+            }
+    }}
+  </p>
+
+  <div
+    *ngIf="proposal() && !proposalIsCurrent() && !generating()"
+    class="meal-planner__notice"
+    role="alert"
+    data-test="meal-proposal-stale"
+  >
+    {{ 'household.meal_proposal_stale' | t }}
+  </div>
+
+  <p
+    *ngIf="!proposal() && !generating() && !errorKey() && !successKey()"
+    class="meal-planner__empty"
+    data-test="meal-proposal-empty"
+  >
+    {{ 'household.meal_proposal_empty_state' | t }}
+  </p>
+
+  <section
+    *ngIf="proposal() as weeklyProposal"
+    class="meal-planner__review"
+    aria-labelledby="meal-proposal-review-title"
+    data-test="meal-proposal-review"
+  >
+    <header class="meal-planner__review-header">
+      <div>
+        <h3 id="meal-proposal-review-title">{{ 'household.meal_proposal_review' | t }}</h3>
+        <p>{{ formatWeekRange() }}</p>
+      </div>
+      <span class="meal-planner__event-count">
+        {{ 'household.meal_proposal_event_count' | t: { count: weeklyProposal.events.length } }}
+      </span>
+    </header>
+
+    <div *ngIf="!weeklyProposal.events.length" class="meal-planner__notice" role="status">
+      {{ 'household.meal_proposal_empty' | t }}
+    </div>
+    <div
+      *ngIf="weeklyProposal.events.length && !hasConfirmableMeals()"
+      class="meal-planner__notice"
+      role="status"
+      data-test="meal-proposal-no-confirmable-meals"
+    >
+      {{ 'household.meal_proposal_no_confirmable_meals' | t }}
+    </div>
+
+    <div class="meal-planner__days">
+      <section
+        *ngFor="let day of proposalDays(); trackBy: trackDay"
+        class="meal-planner__day"
+        [attr.aria-label]="day.label"
+      >
+        <h4>{{ day.label }}</h4>
+        <article
+          *ngFor="let event of day.events; trackBy: trackEvent"
+          class="meal-planner__event"
+          [class.meal-planner__event--unresolved]="event.status === 'unresolved'"
+          [class.meal-planner__event--shared]="isShared(event)"
+          [attr.data-test]="'meal-proposal-event-' + event.id"
+        >
+          <header class="meal-planner__event-header">
+            <div class="meal-planner__meal-label">
+              <span>{{ mealTypeLabel(event.mealType) | t }}</span>
+              <span *ngIf="event.time" class="meal-planner__time">
+                <app-icon name="schedule" [size]="15" [label]="null" />
+                {{ event.time }}
+              </span>
+            </div>
+            <span
+              class="meal-planner__assignment"
+              [class.meal-planner__assignment--shared]="isShared(event)"
+            >
+              {{ eventAssignmentLabel(event) | t }}
+            </span>
+          </header>
+
+          <ng-container *ngIf="event.status === 'scheduled'; else unresolvedEvent">
+            <h5>{{ event.recipe?.name }}</h5>
+            <p class="meal-planner__summary">{{ event.objectiveSummary }}</p>
+            <div class="meal-planner__event-meta">
+              <span>{{ 'household.meal_proposal_servings' | t: { count: event.servings } }}</span>
+              <span *ngIf="event.recipe as recipe">
+                {{
+                  'household.meal_proposal_total_time'
+                    | t
+                      : {
+                          minutes: recipe.prepTimeMinutes + recipe.cookTimeMinutes
+                        }
+                }}
+              </span>
+            </div>
+            <ul
+              class="meal-planner__participants"
+              [attr.aria-label]="'household.meal_proposal_assigned_to' | t"
+            >
+              <li *ngFor="let userId of event.participantIds; trackBy: trackIndex">
+                {{ memberName(userId) }}
+              </li>
+            </ul>
+            <details class="meal-planner__recipe-details" *ngIf="event.recipe as recipe">
+              <summary>{{ 'household.meal_proposal_recipe_details' | t }}</summary>
+              <p>{{ recipe.description }}</p>
+              <h6>{{ 'household.meal_proposal_ingredients' | t }}</h6>
+              <ul>
+                <li *ngFor="let ingredient of recipe.ingredients; trackBy: trackIngredient">
+                  {{ ingredient.quantity }} {{ ingredient.unit }} · {{ ingredient.name }}
+                  <span *ngIf="ingredient.preparation"> · {{ ingredient.preparation }}</span>
+                  <span *ngIf="ingredient.isOptional">
+                    · {{ 'household.meal_proposal_optional' | t }}</span
+                  >
+                </li>
+              </ul>
+              <h6>{{ 'household.meal_proposal_steps' | t }}</h6>
+              <ol>
+                <li *ngFor="let instruction of recipe.instructions; trackBy: trackIndex">
+                  {{ instruction }}
+                </li>
+              </ol>
+            </details>
+          </ng-container>
+          <ng-template #unresolvedEvent>
+            <h5>{{ 'household.meal_proposal_needs_review' | t }}</h5>
+            <p class="meal-planner__summary">{{ event.reason }}</p>
+            <ul
+              class="meal-planner__participants"
+              [attr.aria-label]="'household.meal_proposal_assigned_to' | t"
+            >
+              <li *ngFor="let userId of event.participantIds; trackBy: trackIndex">
+                {{ memberName(userId) }}
+              </li>
+            </ul>
+          </ng-template>
+        </article>
+      </section>
+    </div>
+
+    <footer class="meal-planner__review-footer">
+      <p>{{ 'household.meal_proposal_confirm_hint' | t }}</p>
+      <app-button
+        variant="primary"
+        size="md"
+        [disabled]="!canConfirm()"
+        [loading]="confirming()"
+        (onClick)="confirmProposal()"
+        data-test="meal-proposal-confirm"
+      >
+        <app-icon *ngIf="!confirming()" name="check" [size]="18" [label]="null" />
+        {{
+          (confirming()
+            ? 'household.meal_proposal_confirming'
+            : confirmed()
+              ? 'household.meal_proposal_confirmed'
+              : 'household.meal_proposal_confirm'
+          ) | t
+        }}
+      </app-button>
+    </footer>
+  </section>
+</section>

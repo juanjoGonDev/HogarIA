@@ -75,6 +75,10 @@ export const householdEs = {
   'household.tab_members': 'Miembros',
   'household.tab_permissions': 'Permisos',
   'household.tab_settings': 'Ajustes',
+  'household.planning_subtabs': 'Secciones de planificación',
+  'household.planning_tab_meals': 'Comidas',
+  'household.planning_tab_tasks': 'Tareas',
+  'household.planning_tab_settings': 'Ajustes de comidas',
   'household.guardar_nombre': 'Guardar nombre',
   'household.permisos_de_miembro': 'Acceso de cada miembro',
   'household.seleccionar_miembro': 'Selecciona un miembro',
@@ -369,6 +373,67 @@ export const householdEs = {
   'household.meal_settings_save_error': 'No se pudo guardar; se mantienen tus cambios.',
   'household.meal_settings_context_changed':
     'El hogar activo cambió. Recarga la configuración antes de continuar.',
+  'household.meal_proposal_title': 'Comidas de la semana',
+  'household.meal_proposal_description':
+    'Genera una propuesta, revisa a quién se asigna cada plato y confírmala para añadirla al calendario.',
+  'household.meal_proposal_week': 'Semana (lunes)',
+  'household.meal_proposal_previous_week': 'Semana anterior',
+  'household.meal_proposal_next_week': 'Semana siguiente',
+  'household.meal_proposal_participants': '¿Quién participa?',
+  'household.meal_proposal_participants_help':
+    'Solo aparecen miembros activos con permiso para ver el calendario.',
+  'household.meal_proposal_no_eligible_members': 'No hay miembros con acceso al calendario.',
+  'household.meal_proposal_selected_count': '{count} personas seleccionadas',
+  'household.meal_proposal_generate': 'Generar propuesta',
+  'household.meal_proposal_regenerate': 'Generar otra propuesta',
+  'household.meal_proposal_generating': 'Generando…',
+  'household.meal_proposal_generating_status': 'Preparando una propuesta para revisar…',
+  'household.meal_proposal_empty_state': 'Elige la semana y quién participa para empezar.',
+  'household.meal_proposal_review': 'Revisa la propuesta',
+  'household.meal_proposal_event_count': '{count} comidas',
+  'household.meal_proposal_shared': 'Compartida',
+  'household.meal_proposal_individual': 'Individual',
+  'household.meal_proposal_servings': '{count} raciones',
+  'household.meal_proposal_total_time': '{minutes} min',
+  'household.meal_proposal_assigned_to': 'Personas asignadas',
+  'household.meal_proposal_recipe_details': 'Ver ingredientes e instrucciones',
+  'household.meal_proposal_ingredients': 'Ingredientes (por ración)',
+  'household.meal_proposal_steps': 'Preparación',
+  'household.meal_proposal_optional': 'opcional',
+  'household.meal_proposal_needs_review': 'Necesita revisión',
+  'household.meal_proposal_confirm_hint':
+    'Solo se añadirá al calendario después de confirmar. Puedes cambiar la propuesta antes.',
+  'household.meal_proposal_confirm': 'Confirmar semana',
+  'household.meal_proposal_confirming': 'Guardando…',
+  'household.meal_proposal_confirmed': 'Semana confirmada',
+  'household.meal_proposal_stale':
+    'Cambiaste la semana o las personas. Genera una nueva propuesta antes de confirmarla.',
+  'household.meal_proposal_saved': '{count} comidas añadidas al calendario.',
+  'household.meal_proposal_saved_with_unresolved':
+    '{count} comidas añadidas. Quedan {unresolved} turnos por revisar.',
+  'household.meal_proposal_invalid_response':
+    'La propuesta recibida no es válida. No se ha guardado nada; inténtalo de nuevo.',
+  'household.meal_proposal_empty': 'No hay comidas seguras que se puedan añadir.',
+  'household.meal_proposal_no_confirmable_meals':
+    'Esta propuesta no contiene comidas que puedan añadirse al calendario.',
+  'household.meal_proposal_edit_permission':
+    'Necesitas permiso para editar el calendario del hogar para generar o confirmar comidas.',
+  'household.meal_proposal_view_permission':
+    'Solo puedes seleccionar personas con permiso para ver el calendario.',
+  'household.meal_proposal_ai_unconfigured':
+    'Configura el proveedor de IA del hogar antes de generar una propuesta.',
+  'household.meal_proposal_ai_timeout': 'La IA tardó demasiado. Puedes volver a intentarlo.',
+  'household.meal_proposal_ai_error': 'No se pudo generar la propuesta. Inténtalo de nuevo.',
+  'household.meal_proposal_no_turns':
+    'No hay comidas configuradas para las personas seleccionadas.',
+  'household.meal_proposal_no_safe_meals':
+    'No hay comidas seguras que guardar. Revisa las restricciones o cambia la selección.',
+  'household.meal_proposal_generate_error':
+    'No se pudo generar la propuesta. Puedes volver a intentarlo.',
+  'household.meal_proposal_confirm_error':
+    'No se pudo confirmar la propuesta. Sigue disponible para volver a intentarlo.',
+  'household.meal_proposal_context_changed':
+    'El hogar activo cambió. Vuelve a generar la propuesta para este hogar.',
   'household.tasks_title': 'Tareas del hogar',
   'household.tasks_description': 'Elige una zona del plano para organizar su rutina.',
   'household.tasks_more_actions': 'Más acciones de la semana',
@@ -518,6 +583,10 @@ export const householdEn: Record<keyof typeof householdEs, string> = {
   'household.tab_members': 'Members',
   'household.tab_permissions': 'Permissions',
   'household.tab_settings': 'Settings',
+  'household.planning_subtabs': 'Planning sections',
+  'household.planning_tab_meals': 'Meals',
+  'household.planning_tab_tasks': 'Tasks',
+  'household.planning_tab_settings': 'Meal settings',
   'household.guardar_nombre': 'Save name',
   'household.permisos_de_miembro': 'Member access',
   'household.seleccionar_miembro': 'Select a member',
@@ -805,6 +874,66 @@ export const householdEn: Record<keyof typeof householdEs, string> = {
   'household.meal_settings_save_error': 'Could not save; your changes remain.',
   'household.meal_settings_context_changed':
     'The active home changed. Reload settings before continuing.',
+  'household.meal_proposal_title': 'This week’s meals',
+  'household.meal_proposal_description':
+    'Generate a proposal, review who each meal is for, and confirm it to add it to the calendar.',
+  'household.meal_proposal_week': 'Week (Monday)',
+  'household.meal_proposal_previous_week': 'Previous week',
+  'household.meal_proposal_next_week': 'Next week',
+  'household.meal_proposal_participants': 'Who is eating?',
+  'household.meal_proposal_participants_help':
+    'Only active members who can view the calendar are listed.',
+  'household.meal_proposal_no_eligible_members': 'No members can view the calendar.',
+  'household.meal_proposal_selected_count': '{count} people selected',
+  'household.meal_proposal_generate': 'Generate proposal',
+  'household.meal_proposal_regenerate': 'Generate another proposal',
+  'household.meal_proposal_generating': 'Generating…',
+  'household.meal_proposal_generating_status': 'Preparing a proposal to review…',
+  'household.meal_proposal_empty_state': 'Choose a week and who is eating to get started.',
+  'household.meal_proposal_review': 'Review the proposal',
+  'household.meal_proposal_event_count': '{count} meals',
+  'household.meal_proposal_shared': 'Shared',
+  'household.meal_proposal_individual': 'Individual',
+  'household.meal_proposal_servings': '{count} servings',
+  'household.meal_proposal_total_time': '{minutes} min',
+  'household.meal_proposal_assigned_to': 'Assigned to',
+  'household.meal_proposal_recipe_details': 'View ingredients and instructions',
+  'household.meal_proposal_ingredients': 'Ingredients (per serving)',
+  'household.meal_proposal_steps': 'Preparation',
+  'household.meal_proposal_optional': 'optional',
+  'household.meal_proposal_needs_review': 'Needs review',
+  'household.meal_proposal_confirm_hint':
+    'Nothing is added to the calendar until you confirm. You can generate another proposal first.',
+  'household.meal_proposal_confirm': 'Confirm week',
+  'household.meal_proposal_confirming': 'Saving…',
+  'household.meal_proposal_confirmed': 'Week confirmed',
+  'household.meal_proposal_stale':
+    'The week or participants changed. Generate a new proposal before confirming.',
+  'household.meal_proposal_saved': '{count} meals added to the calendar.',
+  'household.meal_proposal_saved_with_unresolved':
+    '{count} meals added. {unresolved} turns still need review.',
+  'household.meal_proposal_invalid_response':
+    'The proposal received is not valid. Nothing was saved; try again.',
+  'household.meal_proposal_empty': 'There are no safe meals to add.',
+  'household.meal_proposal_no_confirmable_meals':
+    'This proposal contains no meals that can be added to the calendar.',
+  'household.meal_proposal_edit_permission':
+    'You need permission to edit the household calendar to generate or confirm meals.',
+  'household.meal_proposal_view_permission':
+    'You can only select people who can view the calendar.',
+  'household.meal_proposal_ai_unconfigured':
+    'Set up the household AI provider before generating a proposal.',
+  'household.meal_proposal_ai_timeout': 'The AI took too long. You can try again.',
+  'household.meal_proposal_ai_error': 'The proposal could not be generated. Try again.',
+  'household.meal_proposal_no_turns': 'No meals are configured for the selected people.',
+  'household.meal_proposal_no_safe_meals':
+    'There are no safe meals to save. Review restrictions or change your selection.',
+  'household.meal_proposal_generate_error':
+    'The proposal could not be generated. You can try again.',
+  'household.meal_proposal_confirm_error':
+    'The proposal could not be confirmed. It is still available to retry.',
+  'household.meal_proposal_context_changed':
+    'The active household changed. Generate a new proposal for this household.',
   'household.tasks_title': 'Household tasks',
   'household.tasks_description': 'Choose an area on the plan to organize its routine.',
   'household.tasks_more_actions': 'More weekly actions',

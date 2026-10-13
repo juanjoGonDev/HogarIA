@@ -13,6 +13,7 @@ import { AuthService } from '../../core/services/auth.service';
 import { HouseholdPlanService } from '../../core/services/household-plan.service';
 import { HouseholdTasksService } from '../../core/services/household-tasks.service';
 import { HouseholdMealPlanningService } from '../../core/services/household-meal-planning.service';
+import { HouseholdMealProposalService } from '../../core/services/household-meal-proposal.service';
 import type { Household } from '../../shared/models/household.model';
 import { householdEn, householdEs } from '../../core/i18n/dict/household';
 
@@ -127,6 +128,13 @@ describe('HouseholdComponent', () => {
         { provide: HouseholdService, useValue: service },
         { provide: ToastService, useValue: toast },
         { provide: HouseholdMealPlanningService, useValue: mealPlanning },
+        {
+          provide: HouseholdMealProposalService,
+          useValue: jasmine.createSpyObj<HouseholdMealProposalService>(
+            'HouseholdMealProposalService',
+            ['createProposal', 'confirmProposal']
+          )
+        },
         { provide: ConfirmService, useValue: confirm },
         { provide: AuthService, useValue: { currentUser: () => ({ id: 'synthetic-admin' }) } },
         { provide: I18nService, useValue: i18n },
@@ -338,6 +346,73 @@ describe('HouseholdComponent', () => {
     });
   });
 
+  it('keeps planning subtabs exclusive, deep-linkable, and keyboard navigable', async () => {
+    service.household.set(HOUSEHOLD);
+    queryParams.next(convertToParamMap({ tab: 'tasks', planning: 'meals' }));
+    fixture.detectChanges();
+
+    expect(component.activePlanningTab()).toBe('meals');
+    expect(
+      fixture.nativeElement.querySelector('[data-test="household-planning-panel-meals"]')
+    ).not.toBeNull();
+    expect(
+      fixture.nativeElement.querySelector('[data-test="household-planning-panel-tasks"]')
+    ).toBeNull();
+    expect(
+      fixture.nativeElement.querySelector('[data-test="household-planning-panel-settings"]')
+    ).toBeNull();
+
+    const mealsTab = fixture.nativeElement.querySelector(
+      '[data-test="household-planning-tab-meals"]'
+    ) as HTMLButtonElement;
+    mealsTab.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })
+    );
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(component.activePlanningTab()).toBe('tasks');
+    expect(router.navigate).toHaveBeenCalledWith([], {
+      relativeTo: TestBed.inject(ActivatedRoute),
+      queryParams: { planning: null },
+      queryParamsHandling: 'merge'
+    });
+    expect(
+      fixture.nativeElement.querySelector('[data-test="household-planning-panel-tasks"]')
+    ).not.toBeNull();
+    expect(
+      fixture.nativeElement.querySelector('[data-test="household-planning-panel-meals"]')
+    ).toBeNull();
+
+    queryParams.next(convertToParamMap({ tab: 'tasks', planning: 'settings' }));
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(component.activePlanningTab()).toBe('settings');
+    expect(
+      fixture.nativeElement.querySelector('[data-test="household-planning-panel-settings"]')
+    ).not.toBeNull();
+    expect(
+      fixture.nativeElement.querySelector('[data-test="household-planning-panel-meals"]')
+    ).toBeNull();
+    expect(
+      fixture.nativeElement.querySelector('[data-test="household-planning-panel-tasks"]')
+    ).toBeNull();
+  });
+
+  it('cleans invalid planning subtabs from the URL while preserving other query parameters', () => {
+    queryParams.next(convertToParamMap({ tab: 'tasks', planning: 'unknown', source: 'bookmark' }));
+    fixture.detectChanges();
+
+    expect(component.activePlanningTab()).toBe('tasks');
+    expect(router.navigate).toHaveBeenCalledWith([], {
+      relativeTo: TestBed.inject(ActivatedRoute),
+      queryParams: { planning: null },
+      queryParamsHandling: 'merge',
+      replaceUrl: true
+    });
+  });
+
   it('mounts meal settings in the household planning tab with the active home and scoped edit permission', async () => {
     const home = {
       ...HOUSEHOLD,
@@ -345,6 +420,8 @@ describe('HouseholdComponent', () => {
     } as Household;
     service.household.set(home);
     queryParams.next(convertToParamMap({ tab: 'tasks' }));
+    fixture.detectChanges();
+    component.selectPlanningTab('settings');
     fixture.detectChanges();
     await fixture.whenStable();
     fixture.detectChanges();
@@ -369,6 +446,8 @@ describe('HouseholdComponent', () => {
     } as Household;
     service.household.set(memberHome);
     queryParams.next(convertToParamMap({ tab: 'tasks' }));
+    fixture.detectChanges();
+    component.selectPlanningTab('settings');
     fixture.detectChanges();
     await fixture.whenStable();
     fixture.detectChanges();
@@ -455,7 +534,7 @@ describe('HouseholdComponent', () => {
     expect(component.activeTab()).toBe('home');
     expect(router.navigate).toHaveBeenCalledWith([], {
       relativeTo: TestBed.inject(ActivatedRoute),
-      queryParams: { tab: null, space: null },
+      queryParams: { tab: null, space: null, planning: null },
       queryParamsHandling: 'merge',
       replaceUrl: true
     });

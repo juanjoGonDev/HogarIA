@@ -65,7 +65,7 @@ test('configuración de comidas carga, reintenta y guarda campos parciales en Pl
     await route.continue();
   });
 
-  await page.goto('/household?tab=tasks');
+  await page.goto('/household?tab=tasks&planning=settings');
   await expect(page.locator('[data-test="household-tab-tasks"]')).toHaveText('Planificación');
   const panel = page.locator('[data-test="household-panel-tasks"]');
   await expect(panel).toBeVisible();
