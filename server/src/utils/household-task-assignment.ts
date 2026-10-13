@@ -4,7 +4,17 @@ export interface HouseholdTaskAssignmentCandidate {
 }
 
 export type HouseholdTaskAssignmentFailure =
-  'no-members' | 'invalid-tasks' | 'too-many-tasks' | 'no-valid-distribution' | 'search-limit';
+  | 'no-members'
+  | 'invalid-tasks'
+  | 'invalid-previous-day'
+  | 'too-many-tasks'
+  | 'no-valid-distribution'
+  | 'search-limit';
+
+export interface PreviousDayTaskAssignment {
+  scheduledDate: string;
+  assignedMemberIds: readonly string[];
+}
 
 export type HouseholdTaskAssignmentResult<TTask extends HouseholdTaskAssignmentCandidate> =
   | { ok: true; tasks: Array<TTask & { assignedMemberId: string | null }> }
@@ -20,7 +30,8 @@ const MAX_SEARCH_NODES = 200_000;
 export function assignHouseholdTasksFairly<TTask extends HouseholdTaskAssignmentCandidate>(
   tasks: readonly TTask[],
   eligibleMemberIds: readonly string[],
-  random: () => number = Math.random
+  random: () => number = Math.random,
+  previousDayAssignment?: PreviousDayTaskAssignment
 ): HouseholdTaskAssignmentResult<TTask> {
   if (tasks.length === 0) return { ok: true, tasks: [] };
   if (tasks.length > MAX_TASKS_PER_WEEK) return { ok: false, reason: 'too-many-tasks' };
@@ -51,6 +62,27 @@ export function assignHouseholdTasksFairly<TTask extends HouseholdTaskAssignment
 
   const orderedDays = [...groups.keys()].sort((left, right) => left - right);
   const dayTasks = orderedDays.map((day) => groups.get(day)!);
+  const boundaryMemberIds = new Set<string>();
+  if (previousDayAssignment !== undefined) {
+    if (
+      typeof previousDayAssignment !== 'object' ||
+      previousDayAssignment === null ||
+      typeof previousDayAssignment.scheduledDate !== 'string' ||
+      !Array.isArray(previousDayAssignment.assignedMemberIds)
+    ) {
+      return { ok: false, reason: 'invalid-previous-day' };
+    }
+    const previousDayOrdinal = dateToOrdinal(previousDayAssignment.scheduledDate);
+    if (previousDayOrdinal === null) return { ok: false, reason: 'invalid-previous-day' };
+
+    if (orderedDays[0] - previousDayOrdinal === 1) {
+      const eligibleMembers = new Set(members);
+      for (const id of previousDayAssignment.assignedMemberIds) {
+        if (typeof id === 'string' && eligibleMembers.has(id)) boundaryMemberIds.add(id);
+      }
+    }
+  }
+
   const minimum = Math.floor(tasks.length / members.length);
   const maximum = Math.ceil(tasks.length / members.length);
   const counts = new Map(members.map((id) => [id, 0]));
@@ -71,9 +103,11 @@ export function assignHouseholdTasksFairly<TTask extends HouseholdTaskAssignment
 
     const currentDay = orderedDays[dayIndex];
     const forbidden =
-      dayIndex > 0 && orderedDays[dayIndex - 1] === currentDay - 1
-        ? previousDayMembers
-        : new Set<string>();
+      dayIndex === 0
+        ? boundaryMemberIds
+        : orderedDays[dayIndex - 1] === currentDay - 1
+          ? previousDayMembers
+          : new Set<string>();
     const assignedToday = new Set<string>();
     const tasksForDay = dayTasks[dayIndex];
 
@@ -114,7 +148,7 @@ export function assignHouseholdTasksFairly<TTask extends HouseholdTaskAssignment
     return assignOccurrence(0);
   };
 
-  if (!searchDay(0, new Set())) {
+  if (!searchDay(0, boundaryMemberIds)) {
     return {
       ok: false,
       reason: searchLimitReached ? 'search-limit' : 'no-valid-distribution'

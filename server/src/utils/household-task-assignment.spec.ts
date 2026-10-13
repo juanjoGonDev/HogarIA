@@ -84,6 +84,85 @@ describe('assignHouseholdTasksFairly', () => {
       expect(result.tasks.map(({ assignedMemberId }) => assignedMemberId)).toEqual(['ada', 'ada']);
   });
 
+  it('avoids previous-week assignees at the boundary while keeping a balanced solution', () => {
+    const input = [task('tuesday', '2026-10-13'), task('monday', '2026-10-12')];
+    const previousDayAssignment = {
+      scheduledDate: '2026-10-11',
+      assignedMemberIds: ['ada']
+    };
+
+    const result = assignHouseholdTasksFairly(
+      input,
+      ['ada', 'lin'],
+      constantRandom(),
+      previousDayAssignment
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.tasks.map(({ id }) => id)).toEqual(['tuesday', 'monday']);
+    expect(result.tasks.find(({ id }) => id === 'monday')?.assignedMemberId).toBe('lin');
+    expect(result.tasks.find(({ id }) => id === 'tuesday')?.assignedMemberId).toBe('ada');
+    expect(result.tasks.map(({ assignedMemberId }) => assignedMemberId).sort()).toEqual([
+      'ada',
+      'lin'
+    ]);
+  });
+
+  it('fails clearly when a boundary assignment makes every valid distribution impossible', () => {
+    expect(
+      assignHouseholdTasksFairly([task('monday', '2026-10-12')], ['ada'], constantRandom(), {
+        scheduledDate: '2026-10-11',
+        assignedMemberIds: ['ada']
+      })
+    ).toEqual({ ok: false, reason: 'no-valid-distribution' });
+  });
+
+  it('does not apply a previous assignment across a date gap or for inactive member IDs', () => {
+    const acrossGap = assignHouseholdTasksFairly(
+      [task('monday', '2026-10-12')],
+      ['ada'],
+      constantRandom(),
+      { scheduledDate: '2026-10-10', assignedMemberIds: ['ada'] }
+    );
+    const inactive = assignHouseholdTasksFairly(
+      [task('monday', '2026-10-12')],
+      ['ada'],
+      constantRandom(),
+      { scheduledDate: '2026-10-11', assignedMemberIds: ['inactive-member', '', 'inactive-member'] }
+    );
+
+    expect(acrossGap.ok).toBe(true);
+    expect(inactive.ok).toBe(true);
+    if (acrossGap.ok) expect(acrossGap.tasks[0].assignedMemberId).toBe('ada');
+    if (inactive.ok) expect(inactive.tasks[0].assignedMemberId).toBe('ada');
+  });
+
+  it('rejects malformed previous-day dates and leaves previous assignments untouched', () => {
+    const tasks = [task('monday', '2026-10-12')];
+    const invalid = assignHouseholdTasksFairly(tasks, ['ada'], constantRandom(), {
+      scheduledDate: '2026-02-30',
+      assignedMemberIds: ['ada']
+    });
+    const previousDayAssignment = {
+      scheduledDate: '2026-10-11',
+      assignedMemberIds: ['ada']
+    };
+    const before = structuredClone(previousDayAssignment);
+
+    const result = assignHouseholdTasksFairly(
+      [task('monday', '2026-10-12'), task('tuesday', '2026-10-13')],
+      ['ada', 'lin'],
+      constantRandom(),
+      previousDayAssignment
+    );
+
+    expect(invalid).toEqual({ ok: false, reason: 'invalid-previous-day' });
+    expect(previousDayAssignment).toEqual(before);
+    expect(tasks[0].assignedMemberId).toBeNull();
+    expect(result.ok).toBe(true);
+  });
+
   it('deduplicates eligible member IDs and ignores blank IDs like the client utility', () => {
     const result = assignHouseholdTasksFairly(
       [task('only', '2026-10-05')],
