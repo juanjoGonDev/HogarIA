@@ -514,6 +514,319 @@ async function choosePickerOption(
   await page.getByRole('option', { name: optionName }).click();
 }
 
+test('el menú del plano alinea sus acciones y distingue la eliminación', async ({
+  page
+}, testInfo) => {
+  const mobile = testInfo.project.name.startsWith('mobile-');
+  const viewport = mobile ? { width: 390, height: 844 } : { width: 1280, height: 970 };
+  await page.setViewportSize(viewport);
+  await registerUser(page, 'Ana');
+  await createHousehold(page, 'Hogar sintético menú de opciones');
+  await page.getByRole('tab', { name: 'Plano' }).click();
+  await expect(page.locator('[data-test="plan-setup"]')).toBeVisible();
+  await page.locator('[data-test="plan-dwelling-house"]').click();
+
+  const floorCount = page.locator('[data-test="plan-floor-count"]');
+  await floorCount.locator('button.picker__trigger').click();
+  await floorCount.getByRole('option', { name: /^2(?:\s|$)/ }).click();
+  await page.locator('[data-test="plan-method-guided"]').click();
+  await page.getByRole('button', { name: 'Empezar plano' }).click();
+  await expect(page.locator('[data-test="plan-setup"]')).toBeHidden();
+  await expect(page.locator('[data-test="plan-floor-tabs"] .plan-floor-tabs__tab')).toHaveCount(2);
+  const savePlan = page.locator('[data-test="plan-save"]');
+  await expect(savePlan).toBeEnabled();
+  const saveResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'PUT' &&
+      new URL(response.url()).pathname.endsWith('/api/household/plan')
+  );
+  await savePlan.click();
+  expect((await saveResponse).status()).toBe(200);
+  await expect(savePlan).toBeDisabled();
+
+  const advanced = page.locator('.plan-editor__advanced-settings');
+  await advanced.locator('summary').click();
+  const menu = advanced.locator('.plan-editor__advanced-settings-content');
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole('button', { name: 'Eliminar planta' })).toBeVisible();
+  const discardAction = menu.getByRole('button', { name: 'Descartar cambios' });
+  await expect(discardAction).toBeDisabled();
+  const discardDisabledStyle = await discardAction.evaluate((button) => {
+    const styles = getComputedStyle(button);
+    return { opacity: Number(styles.opacity), cursor: styles.cursor };
+  });
+  expect.soft(discardDisabledStyle.opacity).toBeGreaterThanOrEqual(0.5);
+  expect.soft(discardDisabledStyle.cursor).toBe('not-allowed');
+  if (mobile) {
+    const snapSwitch = menu.locator('[data-test="plan-snap-grid-mobile"]');
+    await expect(snapSwitch).toHaveRole('switch');
+    await expect(snapSwitch).toHaveAccessibleName('Ajustar a cuadrícula');
+    const originalState = await snapSwitch.getAttribute('aria-checked');
+    for (let stateIndex = 0; stateIndex < 2; stateIndex += 1) {
+      const checked = (await snapSwitch.getAttribute('aria-checked')) === 'true';
+      const expectedLeftInset = checked ? 19 : 3;
+      await expect
+        .poll(async () =>
+          snapSwitch.evaluate((element, expectedInset) => {
+            const track = element.querySelector('[data-switch-track]')!.getBoundingClientRect();
+            const thumb = element.querySelector('[data-switch-thumb]')!.getBoundingClientRect();
+            return Math.abs(thumb.left - track.left - expectedInset);
+          }, expectedLeftInset)
+        )
+        .toBeLessThanOrEqual(1);
+      const switchGeometry = await snapSwitch.evaluate((element) => {
+        const host = element.getBoundingClientRect();
+        const track = element.querySelector('[data-switch-track]')!.getBoundingClientRect();
+        const thumb = element.querySelector('[data-switch-thumb]')!.getBoundingClientRect();
+        return {
+          hitTargetWidth: host.width,
+          hitTargetHeight: host.height,
+          trackCenterOffset: Math.abs(track.left + track.width / 2 - host.left - 22),
+          thumbCenterOffset: Math.abs(thumb.top + thumb.height / 2 - track.top - track.height / 2),
+          leftInset: thumb.left - track.left,
+          rightInset: track.right - thumb.right
+        };
+      });
+      expect.soft(switchGeometry.hitTargetWidth).toBeGreaterThanOrEqual(44);
+      expect.soft(switchGeometry.hitTargetHeight).toBeGreaterThanOrEqual(44);
+      expect.soft(switchGeometry.trackCenterOffset).toBeLessThanOrEqual(1);
+      expect.soft(switchGeometry.thumbCenterOffset).toBeLessThanOrEqual(1);
+      expect.soft(Math.abs(switchGeometry.leftInset - expectedLeftInset)).toBeLessThanOrEqual(1);
+      expect.soft(Math.abs(switchGeometry.rightInset - (checked ? 3 : 19))).toBeLessThanOrEqual(1);
+      console.info(`[switch:geometry] ${JSON.stringify({ checked, ...switchGeometry })}`);
+      await snapSwitch.click();
+      await expect(snapSwitch).toHaveAttribute(
+        'aria-checked',
+        stateIndex === 0 ? (originalState === 'true' ? 'false' : 'true') : originalState!
+      );
+    }
+  }
+  const toastClose = page.locator('.toast-container--top .toast__close');
+  if (await toastClose.isVisible()) await toastClose.click();
+  await screenshot(
+    page,
+    mobile ? '08-options-menu-mobile-after' : '08-options-menu-desktop-after',
+    viewport
+  );
+
+  const drawAreaAction = menu.locator('[data-test="plan-draw-area"]');
+  await drawAreaAction.focus();
+  await page.keyboard.press('Shift+Tab');
+  await page.keyboard.press('Tab');
+  const focusState = await drawAreaAction.evaluate((button) => ({
+    keyboardFocus: button.matches(':focus-visible'),
+    outlineStyle: getComputedStyle(button).outlineStyle,
+    outlineWidth: getComputedStyle(button).outlineWidth
+  }));
+  expect(focusState.keyboardFocus, 'drawing action is reachable with visible keyboard focus').toBe(
+    true
+  );
+  expect(focusState.outlineStyle).toBe('solid');
+  expect(Number.parseFloat(focusState.outlineWidth)).toBeGreaterThanOrEqual(2);
+  await drawAreaAction.evaluate((button) => button.blur());
+
+  const menuActions = [
+    menu.locator('[data-test="plan-draw-area"]'),
+    menu.locator('[data-test="plan-add-floor"]'),
+    menu.locator('[data-test="plan-add-basement"]'),
+    menu.locator('[data-test="plan-remove-floor"]'),
+    menu.getByRole('button', { name: 'Descartar cambios' })
+  ];
+  const actionGeometry = await Promise.all(
+    menuActions.map((button) =>
+      button.evaluate((element) => {
+        const bounds = element.getBoundingClientRect();
+        const contents = element.querySelector<HTMLElement>('.plan-menu-action__content');
+        const contentBounds = contents?.getBoundingClientRect();
+        return {
+          testId: element.getAttribute('data-test'),
+          height: bounds.height,
+          width: bounds.width,
+          contentCenterOffset: contentBounds
+            ? Math.abs(
+                contentBounds.left + contentBounds.width / 2 - bounds.left - bounds.width / 2
+              )
+            : Infinity,
+          contentVerticalOffset: contentBounds
+            ? Math.abs(
+                contentBounds.top + contentBounds.height / 2 - bounds.top - bounds.height / 2
+              )
+            : Infinity,
+          iconCount: element.querySelectorAll('svg').length
+        };
+      })
+    )
+  );
+  console.info(`[menu:after] ${JSON.stringify({ viewport, actionGeometry })}`);
+  expect.soft(actionGeometry.length, 'all five menu actions are audited').toBe(5);
+  for (const action of actionGeometry) {
+    expect
+      .soft(action.height, `${action.testId ?? 'discard'} has a consistent 44px height`)
+      .toBe(44);
+    expect
+      .soft(action.contentCenterOffset, `${action.testId ?? 'discard'} centers icon and label`)
+      .toBeLessThanOrEqual(1);
+    expect
+      .soft(
+        action.contentVerticalOffset,
+        `${action.testId ?? 'discard'} centers icon and label vertically`
+      )
+      .toBeLessThanOrEqual(1);
+    expect.soft(action.iconCount, `${action.testId ?? 'discard'} has an aligned SVG icon`).toBe(1);
+    expect
+      .soft(
+        Math.abs(action.width - actionGeometry[0].width),
+        `${action.testId ?? 'discard'} shares the menu action width`
+      )
+      .toBeLessThanOrEqual(1);
+  }
+
+  const [addFloor, addBasement] = actionGeometry.filter((action) =>
+    ['plan-add-floor', 'plan-add-basement'].includes(action.testId ?? '')
+  );
+  expect
+    .soft(
+      Math.abs(addFloor!.width - addBasement!.width),
+      'plant actions align on the same full-width track'
+    )
+    .toBeLessThanOrEqual(1);
+
+  const dangerColors = await menu.locator('[data-test="plan-remove-floor"]').evaluate((button) => {
+    const style = getComputedStyle(button);
+    const color = style.color;
+    const background = style.backgroundColor;
+    button.style.color = 'var(--color-error-700)';
+    button.style.backgroundColor = 'var(--error-subtle)';
+    const error = getComputedStyle(button).color;
+    const errorSubtle = getComputedStyle(button).backgroundColor;
+    button.style.removeProperty('color');
+    button.style.removeProperty('background-color');
+    return {
+      className: button.className,
+      color,
+      background,
+      error,
+      errorSubtle
+    };
+  });
+  expect.soft(dangerColors.className).toContain('plan-button--danger');
+  expect.soft(dangerColors.color, 'delete action uses the danger token').toBe(dangerColors.error);
+  expect
+    .soft(dangerColors.background, 'delete action uses the danger surface token')
+    .toBe(dangerColors.errorSubtle);
+  const dangerContrastRatios = await primaryButtonContrast(page, '[data-test="plan-remove-floor"]');
+  console.info(`[menu:danger] ${JSON.stringify({ dangerColors, dangerContrastRatios })}`);
+  for (const ratio of dangerContrastRatios) {
+    expect
+      .soft(ratio, 'delete action text meets WCAG AA in both themes')
+      .toBeGreaterThanOrEqual(4.5);
+  }
+
+  await drawAreaAction.click();
+  await expect(advanced).not.toHaveAttribute('open', '');
+  await expect(drawAreaAction).toHaveAttribute('aria-pressed', 'true');
+  await expect(drawAreaAction).toHaveClass(/is-selected/);
+  const selectedDrawColors = await drawAreaAction.evaluate((button) => {
+    const style = getComputedStyle(button);
+    const color = style.color;
+    const background = style.backgroundColor;
+    button.style.color = 'var(--primary-dark)';
+    button.style.backgroundColor = 'var(--primary-subtle)';
+    const primaryDark = getComputedStyle(button).color;
+    const primarySubtle = getComputedStyle(button).backgroundColor;
+    button.style.removeProperty('color');
+    button.style.removeProperty('background-color');
+    return { color, background, primaryDark, primarySubtle };
+  });
+  expect(selectedDrawColors.color).toBe(selectedDrawColors.primaryDark);
+  expect(selectedDrawColors.background).toBe(selectedDrawColors.primarySubtle);
+  await advanced.locator('summary').click();
+  await expect(menu).toBeVisible();
+  await screenshot(
+    page,
+    mobile ? '08-options-menu-draw-selected-mobile' : '08-options-menu-draw-selected-desktop',
+    viewport
+  );
+
+  if (mobile) {
+    for (const size of [
+      { width: 320, height: 568 },
+      { width: 390, height: 844 },
+      { width: 568, height: 320 },
+      { width: 568, height: 399 },
+      { width: 568, height: 400 },
+      { width: 568, height: 401 },
+      { width: 766, height: 844 },
+      { width: 767, height: 844 },
+      { width: 768, height: 844 }
+    ]) {
+      await page.setViewportSize(size);
+      await expect(menu).toBeVisible();
+      const bounds = await menu.boundingBox();
+      expect(bounds).not.toBeNull();
+      expect.soft(bounds!.x).toBeGreaterThanOrEqual(8);
+      expect.soft(bounds!.x + bounds!.width).toBeLessThanOrEqual(size.width - 8);
+      const menuFlow = await menu.evaluate((element) => {
+        const dock = document.querySelector('.bottom-nav')?.getBoundingClientRect();
+        const header = document.querySelector('.header')?.getBoundingClientRect();
+        const bounds = element.getBoundingClientRect();
+        const styles = getComputedStyle(element);
+        return {
+          top: bounds.top,
+          bottom: bounds.bottom,
+          headerBottom: header?.bottom ?? 0,
+          dockTop: dock?.top ?? Number.POSITIVE_INFINITY,
+          clientHeight: element.clientHeight,
+          scrollHeight: element.scrollHeight,
+          overflowY: styles.overflowY
+        };
+      });
+      const menuAvoidsDock = menuFlow.bottom <= menuFlow.dockTop - 8;
+      const menuCanScroll =
+        menuFlow.scrollHeight > menuFlow.clientHeight &&
+        ['auto', 'scroll'].includes(menuFlow.overflowY);
+      expect
+        .soft(
+          menuAvoidsDock || menuCanScroll,
+          `menu stays above the dock or has its own scroll at ${size.width}×${size.height}: ${JSON.stringify(menuFlow)}`
+        )
+        .toBe(true);
+      if (size.height <= 400) {
+        expect
+          .soft(
+            menuFlow.top,
+            `short-screen menu starts below the fixed header at ${size.width}×${size.height}: ${JSON.stringify(menuFlow)}`
+          )
+          .toBeGreaterThanOrEqual(menuFlow.headerBottom + 8);
+      }
+      if (size.width === 320 && size.height === 568) {
+        const firstFloorAction = await menu.locator('[data-test="plan-add-floor"]').boundingBox();
+        expect(firstFloorAction).not.toBeNull();
+        expect
+          .soft(firstFloorAction!.y + firstFloorAction!.height)
+          .toBeLessThanOrEqual(menuFlow.bottom + 1);
+      }
+      if (menuCanScroll) {
+        await menu.evaluate((element) => {
+          element.scrollTop = element.scrollHeight;
+        });
+        const finalActionBounds = await menu
+          .locator('[data-test="plan-discard-changes"]')
+          .boundingBox();
+        expect(finalActionBounds).not.toBeNull();
+        expect.soft(finalActionBounds!.y).toBeGreaterThanOrEqual(menuFlow.top - 1);
+        expect
+          .soft(finalActionBounds!.y + finalActionBounds!.height)
+          .toBeLessThanOrEqual(menuFlow.bottom + 1);
+        await menu.evaluate((element) => {
+          element.scrollTop = 0;
+        });
+      }
+      await screenshot(page, `08-options-menu-${size.width}x${size.height}`, size);
+    }
+  }
+});
+
 async function assignZone(
   page: Page,
   zoneName: string,

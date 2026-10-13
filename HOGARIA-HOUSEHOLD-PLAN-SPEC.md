@@ -761,20 +761,61 @@ parecer un único grupo de controles diseñado; no basta con que los controles f
 
 ### Aceptación
 
-- [ ] Reproducir el menú abierto en Playwright en escritorio y móvil; medir tamaños/alineación de
-      botones actuales y guardar capturas «antes» sintéticas.
-- [ ] Agrupar visual y semánticamente edición del plano, tipo de vivienda y acciones de plantas;
+- [x] Reproducir el menú abierto en Playwright en escritorio y móvil; medir tamaños/alineación de
+      botones actuales y guardar capturas sintéticas de referencia.
+- [x] Agrupar visual y semánticamente edición del plano, tipo de vivienda y acciones de plantas;
       respetar los componentes/paleta existentes y no cambiar persistencia ni comportamiento.
-- [ ] Normalizar acciones del mismo grupo a altura y ancho coherentes (mínimo táctil 44×44 px),
+- [x] Normalizar acciones del mismo grupo a altura y ancho coherentes (mínimo táctil 44×44 px),
       tipografía, padding, icono y separación; iconos y texto forman una unidad centrada.
-- [ ] Diferenciar el modo de dibujo seleccionado con el acento HogarIA; mostrar añadir planta/sótano
+- [x] Diferenciar el modo de dibujo seleccionado con el acento HogarIA; mostrar añadir planta/sótano
       como acciones secundarias consistentes; destacar «Eliminar planta» con el token de peligro y
       pictograma de eliminar, sin quitar ni debilitar su confirmación existente. «Descartar cambios»
       conserva apariencia secundaria y un estado deshabilitado legible.
-- [ ] Medir que controles comparables comparten rectángulos con tolerancia de 1 CSS px donde deban
+- [x] En móvil, «Ajustar a cuadrícula» conserva el componente compartido `app-switch`, con nombre
+      accesible y objetivo táctil de 44×44 px; medir el centro vertical del pulgar y que sus
+      posiciones activada/desactivada ocupen correctamente extremos opuestos del carril (≤1 CSS px).
+- [x] Medir que controles comparables comparten rectángulos con tolerancia de 1 CSS px donde deban
       ser equivalentes; el menú no recorta el contenido ni tapa el dock/CTA con 320×568, 390×844,
       escritorio y orientación apaisada. Si excede la altura disponible, su contenido puede desplazarse.
-- [ ] Verificar contraste, nombre accesible, teclado/foco y estado deshabilitado; guardar e inspeccionar
+- [x] Verificar contraste, nombre accesible, teclado/foco y estado deshabilitado; guardar e inspeccionar
       capturas finales de escritorio y móvil bajo `.e2e-screenshots/`.
-- [ ] Actualizar esta evidencia solo después de pruebas reproducibles; mantener PR #47 Draft y correr
+- [x] Actualizar esta evidencia solo después de pruebas reproducibles; mantener PR #47 Draft y correr
       todos los hooks sin bypass antes de commit/push.
+
+### Evidencia y limitaciones
+
+- La regresión se ejecutó en rojo antes de implementar. Línea base observada: «Dibujar zona» 59 px,
+  «Añadir planta» 69 px y las acciones restantes 40 px; el texto de eliminar tenía contraste 1,20:1.
+  El menú invadía el dock 90 px en 320×568 y 319 px en 568×320; no tenía desplazamiento interno.
+- Prueba final aislada (fixture sintético y almacenamiento temporal):
+  `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome --project=mobile-safari tests/e2e/household-plan-tasks.spec.ts -g "el menú del plano"`
+  → **3/3 proyectos pasan**. Los cinco botones miden 44×334 px en escritorio y 44×332 px en móvil;
+  icono/texto centrados con desviación máxima de 0,008 CSS px. En 320×568, «Añadir planta» queda
+  completamente visible; el resto se alcanza desplazando el menú, sin cubrir el dock. En 568×320,
+  el panel empieza 8 px bajo el encabezado fijo y mantiene scroll propio sobre el dock. Se cubrieron
+  320×568, 390×844, 568×320 y los bordes B−1/B/B+1 de 400 px de alto y 767 px de ancho.
+- `Eliminar planta` usa texto `rgb(185, 28, 28)` sobre `rgb(254, 242, 242)`; contraste calculado
+  **5,91:1** en ambos temas. Su handler/confirmación no cambió. El foco de teclado es visible y todos
+  los botones conservan nombre accesible. Se activó «Dibujar zona» y se verificó su estado `aria-pressed`,
+  clase seleccionada y tokens de acento. «Descartar cambios» se verificó deshabilitado después de guardar
+  el fixture; conserva texto legible y cursor de estado deshabilitado. El `app-switch` compartido mide 44 px
+  de alto; carril y pulgar
+  centrados verticalmente (0 px de desviación) y posiciones opuestas 19/3 px y 3/19 px dentro del carril,
+  ambas con tolerancia máxima de 1 CSS px en Chromium y Safari.
+- Capturas finales, inspeccionadas visualmente: `.e2e-screenshots/household-plan-tasks/chromium/08-options-menu-desktop-after.png`,
+  `.e2e-screenshots/household-plan-tasks/mobile-chrome/08-options-menu-mobile-after.png`,
+  `08-options-menu-draw-selected-desktop.png`, `08-options-menu-draw-selected-mobile.png`,
+  `08-options-menu-320x568.png` y `08-options-menu-568x320.png` bajo las carpetas de sus proyectos.
+  Las capturas sintéticas «antes» se generaron durante la reproducción roja; el test posterior reutilizó
+  esos nombres al capturar las pantallas finales, por lo que las imágenes retenidas ahora son las finales;
+  las mediciones rojas de línea base quedan registradas arriba.
+- Verificaciones: `pnpm run test:client` **1.418 pruebas**, coverage statements 93,98 %, branches 84,90 %,
+  functions 93,87 %, lines 95,67 %; `pnpm run check:ui` correcto (229 ficheros); `pnpm run typecheck:e2e`
+  correcto. El gate completo `pnpm run test` también terminó correctamente: 1.418 pruebas cliente y
+  1.330 pruebas de servidor aprobadas, 1 omitida; `pnpm run build` terminó correctamente. `prettier --check`
+  y `git diff --check` pasan. El build mantiene avisos ya presentes
+  en `household-plan-editor.component.scss` (10,27 kB frente al presupuesto de 10 kB). `pnpm run lint:client`
+  no completa: el `angular.json` referencia `@angular-eslint/builder:lint`, pero ese paquete no está declarado
+  ni instalado; no se añadió una dependencia ajena a esta mejora. Los comandos equivalentes a los hooks
+  de commit/push terminaron correctamente; los hooks se ejecutan de nuevo automáticamente al publicar.
+  El PR permanece Draft.

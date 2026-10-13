@@ -62,102 +62,138 @@
         </span>
       </summary>
       <div class="plan-editor__advanced-settings-content">
-        <button
-          *ngIf="canEdit"
-          type="button"
-          class="plan-button plan-button--quiet plan-draw-area-toggle"
-          data-test="plan-draw-area"
-          data-close-advanced-settings
-          [class.is-selected]="tool() === 'space'"
-          [attr.aria-pressed]="tool() === 'space'"
-          (click)="setTool('space')"
-        >
-          <span aria-hidden="true" class="plan-draw-area-toggle__icon">
-            <svg viewBox="0 0 64 64">
-              <path d="M13 18h37v31H13z" stroke-dasharray="5 5" />
-              <path d="M13 18v8m0 15v8h8m19 0h10v-8" />
-            </svg>
-          </span>
-          {{ 'household.plan_draw_area' | t }}
-        </button>
-        <app-switch
-          class="plan-snap-control plan-snap-setting-mobile"
-          data-test="plan-snap-grid-mobile"
-          [visibleLabel]="true"
-          [labelledBy]="'plan-snap-label-mobile'"
-          [attr.title]="'household.plan_snap_grid' | t"
-          [checked]="snapToGrid()"
-          (checkedChange)="snapToGrid.set($event)"
-        >
-          <span id="plan-snap-label-mobile">{{ 'household.plan_snap_grid' | t }}</span>
-        </app-switch>
-        <button
-          *ngIf="canEdit"
-          type="button"
-          class="plan-button plan-button--quiet"
-          data-test="plan-add-floor"
-          (click)="addFloor()"
-        >
-          {{ 'household.plan_add_floor' | t }}
-        </button>
-        <div class="plan-editor__field plan-editor__dwelling-type">
-          <span>{{ 'household.plan_dwelling_type' | t }}</span>
-          <app-picker
-            id="household-plan-dwelling-type"
-            [label]="'household.plan_dwelling_type' | t"
-            [options]="dwellingTypeOptions()"
-            [value]="draft().dwellingType"
-            [disabled]="!canEdit"
-            (valueChange)="setDwellingTypeFromPicker($event)"
-          />
+        <div class="plan-options-group plan-options-group--drawing">
+          <button
+            *ngIf="canEdit"
+            type="button"
+            class="plan-button plan-button--quiet plan-menu-action plan-draw-area-toggle"
+            data-test="plan-draw-area"
+            data-close-advanced-settings
+            [class.is-selected]="tool() === 'space'"
+            [attr.aria-pressed]="tool() === 'space'"
+            (click)="setTool('space')"
+          >
+            <span class="plan-menu-action__content">
+              <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+                <path d="M4 5h16v14H4z" stroke-dasharray="3 3" />
+                <path d="M4 5v4m0 7v3h4m8 0h4v-4" />
+              </svg>
+              <span class="plan-menu-action__label">{{ 'household.plan_draw_area' | t }}</span>
+            </span>
+          </button>
+          <app-switch
+            class="plan-snap-control plan-snap-setting-mobile"
+            data-test="plan-snap-grid-mobile"
+            [visibleLabel]="true"
+            [labelledBy]="'plan-snap-label-mobile'"
+            [attr.title]="'household.plan_snap_grid' | t"
+            [checked]="snapToGrid()"
+            (checkedChange)="snapToGrid.set($event)"
+          >
+            <span id="plan-snap-label-mobile">{{ 'household.plan_snap_grid' | t }}</span>
+          </app-switch>
         </div>
-        <label *ngIf="draft().dwellingType === 'other'" class="plan-editor__dwelling-other">
-          <span>{{ 'household.plan_dwelling_other_label' | t }}</span>
-          <input
-            [ngModel]="draft().dwellingTypeLabel"
-            [disabled]="!canEdit"
-            maxlength="80"
-            (ngModelChange)="setDwellingTypeLabel($event)"
-          />
-        </label>
-        <label class="plan-editor__floor-name" *ngIf="activeFloor() as floor">
-          <span>{{ 'household.plan_floor_name' | t }}</span>
-          <input
-            [ngModel]="floor.name"
-            [disabled]="!canEdit"
-            maxlength="80"
-            (ngModelChange)="renameFloor($event)"
-          />
-        </label>
-        <button
-          *ngIf="canEdit"
-          type="button"
-          class="plan-button plan-button--quiet"
-          data-test="plan-add-basement"
-          (click)="addBasement()"
-        >
-          {{ 'household.plan_add_basement' | t }}
-        </button>
-        <button
-          *ngIf="canEdit && draft().floors.length > 1"
-          type="button"
-          class="plan-button plan-button--quiet"
-          data-test="plan-remove-floor"
-          (click)="removeFloor()"
-        >
-          {{ 'household.plan_remove_floor' | t }}
-        </button>
-        <span class="plan-editor__version">{{
-          'household.plan_revision' | t: { version: snapshot().version }
-        }}</span>
-        <button
-          type="button"
-          class="plan-button plan-button--quiet"
-          [disabled]="!canEdit || !isDirty() || saving()"
-          (click)="discardChanges()"
-        >
-          {{ 'household.plan_discard_changes' | t }}
-        </button>
+
+        <div class="plan-options-group plan-options-group--dwelling">
+          <div class="plan-editor__field plan-editor__dwelling-type">
+            <span>{{ 'household.plan_dwelling_type' | t }}</span>
+            <app-picker
+              id="household-plan-dwelling-type"
+              [label]="'household.plan_dwelling_type' | t"
+              [options]="dwellingTypeOptions()"
+              [value]="draft().dwellingType"
+              [disabled]="!canEdit"
+              (valueChange)="setDwellingTypeFromPicker($event)"
+            />
+          </div>
+          <label *ngIf="draft().dwellingType === 'other'" class="plan-editor__dwelling-other">
+            <span>{{ 'household.plan_dwelling_other_label' | t }}</span>
+            <input
+              [ngModel]="draft().dwellingTypeLabel"
+              [disabled]="!canEdit"
+              maxlength="80"
+              (ngModelChange)="setDwellingTypeLabel($event)"
+            />
+          </label>
+        </div>
+
+        <div class="plan-options-group plan-options-group--floors">
+          <label class="plan-editor__floor-name" *ngIf="activeFloor() as floor">
+            <span>{{ 'household.plan_floor_name' | t }}</span>
+            <input
+              [ngModel]="floor.name"
+              [disabled]="!canEdit"
+              maxlength="80"
+              (ngModelChange)="renameFloor($event)"
+            />
+          </label>
+          <div class="plan-options-floor-actions">
+            <button
+              *ngIf="canEdit"
+              type="button"
+              class="plan-button plan-button--quiet plan-menu-action"
+              data-test="plan-add-floor"
+              (click)="addFloor()"
+            >
+              <span class="plan-menu-action__content">
+                <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+                <span class="plan-menu-action__label">{{ 'household.plan_add_floor' | t }}</span>
+              </span>
+            </button>
+            <button
+              *ngIf="canEdit"
+              type="button"
+              class="plan-button plan-button--quiet plan-menu-action"
+              data-test="plan-add-basement"
+              (click)="addBasement()"
+            >
+              <span class="plan-menu-action__content">
+                <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+                  <path d="M4 5h16M6 5v10a6 6 0 0 0 12 0V5M9 19h6" />
+                </svg>
+                <span class="plan-menu-action__label">{{ 'household.plan_add_basement' | t }}</span>
+              </span>
+            </button>
+          </div>
+          <button
+            *ngIf="canEdit && draft().floors.length > 1"
+            type="button"
+            class="plan-button plan-menu-action plan-button--danger"
+            data-test="plan-remove-floor"
+            (click)="removeFloor()"
+          >
+            <span class="plan-menu-action__content">
+              <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+                <path d="M4 7h16m-10 4v6m4-6v6M6 7l1 14h10l1-14M9 7V4h6v3" />
+              </svg>
+              <span class="plan-menu-action__label">{{ 'household.plan_remove_floor' | t }}</span>
+            </span>
+          </button>
+        </div>
+
+        <div class="plan-options-footer">
+          <span class="plan-editor__version">{{
+            'household.plan_revision' | t: { version: snapshot().version }
+          }}</span>
+          <button
+            type="button"
+            class="plan-button plan-button--quiet plan-menu-action"
+            data-test="plan-discard-changes"
+            [disabled]="!canEdit || !isDirty() || saving()"
+            (click)="discardChanges()"
+          >
+            <span class="plan-menu-action__content">
+              <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+                <path d="M4 10V4m0 6h6m-6 0 4-4m0 0a8 8 0 1 1-1.5 9" />
+              </svg>
+              <span class="plan-menu-action__label">{{
+                'household.plan_discard_changes' | t
+              }}</span>
+            </span>
+          </button>
+        </div>
       </div>
     </details>
     <div
