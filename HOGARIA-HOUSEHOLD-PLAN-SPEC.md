@@ -828,8 +828,11 @@ parecer un único grupo de controles diseñado; no basta con que los controles f
 > **Decisión confirmada por el usuario (13-10-2026):** configuración del hogar como valor compartido,
 > overrides personales independientes de objetivo/horario apagados por defecto, primero comida común y,
 > si no es compatible, eventos individuales asignados; restricciones estrictas personales siempre
-> prevalecen. La extensión está en implementación; los criterios de aceptación siguen pendientes hasta
-> tener pruebas reproducibles. La UI de calendario existente se conserva como calendario único.
+> prevalecen. Para una ejecución automática configurada por el hogar, el usuario confirma que una
+> planificación nueva se publique en el calendario al finalizar; la propuesta manual mantiene la
+> revisión y confirmación explícitas. La extensión está en implementación; los criterios de aceptación
+> siguen pendientes hasta tener pruebas reproducibles. La UI de calendario existente se conserva como
+> calendario único.
 
 ### Decisión de producto
 
@@ -926,8 +929,11 @@ una alergia obliga a separar o a dejar el turno sin resolver aunque el objetivo 
   `response_format: { type: "json_schema", json_schema: { name, strict: true, schema } }`. El esquema
   es cerrado (`additionalProperties: false`) y exige todos los campos; el servidor vuelve a validar el
   JSON, miembros pertenecientes al hogar, recetas, horarios, raciones, restricciones y duplicados antes de
-  mostrar una vista previa. La IA no escribe directamente en el calendario ni en el inventario. La persona
-  revisa y confirma la propuesta para persistirla.
+  mostrar una vista previa. En el flujo manual, la IA no escribe directamente en el calendario ni en el
+  inventario: la persona revisa y confirma la propuesta. La excepción es la automatización semanal de
+  comidas que el hogar ha activado explícitamente: después de la misma validación, publica automáticamente
+  la propuesta en el calendario, sin un paso de confirmación adicional; nunca escribe directamente en
+  inventario ni aprueba una lista de compra.
 - Cada comida futura tiene estado de planificación independiente del consumo. Al llegar el momento, se
   puede confirmar **realizada** e indicar las raciones realmente cocinadas/servidas, o marcar **no
   realizada**. Planificar o saltar una comida no descuenta stock. Solo la confirmación de raciones
@@ -976,14 +982,22 @@ una alergia obliga a separar o a dejar el turno sin resolver aunque el objetivo 
   estar en el calendario.
 - La automatización semanal distingue dos modos: **generar una planificación nueva** (llama al planificador
   cuando llegue la fecha configurada) y **repetir la planificación actual** (reutiliza el plan semanal
-  confirmado sin pedir otra respuesta a IA). Repetir no duplica eventos ni reemplaza cambios manuales sin
-  permiso; la lista de compra se vuelve a calcular con las existencias actuales. Un indicador pequeño y persistente muestra la próxima ejecución automática y tiene un único
-  botón alternable de play/pause; al pausar conserva fecha y plan, y al reanudar informa la próxima fecha.
-  Puede configurarse si la ejecución abarca tareas, comidas o ambas. Para activar la recurrencia, el hogar
-  debe guardar explícitamente día semanal, hora local y zona IANA; no se hereda la zona del servidor ni del
+  confirmado más reciente del hogar, sin pedir otra respuesta a IA). Repetir no duplica eventos ni
+  reemplaza cambios manuales; la lista de compra se vuelve a calcular con las existencias actuales y su
+  escritura sigue requiriendo aprobación explícita. El usuario autoriza que, en modo de generación nueva,
+  el resultado validado se publique automáticamente al calendario; los turnos sin resolver, errores,
+  conflictos de versión o respuestas inválidas no escriben parcialmente ni sustituyen el plan actual y
+  quedan señalados para revisión. Solo se publican eventos en huecos sin conflicto con eventos ya
+  confirmados o cambios manuales. Un indicador pequeño y persistente muestra la próxima ejecución
+  automática y tiene un único botón alternable de play/pause; al pausar conserva plan y configuración, y
+  al reanudar programa la siguiente ocurrencia futura sin ejecutar en ráfaga las omitidas. Puede
+  configurarse si la ejecución abarca tareas, comidas o ambas. Para activar la recurrencia, el hogar debe
+  guardar explícitamente día semanal, hora local y zona IANA; no se hereda la zona del servidor ni del
   navegador. Si la hora local no existe por el salto de horario estacional, la ejecución pasa a la primera
   hora local válida posterior; si ocurre dos veces al volver el horario, se ejecuta una sola vez en la
-  primera ocurrencia. La siguiente ejecución debe exponer su instante UTC y etiqueta en la zona elegida.
+  primera ocurrencia. Un timeout ambiguo de IA no se reintenta a ciegas: se conserva una ejecución
+  recuperable para revisión/reintento explícito y la escritura local usa una clave idempotente por
+  ocurrencia. La siguiente ejecución debe exponer su instante UTC y etiqueta en la zona elegida.
 
 ### Alta de cuenta: pertenencia obligatoria a un hogar
 
@@ -1254,7 +1268,7 @@ test:coverage` pasa **1455 tests**, cobertura **93,49/84,12/93,66/95,4 %**. Los 
 El análisis previo del planificador está reflejado arriba para orientar la próxima unidad; todos los
 criterios inferiores permanecen sin marcar hasta validar cada condición en su alcance completo.
 
-### Criterios pendientes de aceptación — no implementados
+### Criterios de aceptación aún no cerrados
 
 - [ ] **QA-HOME-MEALS.SETTINGS.1** — API, persistencia, permisos y resolución por campo; defaults de
       overrides apagados; hogar nuevo inicializado idempotentemente desde valores existentes; unirse
@@ -1291,8 +1305,10 @@ criterios inferiores permanecen sin marcar hasta validar cada condición en su a
       pasa como se detalla arriba; faltan gates integrados antes de cerrar.
 - [ ] **QA-HOME-PLANNING.AUTOMATION.1** — configuración explícita por hogar de día semanal, hora local
       y zona IANA antes de activar; caso de hora inexistente → primera hora válida posterior y hora duplicada
-      → primera ocurrencia única. Generar/repetir, play/pause, siguiente fecha, retry e idempotencia; repetir
-      no llama a IA ni duplica eventos, protege ediciones manuales y permite elegir tareas/comidas.
+      → primera ocurrencia única. Generar/repetir, publicación automática validada de propuestas completas,
+      play/pause, siguiente fecha, omisión de ejecuciones vencidas al reanudar, conflictos sin sobrescritura,
+      retry explícito de timeout ambiguo e idempotencia; repetir no llama a IA ni duplica eventos y protege
+      ediciones manuales; seleccionar tareas/comidas y conservar aprobación explícita para Compra.
 - [x] **QA-HOME-TASKS.WEEKLY.2** — asignación fija/aleatoria, equilibrio, no repetir días
       consecutivos si hay solución, excepción explicada y preservación de asignaciones manuales.
       Evidencia: `household-task-assignment.spec.ts` y `household-tasks.component.spec.ts` cubren
