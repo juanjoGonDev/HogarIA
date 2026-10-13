@@ -1,8 +1,9 @@
-import { Injectable, computed, inject, signal } from '@angular/core';
+import { Injectable, computed, effect, inject, signal, untracked } from '@angular/core';
 import { finalize } from 'rxjs';
 import type { HomeModule } from '../../shared/models/home-profile';
 import { MODULE_REGISTRY, moduleOwningPath, type ModuleDefinition } from '../modules.registry';
 import { TasteProfileService } from './taste-profile.service';
+import { HouseholdService } from './household.service';
 
 /**
  * Módulos de HogarIA: qué secciones de la app tiene encendida esta cuenta.
@@ -30,6 +31,7 @@ export { MODULE_REGISTRY, moduleOwningPath, type ModuleDefinition } from '../mod
 @Injectable({ providedIn: 'root' })
 export class ModulesService {
   private readonly tasteService = inject(TasteProfileService);
+  private readonly householdService = inject(HouseholdService);
 
   readonly registry = MODULE_REGISTRY;
   readonly isSaving = signal(false);
@@ -51,8 +53,13 @@ export class ModulesService {
   });
 
   constructor() {
-    // El perfil puede no haberse pedido nunca (entrada directa a Configuración).
-    this.tasteService.ensureLoaded();
+    // El perfil está protegido por hogar. Cárgalo cuando exista uno activo, tanto al
+    // entrar con una membresía como después de crear/unirse sin recargar la app.
+    effect(() => {
+      if (this.householdService.activeHouseholdId()) {
+        untracked(() => this.tasteService.ensureLoaded());
+      }
+    });
   }
 
   /** Secciones que de verdad se ven ahora mismo (disponibles y encendidas). */

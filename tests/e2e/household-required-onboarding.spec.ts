@@ -134,6 +134,13 @@ test.describe('Mandatory household setup after registration', () => {
     page
   }, testInfo) => {
     const baseURL = String(testInfo.project.use.baseURL);
+    const protectedStartupResponses: Array<{ path: string; status: number }> = [];
+    page.on('response', (response) => {
+      const path = new URL(response.url()).pathname;
+      if (path === '/api/auth/taste' || path === '/api/receipts/queue') {
+        protectedStartupResponses.push({ path, status: response.status() });
+      }
+    });
     await page.setViewportSize(testViewport(testInfo.project.name));
     await registerAccount(page, baseURL);
 
@@ -142,6 +149,11 @@ test.describe('Mandatory household setup after registration', () => {
     await expect(page.locator('.no-household')).toBeVisible();
     await expect(page.getByRole('button', { name: /Crear hogar/i })).toBeVisible();
     await expect(page.getByRole('button', { name: /Unirse con código/i })).toBeVisible();
+    await expect(
+      page.getByText('Conflicto con el recurso', { exact: true }),
+      'la cuenta nueva no debe mostrar un error de conflicto al completar el registro'
+    ).toHaveCount(0);
+    await expect(page.locator('app-receipt-queue')).toHaveCount(0);
     await captureSetupScreen(page, testInfo.project.name, 'create-or-join');
 
     // Client-side navigation and the real app middleware both fail closed before membership exists.
@@ -155,9 +167,22 @@ test.describe('Mandatory household setup after registration', () => {
       count: 0,
       activeMatches: false
     });
+    expect(
+      protectedStartupResponses,
+      'no se deben pedir datos protegidos hasta crear o unirse a un hogar'
+    ).toEqual([]);
 
     const homeName = `Casa QA ${Date.now().toString(36)}`;
+    const tasteResponse = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'GET' &&
+        new URL(response.url()).pathname === '/api/auth/taste'
+    );
     await createHousehold(page, homeName);
+    expect((await tasteResponse).status(), 'el perfil vuelve a cargarse al activar un hogar').toBe(
+      200
+    );
+    await expect(page.locator('app-receipt-queue')).toHaveCount(2);
     expect(await readMembershipState(page)).toMatchObject({
       status: 200,
       count: 1,

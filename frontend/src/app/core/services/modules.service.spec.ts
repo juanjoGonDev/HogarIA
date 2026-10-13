@@ -1,6 +1,7 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { Observable } from 'rxjs';
+import { HouseholdService } from './household.service';
 import {
   DEFAULT_HOME_PROFILE,
   HOME_MODULE_OPTIONS,
@@ -29,6 +30,7 @@ describe('ModulesService', () => {
   let pending: Deferred[];
   let ensureLoadedCalls: number;
   let service: ModulesService;
+  let activeHouseholdId: ReturnType<typeof signal<string | null>>;
 
   class FakeTasteService {
     readonly isLoaded = signal(true);
@@ -66,9 +68,13 @@ describe('ModulesService', () => {
     saved = [];
     pending = [];
     ensureLoadedCalls = 0;
+    activeHouseholdId = signal<string | null>(null);
 
     TestBed.configureTestingModule({
-      providers: [{ provide: TasteProfileService, useClass: FakeTasteService }]
+      providers: [
+        { provide: TasteProfileService, useClass: FakeTasteService },
+        { provide: HouseholdService, useValue: { activeHouseholdId } }
+      ]
     });
 
     service = TestBed.inject(ModulesService);
@@ -79,8 +85,13 @@ describe('ModulesService', () => {
     return current.modules;
   }
 
-  it('pide el perfil al crearse, para no llegar a Configuracion sin datos', () => {
+  it('aplaza el perfil protegido hasta tener hogar activo y lo carga al crear o unirse', () => {
     configure();
+    TestBed.flushEffects();
+    expect(ensureLoadedCalls).toBe(0);
+
+    activeHouseholdId.set('home-1');
+    TestBed.flushEffects();
     expect(ensureLoadedCalls).toBe(1);
   });
 

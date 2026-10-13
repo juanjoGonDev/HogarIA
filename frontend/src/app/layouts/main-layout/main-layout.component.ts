@@ -3,7 +3,6 @@ import { CommonModule } from '@angular/common';
 import { Router, RouterOutlet, RouterLink, RouterLinkActive } from '@angular/router';
 import { AuthService } from '../../core/services/auth.service';
 import { ModulesService } from '../../core/services/modules.service';
-import { TasteProfileService } from '../../core/services/taste-profile.service';
 import { ToastComponent } from '../../shared/components/ui/toast/toast.component';
 import { AvatarComponent } from '../../shared/components/ui/avatar/avatar.component';
 import { IconComponent } from '../../shared/components/ui/icon/icon.component';
@@ -70,7 +69,7 @@ interface NavItem {
         </span>
         <!-- La cola de lectura de tickets: gira mientras la IA local lee, rojo si algo
              fallo, y su clic enseña el progreso y los frenos (## 12aj). -->
-        <app-receipt-queue class="header__queue" />
+        <app-receipt-queue *ngIf="hasActiveHousehold()" class="header__queue" />
         <button type="button" class="header__profile" (click)="navigateToProfile()">
           <!-- La foto tambien aqui: era el unico avatar de la app que ignoraba la
                URL del usuario, asi que en el movil se veia la inicial aunque la
@@ -86,7 +85,7 @@ interface NavItem {
             <app-icon name="home" [size]="20" [label]="null" />
             <span>{{ 'app.name' | t }}</span>
           </span>
-          <app-receipt-queue />
+          <app-receipt-queue *ngIf="hasActiveHousehold()" />
           <button type="button" class="sidebar__close" (click)="closeSidebar()">
             <app-icon name="close" [size]="20" [label]="'ui.close_menu' | t" />
           </button>
@@ -501,17 +500,12 @@ interface NavItem {
 export class MainLayoutComponent implements OnInit {
   authService = inject(AuthService);
   private readonly router = inject(Router);
-  private readonly tasteService = inject(TasteProfileService);
   private readonly householdService = inject(HouseholdService);
   private readonly modules = inject(ModulesService);
   private sidebarTrigger: HTMLElement | null = null;
   isSidebarOpen = signal(false);
 
   ngOnInit(): void {
-    // Gustos/alergias/objetivo se leen en varias vistas (planificador semanal,
-    // Preferencias): se cargan al montar el layout para que estén listos al abrir
-    // cualquiera de ellas, sin esperas ni dobles peticiones.
-    this.tasteService.ensureLoaded();
     this.householdService
       .loadMemberships()
       .subscribe(() => this.householdService.ensureHousehold());
@@ -541,6 +535,9 @@ export class MainLayoutComponent implements OnInit {
 
   /** La foto de la persona, si la tiene; si no, `app-avatar` saca la inicial del nombre. */
   readonly userAvatar = computed(() => this.authService.currentUser()?.avatar || undefined);
+
+  /** La cola está asociada al hogar y no debe consultar datos antes de pertenecer a uno. */
+  readonly hasActiveHousehold = computed(() => Boolean(this.householdService.activeHouseholdId()));
 
   /** Personal mode stays available; inside a home, configuration requires that home's settings permission. */
   readonly canManageAiSettings = computed(() => {
