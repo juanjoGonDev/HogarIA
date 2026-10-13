@@ -1003,18 +1003,33 @@ solo su backend o sus pruebas unitarias.
   de hogar/miembro, validación de permiso existente, resolución por miembro e inicialización del hogar
   están implementados. Los overrides empiezan apagados; la preferencia de horario personal procede de
   `users.preferences.mealPlan/mealTimes` al activar override, sin copiar alergias ni gustos al hogar.
-  Aún falta integrar esta resolución con el planificador y cerrar la UI.
-- **Plan semanal — backend de vista previa parcial:** se añadió `POST /api/household/meal-planning/proposal`
+  La nueva ruta de propuesta ya consume esta resolución; `plan-week` heredado no se declara migrado.
+  Falta cerrar la UI y E2E del flujo de ajustes.
+- **Plan semanal — backend parcial:** se añadió `POST /api/household/meal-planning/proposal`
   con selección explícita de miembros, permisos `calendar.edit`, datos del perfil de quienes participan,
   despacho IA fijado al hogar capturado, `response_format` JSON Schema estricto y validación local de
   cobertura, turnos, alergias incluidas en texto/instrucciones, privacidad de notas/nombres/alergias y
-  raciones. Las alergias no catalogadas producen turnos pendientes sin enviarlas al proveedor. La
+  raciones. Antes de resolver/enviar perfiles, todos los participantes requieren `calendar.view`; una
+  selección sin acceso se rechaza antes de llamar al proveedor. La ruta vuelve a comprobar el hogar
+  activo después de leer el body y al regresar del proveedor, así que una petición retrasada no expone
+  datos del hogar anterior. Las alergias no catalogadas producen turnos pendientes sin enviarlas al proveedor. La
   respuesta incluye alias opacos y eventos normalizados; la vista previa no escribe comidas ni calendario.
-  La petición de confirmación estricta ya está definida, pero la API de confirmación aún no está integrada.
-  El `POST /api/ai/plan-week` heredado no se declara sustituido.
-- **Recetas por ración — backend parcial:** el contrato nuevo usa `baseServings: 1`; ajuste local de
-  raciones y su smoke visual sintético de escritorio/móvil están en otra unidad aislada, aún sin integrar
-  en esta rama. No se llama a IA para volver a escalar una receta guardada.
+  `POST /api/household/meal-planning/confirm` revalida en servidor lo recibido y el estado actual de
+  los miembros, ignora los `participantIds` enviados por el navegador y reconstruye las asignaciones
+  desde alias opacos. Persiste en una sola transacción solo eventos seguros y aprobados; los pendientes
+  por restricciones no soportadas se reconstruyen localmente, no se persisten y no revelan el detalle
+  de la alergia. El retry idéntico es idempotente y cambios al mismo `proposalId` o colisiones de turno
+  responden conflicto sin sobrescribir el calendario. La confirmación limita el body a 8 MiB,
+  revalida el contexto tras parsearlo y el store verifica dentro de la transacción que siga activo el
+  hogar capturado. El máximo del store (2.800 eventos) coincide con el schema estructurado. El
+  `POST /api/ai/plan-week` heredado no se declara sustituido.
+- **Calendario compartido — backend parcial integrado:** un evento compartido se guarda una vez y sus
+  participantes son usuarios del hogar con permiso de lectura; las lecturas existentes exponen el
+  evento solo a las personas asignadas, sin notas/objetivos privados. Pendiente recorrido E2E real y
+  consumo/compras.
+- **Recetas por ración — backend/UI parcial:** el contrato nuevo usa `baseServings: 1`; ajuste local de
+  raciones y smoke visual sintético de escritorio/móvil están implementados en un worktree separado,
+  pendientes de integrar en esta rama. No se llama a IA para volver a escalar una receta guardada.
 - **Validación reproducible ejecutada en Windows:**
 
   ```powershell
@@ -1024,17 +1039,19 @@ solo su backend o sus pruebas unitarias.
   pnpm --filter @hogaria/server run test:coverage
   ```
 
-  Resultado: **5 archivos / 439 tests aprobados** en la focal con el contrato de formulario, TypeScript
-  limpio y suite servidor **74 archivos / 1407 tests aprobados / 1 omitido**. Cobertura focal del preview:
-  88.88 % statements, **70 % branches**, 97.05 % funciones y 93.1 % líneas; planner: 91.81 %, 81.15 %,
-  100 % y 95.6 % respectivamente. Cobertura global de servidor: 91.76 % statements, 83.29 % branches,
-  95.88 % funciones y 94.35 % líneas. La suite usa `DATABASE_PATH=:memory:` y proveedor sintético; no se
-  llamó a IA real. **Runtime:** el Hono route harness usa SQLite en memoria y proveedor simulado; el
-  recorrido real app+servidor/E2E de esta vista aún no se ejecuta. **Rollback de esta unidad:** retirar
-  el montaje/endpoint de preview, su request schema y planner, el parámetro de scope hogar del dispatcher,
-  sus tests/cobertura y esta evidencia; no revierte el contrato Structured Outputs ya integrado ni las
-  unidades independientes de receta/UI/calendario. Aún faltan confirmación/persistencia integrada,
-  UI/E2E reproducible PC+móvil y verificar toda la matriz antes de marcar cualquier casilla.
+  Resultado previo a los últimos fixes: **5 archivos / 452 tests aprobados** en la focal. Tras las
+  pruebas de regresión de permiso de lectura, cambio de hogar durante el parseo y ejecución del
+  proveedor, límite del body, lote de más de 100 eventos y escritura atómica, la suite de servidor
+  termina **75 archivos aprobados / 1 omitido; 1440 tests aprobados / 1 omitido**. TypeScript del
+  servidor pasa.
+  Cobertura de la ruta propuesta+confirmación: **90.47 % statements, 70.83 % branches, 98.07 % funciones
+  y 92.3 % líneas**; planner: 91.73 %, 81.6 %, 100 % y 93.39 %. Cobertura global de servidor: **91.79 %
+  statements, 83.14 % branches, 96.70 % funciones y 94.29 % líneas**. La suite usa `DATABASE_PATH=:memory:`
+  y proveedor sintético; no se llamó a IA real. **Runtime:** las rutas se verificaron con harness Hono y
+  SQLite en memoria; el recorrido real app+servidor/E2E de esta vista aún no se ejecuta. **Rollback de la
+  unidad de confirmación:** retirar endpoint, esquema de confirmación, tests/cobertura y esta evidencia;
+  conserva preview, schema Structured Outputs y almacén/calendario compartido. Aún faltan integrar la UI,
+  E2E reproducible PC+móvil, consumo, compras, automatización y validar la matriz completa.
 
 El análisis previo del planificador está reflejado arriba para orientar la próxima unidad; todos los
 criterios inferiores permanecen sin marcar hasta validar cada condición en su alcance completo.

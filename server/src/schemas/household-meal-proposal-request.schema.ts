@@ -33,6 +33,11 @@ export const householdMealProposalRequestSchema = z
 export type HouseholdMealProposalRequest = z.infer<typeof householdMealProposalRequestSchema>;
 
 const proposalEventSubmissionSchema = mealProposalEventSchema.extend({
+  // The preview echoes these IDs for rendering only. Confirmation ignores them and resolves aliases again.
+  participantIds: z
+    .array(z.string().trim().min(1).max(128))
+    .max(HOUSEHOLD_MEAL_PROPOSAL_MAX_MEMBERS)
+    .optional(),
   id: z
     .string()
     .trim()
@@ -54,7 +59,7 @@ export const householdMealProposalConfirmRequestSchema = z
       .array(z.string().trim().min(1).max(128))
       .min(1)
       .max(HOUSEHOLD_MEAL_PROPOSAL_MAX_MEMBERS),
-    // Membership IDs are deliberately not accepted here; the server derives them from aliases.
+    // Alias-to-membership resolution is always repeated server-side; echoed participantIds are untrusted.
     events: z.array(proposalEventSubmissionSchema).min(1).max(MEAL_PROPOSAL_LIMITS.maxEvents)
   })
   .strict()

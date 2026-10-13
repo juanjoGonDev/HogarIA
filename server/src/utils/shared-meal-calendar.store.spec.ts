@@ -108,6 +108,49 @@ describe('persistSharedMeal', () => {
     expect(first.meal.notes).toBeNull();
   });
 
+  it('no escribe si el hogar activo ya no coincide con el contexto capturado por la ruta', () => {
+    const otherHouseholdId = 'other-meal-home';
+    db.prepare(
+      'INSERT INTO households (id, name, invite_code, share_calendar) VALUES (?, ?, ?, 0)'
+    ).run(otherHouseholdId, 'Otra casa', 'OTHER001');
+    db.prepare('UPDATE users SET household_id = ? WHERE id = ?').run(otherHouseholdId, 'alice');
+    db.prepare(
+      'INSERT INTO household_members (id, household_id, user_id, role, permissions, is_active) VALUES (?, ?, ?, ?, ?, 1)'
+    ).run(
+      'member-alice-other',
+      otherHouseholdId,
+      'alice',
+      'member',
+      JSON.stringify({ calendar: { view: true, edit: true } })
+    );
+
+    let failure: unknown;
+    try {
+      persistSharedMeals(db, 'alice', {
+        proposalId: 'stale-household-proposal',
+        expectedHouseholdId: householdId,
+        events: [
+          {
+            eventId: 'event-lunch',
+            date: '2026-10-14',
+            mealType: 'lunch',
+            customMeal: 'Guiso',
+            servings: 1,
+            participantIds: ['alice']
+          }
+        ]
+      });
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(SharedMealPersistenceError);
+    expect(failure).toMatchObject({ code: 'HOUSEHOLD_CONTEXT_CHANGED' });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM meals').get()).toEqual({ count: 0 });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM weekly_calendars').get()).toEqual({
+      count: 0
+    });
+  });
+
   it('expone los participantes asociados desde el modelo Drizzle sin duplicar la comida', async () => {
     persistSharedMeal(db, 'alice', input);
     const rows = (await (getDrizzle() as any).query.meals.findMany({
@@ -342,6 +385,29 @@ describe('persistSharedMeal', () => {
       ]
     });
     expect(disjoint.meals).toHaveLength(2);
+  });
+
+  it('admite lotes superiores a cien eventos sin volver cuadrática la validación de turnos', () => {
+    const events = Array.from({ length: 101 }, (_, index) => {
+      const date = new Date(Date.UTC(2026, 9, 12 + index)).toISOString().slice(0, 10);
+      return {
+        eventId: `event-${index}`,
+        date,
+        mealType: 'lunch' as const,
+        customMeal: `Comida ${index}`,
+        servings: 1,
+        participantIds: ['alice']
+      };
+    });
+
+    const result = persistSharedMeals(db, 'alice', {
+      proposalId: 'large-weekly-proposal',
+      events
+    });
+
+    expect(result.meals).toHaveLength(101);
+    expect(result.idempotent).toBe(false);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM meals').get()).toEqual({ count: 101 });
   });
 
   it('exige calendar.edit al confirmante y calendar.view a cada participante antes de escribir', () => {

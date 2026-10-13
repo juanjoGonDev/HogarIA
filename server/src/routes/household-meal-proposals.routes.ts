@@ -1,9 +1,16 @@
 import { nanoid } from 'nanoid';
 import { Hono, type Context } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { getDatabase } from '../config/database.js';
 import { authMiddleware } from '../middleware/auth.middleware.js';
-import { createMealProposalResponseFormat } from '../schemas/household-meal-proposal.schema.js';
-import { householdMealProposalRequestSchema } from '../schemas/household-meal-proposal-request.schema.js';
+import {
+  createMealProposalResponseFormat,
+  mealProposalSchema
+} from '../schemas/household-meal-proposal.schema.js';
+import {
+  householdMealProposalConfirmRequestSchema,
+  householdMealProposalRequestSchema
+} from '../schemas/household-meal-proposal-request.schema.js';
 import type { AppEnv } from '../types/hono-env.js';
 import { aiOutputLanguageInstruction } from '../utils/ai-output-language.js';
 import { activeHouseholdId, needsActiveHouseholdSelection } from '../utils/household-context.js';
@@ -20,6 +27,11 @@ import {
   normalizeMealProposal,
   type MealProposalMemberContext
 } from '../utils/household-meal-proposal.planner.js';
+import {
+  persistSharedMeals,
+  SharedMealPersistenceError,
+  type SharedMealEventInput
+} from '../utils/shared-meal-calendar.store.js';
 
 const PRIVATE_GOAL_OUTPUT_TERMS: Partial<Record<TasteGoal, readonly string[]>> = {
   'weight-loss': ['weight-loss', 'weight loss', 'perder peso', 'perdida de peso', 'bajar de peso'],
@@ -27,6 +39,7 @@ const PRIVATE_GOAL_OUTPUT_TERMS: Partial<Record<TasteGoal, readonly string[]>> =
   'muscle-gain': ['muscle-gain', 'muscle gain', 'ganar musculo', 'aumentar masa muscular'],
   maintenance: ['maintenance', 'mantener peso', 'mantenimiento']
 };
+const MAX_MEAL_PROPOSAL_CONFIRMATION_BYTES = 8 * 1024 * 1024;
 
 export const householdMealProposalRoutes = new Hono<AppEnv>();
 householdMealProposalRoutes.use('*', authMiddleware);
@@ -47,6 +60,7 @@ householdMealProposalRoutes.post('/meal-planning/proposal', async (c) => {
   } catch {
     return c.json({ success: false, code: 'INVALID_MEAL_PROPOSAL_REQUEST' }, 400);
   }
+  if (activeHouseholdId(db, userId) !== householdId) return householdContextChanged(c);
   const request = householdMealProposalRequestSchema.safeParse(body);
   if (!request.success) {
     return c.json(
@@ -66,6 +80,9 @@ householdMealProposalRoutes.post('/meal-planning/proposal', async (c) => {
       userId,
       request.data.householdMemberIds
     );
+    if (!selectedMembersCanViewCalendar(db, householdId, context.members)) {
+      return c.json({ success: false, code: 'HOUSEHOLD_CALENDAR_VIEW_REQUIRED' }, 403);
+    }
     const members = resolveProposalMembers(db, householdId, context.members);
     const slots = buildExpectedMealSlots(request.data.weekStart, members);
     if (slots.length === 0) {
@@ -104,11 +121,11 @@ householdMealProposalRoutes.post('/meal-planning/proposal', async (c) => {
         c.req.raw.signal,
         householdId
       );
+      if (activeHouseholdId(db, userId) !== householdId) return householdContextChanged(c);
       proposed = extractJsonObject(response);
     }
 
     const plan = normalizeMealProposal(proposed, slots, members);
-    const aliases = new Map(members.map((member) => [member.alias, member.householdMemberId]));
     c.header('Cache-Control', 'no-store');
     return c.json({
       success: true,
@@ -119,7 +136,9 @@ householdMealProposalRoutes.post('/meal-planning/proposal', async (c) => {
         events: plan.events.map((event) => ({
           id: nanoid(),
           ...event,
-          participantIds: event.participantAliases.map((alias) => aliases.get(alias)!)
+          participantIds: event.participantAliases.map(
+            (alias) => members.find((member) => member.alias === alias)!.userId
+          )
         }))
       }
     });
@@ -138,6 +157,186 @@ householdMealProposalRoutes.post('/meal-planning/proposal', async (c) => {
     return c.json({ success: false, code: 'MEAL_PROPOSAL_GENERATION_FAILED' }, 500);
   }
 });
+
+householdMealProposalRoutes.post(
+  '/meal-planning/confirm',
+  bodyLimit({
+    maxSize: MAX_MEAL_PROPOSAL_CONFIRMATION_BYTES,
+    onError: (c) => c.json({ success: false, code: 'MEAL_PROPOSAL_CONFIRMATION_TOO_LARGE' }, 413)
+  }),
+  async (c) => {
+    const db = getDatabase();
+    const userId = c.get('userId');
+    const householdId = activeHouseholdId(db, userId);
+    if (!householdId) return noHouseholdResponse(c, db, userId);
+    if (c.req.header('x-household-id') !== householdId) return householdContextChanged(c);
+    if (!canEditHouseholdCalendar(db, householdId, userId)) {
+      return c.json({ success: false, code: 'HOUSEHOLD_CALENDAR_EDIT_REQUIRED' }, 403);
+    }
+
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ success: false, code: 'INVALID_MEAL_PROPOSAL_CONFIRMATION' }, 400);
+    }
+    if (activeHouseholdId(db, userId) !== householdId) return householdContextChanged(c);
+    const request = householdMealProposalConfirmRequestSchema.safeParse(body);
+    if (!request.success) {
+      return c.json({ success: false, code: 'INVALID_MEAL_PROPOSAL_CONFIRMATION' }, 400);
+    }
+
+    try {
+      const context = readHouseholdMealPlanningForMembers(
+        db,
+        householdId,
+        userId,
+        request.data.householdMemberIds
+      );
+      if (!selectedMembersCanViewCalendar(db, householdId, context.members)) {
+        return c.json({ success: false, code: 'HOUSEHOLD_CALENDAR_VIEW_REQUIRED' }, 403);
+      }
+      const members = resolveProposalMembers(db, householdId, context.members);
+      const slots = buildExpectedMealSlots(request.data.weekStart, members);
+      const memberByAlias = new Map(members.map((member) => [member.alias, member]));
+      const submitted = request.data.events.map(({ id, participantIds: _echoedIds, ...event }) => ({
+        id,
+        ...event
+      }));
+      const structurallyValid = mealProposalSchema.safeParse({
+        events: submitted.map(({ id: _id, ...event }) => event)
+      });
+      if (!structurallyValid.success) {
+        return c.json({ success: false, code: 'INVALID_MEAL_PROPOSAL_CONFIRMATION' }, 400);
+      }
+
+      // Unsupported strict-restriction slots are server-generated review placeholders. Drop any
+      // client copy of those slots and reconstruct them locally; never persist them as meals.
+      const modelEvents = structurallyValid.data.events.filter((event) =>
+        event.participantAliases.every(
+          (alias) => !memberByAlias.get(alias)?.unsupportedRestrictions.length
+        )
+      );
+      const plan = normalizeMealProposal({ events: modelEvents }, slots, members);
+      const aliases = new Map(members.map((member) => [member.alias, member.userId]));
+      const persistEvents: SharedMealEventInput[] = [];
+
+      for (const event of plan.events) {
+        if (event.status !== 'scheduled' || !event.recipe) continue;
+        const source = submitted.find(
+          (candidate) =>
+            candidate.date === event.date &&
+            candidate.mealType === event.mealType &&
+            candidate.time === event.time &&
+            event.participantAliases.every((alias) => candidate.participantAliases.includes(alias))
+        );
+        if (!source) {
+          return c.json({ success: false, code: 'MEAL_PROPOSAL_EVENT_ID_MISSING' }, 400);
+        }
+        const participantIds = event.participantAliases.map((alias) => aliases.get(alias));
+        if (participantIds.some((id) => !id)) {
+          return c.json({ success: false, code: 'HOUSEHOLD_MEMBER_NOT_FOUND' }, 404);
+        }
+        const recipe = event.recipe;
+        persistEvents.push({
+          eventId: source.id,
+          date: event.date,
+          mealType: event.mealType,
+          time: event.time,
+          customMeal: recipe.name,
+          servings: event.servings,
+          participantIds: participantIds as string[],
+          recipeSnapshot: {
+            name: recipe.name,
+            description: recipe.description,
+            baseServings: 1,
+            times: {
+              prepTimeMinutes: recipe.prepTimeMinutes,
+              cookTimeMinutes: recipe.cookTimeMinutes,
+              totalTimeMinutes: recipe.prepTimeMinutes + recipe.cookTimeMinutes
+            },
+            ingredients: recipe.ingredients.map((ingredient) => ({
+              name: ingredient.name,
+              quantity: ingredient.quantity,
+              unit: ingredient.unit,
+              preparation: ingredient.preparation,
+              isOptional: ingredient.isOptional,
+              notes: ingredient.notes
+            })),
+            instructions: recipe.instructions
+          }
+        });
+      }
+
+      if (persistEvents.length === 0) {
+        return c.json({ success: false, code: 'MEAL_PLAN_NO_SAFE_MEALS' }, 409);
+      }
+
+      const result = persistSharedMeals(db, userId, {
+        proposalId: request.data.proposalId,
+        events: persistEvents,
+        expectedHouseholdId: householdId
+      });
+      const persistedEvents = result.meals.map((meal) => {
+        const eventId = meal.source_proposal_id.slice(request.data.proposalId.length + 1);
+        const persisted = persistEvents.find((event) => event.eventId === eventId);
+        return {
+          id: meal.id,
+          proposalEventId: eventId,
+          date: meal.date,
+          mealType: meal.meal_type,
+          time: meal.time,
+          servings: meal.servings,
+          participantIds: persisted?.participantIds ?? [],
+          recipeSnapshot: meal.recipe_snapshot ? JSON.parse(meal.recipe_snapshot) : null
+        };
+      });
+      const unresolvedEvents = plan.events
+        .filter((event) => event.status === 'unresolved')
+        .map((event) => ({
+          ...event,
+          participantIds: event.participantAliases
+            .map((alias) => aliases.get(alias))
+            .filter((id): id is string => Boolean(id))
+        }));
+
+      c.header('Cache-Control', 'no-store');
+      return c.json({
+        success: true,
+        data: {
+          proposalId: request.data.proposalId,
+          weekStart: request.data.weekStart,
+          idempotent: result.idempotent,
+          events: persistedEvents,
+          unresolvedEvents
+        }
+      });
+    } catch (error) {
+      if (error instanceof MealProposalValidationError) {
+        const status = error.code === 'MEAL_PROPOSAL_SLOT_COVERAGE_INVALID' ? 409 : 400;
+        return c.json({ success: false, code: error.code }, status);
+      }
+      if (error instanceof SharedMealPersistenceError) {
+        const status =
+          error.code === 'HOUSEHOLD_CONTEXT_CHANGED'
+            ? 409
+            : error.code === 'FORBIDDEN'
+              ? 403
+              : error.code === 'INVALID_PARTICIPANTS'
+                ? 403
+                : error.code === 'INVALID_INPUT'
+                  ? 400
+                  : 409;
+        return c.json({ success: false, code: error.code }, status);
+      }
+      if (isHouseholdMealPlanningError(error)) {
+        const status = error.code === 'HOUSEHOLD_MEMBER_NOT_FOUND' ? 404 : 409;
+        return c.json({ success: false, code: error.code }, status);
+      }
+      return c.json({ success: false, code: 'MEAL_PROPOSAL_CONFIRMATION_FAILED' }, 500);
+    }
+  }
+);
 
 export function mapHouseholdMealProposalAiError(error: AiCallError): {
   status: 409 | 502 | 504;
@@ -198,6 +397,7 @@ function resolveProposalMembers(
     return {
       alias: `P${index + 1}`,
       householdMemberId: member.householdMemberId,
+      userId: member.userId,
       schedule: {
         mealTypes: member.schedule.mealTypes,
         mealTimes: member.schedule.mealTimes
@@ -389,6 +589,40 @@ function canEditHouseholdCalendar(
       calendar &&
       typeof calendar === 'object' &&
       (calendar as Record<string, unknown>).edit === true
+    );
+  } catch {
+    return false;
+  }
+}
+
+function selectedMembersCanViewCalendar(
+  db: ReturnType<typeof getDatabase>,
+  householdId: string,
+  members: readonly ResolvedMemberMealPlanning[]
+): boolean {
+  return members.every((member) => canViewHouseholdCalendar(db, householdId, member.userId));
+}
+
+function canViewHouseholdCalendar(
+  db: ReturnType<typeof getDatabase>,
+  householdId: string,
+  userId: string
+): boolean {
+  const membership = db
+    .prepare(
+      `SELECT permissions FROM household_members
+        WHERE household_id = ? AND user_id = ? AND is_active = 1`
+    )
+    .get(householdId, userId) as { permissions: string | null } | undefined;
+  if (!membership?.permissions) return false;
+  try {
+    const permissions: unknown = JSON.parse(membership.permissions);
+    if (!permissions || typeof permissions !== 'object' || Array.isArray(permissions)) return false;
+    const calendar = (permissions as Record<string, unknown>).calendar;
+    return Boolean(
+      calendar &&
+      typeof calendar === 'object' &&
+      (calendar as Record<string, unknown>).view === true
     );
   } catch {
     return false;

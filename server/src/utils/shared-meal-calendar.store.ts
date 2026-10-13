@@ -1,5 +1,6 @@
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
+import { MEAL_PROPOSAL_LIMITS } from '../schemas/household-meal-proposal.schema.js';
 import { activeHouseholdId } from './household-context.js';
 import { ensureWeekCalendar, utcDate } from './week-calendar.js';
 
@@ -36,7 +37,12 @@ const sharedRecipeSnapshotSchema = z.object({
 });
 
 export type SharedMealErrorCode =
-  'INVALID_INPUT' | 'FORBIDDEN' | 'INVALID_PARTICIPANTS' | 'PROPOSAL_CONFLICT' | 'SLOT_CONFLICT';
+  | 'INVALID_INPUT'
+  | 'FORBIDDEN'
+  | 'INVALID_PARTICIPANTS'
+  | 'PROPOSAL_CONFLICT'
+  | 'SLOT_CONFLICT'
+  | 'HOUSEHOLD_CONTEXT_CHANGED';
 
 export class SharedMealPersistenceError extends Error {
   constructor(
@@ -94,6 +100,8 @@ export interface SharedMealsInput {
   /** Stable parent proposal id; all events in this confirmation are committed atomically. */
   proposalId: string;
   events: SharedMealEventInput[];
+  /** Reject a context switch after request parsing, before writing into another active home. */
+  expectedHouseholdId?: string;
 }
 
 /** Backwards-compatible one-event input. Its single event key is `${proposalId}:single`. */
@@ -118,6 +126,7 @@ interface NormalizedSharedMealEvent {
 interface NormalizedSharedMealsInput {
   proposalId: string;
   events: NormalizedSharedMealEvent[];
+  expectedHouseholdId?: string;
 }
 
 export interface PersistedSharedMeal {
@@ -244,14 +253,28 @@ function normalizeBatch(raw: SharedMealsInput): NormalizedSharedMealsInput {
   if (!proposalId || proposalId.length > 200 || proposalId.includes(':')) {
     return invalidInput('proposalId inválido');
   }
-  if (!Array.isArray(raw.events) || raw.events.length === 0 || raw.events.length > 100) {
-    return invalidInput('events debe contener entre 1 y 100 eventos');
+  if (
+    !Array.isArray(raw.events) ||
+    raw.events.length === 0 ||
+    raw.events.length > MEAL_PROPOSAL_LIMITS.maxEvents
+  ) {
+    return invalidInput(`events debe contener entre 1 y ${MEAL_PROPOSAL_LIMITS.maxEvents} eventos`);
+  }
+  if (
+    raw.expectedHouseholdId !== undefined &&
+    (typeof raw.expectedHouseholdId !== 'string' || !raw.expectedHouseholdId.trim())
+  ) {
+    return invalidInput('expectedHouseholdId inválido');
   }
   const events = raw.events.map((event) => normalizeEvent(proposalId, event));
   if (new Set(events.map(({ eventId }) => eventId)).size !== events.length) {
     return invalidInput('eventId no puede repetirse dentro de la propuesta');
   }
-  return { proposalId, events };
+  return {
+    proposalId,
+    events,
+    ...(raw.expectedHouseholdId ? { expectedHouseholdId: raw.expectedHouseholdId.trim() } : {})
+  };
 }
 
 function canUseCalendarPermission(
@@ -324,19 +347,17 @@ function sameMeal(
 }
 
 function assertNoProposalSlotOverlap(events: NormalizedSharedMealEvent[]): void {
-  for (let index = 0; index < events.length; index += 1) {
-    const left = events[index];
-    for (const right of events.slice(index + 1)) {
-      if (
-        left.date === right.date &&
-        left.mealType === right.mealType &&
-        left.participantIds.some((participantId) => right.participantIds.includes(participantId))
-      ) {
+  const assignedByTurn = new Set<string>();
+  for (const event of events) {
+    for (const participantId of event.participantIds) {
+      const key = `${event.date}:${event.mealType}:${participantId}`;
+      if (assignedByTurn.has(key)) {
         throw new SharedMealPersistenceError(
           'SLOT_CONFLICT',
           'Dos eventos de la propuesta asignan comidas distintas a la misma persona, fecha y turno'
         );
       }
+      assignedByTurn.add(key);
     }
   }
 }
@@ -386,6 +407,12 @@ export function persistSharedMeals(
 
   const persist = db.transaction((): PersistSharedMealsResult => {
     const householdId = activeHouseholdId(db, actorId);
+    if (input.expectedHouseholdId && householdId !== input.expectedHouseholdId) {
+      throw new SharedMealPersistenceError(
+        'HOUSEHOLD_CONTEXT_CHANGED',
+        'El hogar activo cambió durante la confirmación'
+      );
+    }
     if (!householdId || !canUseCalendarPermission(db, householdId, actorId, 'edit')) {
       throw new SharedMealPersistenceError('FORBIDDEN', 'Se requiere permiso calendar.edit');
     }

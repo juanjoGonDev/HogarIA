@@ -12,6 +12,7 @@ function member(
   return {
     alias,
     householdMemberId: `member-${alias}`,
+    userId: `user-${alias}`,
     schedule: {
       mealTypes: { breakfast: false, lunch: true, snack: false, dinner: false },
       mealTimes: { breakfast: '09:00', lunch: '14:00', snack: '17:00', dinner: '20:30' }

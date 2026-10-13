@@ -90,7 +90,6 @@ describe('householdMealProposalConfirmRequestSchema', () => {
     for (const value of [
       { ...base, events: [{ ...event, id: 'bad:event' }] },
       { ...base, events: [event, event] },
-      { ...base, events: [{ ...event, participantIds: ['not-trusted'] }] },
       { ...base, weekStart: '2026-10-13' }
     ]) {
       expect(householdMealProposalConfirmRequestSchema.safeParse(value).success).toBe(false);

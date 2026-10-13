@@ -66,6 +66,7 @@ import {
   householdMealProposalConfirmRequestSchema,
   householdMealProposalRequestSchema
 } from './household-meal-proposal-request.schema.js';
+import { mealProposalSchema } from './household-meal-proposal.schema.js';
 import { generatedRecipeCandidateSchema } from './generated-recipe.schema.js';
 import {
   applyLinesSchema,
@@ -302,6 +303,43 @@ const ROWS: Row[] = [
       ]
     },
     note: 'La confirmación acepta solo alias opacos; el servidor resuelve las membresías y vuelve a validar receta y turnos.'
+  },
+  {
+    name: 'mealProposalSchema',
+    schema: mealProposalSchema,
+    required: {
+      events: [
+        {
+          date: '2026-10-12',
+          mealType: 'lunch',
+          time: '13:00',
+          recipe: {
+            name: 'Lentejas',
+            description: 'Plato sencillo.',
+            baseServings: 1,
+            prepTimeMinutes: 10,
+            cookTimeMinutes: 30,
+            ingredients: [
+              {
+                name: 'lentejas',
+                quantity: 80,
+                unit: 'g',
+                preparation: null,
+                isOptional: false,
+                notes: null
+              }
+            ],
+            instructions: ['Cocer las lentejas.']
+          },
+          participantAliases: ['P1'],
+          servings: 1,
+          objectiveSummary: 'Plato sencillo.',
+          status: 'scheduled',
+          reason: null
+        }
+      ]
+    },
+    note: 'Contrato de salida JSON de la IA: al menos un evento válido con receta y alias opaco; la cobertura real se valida con el planificador.'
   },
   {
     name: 'householdPlanWriteSchema',

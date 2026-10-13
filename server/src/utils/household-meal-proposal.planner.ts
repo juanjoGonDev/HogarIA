@@ -12,6 +12,7 @@ import { findIngredientRestrictionConflicts } from './recipe-replacement.js';
 export interface MealProposalMemberContext {
   alias: string;
   householdMemberId: string;
+  userId: string;
   schedule: MealPlanningSchedule;
   goal: MealPlanningObjective;
   goalOverrideEnabled: boolean;
@@ -100,11 +101,39 @@ function recipeText(event: MealProposal['events'][number]): string[] {
   ];
 }
 
+function privacyVisibleText(event: MealProposal['events'][number]): string[] {
+  if (!event.recipe) return [event.objectiveSummary, event.reason ?? ''];
+  return [
+    event.objectiveSummary,
+    event.reason ?? '',
+    event.recipe.name,
+    event.recipe.description,
+    ...event.recipe.ingredients.flatMap((ingredient) => [
+      ingredient.preparation ?? '',
+      ingredient.notes ?? ''
+    ]),
+    ...event.recipe.instructions
+  ];
+}
+
+function containsAllergyDisclosure(
+  event: MealProposal['events'][number],
+  member: MealProposalMemberContext
+): boolean {
+  if (!member.strictRestrictions.length) return false;
+  const narrative = comparableText(privacyVisibleText(event).join(' '));
+  if (/(?:alergi|allerg|intoleran)/.test(narrative)) return true;
+  return member.strictRestrictions.some(
+    (restriction) =>
+      containsPrivateTerm(narrative, member.alias) && containsPrivateTerm(narrative, restriction)
+  );
+}
+
 function hasPrivateOutputLeak(
   event: MealProposal['events'][number],
   members: readonly MealProposalMemberContext[]
 ): boolean {
-  const visibleText = comparableText(recipeText(event).join(' '));
+  const visibleText = comparableText(privacyVisibleText(event).join(' '));
   if (!visibleText) return false;
 
   return members.some((member) => {
@@ -112,12 +141,12 @@ function hasPrivateOutputLeak(
       event.participantAliases.length === 1 && event.participantAliases[0] === member.alias;
     const privateTerms = [
       ...member.privateOutputTerms,
-      // Allergies are model inputs for safety but never belong in calendar-visible copy, even
-      // when the event is assigned to another participant or the dish itself is otherwise safe.
-      ...member.strictRestrictions,
       ...(soleAssignee ? [] : member.privateGoalTerms)
     ];
-    return privateTerms.some((term) => containsPrivateTerm(visibleText, term));
+    return (
+      privateTerms.some((term) => containsPrivateTerm(visibleText, term)) ||
+      containsAllergyDisclosure(event, member)
+    );
   });
 }
 
