@@ -190,6 +190,35 @@ function eventKey(meal: {
   ]);
 }
 
+function parsePromptArrayAfter(prompt: string, label: string): MealSlot[] {
+  const marker = label + '\n';
+  const markerStart = prompt.indexOf(marker);
+  if (markerStart < 0) throw new Error('Prompt fixture is missing the meal-slot section.');
+
+  const jsonStart = prompt.indexOf('[', markerStart + marker.length);
+  if (jsonStart < 0) throw new Error('Prompt fixture is missing the meal-slot JSON array.');
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = jsonStart; index < prompt.length; index += 1) {
+    const character = prompt[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === '\\') escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') inString = true;
+    else if (character === '[') depth += 1;
+    else if (character === ']') {
+      depth -= 1;
+      if (depth === 0) return JSON.parse(prompt.slice(jsonStart, index + 1)) as MealSlot[];
+    }
+  }
+  throw new Error('Prompt fixture contains an incomplete meal-slot JSON array.');
+}
+
 async function captureSyntheticScreen(page: Page, project: string, state: string): Promise<string> {
   const directory = resolve('.e2e-screenshots/household-planning-integrated');
   await mkdir(directory, { recursive: true });
@@ -199,15 +228,20 @@ async function captureSyntheticScreen(page: Page, project: string, state: string
   return path;
 }
 
-test('recorre alta, planificación compartida, consumo, compra y automatización sin duplicar escrituras', async ({
+test('recorre planificación del hogar y guarda automatización futura sin escrituras prematuras', async ({
   page,
   browser
 }, testInfo) => {
   test.setTimeout(180_000);
-  const mobile = testInfo.project.name === 'mobile-chrome';
+  const mobile = testInfo.project.use.isMobile === true;
   const viewport = mobile ? { width: 390, height: 844 } : { width: 1440, height: 900 };
   const baseURL = String(testInfo.project.use.baseURL);
-  const device = mobile ? devices['Pixel 5'] : devices['Desktop Chrome'];
+  const device =
+    testInfo.project.name === 'mobile-safari'
+      ? devices['iPhone 13']
+      : mobile
+        ? devices['Pixel 5']
+        : devices['Desktop Chrome'];
   await page.setViewportSize(viewport);
 
   const memberContext: BrowserContext = await browser.newContext({
@@ -230,13 +264,10 @@ test('recorre alta, planificación compartida, consumo, compra y automatización
         const payload = JSON.parse(body) as ProviderRequest;
         providerRequests.push(payload);
         const prompt = payload.messages?.find((message) => message.role === 'user')?.content ?? '';
-        const marker = 'Turnos que deben quedar resueltos exactamente una vez por participante:\n';
-        const start = prompt.indexOf(marker);
-        const end = prompt.indexOf('\n\nObjetivo común del hogar', start + marker.length);
-        const slots =
-          start >= 0 && end > start
-            ? (JSON.parse(prompt.slice(start + marker.length, end)) as MealSlot[])
-            : [];
+        const slots = parsePromptArrayAfter(
+          prompt,
+          'Turnos que deben quedar resueltos exactamente una vez por participante:'
+        );
         const events = slots.flatMap((slot, index) => {
           const groups =
             index % 2 === 0
