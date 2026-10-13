@@ -351,7 +351,7 @@ test('genera, revisa y confirma comidas con navegación de planificación en esc
       await page.evaluate(() => window.scrollTo(0, 0));
       await page.screenshot({
         path: resolve(screenshotDirectory, 'mobile-chrome-proposal-top.png'),
-        fullPage: true,
+        fullPage: false,
         animations: 'disabled'
       });
       await confirmButton.scrollIntoViewIfNeeded();
