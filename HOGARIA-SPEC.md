@@ -5128,6 +5128,22 @@ en el entorno de esta sesión. No se leyó/creó ningún token ni se envió una 
 smoke permanece abierto; la disponibilidad del navegador/local de desarrollo del usuario no demuestra
 que el gateway sea alcanzable desde este proceso.
 
+**Revalidación aislada con tickets (2026-10-14):** WebAPI `GET /health/ready` respondió **200**; la
+sesión local de ChatGPT devolvió `needs_login`. La PR #164 está incluida en `origin/master`.
+Con autorización expresa, se seleccionaron únicamente los dos grupos pendientes (JPEG individual y
+las otras tres fotos como un ticket largo); los dos PDF ya completados no se repitieron. Se corrigió el
+smoke para crear primero un hogar, obligatorio desde el nuevo onboarding: `typecheck:e2e` pasa y
+`household-required-onboarding.spec.ts` pasa **10/10** en Chromium/Mobile Chrome.
+El proxy aislado validó `response_format` JSON Schema estricto y exactamente un `inventario.json` más
+un ticket. La sesión WebAPI confirmó **2 recibidos, 2 preparados, 2 disponibles y 2 incluidos en el
+prompt**, con **0** fallos al persistir previews. Aun así, ChatGPT no estaba autenticado: la primera
+petición streaming respondió HTTP **400**, la alternativa no-stream HTTP **401** y WebAPI registró
+`authentication_required`. El runner terminó `1`, **2/4** requests permitidas: solo se inició el grupo
+JPEG; el grupo largo no llegó a enviarse. No hubo respuesta válida, verificación de categorías ni
+deduplicación, y no se guardó nada en el inventario real (DB E2E temporal limpiada). La validación real
+queda abierta; no reenviar hasta que la sesión WebAPI indique autenticada, y después enviar solo los
+grupos sin respuesta válida.
+
 ### QA-HOUSEHOLD.SHOPPING.OFFLINE-QUEUE-SCOPE.1 — cola ligada a su hogar de origen
 
 - [x] Cada escritura optimista que entra en la cola captura el hogar activo de origen; la clave de deduplicación también incluye ese ámbito.

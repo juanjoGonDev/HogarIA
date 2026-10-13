@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from './fixtures';
-import { registerAndGoto } from './helpers/auth';
+import { registerAndGoto, registerWithHousehold } from './helpers/auth';
 import {
   AI_LIVE_RECEIPT_LONG_TICKET_ONLY_SELECTION,
   AI_LIVE_RECEIPT_PREFERRED_JPEG_ONLY_SELECTION,
@@ -573,7 +573,7 @@ test('procesa solo los tickets reales seleccionados y verifica la revisión sin 
   );
   reportLiveSmokePhase('real-receipts-inputs-validated');
 
-  await registerAndGoto(page, '/receipts', 'ai-live-receipts-only');
+  await registerWithHousehold(page, '/receipts', 'ai-live-receipts-only');
   const token = await authToken(page);
   await saveLiveAiConfig(page, token);
   reportLiveSmokePhase('real-receipts-started');
@@ -685,7 +685,7 @@ test('recorre los ocho AiJobKind con WebAPI real y ticket sintético editable', 
   test.setTimeout(LIVE_TEST_TIMEOUT_MS);
   page.setDefaultTimeout(LIVE_REQUEST_TIMEOUT_MS);
   reportLiveSmokePhase('register-start');
-  await registerAndGoto(page, '/recipes', 'ai-live-smoke');
+  await registerWithHousehold(page, '/recipes', 'ai-live-smoke');
   reportLiveSmokePhase('registered');
   const token = await authToken(page);
   reportLiveSmokePhase('config-start');
