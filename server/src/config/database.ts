@@ -192,6 +192,22 @@ async function runMigrations(db: Database.Database): Promise<void> {
       FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
     );
 
+    -- One persisted, explicitly configured weekly automation per household.
+    CREATE TABLE IF NOT EXISTS household_planning_automations (
+      household_id TEXT PRIMARY KEY NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
+      mode TEXT CHECK (mode IN ('generate', 'repeat') OR mode IS NULL),
+      scopes_json TEXT NOT NULL DEFAULT '[]',
+      weekday INTEGER CHECK (weekday BETWEEN 1 AND 7 OR weekday IS NULL),
+      local_time TEXT,
+      time_zone TEXT,
+      version INTEGER NOT NULL CHECK (version >= 1),
+      authorized_by TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (household_id) REFERENCES households(id) ON DELETE CASCADE,
+      FOREIGN KEY (authorized_by) REFERENCES users(id) ON DELETE SET NULL
+    );
     -- Ingredients (pantry) table
     CREATE TABLE IF NOT EXISTS ingredients (
       id TEXT PRIMARY KEY,

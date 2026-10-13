@@ -104,6 +104,21 @@ export const householdTaskWeeks = sqliteTable(
 );
 
 // ═══════════════════════════════════════════════════════════════════
+export const householdPlanningAutomations = sqliteTable('household_planning_automations', {
+  householdId: text('household_id')
+    .primaryKey()
+    .references(() => households.id, { onDelete: 'cascade' }),
+  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(false),
+  mode: text('mode'),
+  scopesJson: text('scopes_json').notNull().default('[]'),
+  weekday: integer('weekday'),
+  localTime: text('local_time'),
+  timeZone: text('time_zone'),
+  version: integer('version').notNull(),
+  authorizedBy: text('authorized_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: text('created_at').default('CURRENT_TIMESTAMP'),
+  updatedAt: text('updated_at').default('CURRENT_TIMESTAMP')
+});
 // Ingredients (Pantry)
 // ═══════════════════════════════════════════════════════════════════
 

@@ -1,0 +1,324 @@
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import jwt from 'jsonwebtoken';
+import { Hono } from 'hono';
+
+process.env.DATABASE_PATH = ':memory:';
+process.env.NODE_ENV = 'test';
+process.env.DISABLE_RATE_LIMIT = '1';
+
+type Sql = import('better-sqlite3').Database;
+type App = Awaited<ReturnType<typeof import('../app.js').createApp>>;
+type User = { id: string; token: string };
+
+let app: App;
+let routeOnlyApp: Hono;
+let db: Sql;
+let closeDatabase: () => void;
+let jwtSecret = '';
+
+function makeHousehold(id: string) {
+  db.prepare('INSERT INTO households (id, name, invite_code) VALUES (?, ?, ?)').run(
+    id,
+    id,
+    `INVITE-${id}`
+  );
+}
+
+function makeUser(
+  id: string,
+  householdId: string,
+  permissions: { settings?: boolean; calendar?: { edit?: boolean } } = {}
+): User {
+  db.prepare(
+    'INSERT INTO users (id, email, name, password_hash, household_id) VALUES (?, ?, ?, ?, ?)'
+  ).run(id, `${id}@hogaria.test`, id, 'synthetic-hash', householdId);
+  db.prepare(
+    `INSERT INTO household_members (id, household_id, user_id, role, permissions)
+     VALUES (?, ?, ?, 'member', ?)`
+  ).run(`${id}-membership`, householdId, id, JSON.stringify(permissions));
+  return {
+    id,
+    token: jwt.sign({ sub: id, email: `${id}@hogaria.test` }, jwtSecret, { expiresIn: '1h' })
+  };
+}
+
+function makeUserWithoutHousehold(id: string): User {
+  db.prepare(
+    'INSERT INTO users (id, email, name, password_hash, household_id) VALUES (?, ?, ?, ?, NULL)'
+  ).run(id, `${id}@hogaria.test`, id, 'synthetic-hash');
+  return {
+    id,
+    token: jwt.sign({ sub: id, email: `${id}@hogaria.test` }, jwtSecret, { expiresIn: '1h' })
+  };
+}
+function request(user: User, method: string, body?: unknown, householdId = 'home-a') {
+  return app.request('/api/household/planning-automation', {
+    method,
+    headers: {
+      authorization: `Bearer ${user.token}`,
+      'content-type': 'application/json',
+      'x-household-id': householdId
+    },
+    body: body === undefined ? undefined : JSON.stringify(body)
+  });
+}
+
+const scheduledConfig = {
+  mode: 'generate',
+  scopes: ['meals', 'tasks'],
+  weekday: 1,
+  localTime: '09:30',
+  timeZone: 'Europe/Madrid'
+};
+
+describe('household planning automation routes', () => {
+  beforeAll(async () => {
+    const database = await import('../config/database.js');
+    const { config } = await import('../config/app.config.js');
+    const { createApp } = await import('../app.js');
+    const { householdPlanningAutomationRoutes } =
+      await import('./household-planning-automation.routes.js');
+    await database.initializeDatabase();
+    db = database.getDatabase();
+    closeDatabase = database.closeDatabase;
+    app = createApp({ rateLimit: null, staticDir: null });
+    routeOnlyApp = new Hono();
+    routeOnlyApp.route('/api/household', householdPlanningAutomationRoutes);
+    jwtSecret = config.auth.jwtSecret;
+  });
+
+  afterAll(async () => {
+    const { stopWorker } = await import('../utils/ticket-queue.js');
+    stopWorker();
+    closeDatabase();
+  });
+
+  beforeEach(() => {
+    db.prepare('DELETE FROM household_planning_automations').run();
+    db.prepare('DELETE FROM household_task_weeks').run();
+    db.prepare('DELETE FROM household_plans').run();
+    db.prepare('DELETE FROM household_members').run();
+    db.prepare('DELETE FROM users').run();
+    db.prepare('DELETE FROM households').run();
+  });
+
+  it('is mounted on the main app and GET exposes an off-by-default, read-only value', async () => {
+    makeHousehold('home-a');
+    const member = makeUser('reader', 'home-a');
+    db.prepare('UPDATE users SET household_id = NULL WHERE id = ?').run(member.id);
+
+    const response = await request(member, 'GET');
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      success: true,
+      data: {
+        enabled: false,
+        mode: null,
+        scopes: [],
+        weekday: null,
+        localTime: null,
+        timeZone: null,
+        version: 0,
+        nextRunAt: null,
+        nextRun: null
+      }
+    });
+    expect(
+      (
+        db.prepare('SELECT COUNT(*) AS count FROM household_planning_automations').get() as {
+          count: number;
+        }
+      ).count
+    ).toBe(0);
+    expect(
+      (
+        db.prepare('SELECT household_id FROM users WHERE id = ?').get(member.id) as {
+          household_id: string | null;
+        }
+      ).household_id
+    ).toBeNull();
+    expect(
+      (db.prepare('SELECT COUNT(*) AS count FROM household_task_weeks').get() as { count: number })
+        .count
+    ).toBe(0);
+  });
+
+  it('requires an active household and the matching household header', async () => {
+    makeHousehold('home-a');
+    const member = makeUser('reader', 'home-a');
+
+    const mismatch = await request(member, 'GET', undefined, 'home-b');
+    expect(mismatch.status).toBe(409);
+    expect(await mismatch.json()).toMatchObject({
+      success: false,
+      code: 'HOUSEHOLD_CONTEXT_CHANGED'
+    });
+
+    const noHousehold = makeUserWithoutHousehold('unaffiliated');
+    const missing = await routeOnlyApp.request('/api/household/planning-automation', {
+      headers: {
+        authorization: `Bearer ${noHousehold.token}`,
+        'x-household-id': 'home-a'
+      }
+    });
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toMatchObject({
+      success: false,
+      code: 'HOUSEHOLD_REQUIRED'
+    });
+  });
+
+  it('rejects malformed, unknown, and unauthenticated writes without persistence', async () => {
+    makeHousehold('home-a');
+    const manager = makeUser('manager', 'home-a', { settings: true });
+
+    const malformed = await app.request('/api/household/planning-automation', {
+      method: 'PATCH',
+      headers: {
+        authorization: `Bearer ${manager.token}`,
+        'content-type': 'application/json',
+        'x-household-id': 'home-a'
+      },
+      body: '{'
+    });
+    expect(malformed.status).toBe(400);
+    expect(await malformed.json()).toMatchObject({
+      success: false,
+      code: 'INVALID_HOUSEHOLD_PLANNING_AUTOMATION'
+    });
+
+    const extra = await request(manager, 'PATCH', {
+      expectedVersion: 0,
+      enabled: false,
+      extra: true
+    });
+    expect(extra.status).toBe(400);
+
+    const unauthenticated = await app.request('/api/household/planning-automation', {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', 'x-household-id': 'home-a' },
+      body: JSON.stringify({ expectedVersion: 0, enabled: false })
+    });
+    expect(unauthenticated.status).toBe(401);
+    expect(
+      (
+        db.prepare('SELECT COUNT(*) AS count FROM household_planning_automations').get() as {
+          count: number;
+        }
+      ).count
+    ).toBe(0);
+  });
+
+  it('requires settings for edits and settings plus calendar.edit for activation', async () => {
+    makeHousehold('home-a');
+    const noSettings = makeUser('reader', 'home-a', { calendar: { edit: true } });
+    const noCalendarEdit = makeUser('settings-only', 'home-a', { settings: true });
+
+    const deniedEdit = await request(noSettings, 'PATCH', {
+      expectedVersion: 0,
+      ...scheduledConfig
+    });
+    expect(deniedEdit.status).toBe(403);
+    expect(await deniedEdit.json()).toMatchObject({
+      success: false,
+      code: 'HOUSEHOLD_SETTINGS_REQUIRED'
+    });
+
+    const deniedActivation = await request(noCalendarEdit, 'PATCH', {
+      expectedVersion: 0,
+      enabled: true,
+      ...scheduledConfig
+    });
+    expect(deniedActivation.status).toBe(403);
+    expect(await deniedActivation.json()).toMatchObject({
+      success: false,
+      code: 'HOUSEHOLD_CALENDAR_EDIT_REQUIRED'
+    });
+    expect(
+      (
+        db.prepare('SELECT COUNT(*) AS count FROM household_planning_automations').get() as {
+          count: number;
+        }
+      ).count
+    ).toBe(0);
+  });
+
+  it('requires an explicit complete schedule before enabling and returns CAS conflicts', async () => {
+    makeHousehold('home-a');
+    const manager = makeUser('manager', 'home-a', { settings: true, calendar: { edit: true } });
+
+    const incomplete = await request(manager, 'PATCH', { expectedVersion: 0, enabled: true });
+    expect(incomplete.status).toBe(422);
+    expect(await incomplete.json()).toMatchObject({
+      success: false,
+      code: 'AUTOMATION_SCHEDULE_REQUIRED'
+    });
+
+    const enabled = await request(manager, 'PATCH', {
+      expectedVersion: 0,
+      enabled: true,
+      ...scheduledConfig
+    });
+    expect(enabled.status).toBe(200);
+    expect(await enabled.json()).toMatchObject({
+      success: true,
+      data: {
+        enabled: true,
+        version: 1,
+        mode: 'generate',
+        scopes: ['meals', 'tasks'],
+        nextRunAt: expect.any(String),
+        nextRun: { timeZone: 'Europe/Madrid', occurrenceKey: expect.any(String) }
+      }
+    });
+
+    const stale = await request(manager, 'PATCH', {
+      expectedVersion: 0,
+      mode: 'repeat'
+    });
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toMatchObject({
+      success: false,
+      code: 'HOUSEHOLD_PLANNING_AUTOMATION_VERSION_CONFLICT',
+      data: { version: 1, mode: 'generate', enabled: true }
+    });
+  });
+
+  it('allows a settings-only member to pause without clearing schedule or writing plans', async () => {
+    makeHousehold('home-a');
+    const editor = makeUser('editor', 'home-a', { settings: true, calendar: { edit: true } });
+    const settingsOnly = makeUser('settings-reader', 'home-a', { settings: true });
+
+    const enabled = await request(editor, 'PATCH', {
+      expectedVersion: 0,
+      enabled: true,
+      ...scheduledConfig
+    });
+    expect(enabled.status).toBe(200);
+
+    const paused = await request(settingsOnly, 'PATCH', { expectedVersion: 1, enabled: false });
+    expect(paused.status).toBe(200);
+    expect(await paused.json()).toMatchObject({
+      success: true,
+      data: {
+        enabled: false,
+        version: 2,
+        mode: 'generate',
+        scopes: ['meals', 'tasks'],
+        weekday: 1,
+        localTime: '09:30',
+        timeZone: 'Europe/Madrid',
+        nextRunAt: null,
+        nextRun: null
+      }
+    });
+    expect(
+      (db.prepare('SELECT COUNT(*) AS count FROM household_plans').get() as { count: number }).count
+    ).toBe(0);
+    expect(
+      (db.prepare('SELECT COUNT(*) AS count FROM household_task_weeks').get() as { count: number })
+        .count
+    ).toBe(0);
+  });
+});

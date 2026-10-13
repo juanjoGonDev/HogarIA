@@ -69,6 +69,7 @@ import {
 import { mealProposalSchema } from './household-meal-proposal.schema.js';
 import { householdMealConsumptionSchema } from './household-meal-consumption.schema.js';
 import { householdMealShoppingPreviewQuerySchema } from './household-meal-shopping-preview.schema.js';
+import { householdPlanningAutomationPatchSchema } from './household-planning-automation.schema.js';
 import { generatedRecipeCandidateSchema } from './generated-recipe.schema.js';
 import {
   applyLinesSchema,
@@ -403,6 +404,21 @@ const ROWS: Row[] = [
       tasks: []
     },
     note: 'El lote semanal completo se versiona y valida antes de guardar.'
+  },
+  {
+    name: 'householdPlanningAutomationPatchSchema',
+    schema: householdPlanningAutomationPatchSchema,
+    required: { expectedVersion: 0, enabled: false },
+    note: 'La API exige cambios explícitos y valida la activación completa en el store.',
+    except: {
+      enabled: 'Los booleanos vacíos o null no son una orden válida para activar o pausar.',
+      mode: 'Los valores vacíos no son modos; null sí permite limpiar una configuración pausada.',
+      scopes: 'Los ámbitos deben ser una lista explícita y no aceptan texto ni null.',
+      weekday: 'El día debe ser ISO 1–7; null sí permite limpiar una configuración pausada.',
+      localTime: 'La hora debe usar HH:mm; null sí permite limpiar una configuración pausada.',
+      timeZone:
+        'La zona debe ser IANA explícita; null sí permite limpiar una configuración pausada.'
+    }
   },
   { name: 'updateHouseholdSchema', schema: updateHouseholdSchema },
   { name: 'joinHouseholdSchema', schema: joinHouseholdSchema, required: { inviteCode: 'ABC123' } },
