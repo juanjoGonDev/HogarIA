@@ -37,6 +37,7 @@ export const households = sqliteTable('households', {
   name: text('name').notNull(),
   inviteCode: text('invite_code').unique().notNull(),
   sharedPantry: integer('shared_pantry', { mode: 'boolean' }).default(true),
+  mealPlanningPreferences: text('meal_planning_preferences').notNull().default('{}'),
   aiOwnerUserId: text('ai_owner_user_id'),
   createdAt: text('created_at').default('CURRENT_TIMESTAMP'),
   updatedAt: text('updated_at').default('CURRENT_TIMESTAMP')

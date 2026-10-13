@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { cors } from 'hono/cors';
 import { prettyJSON } from 'hono/pretty-json';
 import { secureHeaders } from 'hono/secure-headers';
@@ -25,6 +25,7 @@ import {
   recipeStepPhotoRoutes
 } from './routes/recipe-step-photos.routes.js';
 import { householdRoutes } from './routes/household.routes.js';
+import { householdMealPlanningRoutes } from './routes/household-meal-planning.routes.js';
 import { householdPlanRoutes } from './routes/household-plan.routes.js';
 import { householdTasksRoutes } from './routes/household-tasks.routes.js';
 import { calendarRoutes } from './routes/calendar.routes.js';
@@ -32,6 +33,7 @@ import { aiRoutes } from './routes/ai.routes.js';
 import { aiQueueRoutes } from './routes/ai-queue.routes.js';
 import { healthRoutes } from './routes/health.routes.js';
 import { logRoutes } from './routes/logs.routes.js';
+import type { AppEnv } from './types/hono-env.js';
 
 /**
  * Ensamblado de la app, separado del `listen`.
@@ -297,6 +299,13 @@ export function createApp(options: AppOptions = {}): Hono {
   });
 
   app.use('*', prettyJSON());
+  // Solo `createApp` representa el ensamblado real de producción. El marker no viene del
+  // request y permite que auth aplique los requisitos de hogar sin cambiar el contrato
+  // de las pruebas aisladas de cada router.
+  app.use('/api/*', async (c, next) => {
+    (c as unknown as Context<AppEnv>).set('householdSetupGate', true);
+    await next();
+  });
   // Despues de `prettyJSON` y antes de las rutas: lo que sale por aqui ya es el cuerpo
   // definitivo, y normalizarlo una vez en el borde evita que cada pantalla vuelva a
   // inventarse como se le echa la zona horaria a una cadena de SQLite.
@@ -443,6 +452,7 @@ export function createApp(options: AppOptions = {}): Hono {
   app.route('/api/recipe-images', recipeImageRoutes);
   app.route('/api/recipes', recipeRoutes);
   app.route('/api/household', householdRoutes);
+  app.route('/api/household', householdMealPlanningRoutes);
   app.route('/api/household', householdPlanRoutes);
   app.route('/api/household', householdTasksRoutes);
   app.route('/api/calendar', calendarRoutes);

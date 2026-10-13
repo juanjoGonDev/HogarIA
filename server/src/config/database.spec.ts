@@ -300,6 +300,8 @@ describe('initializeDatabase con fichero heredado', () => {
         ('admin-a', 'admin-a@test.invalid', 'Admin A', '', 'legacy-house'),
         ('admin-newer', 'admin-newer@test.invalid', 'Admin newer', '', 'legacy-house'),
         ('only-member', 'only-member@test.invalid', 'Only member', '', 'empty-admin-house');
+      UPDATE users SET preferences = '{"mealTimes":{"dinner":"19:00"},"mealPlan":{"dinner":false}}'
+        WHERE id = 'member-first';
       INSERT INTO household_members (id, household_id, user_id, role, joined_at) VALUES
         ('member-row', 'legacy-house', 'member-first', 'member', '2019-01-01 00:00:00'),
         ('admin-z-row', 'legacy-house', 'admin-z', 'admin', '2020-01-01 00:00:00'),
@@ -331,6 +333,24 @@ describe('initializeDatabase con fichero heredado', () => {
           .prepare('SELECT MIN(is_active) AS min, MAX(is_active) AS max FROM household_members')
           .get()
       ).toEqual({ min: 1, max: 1 });
+      expect(
+        db
+          .prepare(
+            `SELECT h.meal_planning_preferences AS household_preferences,
+                    hm.meal_planning_preferences AS member_preferences
+               FROM households h
+               JOIN household_members hm ON hm.household_id = h.id
+              WHERE h.id = 'legacy-house' AND hm.user_id = 'member-first'`
+          )
+          .get()
+      ).toEqual({ household_preferences: '{}', member_preferences: '{}' });
+      db.prepare('UPDATE households SET meal_planning_preferences = ? WHERE id = ?').run(
+        '{"objective":{"goals":["variety"]}}',
+        'legacy-house'
+      );
+      db.prepare(
+        'UPDATE household_members SET meal_planning_preferences = ? WHERE user_id = ?'
+      ).run('{"goalOverrideEnabled":true}', 'member-first');
 
       const configsBeforeRestart = db
         .prepare(
@@ -409,6 +429,25 @@ describe('initializeDatabase con fichero heredado', () => {
         { id: 'empty-admin-house', ai_owner_user_id: null },
         { id: 'legacy-house', ai_owner_user_id: 'admin-a' }
       ]);
+      expect(
+        restartedDb
+          .prepare(
+            `SELECT h.meal_planning_preferences AS household_preferences,
+                    hm.meal_planning_preferences AS member_preferences
+               FROM households h
+               JOIN household_members hm ON hm.household_id = h.id
+              WHERE h.id = 'legacy-house' AND hm.user_id = 'member-first'`
+          )
+          .get()
+      ).toEqual({
+        household_preferences: '{"objective":{"goals":["variety"]}}',
+        member_preferences: '{"goalOverrideEnabled":true}'
+      });
+      expect(
+        restartedDb.prepare('SELECT preferences FROM users WHERE id = ?').get('member-first')
+      ).toEqual({
+        preferences: '{"mealTimes":{"dinner":"19:00"},"mealPlan":{"dinner":false}}'
+      });
       expect(
         restartedDb
           .prepare('SELECT MIN(is_active) AS min, MAX(is_active) AS max FROM household_members')

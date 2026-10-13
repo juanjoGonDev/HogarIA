@@ -124,6 +124,7 @@ async function runMigrations(db: Database.Database): Promise<void> {
       shared_pantry INTEGER DEFAULT 1,
       share_recipes INTEGER DEFAULT 1,
       share_calendar INTEGER DEFAULT 1,
+      meal_planning_preferences TEXT NOT NULL DEFAULT '{}',
       ai_owner_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -136,6 +137,7 @@ async function runMigrations(db: Database.Database): Promise<void> {
       user_id TEXT NOT NULL,
       role TEXT DEFAULT 'member',
       permissions TEXT DEFAULT '{}',
+      meal_planning_preferences TEXT NOT NULL DEFAULT '{}',
       is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
       joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (household_id) REFERENCES households(id),
@@ -692,6 +694,14 @@ async function runMigrations(db: Database.Database): Promise<void> {
     'household_members',
     'is_active',
     'INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1))'
+  );
+  // Shared planner defaults and per-membership overrides are JSON blobs. Adding nullable-safe
+  // defaults is idempotent and leaves every existing household/member preference untouched.
+  addColumnIfMissing('households', 'meal_planning_preferences', "TEXT NOT NULL DEFAULT '{}'");
+  addColumnIfMissing(
+    'household_members',
+    'meal_planning_preferences',
+    "TEXT NOT NULL DEFAULT '{}'"
   );
   addColumnIfMissing('recipes', 'country_code', 'TEXT');
   addColumnIfMissing('recipes', 'catalog_key', 'TEXT');

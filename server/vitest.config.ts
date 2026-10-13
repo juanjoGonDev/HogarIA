@@ -26,6 +26,7 @@ import { defineConfig } from 'vitest/config';
 const COVERED = [
   'src/routes/shopping.routes.ts',
   'src/routes/household.routes.ts',
+  'src/routes/household-meal-planning.routes.ts',
   'src/routes/household-plan.routes.ts',
   'src/routes/household-tasks.routes.ts',
   'src/routes/calendar.routes.ts',
@@ -41,6 +42,7 @@ const COVERED = [
   'src/schemas/generated-recipe.schema.ts',
   'src/schemas/household-plan.schema.ts',
   'src/schemas/household-plan-assignment.schema.ts',
+  'src/schemas/household-meal-planning.schema.ts',
   'src/schemas/household-task.schema.ts',
   'src/utils/product-key.ts',
   'src/utils/pantry-categories.ts',
@@ -69,6 +71,7 @@ const COVERED = [
   'src/routes/pantry.routes.ts',
   'src/utils/week-calendar.ts',
   'src/utils/household-plan.store.ts',
+  'src/utils/household-meal-planning.store.ts',
   'src/utils/household-plan-assignment.store.ts',
   'src/utils/household-task.store.ts',
   'src/utils/household-plan-ai.ts',
