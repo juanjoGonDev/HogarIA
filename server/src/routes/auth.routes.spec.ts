@@ -37,6 +37,25 @@ function withAuth(token: string, init: RequestInit = {}): RequestInit {
   };
 }
 
+async function seedTestHousehold(userId: string): Promise<void> {
+  // These tests exercise account/profile routes after onboarding. The real app now gates every
+  // other API until the person creates or joins a household; that gate has separate integration
+  // coverage in household-required.middleware.spec.ts. Seed membership as fixture data here so
+  // failures stay focused on the auth route under test rather than the onboarding gate.
+  const db = (await import('../config/database.js')).getDatabase();
+  const householdId = `auth-spec-home-${userId}`;
+  db.prepare('INSERT INTO households (id, name, invite_code) VALUES (?, ?, ?)').run(
+    householdId,
+    'Hogar sintético de auth',
+    `AUTH-${userId}`
+  );
+  db.prepare('UPDATE users SET household_id = ? WHERE id = ?').run(householdId, userId);
+  db.prepare(
+    `INSERT INTO household_members (id, household_id, user_id, role, permissions)
+     VALUES (?, ?, ?, 'admin', '{"settings":true}')`
+  ).run(`auth-spec-membership-${userId}`, householdId, userId);
+}
+
 async function register(name: string): Promise<{ token: string; email: string; userId: string }> {
   const email = `${name.toLowerCase().replace(/[^a-z]/g, '')}-${Math.random().toString(36).slice(2, 8)}@hogaria.test`;
   const response = await app.request('/api/auth/register', {
@@ -45,7 +64,10 @@ async function register(name: string): Promise<{ token: string; email: string; u
     body: JSON.stringify({ name, email, password: 'Clave1234' })
   });
   const data = (await json(response)).data;
-  return { token: data.token as string, email, userId: data.user.id as string };
+  const token = data.token as string;
+  const userId = data.user.id as string;
+  await seedTestHousehold(userId);
+  return { token, email, userId };
 }
 
 const profileAvatar = async (token: string) =>
@@ -447,6 +469,7 @@ describe('limite bcrypt para contrasenas nuevas', () => {
       token: registration.data.token as string,
       userId: registration.data.user.id as string
     };
+    await seedTestHousehold(userId);
     const changed = await app.request(
       '/api/auth/change-password',
       withAuth(authToken, {
