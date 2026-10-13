@@ -957,11 +957,20 @@ una alergia obliga a separar o a dejar el turno sin resolver aunque el objetivo 
   al reintentar o corregir. La huella persistida de las líneas impide que una edición posterior de la
   receta cambie cantidades de una corrección; sigue permitiendo revertir el débito con «no realizada».
   Sin receta válida se registra el consumo, pero no se inventan cantidades.
-- Después de registrar lo realmente comido, la IA puede comparar menús próximos con el inventario y
-  proponer una lista de compra. Antes de crearla, la UI pide revisar las existencias —en especial lo que
-  se necesita para las próximas comidas—, permite corregirlas y presenta un borrador editable. Solo la
-  aprobación crea/actualiza la lista de **Compra**; se consolidan ingredientes repetidos entre recetas y
-  comensales. Nunca se afirma que una comida se realizó por el mero hecho de estar en el calendario.
+- Después de registrar lo realmente comido, el servidor calcula determinísticamente las necesidades de
+  comidas futuras confirmadas a partir de sus snapshots de receta y raciones; no necesita otra llamada a
+  IA. Antes de crearla, la UI pide revisar las existencias —en especial lo necesario para las próximas
+  comidas—, permite corregir la previsión y presenta un borrador editable. El cálculo es de solo lectura:
+  no cambia stock ni Compra. Consolida ingredientes por nombre normalizado (Unicode NFKC, mayúsculas/
+  minúsculas y espacios) y unidad exacta; multiplica la cantidad base por las raciones planificadas y
+  resta solo existencias del inventario explícito del hogar cuando `shared_pantry` está activo. No usa
+  inventarios privados, coincidencia aproximada ni conversión de unidades. Si falta una coincidencia, hay
+  varias fichas posibles o solo coincide el nombre con otra unidad, muestra la necesidad y un aviso para
+  revisar el stock; nunca adivina. Los ingredientes opcionales aparecen identificados como opcionales y
+  no se incluyen en el total obligatorio salvo que la persona los añada. Solo la aprobación crea/actualiza
+  la lista del módulo **Compra**; conserva artículos comprados y añadidos manualmente, y los errores,
+  cancelación o rechazo no escriben nada. Nunca se afirma que una comida se realizó por el mero hecho de
+  estar en el calendario.
 - La automatización semanal distingue dos modos: **generar una planificación nueva** (llama al planificador
   cuando llegue la fecha configurada) y **repetir la planificación actual** (reutiliza el plan semanal
   confirmado sin pedir otra respuesta a IA). Repetir no duplica eventos ni reemplaza cambios manuales sin
@@ -1161,9 +1170,12 @@ criterios inferiores permanecen sin marcar hasta validar cada condición en su a
 - [ ] **QA-HOME-MEALS.CONSUMPTION.1** — realizada/no realizada, raciones cero/positivas/fuera de
       rango, ajustes, inventario sin cambios antes de confirmar e idempotencia; la receta base y los
       movimientos de stock no se duplican.
-- [ ] **QA-HOME-MEALS.SHOPPING.1** — stock editable, consolidación de ingredientes, borrador,
-      revisión, edición/cancelación/rechazo/aprobación; errores y cancelaciones no mutan Compra ni
-      inventario.
+- [ ] **QA-HOME-MEALS.SHOPPING.1** — preview de solo lectura a partir de comidas futuras confirmadas,
+      snapshots inmutables y raciones planificadas; consolidación por nombre normalizado + unidad exacta,
+      cálculo de faltantes usando únicamente despensa compartida del hogar, avisos ante ausencias,
+      ambigüedad o unidad distinta y exclusión inicial de ingredientes opcionales; UI con revisión editable
+      en paso separado, cancelar/rechazar sin escritura y aprobación que crea/actualiza Compra conservando
+      filas compradas/manuales. Errores no mutan Compra ni inventario.
 - [ ] **QA-HOME-PLANNING.AUTOMATION.1** — generar/repetir, play/pause, siguiente fecha, retry e
       idempotencia; repetir no llama a IA ni duplica eventos, protege ediciones manuales y permite
       elegir tareas/comidas.
