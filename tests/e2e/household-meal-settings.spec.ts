@@ -70,7 +70,7 @@ test('configuración de comidas carga, reintenta y guarda campos parciales en Pl
   const panel = page.locator('[data-test="household-panel-tasks"]');
   await expect(panel).toBeVisible();
   await expectHouseholdTabsNotToOverlap(page);
-  await expect(panel.getByRole('alert')).toContainText('No se pudo cargar la configuración');
+  await expect(panel.getByRole('alert')).toContainText('No se pudo cargar. Reintenta.');
   await expect(page.locator('[data-test="meal-settings-retry"] button')).toBeEnabled();
 
   await page.locator('[data-test="meal-settings-retry"] button').click();
