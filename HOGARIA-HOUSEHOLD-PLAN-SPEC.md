@@ -1004,7 +1004,10 @@ una alergia obliga a separar o a dejar el turno sin resolver aunque el objetivo 
   completadas y no duplica ni reemplaza cambios manuales: si la semana destino ya tiene datos, se detiene
   para revisión. La lista de compra se vuelve a calcular con las existencias actuales y su escritura
   sigue requiriendo aprobación explícita. Solo se publican eventos en huecos sin conflicto con eventos
-  confirmados o cambios manuales. Un indicador pequeño y persistente muestra la próxima ejecución
+  confirmados o cambios manuales. Cada ocurrencia planifica la semana ISO completa que empieza el
+  primer lunes posterior a su fecha local programada; todas las áreas usan el mismo `weekStart`. Si el
+  worker se recupera cuando esa semana ya empezó, la ocurrencia se marca omitida para revisión y no se
+  publica un plan parcial. Un indicador pequeño y persistente muestra la próxima ejecución
   automática y tiene un único botón alternable de play/pause; al pausar conserva plan y configuración, y
   al reanudar programa la siguiente ocurrencia futura sin ejecutar en ráfaga las omitidas. Puede
   configurarse si la ejecución abarca tareas, comidas o ambas. Para activar la recurrencia, el hogar debe
