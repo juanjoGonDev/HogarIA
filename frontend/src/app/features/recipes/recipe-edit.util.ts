@@ -10,7 +10,10 @@ import {
   RecipeUpdateInput,
   StorageInfo
 } from '../../shared/models/recipe.model';
-import { RecipeDetailLevel, RecipeInstructionsByLevel } from '../../shared/models/recipe-instructions';
+import {
+  RecipeDetailLevel,
+  RecipeInstructionsByLevel
+} from '../../shared/models/recipe-instructions';
 
 export interface RecipeEditorIngredient {
   ingredientId?: string;
@@ -81,6 +84,7 @@ export interface RecipeEditDraft {
   appliancesText: string;
   parallelTasksText: string;
   tipsAndVariationsText: string;
+  batchCookingWarningText: string;
   steps?: RecipeEditorStep[];
   instructionsByLevel?: Record<RecipeDetailLevel, RecipeEditorStep[]>;
   nutritionEnabled: boolean;
@@ -182,6 +186,7 @@ export function recipeToEditDraft(recipe: Recipe): RecipeEditDraft {
     appliancesText: recipe.guidance?.appliances.join('\n') ?? '',
     parallelTasksText: recipe.guidance?.parallelTasks.join('\n') ?? '',
     tipsAndVariationsText: recipe.guidance?.tipsAndVariations.join('\n') ?? '',
+    batchCookingWarningText: recipe.guidance?.batchCookingWarning ?? '',
     nutritionEnabled: Boolean(recipe.nutrition),
     nutrition: toNutritionEditor(recipe.nutrition),
     storageEnabled: Boolean(recipe.storage),
@@ -190,7 +195,10 @@ export function recipeToEditDraft(recipe: Recipe): RecipeEditDraft {
 
   if (recipe.instructionsByLevel) {
     draft.instructionsByLevel = Object.fromEntries(
-      DETAIL_LEVELS.map((level) => [level, recipe.instructionsByLevel?.[level].map(toEditorStep) ?? []])
+      DETAIL_LEVELS.map((level) => [
+        level,
+        recipe.instructionsByLevel?.[level].map(toEditorStep) ?? []
+      ])
     ) as Record<RecipeDetailLevel, RecipeEditorStep[]>;
   } else {
     draft.steps = (recipe.steps ?? []).map(toEditorStep);
@@ -279,11 +287,7 @@ function buildEditorSteps(
       errors,
       { integer: true, positive: true }
     );
-    const temperature = numericValue(
-      step.temperatureText,
-      `${field}_${index}_temperature`,
-      errors
-    );
+    const temperature = numericValue(step.temperatureText, `${field}_${index}_temperature`, errors);
     const photoId = step.imagePhotoId?.trim() ?? '';
     if (photoId && !/^[a-f0-9]{24}$/.test(photoId)) {
       errors.push(`${field}_${index}_image_photo_invalid`);
@@ -301,7 +305,9 @@ function buildEditorSteps(
       tips: step.tips.trim() || null,
       warning: step.warning.trim() || null,
       illustration: step.illustration ?? null,
-      ...(temperature === null ? {} : { temperature: { value: temperature, unit: step.temperatureUnit } }),
+      ...(temperature === null
+        ? {}
+        : { temperature: { value: temperature, unit: step.temperatureUnit } }),
       ...(photoId ? { imagePhotoId: photoId } : {}),
       ...(image ? { image } : {})
     };
@@ -311,9 +317,18 @@ function buildEditorSteps(
 function buildNutrition(draft: RecipeEditDraft, errors: string[]): NutritionInfo | null {
   if (!draft.nutritionEnabled) return null;
   const nutrition = draft.nutrition;
-  const calories = numericValue(nutrition.calories, 'nutrition_calories', errors, { required: true, min: 0 });
-  const protein = numericValue(nutrition.protein, 'nutrition_protein', errors, { required: true, min: 0 });
-  const carbs = numericValue(nutrition.carbs, 'nutrition_carbs', errors, { required: true, min: 0 });
+  const calories = numericValue(nutrition.calories, 'nutrition_calories', errors, {
+    required: true,
+    min: 0
+  });
+  const protein = numericValue(nutrition.protein, 'nutrition_protein', errors, {
+    required: true,
+    min: 0
+  });
+  const carbs = numericValue(nutrition.carbs, 'nutrition_carbs', errors, {
+    required: true,
+    min: 0
+  });
   const fat = numericValue(nutrition.fat, 'nutrition_fat', errors, { required: true, min: 0 });
   const fiber = numericValue(nutrition.fiber, 'nutrition_fiber', errors, { min: 0 });
   const sugar = numericValue(nutrition.sugar, 'nutrition_sugar', errors, { min: 0 });
@@ -365,8 +380,14 @@ export function buildRecipeEditPayload(draft: RecipeEditDraft): RecipeEditPayloa
   const photoId = draft.imagePhotoId?.trim() ?? '';
   if (photoId && !/^[a-f0-9]{24}$/.test(photoId)) errors.push('image_photo_invalid');
   const image = photoId ? undefined : safeRecipeImageReference(draft.image, errors);
-  const totalTime = numericValue(draft.totalTime, 'total_time', errors, { integer: true, positive: true });
-  const prepTime = numericValue(draft.prepTime, 'prep_time', errors, { integer: true, positive: true });
+  const totalTime = numericValue(draft.totalTime, 'total_time', errors, {
+    integer: true,
+    positive: true
+  });
+  const prepTime = numericValue(draft.prepTime, 'prep_time', errors, {
+    integer: true,
+    positive: true
+  });
   const cookTime = numericValue(draft.cookTime, 'cook_time', errors, { integer: true, min: 0 });
   const restTime = numericValue(draft.restTime, 'rest_time', errors, { integer: true, min: 0 });
   const calories = numericValue(
@@ -400,18 +421,24 @@ export function buildRecipeEditPayload(draft: RecipeEditDraft): RecipeEditPayloa
   const appliances = lines(draft.appliancesText);
   const parallelTasks = lines(draft.parallelTasksText);
   const tipsAndVariations = lines(draft.tipsAndVariationsText);
+  const batchCookingWarning = draft.batchCookingWarningText.trim();
   const guidance: RecipeGuidance | null =
-    appliances.length || parallelTasks.length || tipsAndVariations.length
-      ? { appliances, parallelTasks, tipsAndVariations }
+    appliances.length || parallelTasks.length || tipsAndVariations.length || batchCookingWarning
+      ? {
+          appliances,
+          parallelTasks,
+          tipsAndVariations,
+          batchCookingWarning: batchCookingWarning || null
+        }
       : null;
 
   const instructionsByLevel = draft.instructionsByLevel
-    ? Object.fromEntries(
+    ? (Object.fromEntries(
         DETAIL_LEVELS.map((level) => [
           level,
           buildEditorSteps(draft.instructionsByLevel?.[level] ?? [], `level_${level}`, errors)
         ])
-      ) as RecipeInstructionsByLevel
+      ) as RecipeInstructionsByLevel)
     : undefined;
   const steps = draft.instructionsByLevel
     ? undefined

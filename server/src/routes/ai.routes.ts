@@ -556,7 +556,9 @@ Prepara una receta completa, práctica y cronológica. Ajusta cuánto explicas a
 
 Ingredientes disponibles: ${ingredientList}
 Utensilios disponibles: ${utensilList}
-Porciones confirmadas para esta receta: ${input.servings}. Todas las cantidades deben corresponder exactamente a estas raciones.
+Raciones solicitadas para cocinar: ${input.servings}. Úsalo solo para valorar si hace falta cocinar en tandas; no escales con ese número las cantidades de la receta.
+La receta devuelta siempre tiene un rendimiento base de exactamente 1 ración. Todas las cantidades de ingredientes, calorías y nutrición deben corresponder a 1 ración; nunca devuelvas cantidades para las raciones solicitadas.
+Los tiempos describen el método de cocción y no se multiplican por las raciones. En guidance.batchCookingWarning devuelve un aviso breve y concreto si, por la capacidad del recipiente/superficie o por la técnica, la cantidad solicitada exige cocinar en tandas; si no hace falta, devuelve null. No avises solo porque haya más de una ración.
 Dificultad: ${input.difficulty}
 Nivel seleccionado al abrir la ficha: ${input.detailLevel}. Es solo la selección inicial de la vista; genera SIEMPRE los tres niveles completos.
 Electrodomésticos disponibles: freidora de aire/mini horno (máximo 200 °C), microondas LG inverter, cocina de gas, batidora, frigorífico, tostadora y grill/prensa para sándwiches. Hay freidora de aceite, pero evita usarla si existe una alternativa razonable. No propongas un electrodoméstico distinto de esta lista; los utensilios de cocina habituales van separados en "utensils".
@@ -583,11 +585,11 @@ Responde SOLO con un JSON válido y exactamente estas propiedades. Los datos com
   "prepTime": número en minutos,
   "cookTime": número en minutos,
   "restTime": número en minutos o null,
-  "servings": ${input.servings},
+  "servings": 1,
   "calories": kcal aproximadas por ración,
-  "ingredients": [{"name": "", "quantity": número para las raciones pedidas, "unit": "g|kg|ml|l|cup|tbsp|tsp|unit|bunch|slice|piece", "preparation": "", "isOptional": false, "substitutes": ["alternativas razonables que se suelen tener en casa"], "notes": ""}],
+  "ingredients": [{"name": "", "quantity": número para 1 ración, "unit": "g|kg|ml|l|cup|tbsp|tsp|unit|bunch|slice|piece", "preparation": "", "isOptional": false, "substitutes": ["alternativas razonables que se suelen tener en casa"], "notes": ""}],
   "utensils": ["utensilios necesarios"],
-  "guidance": {"appliances": ["solo electrodomésticos de la lista anterior que se necesiten"], "parallelTasks": ["tarea segura que ahorra tiempo"], "tipsAndVariations": ["consejo o variación concreta de sabor, textura o presentación"]},
+  "guidance": {"appliances": ["solo electrodomésticos de la lista anterior que se necesiten"], "parallelTasks": ["tarea segura que ahorra tiempo"], "tipsAndVariations": ["consejo o variación concreta de sabor, textura o presentación"], "batchCookingWarning": "aviso concreto de tandas si hace falta" o null},
   "instructionsByLevel": {
     "basic": [{"stepNumber": 1, "instruction": "", "duration": minutos o null, "tips": "" o null, "warning": "" o null, "illustration": null}],
     "intermediate": [{"stepNumber": 1, "instruction": "", "duration": minutos o null, "tips": "" o null, "warning": "" o null, "illustration": null}],
@@ -804,7 +806,11 @@ aiRoutes.post('/generate-recipe', async (c) => {
       c.get('appLanguage')
     );
     const parsedRecipe = generatedRecipeCandidateSchema.safeParse(rawRecipe);
-    if (!parsedRecipe.success || !isSavableGeneratedRecipe(parsedRecipe.data)) {
+    if (
+      !parsedRecipe.success ||
+      parsedRecipe.data.servings !== 1 ||
+      !isSavableGeneratedRecipe(parsedRecipe.data)
+    ) {
       throw new AiCallError('BAD_JSON', 'AI response does not contain a complete recipe draft');
     }
     if (
@@ -872,7 +878,11 @@ aiRoutes.post('/generate-multiple-recipes', async (c) => {
         i + 1
       );
       const parsedRecipe = generatedRecipeCandidateSchema.safeParse(rawRecipe);
-      if (!parsedRecipe.success || !isSavableGeneratedRecipe(parsedRecipe.data)) {
+      if (
+        !parsedRecipe.success ||
+        parsedRecipe.data.servings !== 1 ||
+        !isSavableGeneratedRecipe(parsedRecipe.data)
+      ) {
         throw new AiCallError('BAD_JSON', 'AI response does not contain a usable recipe draft');
       }
       if (

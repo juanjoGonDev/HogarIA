@@ -100,7 +100,7 @@ const singleRecipe = {
   prepTime: 5,
   cookTime: 15,
   restTime: 5,
-  servings: 2,
+  servings: 1,
   calories: 180,
   ingredients: [
     {
@@ -117,7 +117,8 @@ const singleRecipe = {
   guidance: {
     appliances: ['Cocina de gas'],
     parallelTasks: ['Pesa los ingredientes mientras se calienta el agua.'],
-    tipsAndVariations: ['Añade limón al final para realzar el sabor.']
+    tipsAndVariations: ['Añade limón al final para realzar el sabor.'],
+    batchCookingWarning: null
   },
   instructionsByLevel: {
     basic: [
@@ -704,16 +705,25 @@ test.describe('Generación de recetas IA', () => {
       syntheticProvider
     }, testInfo) => {
       const recipeName = `${singleRecipe.name} ${viewport.width}`;
+      const batchCookingWarning = 'Dora la zanahoria en dos tandas para que se dore y no se cueza.';
       syntheticProvider.enqueue({
-        content: { ...singleRecipeWithAllLevels, name: recipeName }
+        content: {
+          ...singleRecipeWithAllLevels,
+          name: recipeName,
+          guidance: { ...singleRecipe.guidance, batchCookingWarning }
+        }
       });
       await openGenerator(page, viewport, syntheticProvider.baseUrl);
       const recipeDialog = page.getByRole('dialog', { name: 'Generar Receta con IA' });
       await expect(recipeDialog).toHaveClass(/modal--lg/);
       await expect(recipeDialog.locator('.ai-form')).toBeVisible();
       await expect(recipeDialog.locator('#recipe-serving-input')).toHaveValue('2');
+      await recipeDialog.locator('#recipe-serving-input').fill('4');
 
       const generate = page.getByRole('button', { name: 'Generar 1 receta' });
+      const generationRequest = page.waitForRequest((request) =>
+        request.url().includes('/api/ai/generate-recipe')
+      );
       const generatedResponse = page.waitForResponse(
         (response) =>
           response.url().includes('/api/ai/generate-recipe') &&
@@ -722,6 +732,7 @@ test.describe('Generación de recetas IA', () => {
       await generate.click();
       const response = await generatedResponse;
       expect(response.status(), await response.text()).toBe(200);
+      expect((await generationRequest).postDataJSON().servings).toBe(4);
       await expect(recipeDialog).toHaveClass(/modal--full/);
       await expect(recipeDialog.locator('.ai-form')).toBeHidden();
 
@@ -729,16 +740,28 @@ test.describe('Generación de recetas IA', () => {
       await expect(generatedSelector).toHaveValue('basic');
       await expect(generatedSelector).toHaveAccessibleName('Nivel de detalle');
       await expect(page.locator('.generated-recipe__steps')).toContainText('Cocer la zanahoria.');
-      await expect(recipeDialog.locator('.generated-recipe__meta')).toContainText('2 porciones');
+      await expect(recipeDialog.locator('.generated-recipe__meta')).toContainText('4 porciones');
       await expect(recipeDialog.locator('.generated-recipe__meta')).not.toContainText('20 min');
       await expect(page.locator('.generated-recipe__list')).toContainText(
         'Añadir solo si hace falta'
       );
       const generatedPreview = page.locator('.generated-recipe');
+      const generatedServings = generatedPreview.locator('[data-test="generated-serving-count"]');
+      await expect(generatedServings).toHaveValue('4');
+      const generatedIngredients = generatedPreview.locator('.generated-recipe__list li').first();
+      await expect(generatedIngredients).toContainText('8 unit de Zanahoria QA recetas');
+      await expect(
+        generatedPreview.locator('[data-test="generated-recipe-batch-warning"]')
+      ).toContainText(batchCookingWarning);
+      await generatedServings.fill('3');
+      await expect(generatedIngredients).toContainText('6 unit de Zanahoria QA recetas');
+      await expect(generatedServings).toHaveValue('3');
+      expect(syntheticProvider.requests).toHaveLength(1);
       await expect(generatedPreview.locator('.generated-recipe__list li')).toContainText(
         '(lavada) · Añadir solo si hace falta'
       );
       const timings = generatedPreview.locator('[data-test="generated-recipe-timings"]');
+      await expect(timings).toContainText('20 min');
       await expect(timings).toContainText('Tiempo total');
       await expect(timings).toContainText('Preparación');
       await expect(timings).toContainText('Cocción');
@@ -824,9 +847,11 @@ test.describe('Generación de recetas IA', () => {
       );
       await page.getByRole('button', { name: 'Guardar receta' }).click();
       const savePayload = (await saveRequest).postDataJSON();
+      expect(savePayload.servings).toBe(1);
       expect(savePayload.instructionsByLevel).toEqual(submittedInstructionsByLevel);
       expect(savePayload).not.toHaveProperty('steps');
       expect(savePayload.ingredients).toEqual(singleRecipeWithAllLevels.ingredients);
+      expect(savePayload.guidance.batchCookingWarning).toBe(batchCookingWarning);
       expect(savePayload.nutrition.fiber).toBeNull();
       expect(savePayload.storage).toEqual({
         method: 'Refrigerada',
@@ -855,7 +880,11 @@ test.describe('Generación de recetas IA', () => {
       expect(saved).toHaveLength(1);
       expect(saved[0].instructionsByLevel).toEqual(persistedInstructionsByLevel);
       expect(saved[0]).not.toHaveProperty('steps');
+      expect(saved[0].servings).toBe(1);
       expect(saved[0].ingredients).toMatchObject(singleRecipeWithAllLevels.ingredients);
+      expect((saved[0].guidance as { batchCookingWarning: string }).batchCookingWarning).toBe(
+        batchCookingWarning
+      );
       expect(saved[0].nutrition).toMatchObject(singleRecipeWithAllLevels.nutrition);
       expect(saved[0].storage).toEqual({
         method: 'Refrigerada',
@@ -883,6 +912,35 @@ test.describe('Generación de recetas IA', () => {
         page.locator('[data-test="recipe-full-detail"] [data-test="recipe-step-photo"]')
       ).toHaveCount(1);
       await expect(page.locator('.recipe-detail__steps')).toContainText('Cocer la zanahoria.');
+      await expect(page.locator('[data-test="recipe-serving-count"]')).toHaveValue('1');
+      await expect(page.locator('[data-test="recipe-ingredients"] li').first()).toContainText(
+        '2 unit'
+      );
+      await expect(page.locator('[data-test="recipe-batch-warning"]')).toContainText(
+        batchCookingWarning
+      );
+      const savedServings = page.locator('[data-test="recipe-serving-count"]');
+      await savedServings.fill('4');
+      await expect(page.locator('[data-test="recipe-ingredients"] li').first()).toContainText(
+        '8 unit'
+      );
+      await savedServings.fill('1');
+      await page.locator('[data-test="recipe-cooking-open"] button').click();
+      await expect(page.locator('[data-test="cooking-batch-warning"]')).toContainText(
+        batchCookingWarning
+      );
+      const cookingServings = page.locator('[data-test="cooking-serving-count"]');
+      await expect(cookingServings).toHaveValue('1');
+      await cookingServings.fill('4');
+      await cookingServings.press('Tab');
+      await expect(page.locator('[data-test="cooking-ingredient"]')).toContainText('8 unit');
+      expect(syntheticProvider.requests).toHaveLength(1);
+      await captureScreenshot(
+        page,
+        'saved-recipe-cooking-batches',
+        viewport,
+        testInfo.project.name
+      );
       expect(syntheticProvider.requests).toHaveLength(1);
       await dismissToasts(page);
       await captureScreenshot(page, 'saved-recipe-detail-level', viewport, testInfo.project.name);

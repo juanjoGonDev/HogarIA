@@ -351,7 +351,7 @@ const recetaGenerada = {
   prepTime: 10,
   cookTime: 20,
   restTime: null,
-  servings: 2,
+  servings: 1,
   calories: 420,
   ingredients: [
     {
@@ -368,7 +368,8 @@ const recetaGenerada = {
   guidance: {
     appliances: ['Cocina de gas'],
     parallelTasks: ['Lavar y cortar las verduras mientras hierve el caldo.'],
-    tipsAndVariations: ['Añadir pimentón fuera del fuego para que no se queme.']
+    tipsAndVariations: ['Añadir pimentón fuera del fuego para que no se queme.'],
+    batchCookingWarning: null
   },
   instructionsByLevel: {
     basic: [
@@ -514,6 +515,56 @@ describe('POST /generate-recipe y /generate-multiple-recipes', () => {
     expect(prompt).not.toContain('Responde siempre en español de España');
   });
 
+  it('genera cantidades base para una ración y conserva en la respuesta el rendimiento normalizado', async () => {
+    await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
+    const requests = stubRecipeProvider();
+
+    const response = await call(alice, 'POST', '/generate-recipe', {
+      ...peticionGeneracion,
+      servings: 4
+    });
+    const result = await json(response);
+    const providerRequest = JSON.parse(requests[0].body);
+    const prompt = providerRequest.messages[1].content as string;
+
+    expect(response.status).toBe(200);
+    expect(providerRequest.response_format.type).toBe('json_schema');
+    expect(providerRequest.response_format.json_schema.strict).toBe(true);
+    expect(prompt).toContain('Raciones solicitadas para cocinar: 4');
+    expect(prompt).toContain('rendimiento base de exactamente 1 ración');
+    expect(prompt).toContain('quantity": número para 1 ración');
+    expect(prompt).toContain('"servings": 1');
+    expect(result.data).toMatchObject({
+      servings: 1,
+      ingredients: [{ name: 'lentejas', quantity: 200, unit: 'g' }],
+      guidance: { batchCookingWarning: null }
+    });
+    expect(recipeCount()).toBe(0);
+  });
+
+  it('rechaza una respuesta que no esté normalizada a una ración sin guardar nada', async () => {
+    await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
+    const requests = stubRecipeProvider(
+      () =>
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: JSON.stringify({ ...recetaGenerada, servings: 4 }) } }]
+          }),
+          { status: 200 }
+        )
+    );
+
+    const response = await call(alice, 'POST', '/generate-recipe', {
+      ...peticionGeneracion,
+      servings: 4
+    });
+
+    expect(response.status).toBe(500);
+    expect((await json(response)).success).toBe(false);
+    expect(requests).toHaveLength(1);
+    expect(recipeCount()).toBe(0);
+  });
+
   it('uses the active household member count as the default recipe servings', async () => {
     db.prepare('INSERT INTO households (id, name, invite_code) VALUES (?, ?, ?)').run(
       'servings-house',
@@ -534,7 +585,7 @@ describe('POST /generate-recipe y /generate-multiple-recipes', () => {
     }
     await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
 
-    const generated = { ...recetaGenerada, servings: 3 };
+    const generated = { ...recetaGenerada, servings: 1 };
     const requests = stubRecipeProvider(
       () =>
         new Response(
@@ -550,8 +601,8 @@ describe('POST /generate-recipe y /generate-multiple-recipes', () => {
     const prompt = JSON.parse(requests[0].body).messages[1].content as string;
 
     expect(response.status).toBe(200);
-    expect(result.data.servings).toBe(3);
-    expect(prompt).toContain('Porciones confirmadas para esta receta: 3');
+    expect(result.data.servings).toBe(1);
+    expect(prompt).toContain('Raciones solicitadas para cocinar: 3');
   });
 
   it('uses only selected active household tastes and ephemeral guest constraints', async () => {
@@ -610,7 +661,7 @@ describe('POST /generate-recipe y /generate-multiple-recipes', () => {
     const prompt = JSON.parse(requests[0].body).messages[1].content as string;
 
     expect(response.status).toBe(200);
-    expect(result.data.servings).toBe(2);
+    expect(result.data.servings).toBe(1);
     expect(prompt).toContain('marisco');
     expect(prompt).toContain('tomate');
     expect(prompt).toContain('huevo');
@@ -782,7 +833,8 @@ describe('POST /generate-recipe y /generate-multiple-recipes', () => {
     const prompt = providerBody.messages[1].content as string;
     expect(prompt).toContain('Ingredientes disponibles: 200 g de lentejas');
     expect(prompt).toContain('Utensilios disponibles: Olla');
-    expect(prompt).toContain('Porciones confirmadas para esta receta: 2');
+    expect(prompt).toContain('Raciones solicitadas para cocinar: 2');
+    expect(prompt).toContain('rendimiento base de exactamente 1 ración');
     expect(prompt).toContain('Dificultad: easy');
     expect(prompt).toContain('Nivel seleccionado al abrir la ficha: basic');
     expect(prompt).toContain('genera SIEMPRE los tres niveles completos');
@@ -881,11 +933,73 @@ describe('POST /generate-recipe y /generate-multiple-recipes', () => {
       totalTime: 30,
       prepTime: 10,
       cookTime: 20,
-      servings: 2,
+      servings: 1,
       ingredients: [{ name: 'lentejas', quantity: 200, unit: 'g' }],
+      guidance: { batchCookingWarning: null },
       instructionsByLevel: recetaGenerada.instructionsByLevel
     });
     expect(requests).toHaveLength(1);
+    expect(recipeCount()).toBe(0);
+  });
+
+  it('multiple comparte las raciones elegidas como contexto y devuelve cada candidata normalizada', async () => {
+    await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
+    const requests = stubRecipeProvider();
+
+    const response = await call(alice, 'POST', '/generate-multiple-recipes', {
+      ...peticionGeneracion,
+      servings: 5,
+      count: 1
+    });
+    const result = await json(response);
+    const providerRequest = JSON.parse(requests[0].body);
+    const prompt = providerRequest.messages[1].content as string;
+
+    expect(response.status).toBe(200);
+    expect(providerRequest.response_format.json_schema.strict).toBe(true);
+    expect(result.data).toHaveLength(1);
+    expect(result.data.map((recipe: { servings: number }) => recipe.servings)).toEqual([1]);
+    expect(
+      result.data.map(
+        (recipe: { ingredients: { quantity: number }[] }) => recipe.ingredients[0].quantity
+      )
+    ).toEqual([200]);
+    expect(prompt).toContain('Raciones solicitadas para cocinar: 5');
+    expect(prompt).toContain('quantity": número para 1 ración');
+    expect(requests).toHaveLength(1);
+    expect(recipeCount()).toBe(0);
+  });
+
+  it('valida y devuelve un aviso explícito de cocinar en tandas', async () => {
+    await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
+    const warning = 'Dora la cebolla en tres tandas; amontonarla haría que soltara agua.';
+    stubRecipeProvider(
+      () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    ...recetaGenerada,
+                    guidance: { ...recetaGenerada.guidance, batchCookingWarning: warning }
+                  })
+                }
+              }
+            ]
+          }),
+          { status: 200 }
+        )
+    );
+
+    const response = await call(alice, 'POST', '/generate-recipe', {
+      ...peticionGeneracion,
+      servings: 6
+    });
+    const result = await json(response);
+
+    expect(response.status).toBe(200);
+    expect(result.data.guidance.batchCookingWarning).toBe(warning);
     expect(recipeCount()).toBe(0);
   });
 

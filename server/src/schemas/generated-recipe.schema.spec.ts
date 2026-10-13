@@ -59,7 +59,8 @@ const validCandidate = {
   guidance: {
     appliances: ['Cocina de gas'],
     parallelTasks: ['Mientras hierve el agua, lava y corta las verduras.'],
-    tipsAndVariations: ['Añade limón al final para realzar el sabor.']
+    tipsAndVariations: ['Añade limón al final para realzar el sabor.'],
+    batchCookingWarning: null
   },
   nutrition: { calories: 180, protein: 2, carbs: 20, fat: 5, fiber: 4 },
   storage: {
@@ -88,6 +89,37 @@ describe('generatedRecipeCandidateSchema', () => {
         guidance: { ...validCandidate.guidance, appliances: ['freidora de aceite'] }
       }).success
     ).toBe(true);
+  });
+
+  it('requires an explicit nullable batch-cooking decision with bounded text', () => {
+    const { batchCookingWarning: _warning, ...guidanceWithoutWarning } = validCandidate.guidance;
+    expect(
+      generatedRecipeCandidateSchema.safeParse({
+        ...validCandidate,
+        guidance: guidanceWithoutWarning
+      }).success
+    ).toBe(false);
+    expect(
+      generatedRecipeCandidateSchema.safeParse({
+        ...validCandidate,
+        guidance: { ...validCandidate.guidance, batchCookingWarning: '' }
+      }).success
+    ).toBe(false);
+    expect(
+      generatedRecipeCandidateSchema.safeParse({
+        ...validCandidate,
+        guidance: { ...validCandidate.guidance, batchCookingWarning: 't'.repeat(501) }
+      }).success
+    ).toBe(false);
+    expect(
+      generatedRecipeCandidateSchema.parse({
+        ...validCandidate,
+        guidance: {
+          ...validCandidate.guidance,
+          batchCookingWarning: 'Dora en tandas pequeñas.'
+        }
+      }).guidance.batchCookingWarning
+    ).toBe('Dora en tandas pequeñas.');
   });
 
   it('exige illustration null y rechaza recursos visuales devueltos por el modelo', () => {

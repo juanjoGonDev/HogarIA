@@ -64,7 +64,8 @@ export const generatedRecipeCandidateSchema = z
       .object({
         appliances: z.array(z.string().trim().min(1)).max(10),
         parallelTasks: z.array(z.string().trim().min(1)).max(10),
-        tipsAndVariations: z.array(z.string().trim().min(1)).max(10)
+        tipsAndVariations: z.array(z.string().trim().min(1)).max(10),
+        batchCookingWarning: z.string().trim().min(1).max(500).nullable()
       })
       .strict(),
     instructionsByLevel: recipeInstructionsByLevelSchema,

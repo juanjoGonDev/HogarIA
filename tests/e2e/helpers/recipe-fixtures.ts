@@ -30,6 +30,7 @@ export interface SyntheticRecipeOptions {
     appliances: string[];
     parallelTasks: string[];
     tipsAndVariations: string[];
+    batchCookingWarning?: string | null;
   };
   instructionsByLevel?: {
     basic: Array<Record<string, unknown>>;

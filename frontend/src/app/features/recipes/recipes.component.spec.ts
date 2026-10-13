@@ -48,7 +48,7 @@ const GENERATED: AIRecipeResponse = {
   prepTime: 15,
   cookTime: 30,
   restTime: 0,
-  servings: 3,
+  servings: 1,
   calories: 410,
   ingredients: [
     {
@@ -65,7 +65,8 @@ const GENERATED: AIRecipeResponse = {
   guidance: {
     appliances: ['fogón'],
     parallelTasks: ['Lavar la tabla'],
-    tipsAndVariations: ['Añadir perejil']
+    tipsAndVariations: ['Añadir perejil'],
+    batchCookingWarning: null
   },
   steps: [{ stepNumber: 1, instruction: 'Cocinar', duration: 10, tips: 'Remover' }],
   tags: ['guiso'],
@@ -690,6 +691,16 @@ describe('RecipesComponent', () => {
       'recipes.receta_generada',
       'recipes.la_ia_ha_creado'
     );
+    expect(component.generatedPreviewServings()).toBe(3);
+    expect(
+      component.generatedPreviewIngredientQuantity(GENERATED, GENERATED.ingredients[0].quantity)
+    ).toBe(6);
+    component.setGeneratedPreviewServings(5);
+    expect(
+      component.generatedPreviewIngredientQuantity(GENERATED, GENERATED.ingredients[0].quantity)
+    ).toBe(10);
+    expect(GENERATED.ingredients[0].quantity).toBe(2);
+    expect(ai.generateRecipe).toHaveBeenCalledTimes(1);
     ai.generateRecipe.and.returnValue(of(null));
     component.generateSingle();
     expect(toast.error).toHaveBeenCalledWith('ui.error', 'recipes.no_se_pudo_generar');
@@ -708,6 +719,12 @@ describe('RecipesComponent', () => {
     expect(ai.generateMultipleRecipes).toHaveBeenCalledWith(
       jasmine.objectContaining({ servings: 4, count: 3 })
     );
+    expect(component.generatedPreviewServings()).toBe(4);
+    component.setGeneratedPreviewServings(6);
+    expect(
+      component.generatedPreviewIngredientQuantity(GENERATED, GENERATED.ingredients[0].quantity)
+    ).toBe(12);
+    expect(GENERATED.ingredients[0].quantity).toBe(2);
     expect(component.generatedRecipeDetailLevel(0)).toBe('intermediate');
     expect(component.generatedRecipeDetailLevel(1)).toBe('expert');
     ai.generateMultipleRecipes.and.returnValue(of([]));
@@ -735,6 +752,8 @@ describe('RecipesComponent', () => {
     component.saveGeneratedRecipe(multi, 'expert');
     const payload = recipes.createRecipe.calls.mostRecent().args[0] as any;
     expect(payload.author).toBe('ai');
+    expect(payload.servings).toBe(1);
+    expect(payload.ingredients[0].quantity).toBe(2);
     expect(payload.instructionsByLevel.basic[0]).toEqual(
       jasmine.objectContaining({
         instruction: 'Paso básico',

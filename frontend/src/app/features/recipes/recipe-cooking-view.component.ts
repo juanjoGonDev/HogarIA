@@ -107,6 +107,17 @@ interface ActiveRecipeTimer {
         </app-button>
       </header>
 
+      <p
+        *ngIf="recipe.guidance?.batchCookingWarning"
+        class="recipe-cooking__warning"
+        data-test="cooking-batch-warning"
+        role="note"
+      >
+        <app-icon name="error_outline" [size]="16" [label]="null" />
+        <strong>{{ 'recipes.batch_cooking_warning_heading' | t }}:</strong>
+        {{ recipe.guidance?.batchCookingWarning }}
+      </p>
+
       <button
         type="button"
         class="recipe-cooking__ingredients-toggle"

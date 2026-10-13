@@ -710,13 +710,44 @@ function difficultyFromQuery(value: string | null): Difficulty | null {
               <h3 class="generated-recipe__title">{{ recipe.name }}</h3>
               <div class="generated-recipe__meta">
                 <app-badge variant="secondary">{{
-                  'recipes.porciones_n' | t: { n: recipe.servings }
+                  'recipes.porciones_n' | t: { n: generatedPreviewServings() }
                 }}</app-badge>
                 <app-badge *ngIf="recipe.calories">{{
                   'recipes.kcal_per_serving' | t: { n: recipe.calories }
                 }}</app-badge>
               </div>
             </div>
+
+            <div class="recipe-detail__servings" data-test="generated-recipe-serving-control">
+              <label for="generated-recipe-serving-count">{{
+                'recipes.servings_scaled_label' | t
+              }}</label>
+              <input
+                id="generated-recipe-serving-count"
+                class="form-input"
+                type="number"
+                min="1"
+                step="1"
+                [ngModel]="generatedPreviewServings()"
+                (ngModelChange)="setGeneratedPreviewServings($event)"
+                aria-describedby="generated-recipe-serving-hint"
+                data-test="generated-serving-count"
+              />
+              <span id="generated-recipe-serving-hint" class="recipe-detail__hint">
+                {{ 'recipes.scaled_only' | t }}
+              </span>
+            </div>
+
+            <section
+              *ngIf="recipe.guidance.batchCookingWarning"
+              class="step-card__warning generated-recipe__batch-warning"
+              data-test="generated-recipe-batch-warning"
+              role="note"
+            >
+              <app-icon name="error_outline" [size]="16" [label]="null" />
+              <strong>{{ 'recipes.batch_cooking_warning_heading' | t }}:</strong>
+              {{ recipe.guidance.batchCookingWarning }}
+            </section>
 
             <p class="generated-recipe__description">{{ recipe.description }}</p>
             <div
@@ -777,7 +808,12 @@ function difficultyFromQuery(value: string | null): Difficulty | null {
                 <li *ngFor="let ing of recipe.ingredients">
                   {{
                     'recipes.ingrediente_de'
-                      | t: { quantity: ing.quantity, unit: ing.unit, name: ing.name }
+                      | t
+                        : {
+                            quantity: generatedPreviewIngredientQuantity(recipe, ing.quantity),
+                            unit: ing.unit,
+                            name: ing.name
+                          }
                   }}
                   <span *ngIf="ing.preparation" class="generated-recipe__prep"
                     >({{ ing.preparation }})</span
@@ -956,7 +992,7 @@ function difficultyFromQuery(value: string | null): Difficulty | null {
                       'recipes.min' | t: { n: recipe.totalTime }
                     }}</app-badge>
                     <app-badge variant="secondary">{{
-                      'recipes.porciones_n' | t: { n: recipe.servings }
+                      'recipes.porciones_n' | t: { n: generatedPreviewServings() }
                     }}</app-badge>
                   </div>
                 </div>
@@ -1131,6 +1167,16 @@ function difficultyFromQuery(value: string | null): Difficulty | null {
               </div>
             </div>
           </header>
+
+          <section
+            *ngIf="!isCookingMode() && recipe.guidance?.batchCookingWarning"
+            class="recipe-detail__section recipe-detail__panel"
+            data-test="recipe-batch-warning"
+            role="note"
+          >
+            <h3>{{ 'recipes.batch_cooking_warning_heading' | t }}</h3>
+            <p>{{ recipe.guidance?.batchCookingWarning }}</p>
+          </section>
 
           <section
             *ngIf="!isCookingMode() && recipe.nutrition"
@@ -2491,6 +2537,7 @@ export class RecipesComponent implements OnInit {
   cookingRecipeId = signal<string | null>(null);
   isCookingMode = signal(false);
   recipeServings = signal(2);
+  generatedPreviewServings = signal(1);
   selectedIngredients = signal<any[]>([]);
   selectedRecipeDetailLevel = signal<DetailLevel>('intermediate');
   singleGeneratedDetailLevel = signal<DetailLevel>('intermediate');
@@ -2859,6 +2906,17 @@ export class RecipesComponent implements OnInit {
     return scaleRecipeQuantity(quantity, recipe.servings || 2, this.recipeServings());
   }
 
+  generatedPreviewIngredientQuantity(recipe: AIRecipeResponse, quantity: number): number {
+    return scaleRecipeQuantity(quantity, recipe.servings || 1, this.generatedPreviewServings());
+  }
+
+  setGeneratedPreviewServings(value: number | string): void {
+    const servings = Number(value);
+    if (Number.isSafeInteger(servings) && servings >= 1) {
+      this.generatedPreviewServings.set(servings);
+    }
+  }
+
   setRecipeServings(value: number | string): void {
     const servings = Number(value);
     if (Number.isSafeInteger(servings) && servings >= 1) {
@@ -3176,6 +3234,7 @@ export class RecipesComponent implements OnInit {
     }
     this.selectedGeneratedOptionIndex.set(null);
     this.singleGeneratedDetailLevel.set(this.aiOptions.detailLevel as DetailLevel);
+    const requestedServings = Number(this.aiOptions.servings);
     const request = {
       ingredients: this.selectedIngredients().map((i) => ({
         id: i.id,
@@ -3184,7 +3243,7 @@ export class RecipesComponent implements OnInit {
         unit: i.unit
       })),
       utensils: [],
-      servings: Number(this.aiOptions.servings),
+      servings: requestedServings,
       householdMemberIds: this.recipeMemberIds(),
       guests: this.recipeGuests(),
       difficulty: this.aiOptions.difficulty,
@@ -3200,6 +3259,7 @@ export class RecipesComponent implements OnInit {
           this.showRecipeGenerationError('recipes.no_se_pudo_generar');
           return;
         }
+        this.generatedPreviewServings.set(requestedServings);
         this.aiFormExpanded.set(false);
         this.singleGeneratedDetailLevel.set(
           recipe.selectedDetailLevel ?? (this.aiOptions.detailLevel as DetailLevel)
@@ -3220,6 +3280,7 @@ export class RecipesComponent implements OnInit {
     }
     this.selectedGeneratedOptionIndex.set(null);
     this.generatedRecipeLevels.set({});
+    const requestedServings = Number(this.aiOptions.servings);
     const request = {
       ingredients: this.selectedIngredients().map((i) => ({
         id: i.id,
@@ -3228,7 +3289,7 @@ export class RecipesComponent implements OnInit {
         unit: i.unit
       })),
       utensils: [],
-      servings: Number(this.aiOptions.servings),
+      servings: requestedServings,
       householdMemberIds: this.recipeMemberIds(),
       guests: this.recipeGuests(),
       difficulty: this.aiOptions.difficulty,
@@ -3245,6 +3306,7 @@ export class RecipesComponent implements OnInit {
           this.showRecipeGenerationError('recipes.no_se_pudieron_generar');
           return;
         }
+        this.generatedPreviewServings.set(requestedServings);
         this.aiFormExpanded.set(false);
         const initialLevel = this.aiOptions.detailLevel as DetailLevel;
         this.generatedRecipeLevels.set(

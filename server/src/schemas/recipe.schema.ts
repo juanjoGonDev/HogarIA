@@ -112,7 +112,9 @@ const recipeGuidanceSchema = z
   .object({
     appliances: z.array(z.string().trim().min(1)).max(10),
     parallelTasks: z.array(z.string().trim().min(1)).max(10),
-    tipsAndVariations: z.array(z.string().trim().min(1)).max(10)
+    tipsAndVariations: z.array(z.string().trim().min(1)).max(10),
+    /** Optional for older saved guidance JSON; generated recipes always provide the explicit decision. */
+    batchCookingWarning: formField(z.string().trim().min(1).max(500))
   })
   .strict();
 

@@ -114,7 +114,7 @@ describe('redacción de secretos en la configuración IA', () => {
       prepTime: 5,
       cookTime: 5,
       restTime: null,
-      servings: 2,
+      servings: 1,
       calories: 100,
       ingredients: [
         {
@@ -128,7 +128,12 @@ describe('redacción de secretos en la configuración IA', () => {
         }
       ],
       utensils: [],
-      guidance: { appliances: [], parallelTasks: [], tipsAndVariations: [] },
+      guidance: {
+        appliances: [],
+        parallelTasks: [],
+        tipsAndVariations: [],
+        batchCookingWarning: null
+      },
       instructionsByLevel: {
         basic: [
           {

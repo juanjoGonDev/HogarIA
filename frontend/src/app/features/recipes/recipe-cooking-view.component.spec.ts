@@ -42,6 +42,19 @@ describe('RecipeCookingViewComponent', () => {
     expect(recipe.ingredients[0].quantity).toBe(200);
   });
 
+  it('scales a normalized one-serving recipe without mutating its base ingredient', () => {
+    const oneServingRecipe = {
+      ...recipe,
+      servings: 1,
+      ingredients: [{ name: 'Arroz', quantity: 80, unit: 'g', isOptional: false }]
+    } as Recipe;
+    component.recipe = oneServingRecipe;
+    component.servings = 4;
+
+    expect(component.scaledQuantity(80)).toBe(320);
+    expect(oneServingRecipe.ingredients[0].quantity).toBe(80);
+  });
+
   it('emits safe positive integer servings and ignores invalid adjustments', () => {
     const changes: number[] = [];
     component.servingsChange.subscribe((servings) => changes.push(servings));

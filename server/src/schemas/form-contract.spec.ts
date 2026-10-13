@@ -475,7 +475,7 @@ const ROWS: Row[] = [
       prepTime: 5,
       cookTime: 15,
       restTime: null,
-      servings: 2,
+      servings: 1,
       calories: 180,
       ingredients: [
         {
@@ -488,7 +488,12 @@ const ROWS: Row[] = [
         }
       ],
       utensils: [],
-      guidance: { appliances: [], parallelTasks: [], tipsAndVariations: [] },
+      guidance: {
+        appliances: [],
+        parallelTasks: [],
+        tipsAndVariations: [],
+        batchCookingWarning: null
+      },
       instructionsByLevel: {
         basic: [
           {

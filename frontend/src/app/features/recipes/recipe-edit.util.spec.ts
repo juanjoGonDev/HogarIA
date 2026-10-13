@@ -31,7 +31,8 @@ const detailedRecipe: Recipe = {
   guidance: {
     appliances: ['Cocina de gas'],
     parallelTasks: ['Tuesta el pan mientras hierve.'],
-    tipsAndVariations: ['Añade nuez moscada.']
+    tipsAndVariations: ['Añade nuez moscada.'],
+    batchCookingWarning: 'Dora la calabaza en tandas para evitar que se cueza al vapor.'
   },
   instructionsByLevel: {
     basic: [{ stepNumber: 1, instruction: 'Cuece la calabaza.' }],
@@ -105,6 +106,23 @@ describe('recipe edit payload', () => {
     expect(Object.prototype.hasOwnProperty.call(payload, 'steps')).toBeFalse();
   });
 
+  it('preserves and explicitly clears a batch-cooking warning in the edit payload', () => {
+    const draft = recipeToEditDraft(detailedRecipe);
+    expect(draft.batchCookingWarningText).toBe(
+      'Dora la calabaza en tandas para evitar que se cueza al vapor.'
+    );
+    draft.batchCookingWarningText = '  Cocina las verduras por tandas.  ';
+
+    const { payload, errors } = buildRecipeEditPayload(draft);
+
+    expect(errors).toEqual([]);
+    expect(payload?.guidance?.batchCookingWarning).toBe('Cocina las verduras por tandas.');
+
+    draft.batchCookingWarningText = '';
+    const cleared = buildRecipeEditPayload(draft);
+    expect(cleared.payload?.guidance?.batchCookingWarning).toBeNull();
+  });
+
   it('conserves legacy single-level steps and supports editing nested ingredients and arrays', () => {
     const legacy = recipeToEditDraft({
       ...detailedRecipe,
@@ -156,6 +174,7 @@ describe('recipe edit payload', () => {
     draft.appliancesText = '';
     draft.parallelTasksText = '';
     draft.tipsAndVariationsText = '';
+    draft.batchCookingWarningText = '';
 
     const cleared = buildRecipeEditPayload(draft);
     expect(cleared.errors).toEqual([]);
@@ -242,7 +261,9 @@ describe('recipe edit payload', () => {
     expect(result.payload?.instructionsByLevel?.basic[0]).toEqual(
       jasmine.objectContaining({ imagePhotoId: 'f'.repeat(24) })
     );
-    expect(Object.prototype.hasOwnProperty.call(result.payload?.instructionsByLevel?.basic[0], 'image')).toBeFalse();
+    expect(
+      Object.prototype.hasOwnProperty.call(result.payload?.instructionsByLevel?.basic[0], 'image')
+    ).toBeFalse();
   });
 
   it('preserves a previously stored same-origin step photo when editing other fields', () => {
@@ -271,6 +292,8 @@ describe('recipe edit payload', () => {
     const result = buildRecipeEditPayload(draft);
 
     expect(result.errors).toEqual([]);
-    expect(result.payload?.instructionsByLevel?.basic[0].image).toBe(`/api/recipe-images/${photoId}`);
+    expect(result.payload?.instructionsByLevel?.basic[0].image).toBe(
+      `/api/recipe-images/${photoId}`
+    );
   });
 });

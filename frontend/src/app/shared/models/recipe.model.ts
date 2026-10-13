@@ -104,6 +104,8 @@ export interface RecipeGuidance {
   appliances: string[];
   parallelTasks: string[];
   tipsAndVariations: string[];
+  /** Explicit provider/editor decision; absent on legacy saved guidance. */
+  batchCookingWarning?: string | null;
 }
 
 export interface RecipeStep extends RecipeInstructionStep {
