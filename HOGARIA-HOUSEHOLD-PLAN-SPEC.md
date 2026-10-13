@@ -979,7 +979,11 @@ una alergia obliga a separar o a dejar el turno sin resolver aunque el objetivo 
   confirmado sin pedir otra respuesta a IA). Repetir no duplica eventos ni reemplaza cambios manuales sin
   permiso; la lista de compra se vuelve a calcular con las existencias actuales. Un indicador pequeño y persistente muestra la próxima ejecución automática y tiene un único
   botón alternable de play/pause; al pausar conserva fecha y plan, y al reanudar informa la próxima fecha.
-  Puede configurarse si la ejecución abarca tareas, comidas o ambas.
+  Puede configurarse si la ejecución abarca tareas, comidas o ambas. Para activar la recurrencia, el hogar
+  debe guardar explícitamente día semanal, hora local y zona IANA; no se hereda la zona del servidor ni del
+  navegador. Si la hora local no existe por el salto de horario estacional, la ejecución pasa a la primera
+  hora local válida posterior; si ocurre dos veces al volver el horario, se ejecuta una sola vez en la
+  primera ocurrencia. La siguiente ejecución debe exponer su instante UTC y etiqueta en la zona elegida.
 
 ### Alta de cuenta: pertenencia obligatoria a un hogar
 
@@ -1256,9 +1260,10 @@ criterios inferiores permanecen sin marcar hasta validar cada condición en su a
       en paso separado, cancelar/rechazar sin escritura y aprobación que crea/actualiza Compra conservando
       filas compradas/manuales. Errores no mutan Compra ni inventario.
       Progreso: preview backend de solo lectura integrado; sin UI ni aprobación persistente todavía.
-- [ ] **QA-HOME-PLANNING.AUTOMATION.1** — generar/repetir, play/pause, siguiente fecha, retry e
-      idempotencia; repetir no llama a IA ni duplica eventos, protege ediciones manuales y permite
-      elegir tareas/comidas.
+- [ ] **QA-HOME-PLANNING.AUTOMATION.1** — configuración explícita por hogar de día semanal, hora local
+      y zona IANA antes de activar; caso de hora inexistente → primera hora válida posterior y hora duplicada
+      → primera ocurrencia única. Generar/repetir, play/pause, siguiente fecha, retry e idempotencia; repetir
+      no llama a IA ni duplica eventos, protege ediciones manuales y permite elegir tareas/comidas.
 - [x] **QA-HOME-TASKS.WEEKLY.2** — asignación fija/aleatoria, equilibrio, no repetir días
       consecutivos si hay solución, excepción explicada y preservación de asignaciones manuales.
       Evidencia: `household-task-assignment.spec.ts` y `household-tasks.component.spec.ts` cubren
