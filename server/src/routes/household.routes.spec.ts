@@ -16,6 +16,7 @@ describe('household create and join transactions', () => {
   beforeAll(async () => {
     const database = await import('../config/database.js');
     const { householdRoutes } = await import('./household.routes.js');
+    const { householdMealPlanningRoutes } = await import('./household-meal-planning.routes.js');
     const { authMiddleware } = await import('../middleware/auth.middleware.js');
     const { config } = await import('../config/app.config.js');
     await database.initializeDatabase();
@@ -23,6 +24,7 @@ describe('household create and join transactions', () => {
     db = database.getDatabase();
     app = new Hono();
     app.route('/api/household', householdRoutes);
+    app.route('/api/household', householdMealPlanningRoutes);
     app.get('/api/protected-household-test', authMiddleware, (context) =>
       context.json({ success: true })
     );
@@ -456,6 +458,60 @@ describe('household create and join transactions', () => {
     ).toEqual({ count: 13 });
   });
 
+  it('inicializa la planificación compartida desde el creador sin copiar ni borrar su perfil', async () => {
+    const owner = await makeUser('planning-owner', null);
+    const personalPreferences = {
+      taste: {
+        goals: ['muscle-gain', 'variety'],
+        goalNotes: 'Más energía para entrenar',
+        allergies: ['frutos secos'],
+        likes: ['lentejas'],
+        dislikes: ['coliflor'],
+        notes: 'Prefiero cenas ligeras'
+      },
+      mealPlan: { breakfast: false, lunch: true, snack: false, dinner: true },
+      mealTimes: { breakfast: '08:10', lunch: '13:15', snack: '17:45', dinner: '21:00' },
+      onboarding: { status: 'done' }
+    };
+    db.prepare('UPDATE users SET preferences = ? WHERE id = ?').run(
+      JSON.stringify(personalPreferences),
+      owner.id
+    );
+
+    const response = await call(owner, 'POST', '', { name: 'Hogar con planificación' });
+    const body = (await response.json()) as { data: { id: string } };
+    const storedHome = db
+      .prepare('SELECT meal_planning_preferences FROM households WHERE id = ?')
+      .get(body.data.id) as { meal_planning_preferences: string };
+    const storedProfile = db
+      .prepare('SELECT preferences FROM users WHERE id = ?')
+      .get(owner.id) as {
+      preferences: string;
+    };
+    const settings = await app.request('/api/household/meal-planning', {
+      headers: {
+        authorization: `Bearer ${owner.token}`,
+        'x-household-id': body.data.id
+      }
+    });
+    const settingsBody = (await settings.json()) as { data: any };
+
+    expect(response.status).toBe(201);
+    expect(settings.status).toBe(200);
+    expect(JSON.parse(storedHome.meal_planning_preferences)).toEqual({
+      objective: { goals: ['muscle-gain', 'variety'], notes: 'Más energía para entrenar' },
+      mealTypes: { breakfast: false, lunch: true, snack: false, dinner: true },
+      mealTimes: { breakfast: '08:10', lunch: '13:15', snack: '17:45', dinner: '21:00' }
+    });
+    expect(JSON.parse(storedProfile.preferences)).toEqual(personalPreferences);
+    expect(settingsBody.data.member).toMatchObject({
+      goalOverrideEnabled: false,
+      scheduleOverrideEnabled: false,
+      personalObjective: { goals: ['muscle-gain', 'variety'], notes: 'Más energía para entrenar' }
+    });
+    expect(JSON.stringify(settingsBody)).not.toContain('frutos secos');
+  });
+
   it('permite crear otro hogar sin eliminar la membresía anterior ni adoptar datos de esa casa', async () => {
     const { member } = await createJoinFixture();
 
@@ -549,6 +605,15 @@ describe('household create and join transactions', () => {
       'Hogar destino',
       'TARGET01'
     );
+    const existingDefaults = {
+      objective: { goals: ['variety'], notes: 'Ya configurado' },
+      mealTypes: { breakfast: true, lunch: false, snack: true, dinner: false },
+      mealTimes: { breakfast: '09:00', lunch: '14:00', snack: '17:00', dinner: '20:30' }
+    };
+    db.prepare('UPDATE households SET meal_planning_preferences = ? WHERE id = ?').run(
+      JSON.stringify(existingDefaults),
+      'target-house'
+    );
     const member = await makeUser('personal-member', null);
     const admin = await makeUser('target-admin', 'target-house');
     db.prepare(
@@ -572,6 +637,15 @@ describe('household create and join transactions', () => {
         .prepare('SELECT id FROM household_members WHERE household_id = ? AND user_id = ?')
         .get('target-house', member.id)
     ).toBeTruthy();
+    expect(
+      JSON.parse(
+        (
+          db
+            .prepare('SELECT meal_planning_preferences FROM households WHERE id = ?')
+            .get('target-house') as { meal_planning_preferences: string }
+        ).meal_planning_preferences
+      )
+    ).toEqual(existingDefaults);
     expect(
       (
         db

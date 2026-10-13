@@ -7,6 +7,7 @@ import type { AppEnv } from '../types/hono-env.js';
 import { seedDefaultsForHousehold, adoptPersonalRowsIntoHousehold } from '../utils/seed-data.js';
 import { activeHouseholdId } from '../utils/household-context.js';
 import { copyActivePersonalAiConfigToHousehold } from '../utils/household-ai-config.js';
+import { initializeHouseholdMealPlanningFromCreator } from '../utils/household-meal-planning.store.js';
 
 const householdRoutes = new Hono<AppEnv>();
 
@@ -255,6 +256,7 @@ householdRoutes.post('/', authMiddleware, async (c) => {
     ).run(nanoid(), id, userId, perms);
 
     db.prepare('UPDATE users SET household_id = ? WHERE id = ?').run(id, userId);
+    initializeHouseholdMealPlanningFromCreator(db, id, userId);
     copyActivePersonalAiConfigToHousehold(db, id, userId);
 
     // Solo la primera casa adopta las filas personales; crear otra no copia ni
@@ -375,10 +377,11 @@ householdRoutes.patch('/', authMiddleware, async (c) => {
   }
   if (updatesMember) {
     const targetMember = db
-      .prepare('SELECT id, user_id, role, is_active FROM household_members WHERE id = ? AND household_id = ?')
+      .prepare(
+        'SELECT id, user_id, role, is_active FROM household_members WHERE id = ? AND household_id = ?'
+      )
       .get(body.memberId, selectedHouseholdId) as
-      | { id: string; user_id: string; role: string; is_active: number }
-      | undefined;
+      { id: string; user_id: string; role: string; is_active: number } | undefined;
     if (!targetMember) {
       return c.json({ success: false, message: 'Member not found' }, 404);
     }
