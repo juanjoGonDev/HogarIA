@@ -92,6 +92,7 @@ const COVERED = [
   'src/utils/household-plan-assignment.store.ts',
   'src/utils/household-task.store.ts',
   'src/utils/household-task-proposal-ai.ts',
+  'src/utils/household-task-assignment.ts',
   'src/utils/household-plan-ai.ts',
   'src/utils/weekly-plan.ts',
   'src/utils/caducidades.ts',
