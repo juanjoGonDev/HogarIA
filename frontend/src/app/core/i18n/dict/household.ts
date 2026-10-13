@@ -359,17 +359,14 @@ export const householdEs = {
   'household.dwelling_mobile_home': 'Casa móvil',
   'household.dwelling_other': 'Otro tipo de vivienda',
   'household.meal_settings_title': 'Planificación de comidas',
-  'household.meal_settings_home_read_only':
-    'Solo puedes editar tus ajustes personales; lo común es de solo lectura.',
+  'household.meal_settings_home_read_only': 'Los ajustes del hogar son de solo lectura.',
   'household.meal_settings_time': 'Hora',
   'household.meal_settings_goal_override': 'Usar mi objetivo personal',
-  'household.meal_settings_goal_override_help':
-    'Usa el objetivo de tu perfil en vez del objetivo común.',
+  'household.meal_settings_goal_override_help': 'Sustituye al objetivo común.',
   'household.meal_settings_schedule_override': 'Usar mis horarios personales',
-  'household.meal_settings_schedule_override_help':
-    'Elige comidas y horarios sin cambiar los del hogar.',
-  'household.meal_settings_load_error': 'No se pudo cargar la configuración. Inténtalo de nuevo.',
-  'household.meal_settings_save_error': 'No se pudo guardar. Tus cambios siguen aquí.',
+  'household.meal_settings_schedule_override_help': 'Personaliza tus comidas y horarios.',
+  'household.meal_settings_load_error': 'No se pudo cargar. Reintenta.',
+  'household.meal_settings_save_error': 'No se pudo guardar; se mantienen tus cambios.',
   'household.meal_settings_context_changed':
     'El hogar activo cambió. Recarga la configuración antes de continuar.',
   'household.tasks_title': 'Tareas del hogar',
@@ -798,17 +795,14 @@ export const householdEn: Record<keyof typeof householdEs, string> = {
   'household.dwelling_mobile_home': 'Mobile home',
   'household.dwelling_other': 'Other dwelling type',
   'household.meal_settings_title': 'Meal planning',
-  'household.meal_settings_home_read_only':
-    'You can edit your own settings; shared values are read-only.',
+  'household.meal_settings_home_read_only': 'Household settings are read-only.',
   'household.meal_settings_time': 'Time',
   'household.meal_settings_goal_override': 'Use my personal goal',
-  'household.meal_settings_goal_override_help':
-    'Uses your profile goal instead of the shared goal.',
+  'household.meal_settings_goal_override_help': 'Replaces the shared goal.',
   'household.meal_settings_schedule_override': 'Use my personal times',
-  'household.meal_settings_schedule_override_help':
-    'Choose meals and times without changing home settings.',
-  'household.meal_settings_load_error': 'Could not load settings. Try again.',
-  'household.meal_settings_save_error': 'Could not save. Your changes are still here.',
+  'household.meal_settings_schedule_override_help': 'Customize your meals and times.',
+  'household.meal_settings_load_error': 'Could not load. Try again.',
+  'household.meal_settings_save_error': 'Could not save; your changes remain.',
   'household.meal_settings_context_changed':
     'The active home changed. Reload settings before continuing.',
   'household.tasks_title': 'Household tasks',
