@@ -1,10 +1,12 @@
 # HogarIA — Plano interactivo del hogar y tareas por zonas
 
-Estado: **seguimiento de calidad visual abierto por defectos observados en la UI; PR #47 en Draft · 2026-10-13**
+Estado: **seguimiento de calidad visual abierto; ampliación de planificación de comidas y alta obligatoria de hogar capturada como propuesta pendiente de validar; PR #47 en Draft · 2026-10-13**
 
-Este contrato concreta una nueva capacidad de HogarIA y complementa las reglas compartidas de
+Este contrato concreta capacidades de HogarIA y complementa las reglas compartidas de
 `HOGARIA-SPEC.md` §12ap (aislamiento por hogar, membresía, permisos y proveedor de IA) y §13
-(tareas del hogar pendientes). No modifica recetas ni el calendario existente.
+(tareas del hogar pendientes). La extensión de planificación de comidas descrita al final mantiene
+el calendario existente como calendario único: añade a él eventos de comida/tareas del hogar, sin
+reemplazar su vista ni modificar las recetas guardadas. Esa extensión aún no está implementada.
 
 ## Objetivo
 
@@ -819,3 +821,178 @@ parecer un único grupo de controles diseñado; no basta con que los controles f
   ni instalado; no se añadió una dependencia ajena a esta mejora. Los comandos equivalentes a los hooks
   de commit/push terminaron correctamente; los hooks se ejecutan de nuevo automáticamente al publicar.
   El PR permanece Draft.
+
+## Extensión propuesta — planificación del hogar, comidas por miembro y alta obligatoria (13-10-2026)
+
+> **Estado:** requisitos capturados para que no se pierdan; la política de conflictos y este alcance
+> ampliado siguen pendientes de confirmación e implementación. No se marca ningún criterio nuevo como
+> probado. La UI de calendario existente se conserva como calendario único.
+
+### Recomendación de producto
+
+La generación de comidas debe configurarse en **Hogar > Planificación**, porque produce una agenda
+para el hogar y necesita considerar a sus miembros. No debe ser un interruptor global de la cuenta.
+Cada persona mantiene su perfil alimentario propio; el hogar define valores compartidos por defecto.
+
+| Dato                                                                  | Propietario y resolución propuesta                                                                                                                                       |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Planificación habilitada, comidas/horarios semanales y objetivo común | Configuración del hogar. La automatización permanece pausada hasta activarla expresamente.                                                                               |
+| Objetivo personal                                                     | Perfil de cada miembro. Un switch «Usar mi objetivo» empieza apagado; apagado hereda el objetivo del hogar, encendido sustituye solo ese campo por el objetivo personal. |
+| Horario/comidas que recibe cada miembro                               | Perfil de cada miembro. Un switch independiente «Personalizar mis comidas» empieza apagado; apagado hereda el horario del hogar, encendido sustituye solo ese horario.   |
+| Alergias, intolerancias y restricciones marcadas como estrictas       | Siempre personales y obligatorias; nunca se desactivan al heredar el objetivo/horario del hogar.                                                                         |
+| Gustos, ingredientes que no gustan y notas culinarias                 | Siempre personales; se usan como preferencias, no como restricciones de seguridad salvo que la persona las marque explícitamente como estrictas.                         |
+| Quién puede editar los valores comunes                                | Miembros con el permiso vigente de configuración del hogar; cada miembro puede editar solo sus propios overrides y perfil. No crear una ACL paralela.                    |
+
+Los dos switches son independientes: personalizar el objetivo no personaliza automáticamente los horarios,
+y viceversa. Si un switch está encendido pero falta su valor personal, la UI lo exige antes de generar; no
+interpreta el vacío como «sin restricciones». La selección de miembros que comerán en una generación se
+confirma para esa planificación: pertenecer al hogar no implica automáticamente comer cada plato.
+
+### Resolución de diferencias entre miembros
+
+1. **Resolver por campo y por comensal.** Para cada persona incluida en la semana, su switch encendido
+   aporta su valor personal para ese campo; apagado hereda el valor común del hogar. No se mezclan ni se
+   pisan silenciosamente los valores.
+2. **Seguridad primero.** Una receta nunca puede incumplir una alergia, intolerancia o restricción
+   individual marcada como estricta. Si no hay una receta segura para una persona, se deja el hueco
+   claramente sin resolver y se pide intervención; no se inventa una sustitución.
+3. **Buscar primero una comida compartida.** Para cada fecha y turno seleccionado, la IA intenta proponer
+   una receta segura para todos los comensales de ese evento y razonablemente compatible con sus objetivos
+   y gustos. Si encaja, se crea **un evento compartido** sin asignación individual exclusiva, con el grupo
+   de comensales y las raciones totales; no una copia por cada miembro.
+4. **Separar solo cuando haga falta.** Si una comida común no puede respetar las restricciones duras o
+   servir razonablemente a los objetivos aplicables, se proponen platos distintos para los grupos/personas
+   afectados. Cada evento queda asignado a sus comensales, indica su objetivo culinario aplicable y su
+   número de raciones. La vista previa explica por qué se separó; no se presenta como si todos hubieran
+   recibido la misma planificación.
+5. **Los valores personales sustituyen los del hogar campo por campo.** Si todos los comensales elegidos
+   tienen el override de objetivo encendido, se ignora el objetivo común para esa generación. Si todos
+   tienen el override de horario encendido, se ignora el horario común y se generan solo sus turnos
+   personales. Si solo algunos lo tienen encendido, el valor del hogar sigue aplicando a quienes lo
+   heredan. Si todos usan overrides pero sus valores personales coinciden o son compatibles, aún se puede
+   proponer un plato/evento compartido; no se separa a las personas solo por el origen del dato. Un override
+   personal no desactiva presupuesto, inventario u otros límites compartidos del hogar configurados.
+6. **Objetivos incompatibles no se resuelven ocultando la diferencia.** Si todos contradicen el objetivo
+   común mediante overrides, se planifica por los objetivos personales y se omite únicamente el objetivo
+   común. Si una receta sirve a varios miembros con objetivos distintos, puede compartirse si sigue siendo
+   adecuada; si no, se separan y se explica el criterio. Gustos/disgustos son señales de optimización, no
+   motivo automático para multiplicar platos. La IA no formula diagnósticos ni promete resultados médicos.
+7. **Privacidad en el calendario.** La persona asignada ve el objetivo/resumen de su plato. Un evento
+   compartido muestra una explicación neutral; no revela alergias, objetivos sensibles ni notas privadas
+   de otro miembro. La petición al proveedor incluye solo perfiles de quienes participan.
+
+Ejemplos que deberán quedar cubiertos: dos miembros que heredan el mismo horario comparten un plato si
+encaja; uno personaliza objetivo y el otro hereda el común; objetivos personales incompatibles generan
+eventos individuales asignados; un plato seguro para todos aparece una sola vez con participantes/raciones;
+una alergia obliga a separar o a dejar el turno sin resolver aunque el objetivo común prefiera otra cosa.
+
+### Flujo de planificación, calendario y automatización
+
+- **Hogar > Planificación** organiza la planificación semanal de **Comidas** y **Tareas**. No crea un
+  calendario paralelo: las comidas y tareas planificadas aparecen en el calendario actual, con persona(s)
+  asignada(s), estado y hora cuando exista. Un evento de comida compartido se guarda una sola vez con su
+  conjunto de participantes y raciones; comidas diferentes son eventos diferentes asignados a sus
+  participantes.
+- Para las tareas, el hogar puede gestionar zonas de dos formas: (a) dibujar/editar un plano interactivo,
+  o (b) crear una lista sencilla de zonas con nombre, sin dibujo. Ambas admiten asignar tareas y verlas en
+  Planificación; dibujar el plano es opcional. El menú permite eliminar el plano actual y empezar desde
+  cero sin borrar el hogar ni tareas independientes de zonas que sigan existiendo. Una zona borrada con
+  tareas asociadas exige resolverlas antes de confirmar.
+- La propuesta semanal de tareas puede asignar a una persona o repartirlas automáticamente entre miembros
+  elegibles. El reparto automático debe ser equitativo y evitar asignar a la misma persona dos días seguidos
+  cuando exista una solución válida; si las restricciones o el número de tareas lo hacen imposible,
+  muestra la excepción y el motivo. Las asignaciones manuales prevalecen sobre una nueva propuesta salvo
+  que la persona confirme sustituirlas.
+- La planificación de comidas se genera con la lista de miembros y preferencias resueltas, recetas,
+  inventario disponible y horarios/objetivos aplicables. La respuesta de IA es un objeto completo bajo
+  `response_format: { type: "json_schema", json_schema: { name, strict: true, schema } }`. El esquema
+  es cerrado (`additionalProperties: false`) y exige todos los campos; el servidor vuelve a validar el
+  JSON, miembros pertenecientes al hogar, recetas, horarios, raciones, restricciones y duplicados antes de
+  mostrar una vista previa. La IA no escribe directamente en el calendario ni en el inventario. La persona
+  revisa y confirma la propuesta para persistirla.
+- Cada comida futura tiene estado de planificación independiente del consumo. Al llegar el momento, se
+  puede confirmar **realizada** e indicar las raciones realmente cocinadas/servidas, o marcar **no
+  realizada**. Planificar o saltar una comida no descuenta stock. Solo la confirmación de raciones
+  descuenta los ingredientes estimados de la receta; la misma confirmación no puede aplicarse dos veces.
+- Después de registrar lo realmente comido, la IA puede comparar menús próximos con el inventario y
+  proponer una lista de compra. Antes de crearla, la UI pide revisar las existencias —en especial lo que
+  se necesita para las próximas comidas—, permite corregirlas y presenta un borrador editable. Solo la
+  aprobación crea/actualiza la lista de **Compra**; se consolidan ingredientes repetidos entre recetas y
+  comensales. Nunca se afirma que una comida se realizó por el mero hecho de estar en el calendario.
+- La automatización semanal distingue dos modos: **generar una planificación nueva** (llama al planificador
+  cuando llegue la fecha configurada) y **repetir la planificación actual** (reutiliza el plan semanal
+  confirmado sin pedir otra respuesta a IA). Repetir no duplica eventos ni reemplaza cambios manuales sin
+  permiso; la lista de compra se vuelve a calcular con las existencias actuales. Un indicador pequeño y persistente muestra la próxima ejecución automática y tiene un único
+  botón alternable de play/pause; al pausar conserva fecha y plan, y al reanudar informa la próxima fecha.
+  Puede configurarse si la ejecución abarca tareas, comidas o ambas.
+
+### Alta de cuenta: pertenencia obligatoria a un hogar
+
+El registro no termina con una cuenta sin hogar: antes de entrar al resto de la aplicación, la persona
+elige explícitamente **Crear un hogar** o **Unirme a uno existente** mediante una invitación válida. No
+hay ruta de omisión ni acceso al dashboard/calendario con membresía pendiente. Si se interrumpe el flujo,
+se puede reanudar sin crear cuentas, hogares o membresías duplicadas. Un código inválido, vencido, una
+denegación o un fallo de red deja un error recuperable y conserva la opción de crear hogar o reintentar.
+El servidor comprueba la membresía activa en cada ruta protegida; el estado local del cliente no basta.
+
+Se recomienda copiar una sola vez los valores iniciales de planificación vigentes del creador al crear un
+hogar para no perder su configuración; desde entonces la casa es la fuente compartida y no hay fallback
+por petición a `users.preferences`. Al unirse a un hogar existente no se alteran sus valores comunes; el
+perfil personal y los overrides del nuevo miembro se mantienen separados. Cualquier copia/migración
+inicial debe ser idempotente y preservar las preferencias originales.
+
+El alcance no añade una capa de compatibilidad para cuentas que permanecen sin hogar. Eso no autoriza
+borrar/migrar datos existentes: cualquier cuenta ya creada conserva sus datos y, si carece de membresía,
+debe resolverse mediante una pantalla obligatoria de crear/unirse antes de usar funciones scoped al hogar.
+Aunque hoy exista un único usuario real, las pruebas usan miembros sintéticos para verificar invitación,
+asignación, conflictos y aislamiento; no se implementará un atajo que invalide el flujo de unirse.
+
+### Criterios pendientes de aceptación — no implementados
+
+- [ ] Confirmar la jerarquía propuesta: configuración común del hogar; overrides personales e
+      independientes de objetivo/horario, apagados por defecto; gustos y restricciones de seguridad
+      permanecen personales.
+- [ ] Confirmar que el permiso vigente de configuración del hogar protege los valores comunes y la
+      automatización; las personas solo editan sus propios overrides/perfil.
+- [ ] Definir/validar nombres y significado exacto de los campos de objetivo, horarios, comidas habilitadas,
+      participantes de cada semana y controles de automatización; mantener Preferencias para perfil
+      alimentario personal, no como lugar de configuración de la planificación común.
+- [ ] Reconciliar el requisito anterior de `users.preferences.mealPlan` de `HOGARIA-SPEC.md` §12t.T:
+      queda **en conflicto** con este traslado al hogar; no implementar la ubicación antigua hasta actualizar
+      la fuente de verdad. La recurrencia de eventos de §12t.R es independiente y no cambia por esta propuesta.
+- [ ] Pruebas unitarias del resolvedor de objetivos/horarios: overrides apagados por defecto; override de
+      un solo campo; valor personal ausente; hogar sin configuración; miembros incluidos/excluidos; ningún
+      dato de un miembro fuera del hogar o no seleccionado llega al prompt.
+- [ ] Pruebas de creación/unión y origen inicial: copiar configuración actual del creador una vez al crear
+      hogar, conservar sus preferencias personales, unirse sin cambiar defaults del hogar y mantener
+      idempotencia ante reintentos.
+- [ ] Pruebas del planificador con proveedor simulado: plato compartido deduplicado; raciones calculadas por
+      participantes; conflictos soft/hard; alergia estricta nunca violada; todos con overrides; turnos
+      personales solamente cuando corresponda; ausencia de receta segura; JSON malformado/esquema inválido,
+      IDs foráneos, duplicados y errores del proveedor no persisten ningún evento.
+- [ ] Verificar `response_format` JSON Schema estricto en cada petición que solicite JSON y volver a validar
+      la respuesta en servidor; no depender de que el modelo obedezca el prompt.
+- [ ] Pruebas de calendario: un evento compartido aparece una vez y muestra participantes/raciones; los
+      platos distintos se asignan a los miembros correctos; no hay filtración de objetivos/notas privadas;
+      vista actual no se reemplaza y la persistencia es idempotente.
+- [ ] Pruebas de confirmación de comidas: realizada/no realizada, porciones cero/positivas/fuera de rango,
+      ajustes permitidos, stock sin cambios antes de confirmar e idempotencia al reintentar; confirmar una
+      comida no altera la receta base ni crea movimientos duplicados.
+- [ ] Pruebas de propuesta de compra: conciliación de stock editable, consolidación de ingredientes,
+      revisión/edición, cancelación, rechazo y aprobación explícita; ni una ejecución fallida ni una
+      propuesta cancelada modifica inventario o la lista real.
+- [ ] Pruebas de automatización: crear la semana nueva una vez, pausar/reanudar, fecha próxima, reintento,
+      idempotencia, repetición del mismo plan sin llamadas IA y sin duplicados, separación Tareas/Comidas y
+      preservación de ediciones manuales.
+- [ ] Pruebas de reparto de tareas con asignación fija y aleatoria: equilibrio entre elegibles, no repetir
+      persona en días consecutivos si hay solución, excepción explicada cuando no la hay, y asignaciones
+      manuales protegidas.
+- [ ] Pruebas de alta aisladas: crear hogar, unirse con invitación válida, opción omitida bloqueada, código
+      inválido/vencido, error de servidor/red con reintento, recarga y reanudación, doble envío/concurrencia,
+      pertenencia activa antes de acceder al dashboard y denegación server-side al intentar otra casa.
+      No borrar datos reales ni tratar tests sintéticos como prueba de compatibilidad de cuentas antiguas.
+- [ ] E2E real contra app local para PC y móvil: configuración de hogar, override por dos miembros,
+      generación y aprobación, calendario, confirmación de raciones, borrador de compra, automatización y
+      alta crear/unirse; usar DB temporal/semillas únicas y capturas sin datos personales.
+- [ ] Actualizar `HOGARIA-SPEC.md` §12t.T y este checklist con las decisiones que el usuario confirme.
+      No marcar esta extensión completa ni la validación IA real sin evidencia reproducible de cada gate.
