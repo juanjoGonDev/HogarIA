@@ -2,6 +2,7 @@ import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test, expect } from './fixtures';
 import { registerAndGoto, registerUser } from './helpers/auth';
+import { assertSwitchGeometry, assertSwitchHitArea } from './helpers/switch-geometry';
 
 test.use({ serviceWorkers: 'block' });
 
@@ -16,6 +17,52 @@ test.use({ serviceWorkers: 'block' });
  * es el castellano en el primer render.
  */
 test.describe('Configuración — módulos', () => {
+  test('el switch compartido mantiene el thumb centrado y un objetivo táctil de 44 px', async ({
+    page
+  }, testInfo) => {
+    const mobile = testInfo.project.name.startsWith('mobile-');
+    const viewport = mobile ? { width: 390, height: 950 } : { width: 1280, height: 970 };
+    await page.setViewportSize(viewport);
+    await registerAndGoto(page, '/settings', 'shared-switch-geometry');
+
+    const selector = '[data-module-switch="pantry"]';
+    await assertSwitchGeometry(page, selector);
+    await expect(page.locator(selector)).toHaveAttribute('aria-disabled', 'false');
+
+    await page.getByRole('button', { name: /^(Oscuro|Dark)$/ }).click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    await assertSwitchGeometry(page, selector);
+    await page.getByRole('button', { name: /^(Claro|Light)$/ }).click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+
+    if (mobile) {
+      for (const size of [
+        { width: 320, height: 568 },
+        { width: 568, height: 320 }
+      ]) {
+        await page.setViewportSize(size);
+        await page.locator(selector).scrollIntoViewIfNeeded();
+        await assertSwitchHitArea(page, selector);
+      }
+      await page.setViewportSize(viewport);
+    }
+    await page.locator(selector).scrollIntoViewIfNeeded();
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+
+    const screenshotDir = join(
+      process.cwd(),
+      '.e2e-screenshots',
+      'household-plan-comparison',
+      testInfo.project.name
+    );
+    await mkdir(screenshotDir, { recursive: true });
+    await page.screenshot({
+      path: join(screenshotDir, `07-settings-switch-${mobile ? 'mobile' : 'desktop'}.png`),
+      fullPage: false,
+      animations: 'disabled'
+    });
+  });
+
   test('lista las cinco secciones y marca las que aún no llegan', async ({ page }) => {
     await registerAndGoto(page, '/settings', 'mods-list');
 
@@ -107,7 +154,11 @@ test.describe('Configuración — módulos', () => {
     await page.locator('[data-module-switch="receipts"]').click();
 
     // Queda una sola: apagarla habria vuelto a encender todas (seleccion vacia)
-    await expect(page.locator('[data-module-switch="meals"]')).toBeDisabled();
+    await expect(page.locator('[data-module-switch="meals"]')).toHaveAttribute(
+      'aria-disabled',
+      'true'
+    );
+    await expect(page.locator('[data-module-switch="meals"]')).toHaveAttribute('tabindex', '-1');
     await expect(page.locator('a[href="/calendar"]')).not.toHaveCount(0);
 
     await page.locator('[data-modules-reset]').click();
@@ -138,8 +189,8 @@ test.describe('Configuración — módulos', () => {
   test('los interruptores de módulo responden a Espacio y conservan el foco', async ({ page }) => {
     await registerAndGoto(page, '/settings', 'mods-keyboard-toggle');
     const pantrySwitch = page.locator('[data-module-switch="pantry"]');
-    await expect(pantrySwitch).toBeEnabled();
     await expect(pantrySwitch).toHaveAttribute('aria-disabled', 'false');
+    await expect(pantrySwitch).toHaveAttribute('tabindex', '0');
     let signalPatch!: () => void;
     let releasePatch!: () => void;
     let patchCount = 0;
@@ -203,7 +254,8 @@ test.describe('Configuración — módulos', () => {
     await profileRequest;
 
     const pantrySwitch = page.locator('[data-module-switch="pantry"]');
-    await expect(pantrySwitch).toBeDisabled();
+    await expect(pantrySwitch).toHaveAttribute('aria-disabled', 'true');
+    await expect(pantrySwitch).toHaveAttribute('tabindex', '-1');
     await expect(pantrySwitch).toHaveAttribute('aria-disabled', 'true');
     const screenshotDir = join(
       process.cwd(),
@@ -219,7 +271,8 @@ test.describe('Configuración — módulos', () => {
     });
 
     releaseProfile();
-    await expect(pantrySwitch).toBeEnabled();
+    await expect(pantrySwitch).toHaveAttribute('aria-disabled', 'false');
+    await expect(pantrySwitch).toHaveAttribute('tabindex', '0');
     await expect(pantrySwitch).toHaveAttribute('aria-checked', 'true');
     await pantrySwitch.click();
     await expect(pantrySwitch).toHaveAttribute('aria-checked', 'false');

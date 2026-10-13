@@ -649,48 +649,93 @@ un control funcional o por pasar checks de estructura. La afirmación de auditor
 «no quedan desajustes geométricos» queda **invalidada como criterio de cierre** hasta repetir la
 inspección visual y geométrica de forma crítica.
 
-### Hallazgos iniciales
+### Hallazgos confirmados y correcciones
 
-- El switch de cuadrícula está duplicado para móvil y escritorio como checkbox nativo oculto más
-  una pista dibujada manualmente (`.plan-snap-switch`, 38×22 px con pseudo-elemento móvil de 16 px).
-- Ajustes usa una tercera apariencia/implementación independiente (`role="switch"`, pista y knob
-  en `settings.component.ts`). No existe un componente de switch compartido que garantice una
-  geometría, foco, estado accesible y comportamiento únicos.
-- La causa exacta del desfase que muestra la captura queda **pendiente de medir en navegador**;
-  no se presume que sea solo el CSS local de la pista. Se auditarán también cascada global, caja de
-  alineación, centro del track/thumb, baseline de etiquetas, foco y estados en PC/móvil.
+- La captura inicial y la medición Playwright encontraron que el switch del plano era un checkbox
+  oculto con una pista CSS independiente: el área alcanzable medía solo **18 px**. Ajustes tenía
+  otra implementación. No había contrato geométrico ni de teclado común.
+- La desviación horizontal concreta venía de una regla heredada `.plan-canvas__snap` que imponía
+  `display: inline-flex !important` al control, aunque el thumb se dibujaba con `margin: 3px`.
+  El track quedaba **3 px fuera del centro**. La variante móvil repetía el conflicto al imponer
+  `display: flex !important`.
+- Tras migrar ambos consumidores a `app-switch`, Playwright volvió a detectar el conflicto en el
+  selector anterior `.plan-canvas__snap`; se eliminó la colisión y se usa el host `inline-grid`
+  compartido. La geometría final es objetivo **44×44 px**, track **38×22 px**, thumb **16×16 px**,
+  inset horizontal simétrico **3 px** y centro vertical con tolerancia **≤1 CSS px**, en ambos
+  estados.
+- La inspección móvil detectó además que el panel de opciones avanzadas se superponía **12 px** a
+  la descripción del editor. Se separó el panel y E2E comprueba la distancia en 390×950, 320×568
+  y 568×320.
+- La revisión de la propuesta desde foto mostró la pregunta de entrada pegada a «Confirmar» y
+  «Cambiar»: el CSS móvil anulaba todo el `gap` de la tarjeta. Se restablecen **8 px** bajo la
+  pregunta y E2E verifica el espacio entre texto y ambos botones.
+- El primer E2E de Safari móvil no abría el panel al tocar una zona. El flujo solo inicializaba
+  la selección completa desde el `click` del polígono, después de capturar el puntero. La activación
+  se traslada también a `pointerup` cuando el gesto fue un toque sin arrastre; los arrastres y la
+  herramienta actual se conservan.
+- La prueba táctil ahora busca un punto de relleno realmente visible dentro del polígono en vez de
+  asumir que el centro de su bounding box siempre cae dentro de la zona. La suite anterior tapaba
+  a veces una pared superpuesta y producía un falso negativo.
 
 ### Aceptación obligatoria antes de cerrar
 
-- [ ] **Auditoría crítica reproducible:** volver a abrir los seis estados de plano/tareas en
+- [x] **Auditoría crítica reproducible:** volver a abrir los seis estados de plano/tareas en
       servidor Playwright aislado, inspeccionar los controles uno por uno y registrar defectos
       visibles de alineación, iconos ausentes/incorrectos, tamaño de toque, contraste, recorte,
       desbordamiento o separación. No descartar un defecto porque `scrollWidth` no detecte overflow.
-- [ ] **Componente compartido `app-switch`:** definir una única pista/thumb, estado on/off,
+- [x] **Componente compartido `app-switch`:** definir una única pista/thumb, estado on/off,
       accesibilidad (`role=switch`, nombre, `aria-checked`, deshabilitado/ocupado), teclado,
       foco visible y objetivo táctil ≥44×44 px; soportar etiqueta/hint externos sin duplicar
       nombres accesibles. La pista y el knob se posicionan por geometría explícita, no por márgenes
       de texto ni herencia accidental.
-- [ ] **Unificación de consumidores:** sustituir las variantes desktop/móvil de ajuste de cuadrícula
+- [x] **Unificación de consumidores:** sustituir las variantes desktop/móvil de ajuste de cuadrícula
       y el switch de módulos de Ajustes por el componente compartido, conservando la persistencia,
       permisos, bloqueo durante guardado, selectores de pruebas y traducciones.
-- [ ] **Pruebas rojas antes del cambio:** cobertura de componente para cambio repetido, teclado,
+- [x] **Pruebas rojas antes del cambio:** cobertura de componente para cambio repetido, teclado,
       nombre/estado accesibles, ocupado, deshabilitado y labels; E2E a 1280×970 y 390×950 mide
       track y thumb en ambos estados y exige centro vertical ≤1 CSS px, márgenes laterales
-      simétricos ≤1 CSS px y hit target ≥44×44 px. Repetir geometría en Ajustes, además de modo
-      oscuro/claro si lo activa el harness.
-- [ ] **Revisión de todos los controles de los seis estados:** corregir cada defecto confirmado,
+      simétricos ≤1 CSS px, hit target ≥44×44 px y contraste ≥3:1 del thumb/track activo y foco.
+      Repetir geometría y contraste en Ajustes, además de modo oscuro/claro.
+- [x] **Revisión de todos los controles de los seis estados:** corregir cada defecto confirmado,
       no solo el switch. Verificar que botones/iconos forman una unidad centrada, que controles
       equivalentes comparten dimensiones/padding/alineación, y que texto/acciones no se solapan ni
       quedan fuera de la vista. Registrar explícitamente los puntos revisados que no requieren
       cambios; no ajustar tamaños aislados sin una regla compartida que lo justifique.
-- [ ] **Responsive y accesibilidad:** comprobar estados PC, 390×950, anchura mínima 320×568,
+- [x] **Responsive y accesibilidad:** comprobar estados PC, 390×950, anchura mínima 320×568,
       orientación 568×320, foco/teclado, contraste, áreas táctiles, safe-area y ausencia de
       recorte/overflow en editor, propuesta, chat y tareas; verificar la ruta de Ajustes afectada
       por el switch compartido.
-- [ ] **Evidencia visual:** guardar e inspeccionar capturas sintéticas PC/móvil antes/después y
+- [x] **Evidencia visual:** guardar e inspeccionar capturas sintéticas PC/móvil antes/después y
       comparar de nuevo las 12 vistas de producto; obtener rects de componentes equivalentes y
       documentar diferencias reales. No cerrar la spec mientras exista una desalineación
       reproducible dentro del alcance.
 - [ ] Actualizar resultados/comandos/limitaciones aquí; mantener PR #47 en Draft. Cada unidad va
       en commit atómico con pruebas, hooks completos y push a la rama actual.
+
+#### Evidencia de esta auditoría
+
+- **Inspección visual:** se generaron e inspeccionaron las doce comparativas sintéticas de
+  escritorio/móvil (`.e2e-screenshots/household-plan-comparison/01-...` a `06-...`) y las vistas
+  específicas del switch en escritorio, Chrome móvil y Safari móvil bajo
+  `.e2e-screenshots/household-plan-tasks/`. Inicio, asignación, tareas y chat no mostraron defectos
+  reproducibles adicionales de alineación o iconos. En el editor se corrigieron el switch y el
+  solapamiento de 12 px del panel; en propuesta desde foto, el espacio de la pregunta; en Safari,
+  la selección táctil de zonas.
+- **TDD del contraste:** la nueva aserción E2E primero falló de forma determinista: thumb/pista
+  activa **2,68:1**, bajo el mínimo **3:1**. La pista activa usa ahora el naranja 600 y el foco el
+  naranja oscuro accesible. La prueba enfocada pasó **1/1** en Chromium; la geometría y el
+  contraste también pasan en los tres proyectos del E2E final.
+- **E2E aislado final:**
+  `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome --project=mobile-safari tests/e2e/household-plan-tasks.spec.ts tests/e2e/settings-modules.spec.ts`
+  — **36/36**; DB y artefactos del servidor aislados y limpiados al terminar.
+- **Pruebas de cliente:** los tres specs enfocados del componente, Ajustes y editor pasaron
+  **41/41**; la suite con cobertura pasó **1.418/1.418**, con statements **93,98 %**, ramas
+  **84,9 %**, funciones **93,87 %** y líneas **95,67 %**.
+- `pnpm run typecheck:e2e`, `pnpm run check:ui` (**229 archivos, 21 reglas**), `git diff --check`
+  y `pnpm exec prettier --check` para todos los archivos modificados pasaron.
+- `scripts/create-household-plan-comparison.ps1` generó de nuevo las 12 comparativas con el color
+  accesible final. El E2E cubre 1280×970, 390×950, 320×568 y 568×320; valida centro y márgenes
+  ≤1 CSS px, hit target 44×44 px, ambos estados, teclado/foco y modos claro/oscuro.
+- **Limitación conocida:** `pnpm run lint:client` sigue sin poder arrancar porque falta el paquete
+  ya requerido `@angular-eslint/builder`; no se añadió una dependencia fuera del alcance. `check:ui`
+  y los hooks sí cubren el cambio.

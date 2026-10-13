@@ -51,9 +51,11 @@ describe('HouseholdPlanEditorComponent', () => {
     canvas: SVGSVGElement,
     target: EventTarget,
     clientX: number,
-    clientY: number
+    clientY: number,
+    type: PointerEvent['type'] = 'pointerdown'
   ): PointerEvent {
     return {
+      type,
       currentTarget: canvas,
       target,
       clientX,
@@ -719,17 +721,17 @@ describe('HouseholdPlanEditorComponent', () => {
     component.setTool('space');
     component.onCanvasPointerDown(pointer(canvas, emptyTarget, 10, 10));
     expect(component.drawingRect()).toEqual({ x: 1000, y: 1000, width: 0, height: 0 });
-    component.onCanvasPointerMove(pointer(canvas, emptyTarget, 60, 55));
+    component.onCanvasPointerMove(pointer(canvas, emptyTarget, 60, 55, 'pointermove'));
     expect(component.drawingRect()).toEqual({ x: 1000, y: 1000, width: 5000, height: 4600 });
-    component.onCanvasPointerUp(pointer(canvas, emptyTarget, 60, 55));
+    component.onCanvasPointerUp(pointer(canvas, emptyTarget, 60, 55, 'pointerup'));
     expect(component.draft().floors[0].spaces).toHaveSize(2);
     expect(component.tool()).toBe('select');
 
     component.setSelectedWallKindFromPicker('exterior');
     component.setTool('wall');
     component.onCanvasPointerDown(pointer(canvas, emptyTarget, 15, 75));
-    component.onCanvasPointerMove(pointer(canvas, emptyTarget, 90, 75));
-    component.onCanvasPointerUp(pointer(canvas, emptyTarget, 90, 75));
+    component.onCanvasPointerMove(pointer(canvas, emptyTarget, 90, 75, 'pointermove'));
+    component.onCanvasPointerUp(pointer(canvas, emptyTarget, 90, 75, 'pointerup'));
     expect(component.draft().floors[0].walls).toHaveSize(1);
     expect(component.selectedWall()?.kind).toBe('exterior');
     component.addOpening('door');
@@ -752,11 +754,16 @@ describe('HouseholdPlanEditorComponent', () => {
     const areaTarget = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
     areaTarget.setAttribute('data-space-id', area.id);
     component.onCanvasPointerDown(pointer(canvas, areaTarget, 20, 20));
-    component.onCanvasPointerMove(pointer(canvas, areaTarget, 25, 25));
-    component.onCanvasPointerUp(pointer(canvas, areaTarget, 25, 25));
+    component.onCanvasPointerMove(pointer(canvas, areaTarget, 25, 25, 'pointermove'));
+    component.onCanvasPointerUp(pointer(canvas, areaTarget, 25, 25, 'pointerup'));
     expect(component.selectedSpace()?.id).toBe(area.id);
     expect(component.draft().floors[0].spaces[1].polygon[0]).toEqual({ x: 1600, y: 1600 });
     expect(component.undoStack().length).toBeGreaterThan(0);
+
+    component.setTool('select');
+    component.onCanvasPointerDown(pointer(canvas, areaTarget, 25, 25));
+    component.onCanvasPointerUp(pointer(canvas, areaTarget, 25, 25, 'pointerup'));
+    expect(component.assignmentViewActive()).toBeTrue();
 
     component.onCanvasPointerDown(pointer(canvas, emptyTarget, 5, 5));
     expect(component.selectedSpace()).toBeNull();
@@ -801,9 +808,8 @@ describe('HouseholdPlanEditorComponent', () => {
       [50, 90],
       [10, 90]
     ]) {
-      const event = pointer(canvas, target, x, y);
-      component.onCanvasPointerDown(event);
-      component.onCanvasPointerUp(event);
+      component.onCanvasPointerDown(pointer(canvas, target, x, y));
+      component.onCanvasPointerUp(pointer(canvas, target, x, y, 'pointerup'));
     }
     expect(component.freeformPoints()).toHaveSize(6);
     component.finishFreeformSpace();
@@ -822,9 +828,8 @@ describe('HouseholdPlanEditorComponent', () => {
       [10, 90],
       [90, 10]
     ]) {
-      const event = pointer(canvas, target, x, y);
-      component.onCanvasPointerDown(event);
-      component.onCanvasPointerUp(event);
+      component.onCanvasPointerDown(pointer(canvas, target, x, y));
+      component.onCanvasPointerUp(pointer(canvas, target, x, y, 'pointerup'));
     }
     component.finishFreeformSpace();
     expect(component.errorKey()).toBe('household.plan_polygon_invalid');

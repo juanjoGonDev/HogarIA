@@ -80,22 +80,17 @@
           </span>
           {{ 'household.plan_draw_area' | t }}
         </button>
-        <label
-          class="plan-canvas__snap plan-snap-setting-mobile"
+        <app-switch
+          class="plan-snap-control plan-snap-setting-mobile"
+          data-test="plan-snap-grid-mobile"
+          [visibleLabel]="true"
+          [labelledBy]="'plan-snap-label-mobile'"
           [attr.title]="'household.plan_snap_grid' | t"
+          [checked]="snapToGrid()"
+          (checkedChange)="snapToGrid.set($event)"
         >
-          <span class="plan-snap-control">
-            <input
-              type="checkbox"
-              data-test="plan-snap-grid-mobile"
-              [attr.aria-label]="'household.plan_snap_grid' | t"
-              [ngModel]="snapToGrid()"
-              (ngModelChange)="snapToGrid.set($event)"
-            />
-            <span class="plan-snap-switch" aria-hidden="true"></span>
-          </span>
-          <span>{{ 'household.plan_snap_grid' | t }}</span>
-        </label>
+          <span id="plan-snap-label-mobile">{{ 'household.plan_snap_grid' | t }}</span>
+        </app-switch>
         <button
           *ngIf="canEdit"
           type="button"
@@ -870,19 +865,19 @@
           </button>
         </div>
         <div class="plan-editor__toolbar-actions">
-          <label class="plan-canvas__snap" [attr.title]="'household.plan_snap_grid' | t">
-            <span class="plan-snap-control">
-              <input
-                type="checkbox"
-                data-test="plan-snap-grid"
-                [attr.aria-label]="'household.plan_snap_grid' | t"
-                [ngModel]="snapToGrid()"
-                (ngModelChange)="snapToGrid.set($event)"
-              />
-              <span class="plan-snap-switch" aria-hidden="true"></span>
+          <app-switch
+            class="plan-snap-control"
+            data-test="plan-snap-grid"
+            [visibleLabel]="true"
+            [labelledBy]="'plan-snap-label-desktop'"
+            [attr.title]="'household.plan_snap_grid' | t"
+            [checked]="snapToGrid()"
+            (checkedChange)="snapToGrid.set($event)"
+          >
+            <span id="plan-snap-label-desktop" class="plan-snap-label">
+              {{ 'household.plan_snap_grid' | t }}
             </span>
-            <span class="plan-snap-label">{{ 'household.plan_snap_grid' | t }}</span>
-          </label>
+          </app-switch>
           <button
             type="button"
             class="plan-button plan-toolbar-icon"
@@ -1045,6 +1040,7 @@
             "
             [disabled]="!canEdit"
             (click)="addQuickArea($any(kind))"
+            (focus)="bringQuickAreaIntoView($event)"
           >
             <svg
               householdAreaGlyph

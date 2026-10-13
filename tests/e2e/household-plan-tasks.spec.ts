@@ -2,6 +2,8 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { expect, test, type Page } from './fixtures';
 import { createHousehold, registerUser } from './helpers/auth';
+import { tapSvgPolygonInterior } from './helpers/plan-geometry';
+import { assertSwitchGeometry, assertSwitchHitArea } from './helpers/switch-geometry';
 import type {
   HouseholdPlan,
   HouseholdPlanPoint
@@ -527,8 +529,11 @@ async function assignZone(
   );
   if (mapZoneIndex >= 0) {
     const mapZone = mapZones.nth(mapZoneIndex);
-    if ((page.viewportSize()?.width ?? 1440) <= 767) await mapZone.tap();
-    else await mapZone.click();
+    if ((page.viewportSize()?.width ?? 1440) <= 767) {
+      await tapSvgPolygonInterior(mapZone);
+    } else {
+      await mapZone.click();
+    }
     await expect(page.locator('[data-test="plan-selected-space"] h3')).toHaveText(zoneName);
   } else {
     if (!(await zone.isVisible())) {
@@ -601,7 +606,7 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   page,
   browser
 }, testInfo) => {
-  const mobile = testInfo.project.name === 'mobile-chrome';
+  const mobile = testInfo.project.name.startsWith('mobile-');
   const viewport = mobile ? { width: 390, height: 950 } : { width: 1280, height: 970 };
 
   await registerUser(page, 'Ana');
@@ -916,6 +921,51 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     'empty-state icon and copy share a visual center'
   ).toBeLessThanOrEqual(1);
   await screenshot(page, '02-plan-editor-empty-floor', viewport);
+  const advancedSettings = page.locator('.plan-editor__advanced-settings');
+  const advancedPanel = page.locator('.plan-editor__advanced-settings-content');
+  const assertAdvancedPanelBelowDescription = async () => {
+    const clearance = await advancedPanel.evaluate((panel) => {
+      const panelTop = panel.getBoundingClientRect().top;
+      const descriptionBottom = panel
+        .closest('.plan-editor')
+        ?.querySelector('.plan-editor__header > div:first-child p')
+        ?.getBoundingClientRect().bottom;
+      return descriptionBottom === undefined
+        ? Number.NEGATIVE_INFINITY
+        : panelTop - descriptionBottom;
+    });
+    expect(
+      clearance,
+      'the mobile options panel starts after the plan description'
+    ).toBeGreaterThanOrEqual(0);
+  };
+  if (mobile) {
+    await advancedSettings.locator('summary').click();
+    const headerDescription = page.locator('.plan-editor__header > div:first-child p');
+    await expect(advancedPanel).toBeVisible();
+    await assertAdvancedPanelBelowDescription();
+    await expect(headerDescription).toBeVisible();
+  }
+  const snapSwitchSelector = mobile
+    ? '[data-test="plan-snap-grid-mobile"]'
+    : '[data-test="plan-snap-grid"]';
+  await assertSwitchGeometry(page, snapSwitchSelector);
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.locator(snapSwitchSelector).scrollIntoViewIfNeeded();
+  await screenshot(page, '07-plan-snap-switch', viewport, false);
+  if (mobile) {
+    for (const size of [
+      { width: 320, height: 568 },
+      { width: 568, height: 320 }
+    ]) {
+      await page.setViewportSize(size);
+      await assertAdvancedPanelBelowDescription();
+      await page.locator(snapSwitchSelector).scrollIntoViewIfNeeded();
+      await assertSwitchHitArea(page, snapSwitchSelector);
+    }
+    await page.setViewportSize(viewport);
+    await advancedSettings.locator('summary').click();
+  }
   await page.locator('[data-test="plan-tool-freeform"]').click();
   await expect(
     emptyCanvasState,
@@ -930,7 +980,7 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   ).toBeVisible();
   await floorTabsControl.first().click();
   if (mobile) {
-    await expect(page.locator('.plan-editor__toolbar-actions .plan-canvas__snap')).toBeHidden();
+    await expect(page.locator('.plan-editor__toolbar-actions .plan-snap-control')).toBeHidden();
     const floorTabText = await page
       .locator('[data-test="plan-floor-tabs"] .plan-floor-tabs__tab')
       .first()
@@ -1505,7 +1555,9 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
       rowOverflow.scrollWidth,
       'the narrow quick-add row signals more content'
     ).toBeGreaterThan(rowOverflow.clientWidth);
-    await quickRoomButtons.nth(5).focus();
+    await quickRoomButtons.first().focus();
+    for (let index = 0; index < 5; index++) await page.keyboard.press('Tab');
+    await expect(quickRoomButtons.nth(5)).toBeFocused();
     const finalRoomBounds = await quickRoomButtons.nth(5).boundingBox();
     const quickRoomBounds = await quickRoomRow.boundingBox();
     expect(finalRoomBounds).not.toBeNull();
@@ -2226,10 +2278,8 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   expect(savedPlan.floors[0].openings[0].isMainEntrance).toBe(true);
 
   const canvasSpace = canvas.locator('[data-space-id]').first();
-  if (mobile) await canvasSpace.tap();
-  else await canvasSpace.click();
-  await expect(canvasSpace).toHaveClass(/plan-canvas__space--selected/);
   await canvasSpace.focus();
+  await expect(canvasSpace).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(canvasSpace).toHaveClass(/plan-canvas__space--selected/);
 
@@ -2374,6 +2424,20 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   await expect(page.getByRole('button', { name: 'Confirmar', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Cambiar', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Continuar editando', exact: true })).toBeVisible();
+  const entryQuestion = await page.locator('.plan-review__photo-entry-question').boundingBox();
+  const entryDecisionButtons = await Promise.all(
+    ['Confirmar', 'Cambiar'].map((name) =>
+      page.getByRole('button', { name, exact: true }).boundingBox()
+    )
+  );
+  expect(entryQuestion).not.toBeNull();
+  expect(entryDecisionButtons.every(Boolean)).toBe(true);
+  expect(
+    Math.min(
+      ...entryDecisionButtons.map((button) => button!.y - entryQuestion!.y - entryQuestion!.height)
+    ),
+    'the photo entry question keeps breathing room above both decision buttons'
+  ).toBeGreaterThanOrEqual(8);
   const discardPhotoProposal = page.getByRole('button', { name: 'Descartar propuesta' });
   await expect(discardPhotoProposal).toBeVisible();
   await expect(

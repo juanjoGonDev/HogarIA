@@ -10,6 +10,7 @@ import { TranslatePipe } from '../../core/pipes/translate.pipe';
 import type { TranslationKey } from '../../core/i18n';
 import { IconComponent } from '../../shared/components/ui/icon/icon.component';
 import { InputComponent } from '../../shared/components/ui/input/input.component';
+import { SwitchComponent } from '../../shared/components/ui/switch/switch.component';
 
 interface Option<T extends string> {
   value: T;
@@ -19,7 +20,14 @@ interface Option<T extends string> {
 @Component({
   selector: 'app-settings',
   standalone: true,
-  imports: [CommonModule, FormsModule, TranslatePipe, IconComponent, InputComponent],
+  imports: [
+    CommonModule,
+    FormsModule,
+    TranslatePipe,
+    IconComponent,
+    InputComponent,
+    SwitchComponent
+  ],
   template: `
     <div class="settings-page">
       <h1 class="settings-title">
@@ -104,35 +112,29 @@ interface Option<T extends string> {
             [attr.data-module]="def.id"
           >
             <span class="settings-module__text">
-              <span class="settings-module__label">
+              <span class="settings-module__label" [id]="'settings-module-label-' + def.id">
                 {{ def.labelKey | t }}
                 <span class="settings-module__soon" *ngIf="!def.available">
                   {{ 'settings.modulesSoon' | t }}
                 </span>
               </span>
-              <span class="settings-module__hint">{{ def.hintKey | t }}</span>
+              <span class="settings-module__hint" [id]="'settings-module-hint-' + def.id">
+                {{ def.hintKey | t }}
+              </span>
             </span>
-            <button
-              type="button"
+            <app-switch
               class="settings-module__switch"
-              role="switch"
               [attr.data-module-switch]="def.id"
-              [attr.aria-checked]="modules.isEnabled(def.id)"
-              [attr.aria-label]="def.labelKey | t"
+              [checked]="modules.isEnabled(def.id)"
               [disabled]="
                 (!modules.profileLoaded() && modules.profileLoading()) ||
                 !modules.canSwitchOff(def.id)
               "
-              [attr.aria-disabled]="
-                (!modules.profileLoaded() && modules.profileLoading()) ||
-                modules.isSaving() ||
-                !modules.canSwitchOff(def.id)
-              "
-              [attr.data-on]="modules.isEnabled(def.id)"
-              (click)="toggleModule(def.id)"
-            >
-              <span class="settings-module__knob" aria-hidden="true"></span>
-            </button>
+              [busy]="modules.isSaving()"
+              [labelledBy]="'settings-module-label-' + def.id"
+              [describedBy]="'settings-module-hint-' + def.id"
+              (checkedChange)="toggleModule(def.id)"
+            />
           </li>
         </ul>
 
@@ -255,89 +257,6 @@ interface Option<T extends string> {
       .settings-module__hint {
         font-size: var(--text-xs);
         color: var(--text-secondary);
-      }
-
-      .settings-module__switch {
-        position: relative;
-        flex: none;
-        width: 46px;
-        height: 44px;
-        padding: 2px;
-        border: 0;
-        border-radius: 0;
-        background: transparent;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        transition:
-          background var(--duration-150) ease,
-          border-color var(--duration-150) ease;
-      }
-
-      .settings-module__switch::before {
-        position: absolute;
-        inset: 50% 0 auto;
-        height: 26px;
-        transform: translateY(-50%);
-        content: '';
-        border: 1px solid var(--border-default);
-        border-radius: 999px;
-        background: var(--bg-tertiary);
-      }
-
-      .settings-module__switch[aria-checked='true']::before {
-        background: var(--primary);
-        border-color: var(--primary);
-      }
-
-      .settings-module__switch[aria-checked='true'] {
-        justify-content: flex-end;
-      }
-
-      .settings-module__switch:focus-visible {
-        outline: 2px solid var(--primary);
-        outline-offset: 2px;
-      }
-
-      .settings-module__switch:disabled,
-      .settings-module__switch[aria-disabled='true'] {
-        opacity: 0.6;
-      }
-
-      .settings-module__switch:disabled {
-        cursor: not-allowed;
-      }
-
-      .settings-module__switch[aria-disabled='true']:not(:disabled) {
-        cursor: progress;
-      }
-
-      .settings-module__knob {
-        position: relative;
-        width: 20px;
-        height: 20px;
-        border-radius: 50%;
-        background: var(--bg-primary);
-        animation: settings-knob-in var(--duration-150) ease-out;
-      }
-
-      @keyframes settings-knob-in {
-        from {
-          transform: scale(0.85);
-          opacity: 0.6;
-        }
-        to {
-          transform: scale(1);
-          opacity: 1;
-        }
-      }
-
-      @media (prefers-reduced-motion: reduce) {
-        .settings-module__knob,
-        .settings-module__switch {
-          animation: none;
-          transition: none;
-        }
       }
 
       .settings-group {

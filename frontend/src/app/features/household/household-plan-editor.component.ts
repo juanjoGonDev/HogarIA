@@ -26,6 +26,7 @@ import {
   PickerComponent,
   type PickerOption
 } from '../../shared/components/ui/picker/picker.component';
+import { SwitchComponent } from '../../shared/components/ui/switch/switch.component';
 import { HouseholdAreaGlyphComponent } from './household-area-glyph.component';
 import { HouseholdPlanPreviewMapComponent } from './household-plan-preview-map.component';
 import {
@@ -102,6 +103,7 @@ const DWELLING_CARD_LABEL_KEYS: Record<
     FormsModule,
     TranslatePipe,
     PickerComponent,
+    SwitchComponent,
     HouseholdAreaGlyphComponent,
     HouseholdPlanPreviewMapComponent
   ],
@@ -635,6 +637,13 @@ export class HouseholdPlanEditorComponent implements OnChanges, OnDestroy {
     this.addGuidedSpace();
   }
 
+  bringQuickAreaIntoView(event: FocusEvent): void {
+    const target = event.currentTarget;
+    if (target instanceof HTMLElement) {
+      target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
+  }
+
   onCanvasPointerDown(event: PointerEvent): void {
     if (!this.canEdit || this.previewMode() === 'proposal') return;
     const svg = event.currentTarget as SVGSVGElement;
@@ -717,6 +726,11 @@ export class HouseholdPlanEditorComponent implements OnChanges, OnDestroy {
   }
 
   onCanvasPointerUp(event: PointerEvent): void {
+    const drag = this.dragStart;
+    if (event.type === 'pointerup' && drag && !drag.moved && this.tool() === 'select') {
+      const selected = this.activeFloor()?.spaces.find((space) => space.id === drag.spaceId);
+      if (selected) this.selectSpace(selected);
+    }
     const start = this.drawingStart();
     const end = this.drawingEnd();
     if (start && end) {

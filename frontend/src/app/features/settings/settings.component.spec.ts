@@ -174,15 +174,16 @@ describe('SettingsComponent', () => {
   it('routes module toggles through the service and renders the semantic switch state', () => {
     const toggle = fixture.nativeElement.querySelector(
       '[data-module-switch="meals"]'
-    ) as HTMLButtonElement;
+    ) as HTMLElement;
     expect(toggle.getAttribute('role')).toBe('switch');
     expect(toggle.getAttribute('aria-checked')).toBe('true');
-    expect(toggle.getAttribute('aria-label')).toBe('settings.modules.meals');
+    expect(toggle.getAttribute('aria-labelledby')).toBe('settings-module-label-meals');
+    expect(toggle.getAttribute('aria-describedby')).toBe('settings-module-hint-meals');
 
     modules.isSaving.set(true);
     fixture.detectChanges();
-    expect(toggle.disabled).toBeFalse();
     expect(toggle.getAttribute('aria-disabled')).toBe('true');
+    expect(toggle.getAttribute('tabindex')).toBe('0');
     toggle.click();
     expect(modules.toggle).not.toHaveBeenCalled();
 
@@ -193,15 +194,15 @@ describe('SettingsComponent', () => {
     expect(modules.toggle).toHaveBeenCalledWith('meals');
   });
 
-  it('keeps the last enabled module natively disabled', () => {
+  it('keeps the last enabled module semantically disabled', () => {
     modules.canSwitchOff.and.returnValue(false);
     fixture.detectChanges();
 
     const toggle = fixture.nativeElement.querySelector(
       '[data-module-switch="meals"]'
-    ) as HTMLButtonElement;
-    expect(toggle.disabled).toBeTrue();
+    ) as HTMLElement;
     expect(toggle.getAttribute('aria-disabled')).toBe('true');
+    expect(toggle.getAttribute('tabindex')).toBe('-1');
     toggle.click();
     expect(modules.toggle).not.toHaveBeenCalled();
   });
@@ -213,9 +214,9 @@ describe('SettingsComponent', () => {
 
     const toggle = fixture.nativeElement.querySelector(
       '[data-module-switch="meals"]'
-    ) as HTMLButtonElement;
-    expect(toggle.disabled).toBeTrue();
+    ) as HTMLElement;
     expect(toggle.getAttribute('aria-disabled')).toBe('true');
+    expect(toggle.getAttribute('tabindex')).toBe('-1');
 
     fixture.componentInstance.toggleModule('meals');
     expect(modules.toggle).not.toHaveBeenCalled();
@@ -223,6 +224,7 @@ describe('SettingsComponent', () => {
     // Si la carga falla (deja de estar pendiente), el control no queda bloqueado para siempre.
     modules.profileLoading.set(false);
     fixture.detectChanges();
-    expect(toggle.disabled).toBeFalse();
+    expect(toggle.getAttribute('aria-disabled')).toBe('false');
+    expect(toggle.getAttribute('tabindex')).toBe('0');
   });
 });
