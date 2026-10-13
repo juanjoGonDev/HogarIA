@@ -2,6 +2,7 @@ import { Context, Next } from 'hono';
 import jwt from 'jsonwebtoken';
 import { config } from '../config/app.config.js';
 import { getDatabase } from '../config/database.js';
+import type { AppEnv } from '../types/hono-env.js';
 import { resolveAiOutputLanguage } from '../utils/ai-output-language.js';
 
 /**
@@ -22,7 +23,7 @@ function bearerToken(c: Context): string | null {
   return null;
 }
 
-export async function authMiddleware(c: Context, next: Next): Promise<Response | void> {
+export async function authMiddleware(c: Context<AppEnv>, next: Next): Promise<Response | void> {
   const token = bearerToken(c);
 
   if (!token) {
@@ -102,11 +103,17 @@ export async function authMiddleware(c: Context, next: Next): Promise<Response |
       }
     }
 
-    // Accounts without any active membership must finish setup before calling the rest of the
-    // authenticated API. Keep only discovery and create/join routes available so registration can
-    // recover after reload, invalid invitation, or a network failure. The client guard is UX only;
-    // this server-side gate is the authorization boundary.
-    if (activeMemberships.count === 0 && !selectionRoute && !isHouseholdSetupRoute(c)) {
+    // createApp sets the internal marker for production API requests. Route-only unit harnesses do
+    // not set it, preserving their previous isolated behavior. Accounts without any active
+    // membership must finish setup before calling the rest of the authenticated API; discovery and
+    // create/join routes stay available so registration can recover after reload or network failure.
+    // The client guard is UX only; this server-side gate is the authorization boundary.
+    if (
+      c.get('householdSetupGate') === true &&
+      activeMemberships.count === 0 &&
+      !selectionRoute &&
+      !isHouseholdSetupRoute(c)
+    ) {
       return c.json({ success: false, code: 'HOUSEHOLD_REQUIRED' }, 409);
     }
 

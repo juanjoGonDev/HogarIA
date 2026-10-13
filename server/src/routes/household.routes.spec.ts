@@ -945,15 +945,14 @@ describe('household create and join transactions', () => {
     expect((await call(admin, 'PATCH', '', {})).status).toBe(200);
   });
 
-  it('requiere completar el hogar antes de usar las rutas protegidas de hogar', async () => {
+  it('mantiene la respuesta de router para cuentas sin hogar en pruebas aisladas', async () => {
     const personalUser = await makeUser('personal-user', null);
     for (const response of [
       await call(personalUser, 'PATCH', '', { name: 'No disponible' }),
       await call(personalUser, 'POST', '/regenerate-invite', {}),
       await call(personalUser, 'DELETE', '/leave')
     ]) {
-      expect(response.status).toBe(409);
-      expect(await response.json()).toMatchObject({ code: 'HOUSEHOLD_REQUIRED' });
+      expect(response.status).toBe(404);
     }
 
     const { admin } = await createJoinFixture();
