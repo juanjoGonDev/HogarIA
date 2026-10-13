@@ -1,4 +1,5 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { HttpErrorResponse } from '@angular/common/http';
 import { signal } from '@angular/core';
 import { of, throwError } from 'rxjs';
 import { HouseholdPlanningAutomationComponent } from './household-planning-automation.component';
@@ -169,6 +170,38 @@ describe('HouseholdPlanningAutomationComponent', () => {
     expect(fixture.nativeElement.querySelector('[role="status"]').textContent).toContain(
       'household.automation.saved'
     );
+  });
+
+  it('distinguishes recognized permission failures from other save errors', () => {
+    savedConfig = {
+      ...DEFAULT_CONFIG,
+      mode: 'generate',
+      scopes: ['tasks'],
+      weekday: 1,
+      localTime: '20:30',
+      timeZone: 'Europe/Madrid'
+    };
+    service.load.and.returnValue(of(savedConfig));
+    fixture.detectChanges();
+    component.setMode('repeat');
+
+    for (const code of ['HOUSEHOLD_SETTINGS_REQUIRED', 'HOUSEHOLD_CALENDAR_EDIT_REQUIRED']) {
+      service.save.and.returnValue(
+        throwError(() => new HttpErrorResponse({ status: 403, error: { code } }))
+      );
+
+      component.save();
+
+      expect(component.errorKey).toBe('household.automation.permission_error');
+    }
+
+    service.save.and.returnValue(throwError(() => new HttpErrorResponse({ status: 403 })));
+    component.save();
+    expect(component.errorKey).toBe('household.automation.save_error');
+
+    service.save.and.returnValue(throwError(() => new Error('synthetic network failure')));
+    component.save();
+    expect(component.errorKey).toBe('household.automation.save_error');
   });
 
   it('uses a newer shared-service version after the persistent notice toggles activation', () => {
