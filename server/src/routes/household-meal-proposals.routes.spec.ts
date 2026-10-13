@@ -57,6 +57,26 @@ function validProposal(aliases: string[] = ['P1', 'P2']) {
   };
 }
 
+function individuallyAssignedProposal() {
+  return {
+    events: validProposal().events.flatMap((event) =>
+      (['P1', 'P2'] as const).map((alias) => ({
+        ...event,
+        recipe: {
+          ...event.recipe,
+          name: `Plato de ${alias}`
+        },
+        participantAliases: [alias],
+        servings: 1,
+        objectiveSummary:
+          alias === 'P1'
+            ? 'Plato compatible con el objetivo weight-loss.'
+            : 'Plato compatible con el objetivo muscle-gain.'
+      }))
+    )
+  };
+}
+
 describe('household meal proposal preview route', () => {
   beforeAll(async () => {
     const database = await import('../config/database.js');
@@ -435,10 +455,27 @@ describe('household meal proposal preview route', () => {
     ).toEqual(before.memberPreferences);
   });
 
-  it('omits the shared goal when everyone selected has a personal override', async () => {
+  it('omits the household goal and keeps conflicting personal objectives assigned separately', async () => {
     addHousehold('home');
-    const planner = addUser('planner', 'home');
-    const second = addUser('second', 'home', { calendar: { edit: false, view: true } });
+    const planner = addUser('planner', 'home', undefined, {
+      goals: ['weight-loss'],
+      goalNotes: 'PERSONAL_WEIGHT_GOAL_992',
+      allergies: [],
+      likes: ['PREFER_LEGUMES_992'],
+      dislikes: []
+    });
+    const second = addUser(
+      'second',
+      'home',
+      { calendar: { edit: false, view: true } },
+      {
+        goals: ['muscle-gain'],
+        goalNotes: 'PERSONAL_MUSCLE_GOAL_992',
+        allergies: [],
+        likes: [],
+        dislikes: ['AVOID_LEGUMES_992']
+      }
+    );
     setGoalOverride(planner);
     setGoalOverride(second);
     addAiConfig(planner.id, 'home');
@@ -449,7 +486,10 @@ describe('household meal proposal preview route', () => {
       return new Response(
         JSON.stringify({
           choices: [
-            { finish_reason: 'stop', message: { content: JSON.stringify(validProposal()) } }
+            {
+              finish_reason: 'stop',
+              message: { content: JSON.stringify(individuallyAssignedProposal()) }
+            }
           ]
         }),
         { status: 200 }
@@ -473,11 +513,32 @@ describe('household meal proposal preview route', () => {
       weekStart: WEEK_START,
       householdMemberIds: [planner.membershipId, second.membershipId]
     });
-    expect(response.status).toBe(200);
+    const json = await read(response);
     const prompt = String(providerBody.messages[1].content);
 
+    expect(response.status).toBe(200);
+    expect(json.success).toBe(true);
+    expect(json.data.events).toHaveLength(14);
+    expect(json.data.events[0]).toMatchObject({
+      participantIds: [planner.id],
+      servings: 1,
+      objectiveSummary: 'Plato compatible con el objetivo weight-loss.'
+    });
+    expect(json.data.events[1]).toMatchObject({
+      participantIds: [second.id],
+      servings: 1,
+      objectiveSummary: 'Plato compatible con el objetivo muscle-gain.'
+    });
+    expect(providerBody.response_format).toEqual(createMealProposalResponseFormat());
+    expect(prompt).toContain('Primero intenta un plato compartido');
     expect(prompt).not.toContain(promptMarker);
     expect(prompt.match(/"objectiveSource":"member"/g)).toHaveLength(2);
+    expect(prompt).toContain('PERSONAL_WEIGHT_GOAL_992');
+    expect(prompt).toContain('PERSONAL_MUSCLE_GOAL_992');
+    expect(prompt).toContain('PREFER_LEGUMES_992');
+    expect(prompt).toContain('AVOID_LEGUMES_992');
+    expect(JSON.stringify(json)).not.toContain('HOUSEHOLD_GOAL_ONLY_FOR_NON_OVERRIDES_992');
+    expect(db.prepare('SELECT COUNT(*) AS count FROM meals').get()).toEqual({ count: 0 });
   });
 
   it('sends the personal override and inherited household goal for their respective members', async () => {
@@ -547,6 +608,11 @@ describe('household meal proposal preview route', () => {
 
     expect(response.status).toBe(200);
     expect(json.success).toBe(true);
+    expect(json.data.events[0]).toMatchObject({
+      participantIds: [planner.id, inheriting.id],
+      servings: 2
+    });
+    expect(prompt).toContain('Primero intenta un plato compartido');
     expect(participantsJson).toBeDefined();
     expect(JSON.parse(participantsJson!)).toMatchObject([
       {

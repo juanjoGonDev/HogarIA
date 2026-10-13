@@ -15,6 +15,7 @@ import type {
   HouseholdMealShoppingPreview
 } from '../../core/services/household-meal-shopping.service';
 import { I18nService } from '../../core/services/i18n.service';
+import type { TranslationKey } from '../../core/i18n';
 import type { HouseholdMember } from '../../shared/models/household.model';
 
 const members = [member('member-1', 'user-1', 'Alicia'), member('member-2', 'user-2', 'Bruno')];
@@ -91,6 +92,23 @@ function proposal(): HouseholdMealProposal {
       event('solo-dinner-one', 'dinner', ['P1'], ['user-1'], 1),
       event('solo-dinner-two', 'dinner', ['P2'], ['user-2'], 1)
     ]
+  };
+}
+
+function currentShoppingPreview(): HouseholdMealShoppingPreview {
+  const start = new Date();
+  const startDate = start.toISOString().slice(0, 10);
+  const end = new Date(start.getTime());
+  end.setUTCDate(end.getUTCDate() + 30);
+  return {
+    startDate,
+    endDate: end.toISOString().slice(0, 10),
+    previewId: 'e'.repeat(64),
+    sharedPantry: true,
+    plannedMealCount: 0,
+    requiredIngredients: [],
+    optionalIngredients: [],
+    warnings: []
   };
 }
 
@@ -604,5 +622,208 @@ describe('HouseholdMealPlannerComponent', () => {
     expect(component.proposal()).toBeNull();
     expect(component.selectedMemberIds()).toEqual(['member-3']);
     expect(component.errorKey()).toBe('household.meal_proposal_context_changed');
+  });
+
+  it('maps generation errors to recoverable messages, including each incomplete override case', () => {
+    const cases: Array<[string, Record<string, unknown>, TranslationKey]> = [
+      ['HOUSEHOLD_CONTEXT_CHANGED', {}, 'household.meal_proposal_context_changed'],
+      ['HOUSEHOLD_CALENDAR_EDIT_REQUIRED', {}, 'household.meal_proposal_edit_permission'],
+      ['HOUSEHOLD_CALENDAR_VIEW_REQUIRED', {}, 'household.meal_proposal_view_permission'],
+      ['AI_PROVIDER_NOT_CONFIGURED', {}, 'household.meal_proposal_ai_unconfigured'],
+      ['AI_PROVIDER_ERROR', {}, 'household.meal_proposal_ai_error'],
+      ['MEAL_PROPOSAL_GENERATION_FAILED', {}, 'household.meal_proposal_ai_error'],
+      ['MEAL_PLAN_NO_SELECTED_TURNS', {}, 'household.meal_proposal_no_turns'],
+      ['MEAL_PLAN_NO_SAFE_MEALS', {}, 'household.meal_proposal_no_safe_meals'],
+      ['MEAL_PROPOSAL_SLOT_COVERAGE_INVALID', {}, 'household.meal_proposal_invalid_response'],
+      ['MEAL_PROPOSAL_SLOT_ASSIGNMENT_INVALID', {}, 'household.meal_proposal_invalid_response'],
+      ['INVALID_MEAL_PROPOSAL_CONFIRMATION', {}, 'household.meal_proposal_invalid_response'],
+      ['MEAL_PROPOSAL_CONFIRMATION_TOO_LARGE', {}, 'household.meal_proposal_invalid_response'],
+      [
+        'MEAL_PLAN_OVERRIDE_INCOMPLETE',
+        { missingFields: ['objective'] },
+        'household.meal_proposal_override_objective'
+      ],
+      [
+        'MEAL_PLAN_OVERRIDE_INCOMPLETE',
+        { missingFields: ['schedule'] },
+        'household.meal_proposal_override_schedule'
+      ],
+      [
+        'MEAL_PLAN_OVERRIDE_INCOMPLETE',
+        { missingFields: 'invalid' },
+        'household.meal_proposal_override_incomplete'
+      ],
+      ['UNKNOWN_CODE', {}, 'household.meal_proposal_generate_error']
+    ];
+
+    for (const [code, detail, expected] of cases) {
+      service.createProposal.and.returnValue(
+        throwError(() => new HttpErrorResponse({ status: 409, error: { code, ...detail } }))
+      );
+      component.generateProposal();
+      expect(component.errorKey()).withContext(code).toBe(expected);
+    }
+
+    service.createProposal.and.returnValue(throwError(() => new Error('network unavailable')));
+    component.generateProposal();
+    expect(component.errorKey()).toBe('household.meal_proposal_generate_error');
+  });
+
+  it('maps confirmation failures and reports a saved proposal with unresolved meals', () => {
+    const preview = proposal();
+    service.createProposal.and.returnValue(of(preview));
+    component.generateProposal();
+
+    service.confirmProposal.and.returnValue(
+      throwError(
+        () =>
+          new HttpErrorResponse({
+            status: 409,
+            error: { code: 'INVALID_MEAL_PROPOSAL_CONFIRMATION' }
+          })
+      )
+    );
+    component.confirmProposal();
+    expect(component.errorKey()).toBe('household.meal_proposal_invalid_response');
+    expect(component.confirming()).toBeFalse();
+
+    service.confirmProposal.and.returnValue(throwError(() => new Error('network unavailable')));
+    component.confirmProposal();
+    expect(component.errorKey()).toBe('household.meal_proposal_confirm_error');
+
+    service.confirmProposal.and.returnValue(
+      of({
+        proposalId: preview.proposalId,
+        weekStart: preview.weekStart,
+        idempotent: false,
+        events: [],
+        unresolvedEvents: [preview.events[0]]
+      })
+    );
+    component.confirmProposal();
+    expect(component.confirmed()).toBeTrue();
+    expect(component.unresolvedEventsCount()).toBe(1);
+    expect(component.successKey()).toBe('household.meal_proposal_saved_with_unresolved');
+  });
+
+  it('maps shopping preview and approval errors without treating an invalid preview as writable', () => {
+    const cases: Array<[string, TranslationKey]> = [
+      ['HOUSEHOLD_CONTEXT_CHANGED', 'household.meal_proposal_context_changed'],
+      ['HOUSEHOLD_CALENDAR_VIEW_REQUIRED', 'household.meal_shopping_view_permission'],
+      ['MEAL_SHOPPING_PREVIEW_STALE', 'household.meal_shopping_stale'],
+      ['INVALID_MEAL_SHOPPING_APPROVAL', 'household.meal_shopping_invalid_preview'],
+      ['MEAL_SHOPPING_ITEM_NOT_IN_PREVIEW', 'household.meal_shopping_invalid_preview'],
+      ['UNKNOWN_CODE', 'household.meal_shopping_error']
+    ];
+
+    for (const [code, expected] of cases) {
+      shoppingService.loadPreview.and.returnValue(
+        throwError(() => new HttpErrorResponse({ status: 409, error: { code } }))
+      );
+      component.openShoppingReview();
+      expect(component.shoppingErrorKey()).withContext(code).toBe(expected);
+      expect(component.shoppingLoading()).toBeFalse();
+    }
+
+    shoppingService.loadPreview.and.returnValue(
+      of({ ...currentShoppingPreview(), previewId: 'not-a-hash' })
+    );
+    component.openShoppingReview();
+    expect(component.shoppingErrorKey()).toBe('household.meal_shopping_invalid_preview');
+    expect(component.shoppingPreview()).toBeNull();
+    expect(component.canApproveShopping()).toBeFalse();
+  });
+
+  it('keeps shopping read-only when access is unavailable, the selection is empty, or quantities are invalid', () => {
+    shoppingService.loadPreview.and.returnValue(of(currentShoppingPreview()));
+    fixture.componentRef.setInput('canViewShopping', false);
+    fixture.detectChanges();
+    component.openShoppingReview();
+    expect(shoppingService.loadPreview).not.toHaveBeenCalled();
+
+    fixture.componentRef.setInput('canViewShopping', true);
+    fixture.detectChanges();
+    component.openShoppingReview();
+    expect(component.canApproveShopping()).toBeFalse();
+    expect(shoppingService.approve).not.toHaveBeenCalled();
+
+    component.shoppingLines.set([
+      {
+        name: 'Arroz',
+        unit: 'g',
+        quantity: 1,
+        stockQuantity: 0,
+        missingQuantity: 1,
+        status: 'matched',
+        key: '["ARROZ","g"]',
+        optional: false,
+        included: true,
+        addQuantity: 10_001
+      }
+    ]);
+    expect(component.canApproveShopping()).toBeFalse();
+
+    component.shoppingLines.update((lines) => lines.map((line) => ({ ...line, addQuantity: 1 })));
+    expect(component.canApproveShopping()).toBeTrue();
+    component.shoppingSaving.set(true);
+    expect(component.canApproveShopping()).toBeFalse();
+    component.shoppingSaving.set(false);
+    component.shoppingApproval.set({
+      listId: 'list-1',
+      version: 1,
+      created: true,
+      idempotent: false,
+      added: 1,
+      updated: 0,
+      removed: 0
+    });
+    expect(component.canApproveShopping()).toBeFalse();
+  });
+
+  it('supports keyboard navigation across meal steps and ignores unrelated keys and dates', () => {
+    shoppingService.loadPreview.and.returnValue(of(currentShoppingPreview()));
+    const prepareTab = fixture.nativeElement.querySelector(
+      '[data-test="meal-proposal-step-tab-prepare"]'
+    ) as HTMLButtonElement;
+    const reviewTab = fixture.nativeElement.querySelector(
+      '[data-test="meal-proposal-step-tab-review"]'
+    ) as HTMLButtonElement;
+    const shoppingTab = fixture.nativeElement.querySelector(
+      '[data-test="meal-proposal-step-tab-shopping"]'
+    ) as HTMLButtonElement;
+
+    prepareTab.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    expect(component.activeMealStep()).toBe('review');
+    expect(document.activeElement).toBe(reviewTab);
+
+    reviewTab.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+    expect(component.activeMealStep()).toBe('shopping');
+    expect(document.activeElement).toBe(shoppingTab);
+    expect(component.shoppingPreview()).not.toBeNull();
+
+    shoppingTab.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+    expect(component.activeMealStep()).toBe('review');
+    reviewTab.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+    expect(component.activeMealStep()).toBe('prepare');
+
+    const beforeUnknownKey = component.activeMealStep();
+    prepareTab.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(component.activeMealStep()).toBe(beforeUnknownKey);
+
+    component.selectMealStep('shopping');
+    expect(component.activeMealStep()).toBe('shopping');
+    component.selectMealStep('review');
+    expect(component.activeMealStep()).toBe('review');
+  });
+
+  it('updates and rejects proposal day selection only for days in the proposal', () => {
+    service.createProposal.and.returnValue(of(proposal()));
+    component.generateProposal();
+    component.selectProposalDate('2026-10-12');
+    expect(component.selectedProposalDate()).toBe('2026-10-12');
+    component.selectProposalDate('2026-10-19');
+    expect(component.selectedProposalDate()).toBe('2026-10-12');
+    expect(component.memberName('user-1')).toBe('Alicia');
+    expect(component.memberName('unknown-user')).toBe('');
   });
 });

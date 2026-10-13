@@ -2571,20 +2571,22 @@ el snapshot por ración. La regresión focal de consumo pasa 30 tests (schema/st
 de ruta 88,67/80/100/91,83 % y store 89,77/80,83/100/92,59 % S/B/F/L; 92 tests de frontend pasan y el
 E2E sintético de escritorio/móvil 2/2 verifica propuesta con proveedor local, confirmación, calendario,
 teclado, persistencia de consumo y breakpoints estrechos. Capturas y comandos reproducibles están en
-`HOGARIA-HOUSEHOLD-PLAN-SPEC.md`. La suite web/cobertura global integrada queda pendiente; por eso no
-se marca `QA-HOME-MEALS.CONSUMPTION.1` completo todavía. La compra doméstica tiene preview de solo
+`HOGARIA-HOUSEHOLD-PLAN-SPEC.md`. La suite web y su cobertura global integrada pasan; por ello se marca
+`QA-HOME-MEALS.CONSUMPTION.1` completo con sus tests focales. La compra doméstica tiene preview de solo
 lectura, UI de revisión editable y aprobación explícita que reconcilia filas `meal_plan` sin tocar
 inventario ni borrar filas compradas/manuales. La ruta de aprobación pasa 14/14 focales; el E2E
 sintético de escritorio/móvil pasa 2/2 e incluye cancelar/error sin escritura, aprobación, retry
-idempotente y conservación de filas. La spec activa contiene capturas, comandos, cobertura y límites;
-`QA-HOME-MEALS.SHOPPING.1` sigue pendiente de los gates integrados.
+idempotente y conservación de filas. `QA-HOME-MEALS.SHOPPING.1` está cerrado: planificador UI con
+cobertura 90,48/81,08/92,55/96,2 % y servicio HTTP 100 % en sus cuatro métricas; pruebas, comandos,
+capturas sintéticas y límites están documentados en `HOGARIA-HOUSEHOLD-PLAN-SPEC.md`.
 
 La proyección de tareas semanales en el calendario actual pasa 62/62 backend (cobertura de alcance
 89,14/80,45/95,29/91,23 % S/B/F/L), 94/94 frontend y E2E sintética PC/móvil 2/2. Requiere membresía
 activa y `calendar.view`; muestra título, fecha, estado, zona y asignatario activo, sin detalles de tarea
 ni una hora inexistente en el modelo. Es de solo lectura y no modifica calendarios o permisos de
-escritura. `QA-HOME-TASKS.CALENDAR.1` sigue pendiente de la matriz completa de breakpoints/teclado y
-del gate global; sus capturas y comandos están en `HOGARIA-HOUSEHOLD-PLAN-SPEC.md`.
+escritura. `QA-HOME-TASKS.CALENDAR.1` cierra la matriz de vista/rango y teclado: E2E 6/6 en Chromium,
+Mobile Chrome y Mobile Safari, seis vistas y seis anchuras desde 320 px a 1440 px. Capturas y comandos
+están en `HOGARIA-HOUSEHOLD-PLAN-SPEC.md`; no implica cerrar la auditoría visual global de otras vistas.
 
 **Decisión de automatización (13-10-2026):** cada hogar debe elegir explícitamente día, hora local y
 zona IANA antes de activarla; no se inferirá la zona del servidor o del navegador. Una hora local que
@@ -2598,12 +2600,12 @@ configuración persistente, worker ni ledger de ejecuciones. Contrato, decisione
 
 La proyección de tareas semanales en el calendario existente ya tiene implementación backend/UI y
 pruebas focales: **62/62** backend con cobertura de alcance 89,14/80,45/95,29/91,23 % S/B/F/L, **94/94**
-frontend, typecheck del servidor y E2E sintética PC/móvil **2/2**. Requiere `calendar.view` y pertenencia
+frontend, typecheck del servidor y E2E sintética PC/móvil/Safari **6/6**. Requiere `calendar.view` y pertenencia
 activa al hogar; las tarjetas muestran título, zona, estado y asignatario; el modelo semanal no define
 hora y el JSON del calendario no expone detalles de tarea. No crea ni altera tareas, comidas o eventos
-personales. El E2E final ya inspeccionó agenda, semana/timeline, mes y año, y las capturas PC/móvil; aún
-falta la matriz completa de breakpoints/teclado y el gate global, por lo que
-`QA-HOME-TASKS.CALENDAR.1` sigue abierto.
+personales. El E2E final inspecciona agenda, día, 4 días, semana/timeline, mes y año, la capa ARIA y
+teclado en seis anchuras para Chromium, Mobile Chrome y Mobile Safari. `QA-HOME-TASKS.CALENDAR.1` está
+cerrado; la auditoría visual de otras familias queda fuera de esa unidad.
 La spec activa contiene comandos, rutas de capturas, límites y rollback/evidencia de esta unidad.
 
 **Trazabilidad de tareas semanales (2026-10-13):** la unidad `QA-HOME-TASKS.WEEKLY.2` de la
@@ -2617,12 +2619,35 @@ poller único, worker con fence de versión, modos generar/repetir, publicación
 explícito. Para «Generar» tareas el usuario eligió una propuesta nueva con IA, usando las zonas vigentes y
 la última semana confirmada solo como contexto; el servidor asigna localmente y publica únicamente tras
 validar ámbitos y comprobar que el destino no contiene cambios/conflictos manuales. «Repetir» copia la
-última semana confirmada sin IA. Scheduler **4/4**, worker **14/14**, configuración/rutas **55/55** con
+última semana confirmada sin IA. Scheduler **5/5**, worker **14/14**, configuración/rutas **55/55** con
 SQLite en memoria; E2E aislada de configuración **2/2 PC/móvil** cubre guardar/reanudar/pausar/cambiar
 modo/guardar y la versión vigente tras acciones del aviso. No se envió proveedor real ni se ejecutó una
-planificación desde este E2E. La aceptación global sigue abierta hasta cubrir el flujo integrado de
-ocurrencia y los gates/matriz restantes; evidencia, comandos y capturas sintéticas en
+planificación desde este E2E. Una nueva prueba de scheduler ejecuta el worker completo con proveedor
+sintético, vuelve a sondear la misma ocurrencia y comprueba un solo envío/publicación; no se llamó al
+proveedor real. La aceptación global sigue abierta por escenarios restantes y gates/matriz; evidencia,
+comandos y capturas sintéticas en
 `HOGARIA-HOUSEHOLD-PLAN-SPEC.md`.
+
+**Validación integrada de planificación (14-10-2026):** E2E aislada multi-miembro confirma que comidas
+individuales y compartidas aparecen por API a ambos miembros, que ambos calendarios semanales muestran
+los mismos títulos y asignaciones, pero solo el participante registra consumo; la vista previa de Compra
+consolida el mismo ingrediente de comidas individuales y compartidas en una sola cantidad (**90 g**).
+Suite de servidor: **1692/1692 aprobados + 1 omitido**;
+cobertura agregada **90,54/82,54/96,1/93,41 %** (S/B/F/L). Suite frontend: **1526/1526**, cobertura
+**93,55/84,25/94/95,7 %**. Planificador de comidas: **90,48/81,08/92,55/96,2 %**; servicio de
+propuestas **100/100/100/100 %**; UI de automatización **87,08/75,25/97,61/94,56 %** (S/B/F/L).
+E2E focal de menú corto pasa **1/1** en Mobile Safari; auditoría
+sintética PC/móvil inspeccionada. La corrida actualizada de nueve archivos pasa **32/32** en Chromium/
+Mobile Chrome, incluida la E2E integrada de
+ajustes, dos miembros, generación/confirmación, calendario, consumo, compra e idempotencia. Esa E2E
+integrada también pasa **3/3** en Chromium, Mobile Chrome y Mobile Safari. La automatización queda
+programada a más de 48 h en ese recorrido; no prueba ejecución. Un test de integración separado ejecuta
+scheduler→worker→proveedor sintético→publicación e idempotencia. No se llamaron servicios IA reales ni se
+modificó inventario persistente. `check:ui` (246 archivos/21 reglas), `typecheck:e2e`, TypeScript server,
+tests config **12/12** y build pasan. La prueba `test:config` se corrigió para la sintaxis experimental
+de Node 22; Volta local quedó en Node **22.23.1** y pnpm **10.15.0**. El build conserva avisos de
+presupuesto (bundle inicial 982,22 kB y SCSS del editor 10,27 kB); no se bajaron los límites. Los gates/
+matriz completa continúan pendientes; ver la spec activa.
 
 ### R. Recurrencia de los eventos de la casa
 

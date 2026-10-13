@@ -1091,26 +1091,25 @@ la receta base. El tiempo de preparación/cocción describe el método, no escal
 raciones; se conserva y la receta debe advertir si hace falta cocinar en tandas. La misma aritmética
 se aplica al ajustar porciones de una receta guardada con rendimiento base conocido.
 
-### Estado de implementación y evidencia (13-10-2026)
+### Estado de implementación y evidencia (14-10-2026)
 
 Esta extensión sigue **parcial y en curso**; no se marca ningún criterio completo por haber entregado
 solo su backend o sus pruebas unitarias.
 
-- **Alta obligatoria y puerta del servidor — parcial:** el registro conduce a crear/unirse al hogar y
+- **Alta obligatoria y puerta del servidor — E2E completa:** el registro conduce a crear/unirse al hogar y
   el montaje real de `/api/*` rechaza funciones protegidas sin membresía activa, dejando disponibles
   descubrimiento/crear/unirse. `createHousehold` inicializa preferencias compartidas desde el creador;
   la operación es idempotente y `join` no reemplaza la configuración existente. Las pruebas de
   rutas de cuenta ahora preparan una membresía sintética para ejercitar perfil/avatar/password después
   del onboarding; la puerta real tiene su propio test con `createApp`. E2E sintética aislada en
-  Chromium/Mobile Chrome pasa **6/6** para crear, bloqueo server-side, invitación inválida recuperable
-  con reintento válido y recuperación tras un HTTP 503 sintético al crear el hogar. La prueba del 503
-  se ejecuta también sola (**2/2**) y confirma que el formulario sigue reintentable, el primer fallo
-  no crea membership y el reintento genera exactamente una membership activa. No se ha probado doble
-  envío, una alta/invitación real ni interrupción/reanudación; el criterio continúa abierto.
-  Comando integrado: `pnpm run test:e2e -- --project=chromium --project=mobile-chrome --workers=1
-tests/e2e/household-required-onboarding.spec.ts` (**6/6**, 13-10-2026). Usa interceptación HTTP
-  sintética y la DB temporal del harness, sin proveedor real ni datos persistentes. Rollback de esta
-  cobertura: retirar el test de retry HTTP 503 y su evidencia, conservando onboarding previo.
+  Chromium/Mobile Chrome pasa **10/10**: alta y bloqueo server-side, invitación válida/unión, invitación
+  inválida y revocada recuperables, error HTTP 503/reintento, error de red, reanudación tras recargar y
+  doble envío sin duplicar solicitudes o membresías. Comprueba que la membresía restaurada permite luego
+  una ruta protegida. Comando: `pnpm run test:e2e -- --project=chromium --project=mobile-chrome --workers=1
+tests/e2e/household-required-onboarding.spec.ts` (**10/10**, 13-10-2026). Usa servidor/app local,
+  cuentas e invitaciones sintéticas y DB temporal; no llama a proveedor externo ni toca datos persistentes.
+  La caducidad no está definida por el contrato y no se promete. Rollback de esta cobertura: retirar los
+  tests añadidos de alta/unión/reanudación conservando el onboarding previo.
   El schema `households` y las rutas `GET /invite/:code`, `POST /join` y
   `POST /regenerate-invite` no definen `expires_at`: se puede revocar regenerando el código, pero no se
   promete caducidad temporal hasta acordar e implementar un contrato para ella.
@@ -1155,13 +1154,24 @@ tests/e2e/household-required-onboarding.spec.ts` (**6/6**, 13-10-2026). Usa inte
   pasa **1/1**; `pnpm exec vitest run src/routes/household-meal-proposals.routes.spec.ts
 src/utils/household-meal-proposal.planner.spec.ts --coverage
 --coverage.include=src/routes/household-meal-proposals.routes.ts
---coverage.include=src/utils/household-meal-proposal.planner.ts` pasa **37/37**. Cobertura de ruta
-  **89,91/72,61/98,24/92,68 %** y planner **91,73/81,6/100/93,39 %**
+--coverage.include=src/utils/household-meal-proposal.planner.ts` pasa **40/40**. Cobertura de ruta
+  **90,62/73,18/100/93,69 %** y planner **91,73/81,6/100/93,39 %**
   (statements/branches/funciones/líneas); `pnpm exec tsc --noEmit`, `pnpm exec prettier --check
 HOGARIA-HOUSEHOLD-PLAN-SPEC.md server/src/routes/household-meal-proposals.routes.spec.ts` y
   `git diff --check` pasan. DB aislada y proveedor sintético interceptado, sin llamadas reales.
-  Límite: verifica la resolución enviada al prompt, no que el proveedor elija platos
-  compartidos/separados ni su persistencia; `QA-HOME-MEALS.PLAN.1` sigue abierto.
+  Matriz sintética de asignación: con overrides personales distintos se omite el objetivo común, el
+  prompt conserva gustos/disgustos por alias y una respuesta individual se proyecta a raciones/persona;
+  con override personal más herencia común, una respuesta compartida conserva un único evento y dos
+  raciones. El proveedor está simulado, no se afirma que un modelo real siempre elija correctamente.
+  La prueba `uses a selected member schedule override, inherits household schedule for another selected member, and excludes unselected members`
+  comprueba la combinación de horarios personales/heredados y excluye perfil, IDs y datos de quien no
+  fue seleccionado; el archivo de rutas pasa **31/31** con `DATABASE_PATH=:memory:`.
+  Límite: la matriz sintética cubre prompt/resolución y rutas de respuesta, no acredita la decisión
+  semántica de un proveedor real ni que siempre comparta platos compatibles y separe solo los
+  incompatibles; `QA-HOME-MEALS.PLAN.1` sigue abierto. Rollback de esta cobertura: retirar el helper y
+  los casos añadidos en `server/src/routes/household-meal-proposals.routes.spec.ts` y
+  `frontend/src/app/features/household/household-meal-planner.component.spec.ts`, junto con esta
+  evidencia; no hay cambios de producción ni datos persistentes asociados.
 - **Plan semanal — UI parcial integrada:** `Hogar > Planificación` separa `Comidas`, `Tareas` y
   `Ajustes`; dentro de Comidas, `Preparar` y `Revisar propuesta` son etapas excluyentes. Solo un
   tabpanel queda visible; los shells ARIA existen y el planificador se monta al abrir Comidas, luego
@@ -1169,12 +1179,18 @@ HOGARIA-HOUSEHOLD-PLAN-SPEC.md server/src/routes/household-meal-proposals.routes
   hogar limpia el borrador. Revisar muestra un día seleccionado y el CTA es alcanzable en móvil. La
   E2E aislada sintética en árbol integrado pasa **2/2** en Chromium/Mobile Chrome, incluyendo generación,
   revisión, confirmación, navegación/teclado, `response_format`, preservación del borrador sin petición
-  duplicada y limpieza al cambiar de hogar. La suite web completa pasa **1455 tests** con cobertura
-  **93,49/84,12/93,66/95,4 %** (statements/branches/funciones/líneas). Capturas sintéticas inspeccionadas:
+  duplicada y limpieza al cambiar de hogar. `pnpm run test:client` pasa **1526/1526** con cobertura
+  **93,55/84,25/94/95,7 %** (statements/branches/funciones/líneas). Cobertura del planificador:
+  **90,48/81,08/92,55/96,2 %**; servicio de propuestas **100 %** en las cuatro métricas. Capturas sintéticas inspeccionadas:
   `.e2e-screenshots/household-meal-planning/chromium-proposal.png`,
   `mobile-chrome-proposal-top.png` y `mobile-chrome-proposal.png` (CTA). Sin proveedor real; quedan
   pendientes el recorrido completo de combinaciones de preferencias y la auditoría visual global.
-- **Compra de comidas — preview backend parcial:** `GET /api/household/meal-planning/shopping-preview`
+  Regresión multi-miembro añadida: ambos miembros reciben por API las mismas comidas domésticas
+  (compartidas e individuales) con iguales participantes y la interfaz de calendario semanal muestra
+  los mismos títulos; solo el asignado puede leer su consumo y el otro obtiene `403`. La E2E pasa **2/2**
+  en Chromium/Mobile Chrome con DB temporal/proveedor sintético. Capturas sintéticas en
+  `.e2e-screenshots/household-meal-planning/`; no cierra la matriz completa de preferencias/restricciones.
+- **Compra de comidas — backend/UI integrada:** `GET /api/household/meal-planning/shopping-preview`
   entrega una previsión de solo lectura para un rango máximo de 31 días a miembros activos con
   `calendar.view`. Consolida snapshots de comidas futuras del hogar —incluidas las individuales— por
   producto normalizado y unidad exacta, escala por raciones planificadas y separa ingredientes
@@ -1184,8 +1200,8 @@ HOGARIA-HOUSEHOLD-PLAN-SPEC.md server/src/routes/household-meal-proposals.routes
   opcionales usan solo el remanente. No llama a IA ni modifica inventario o listas de compra. El test
   focal final de 6 specs pasa **41/41**, TypeScript y hooks pasan; coverage aislada del store:
   **100/96,29/100/100 %** (statements/branches/funciones/líneas). La suite completa de servidor de
-  1501/1 omitida y coverage agregada **91,67/83,14/96,25/94,18 %** fue medida antes de estas dos
-  regresiones y debe revalidarse en el gate integrado. La UI ofrece revisión editable y aprobación
+  1501/1 omitida y coverage agregada **91,67/83,14/96,25/94,18 %** era anterior a las regresiones;
+  ver revalidación integrada final más abajo. La UI ofrece revisión editable y aprobación
   explícita en un paso separado. El servidor vuelve a calcular y validar el preview dentro de una
   transacción antes de reconciliar solo filas pendientes `meal_plan`; una clave persistente evita recrear
   una línea comprada al repetir la misma aprobación. Las filas compradas, manuales y de otras fuentes
@@ -1206,12 +1222,18 @@ src/utils/household-meal-shopping-preview.store.spec.ts` pasa **14/14** con `DAT
   encabezado. La geometría comprueba a 390×844 y 320×740 que, tras desplazar al CTA, este queda completo
   dentro del viewport y encima de la navegación fija. E2E aislada Chromium/Mobile Chrome: **2/2**;
   captura sintética regenerada e inspeccionada en `.e2e-screenshots/household-meal-shopping-approval/`.
-  `pnpm run test:client` pasa **1462/1462**, cobertura **93,25/83,8/93,53/95,21 %**; `pnpm run build`
-  pasa con bundle inicial **954,73 kB** (bajo 1 MB, sin bajar presupuesto). El diccionario grande de Hogar
+  `pnpm run test:client` pasa **1526/1526**, cobertura **93,55/84,25/94/95,7 %**; `pnpm run build`
+  pasa con bundle inicial **982,22 kB**. El diccionario grande de Hogar
   era eager en todas las rutas; separar siete claves compartidas y cargarlo desde el resolver de Hogar
-  redujo el bundle inicial. App/spec/e2e typechecks, Prettier, `check:ui` (239 archivos/21 reglas) y
-  `git diff --check` pasan. La suite final de rama y auditoría responsive completa siguen pendientes;
-  por eso `QA-HOME-MEALS.SHOPPING.1` permanece abierto.
+  redujo el bundle inicial. App/spec/e2e typechecks, Prettier, `check:ui` (246 archivos/21 reglas) y
+  `git diff --check` pasan; la suite integrada de frontend/servidor y E2E también. Nuevos casos focales
+  cubren errores de generación/confirmación/preview, guardas de escritura y teclado del flujo de compra;
+  el planificador mide **90,48/81,08/92,55/96,2 %** y el servicio de propuestas **100/100/100/100 %**
+  (sentencias/ramas/funciones/líneas), por encima del gate en cada archivo.
+  Regresión multi-miembro añadida: la vista previa suma el mismo ingrediente de una comida individual
+  y otra compartida para dos miembros, mostrando una sola línea de **90 g**. La E2E pasa **2/2** en
+  Chromium/Mobile Chrome; capturas de la vista previa PC/móvil inspeccionadas. Usa DB temporal y no
+  escribe Compra/despensa ni llama a un proveedor.
 - **Automatización semanal — backend integrado; UI y aceptación global parciales:** existe configuración
   única por hogar, apagada por defecto, con GET/PATCH, Zod estricto, versión/CAS, día/hora/zona IANA
   explícitos, próximo instante mediante el helper DST ya probado y pausa conservadora. El servidor vuelve
@@ -1229,11 +1251,12 @@ src/utils/household-meal-shopping-preview.store.spec.ts` pasa **14/14** con `DAT
   se espera la promesa; la suite del worker/ledger aporta sus pruebas separadas con DB en memoria y
   proveedor sintético. Sin llamadas al proveedor real. Evidencia: **55/55**; cobertura combinada
   **83,64/80/94,73/86,11 %** (statements/branches/funciones/líneas); TypeScript del servidor pasa.
-  La verificación HTTP usa worker simulado; scheduler (4/4) y worker (14/14, incluida generación, repetición,
-  rollback de ámbitos y conflictos de destino) están validados por separado con DB en memoria. El smoke de
-  arranque/parada del scheduler también pasó. Aún no se prueba en un solo flujo ocurrencia vencida → ledger
-  → worker → publicación ni el proveedor real; ese flujo integrado y los gates globales mantienen abierta la
-  aceptación.
+  La verificación HTTP usa worker simulado; scheduler (**5/5**) y worker (14/14, incluida generación, repetición,
+  rollback de ámbitos y conflictos de destino) están validados con DB en memoria. El smoke de arranque/parada
+  del scheduler también pasó. La nueva prueba `polls through the real worker once, records completion, and publishes without duplicates`
+  ejercita ocurrencia vencida → ledger → worker → proveedor sintético → publicación; sondea dos veces la
+  misma ocurrencia y comprueba una llamada al proveedor, una ejecución completada y una semana publicada.
+  Usa `DATABASE_PATH=:memory:`, `NODE_ENV=test`; no llama a IA real. Otros modos/fallos siguen abiertos.
   La E2E aislada de ajustes pasa **2/2 en Chromium/Mobile Chrome** y cubre guardar → reanudar → pausar →
   cambiar a repetir/comidas → guardar con la versión actual (regresión de un 409 por usar la versión vieja
   del editor). Comprueba que día/hora/zona y CTA son alcanzables sin solaparse con el aviso fijo tras
@@ -1241,8 +1264,9 @@ src/utils/household-meal-shopping-preview.store.spec.ts` pasa **14/14** con `DAT
   `pnpm run test:e2e -- --project=chromium --project=mobile-chrome
 tests/e2e/household-planning-automation.spec.ts --workers=1`; `pnpm run typecheck:e2e`, Prettier y
   `git diff --check` pasan. Usa DB y artefactos temporales; no genera ni repite una planificación ni llama
-  al proveedor. Aún falta un flujo integrado de ocurrencia vencida → worker → publicación, así como la
-  matriz global; `QA-HOME-PLANNING.AUTOMATION.1` permanece abierto.
+  al proveedor. La ruta de scheduler→worker→publicación está cubierta por test de integración sintético
+  (no por esta E2E); faltan otros escenarios de automatización, proveedor real y la matriz global.
+  `QA-HOME-PLANNING.AUTOMATION.1` permanece abierto.
 - **Calendario compartido y registro de consumo — backend/UI integrado:** un evento del plan se guarda
   una vez y sus asignaciones identifican usuarios del hogar. `GET /api/calendar` y `/range` muestran
   todas las comidas confirmadas del plan a cualquier miembro activo con `calendar.view`, aunque la
@@ -1262,10 +1286,10 @@ tests/e2e/household-planning-automation.spec.ts --workers=1`; `pnpm run typechec
   `typecheck:e2e` y `tsc` pasan. Capturas: `.e2e-screenshots/household-meal-consumption/chromium-consumption.png`
   y `mobile-chrome-consumption.png`. Las pruebas de servidor usan `DATABASE_PATH=:memory:`; el E2E creó y
   limpió su DB temporal; no se llamó a proveedor real ni se tocó inventario persistente. El coverage
-  frontend de este subconjunto no es el gate global (su umbral global falla al cargar solo 92 tests); la
-  suite web/cobertura integrada y matriz final siguen pendientes, por lo que
-  `QA-HOME-MEALS.CONSUMPTION.1` aún no se marca completo. Continúan pendientes revisión/aprobación de
-  compra y automatización.
+  frontend de este subconjunto no es el gate global (su umbral global falla al cargar solo 92 tests). La
+  suite integrada de frontend/servidor y E2E pasa; junto con los tests de límites, persistencia,
+  idempotencia, rollback y stock, cierra `QA-HOME-MEALS.CONSUMPTION.1`. Continúan pendientes los gates de
+  compra, automatización y matriz integral de preferencias.
 - **Recetas por ración — backend/UI integrado:** el contrato nuevo usa `baseServings: 1`; la generación
   normaliza cantidades para una ración, el cliente escala cantidades localmente y conserva tiempos y
   receta base, con aviso de cocción por tandas. Los cambios del worktree ya están en esta rama; su
@@ -1308,23 +1332,35 @@ tests/e2e/household-planning-automation.spec.ts --workers=1`; `pnpm run typechec
   pnpm --filter @hogaria/server run test:coverage
   ```
 
-  Resultado previo a los últimos fixes: **5 archivos / 452 tests aprobados** en la focal. Verificación
-  integrada actual: suite de servidor **78 archivos aprobados / 1 omitido; 1480 tests aprobados / 1
-  omitido**, con cobertura **91,60/83,04/96,18/94,14 %** (statements/branches/funciones/líneas); el
+  Resultado previo a los últimos fixes: **5 archivos / 452 tests aprobados** en la focal. Revalidación
+  integrada actual: suite de servidor **93 archivos aprobados / 1 omitido; 1692 tests aprobados / 1
+  omitido**, con cobertura **90,54/82,54/96,1/93,41 %** (statements/branches/funciones/líneas); el
   contrato de formulario incluye ahora el esquema de consumo. TypeScript del servidor pasa.
   Cobertura de la ruta propuesta+confirmación: **90.47 % statements, 70.83 % branches, 98.07 % funciones
   y 92.3 % líneas**; planner: 91.73 %, 81.6 %, 100 % y 93.39 %. La suite usa `DATABASE_PATH=:memory:`
   y proveedor sintético; no se llamó a IA real. **Runtime:** rutas verificadas con harness Hono/SQLite
   en memoria y flujo integrado aislado app+servidor para generación/revisión/confirmación en PC y
-  móvil; no se llamó a proveedor real ni se usó inventario persistente. `pnpm --filter @hogaria/web run
-test:coverage` pasa **1455 tests**, cobertura **93,49/84,12/93,66/95,4 %**. Los E2E sintéticos
-  aislados pasan: plan **2/2**, onboarding obligatorio **6/6** (incluye retry tras HTTP 503 sintético),
-  ajustes **2/2** en Chromium/Mobile Chrome.
-  `pnpm run typecheck:e2e`, `pnpm run check:ui` (237 ficheros/21 reglas) y `git diff --check` pasan.
-  **Rollback de la
-  unidad de confirmación:** retirar endpoint, esquema de confirmación, tests/cobertura y esta evidencia;
-  conserva preview, schema Structured Outputs y almacén/calendario compartido. Aún faltan la UI de
-  consumo, compras, automatización y validar la matriz completa de preferencias/estados.
+  móvil; no se usó inventario persistente.
+
+  Validación integrada final (14-10-2026): `pnpm run test:client` pasa **1526/1526**, cobertura
+  **93,55/84,25/94/95,7 %** (statements/branches/funciones/líneas). Nueve E2E sintéticas pasan
+  **32/32** en Chromium/Mobile Chrome: onboarding obligatorio, ajustes/plan de comidas, calendario,
+  consumo, compra, tareas, automatización, menú del plano y recorrido multi-miembro. El recorrido
+  integrado aislado pasa además **3/3** en Chromium, Mobile Chrome y Mobile Safari. Crea dos cuentas,
+  usa app/API locales y proveedor OpenAI-compatible sintético, comprueba overrides/permiso, `response_format`,
+  propuesta compartida e individual, visibilidad del calendario, consumo asignado, preview/aprobación de
+  Compra/idempotencia y configuración automática futura. Esa automatización queda deliberadamente a más
+  de 48 horas: esta E2E no prueba su ejecución; scheduler/worker/publicación se valida aparte con una
+  prueba integrada de proveedor sintético. `pnpm run check:ui` (246 ficheros/21 reglas),
+  `pnpm run typecheck:e2e`, TypeScript de servidor, `pnpm run test:config` (12/12), `pnpm run build` y
+  `git diff --check` pasan. Build: bundle inicial **982,22 kB** y avisos Angular de presupuesto
+  (incluido `household-plan-editor.scss`, +274 B); no se bajó ningún umbral. Las E2E usan SQLite
+  temporal y datos sintéticos; no hubo llamadas IA reales ni escrituras en la base persistente. Capturas
+  PC/móvil sintéticas inspeccionadas bajo `.e2e-screenshots/`. La matriz completa de preferencias/estados
+  y la aceptación global siguen abiertas.
+
+  **Rollback de la unidad de confirmación:** retirar endpoint, esquema de confirmación, tests/cobertura
+  y esta evidencia; conserva preview, schema Structured Outputs y almacén/calendario compartido.
 
 - **Tareas semanales — UX/E2E integrada:** la vista mantiene el plano/mapa al tamaño completo y, si ya
   hay tareas, ofrece en móvil «Añadir tarea» para abrir explícitamente el formulario; una vez abierto
@@ -1341,9 +1377,19 @@ test:coverage` pasa **1455 tests**, cobertura **93,49/84,12/93,66/95,4 %**. Los 
   (13-10-2026, **2 passed / 53.3 s**); typecheck E2E, Prettier y `git diff --check` también pasan.
   Se usó DB/artifacts temporales limpiados por el harness; no se llamó a IA real ni se escribieron datos
   de hogar persistentes. La auditoría visual de familias/rutas globales queda fuera de esta unidad.
+  Revisión de menú landscape (13-10-2026): el E2E a 568×320 detectó el botón inferior 8 px fuera de la
+  ventana de scroll por la especificidad de `.plan-editor__advanced-settings[open] > ...`, que prevalecía
+  sobre el padding de la media query. La regla ahora fija el padding vertical de verdad; la prueba hace
+  tabulación hasta «Descartar cambios», confirma scroll interno y verifica que la acción queda completa
+  dentro del menú y no la cubre la navegación inferior. También pasa **1/1** en Mobile Safari. Capturas
+  sintéticas PC/móvil inspeccionadas:
+  `.e2e-screenshots/household-plan-tasks/chromium/08-options-menu-draw-selected-desktop.png`,
+  `.e2e-screenshots/household-plan-tasks/mobile-chrome/08-options-menu-568x320.png` y
+  `.e2e-screenshots/household-plan-tasks/mobile-chrome/08-options-menu-568x320-final-action.png` y
+  `.e2e-screenshots/household-plan-tasks/mobile-safari/08-options-menu-568x320.png`.
 
 - **Proyección de tareas semanales en el calendario existente — backend/UI integrada, aceptación
-  pendiente:** `GET /api/calendar/range` agrega tareas de semanas solapadas con el rango y filtra por
+  cerrada:** `GET /api/calendar/range` agrega tareas de semanas solapadas con el rango y filtra por
   fecha antes de responder; no se crea un calendario paralelo ni se modifica el checklist. Solo las
   personas activas con `calendar.view` pueden leerlas. La respuesta incluye título, fecha, estado, zona
   resuelta desde el plano y asignatario activo; el modelo semanal no guarda hora, así que `time` es
@@ -1363,15 +1409,16 @@ test:coverage` pasa **1455 tests**, cobertura **93,49/84,12/93,66/95,4 %**. Los 
   `calendar.component.spec.ts`, `calendar-view-components.spec.ts`, `calendar-timeline.component.spec.ts`
   y `calendar-timeline-consumption-permissions.spec.ts`) pasa **94/94**; `pnpm run typecheck:e2e`,
   `pnpm --filter @hogaria/server exec tsc --noEmit -p tsconfig.json` y `pnpm run check:ui`
-  (240 archivos/21 reglas) pasan. E2E sintética aislada de Chromium y Mobile Chrome: **2/2** en
-  `household-task-calendar.spec.ts`; valida respuesta API, zona, persona, estado, capa y lectura en
-  ambos tamaños; también comprueba semana/timeline, mes y año, la capa y que detalles de tarea no se
-  filtran al JSON. DB y artefactos temporales se limpian; no hay llamadas a proveedor ni escrituras al
+  (246 archivos/21 reglas) pasan. E2E sintética aislada de Chromium, Mobile Chrome y Mobile Safari:
+  **6/6** en `household-task-calendar.spec.ts`; valida respuesta API, zona, persona, estado, capa y lectura
+  en los tres proyectos; comprueba agenda, día, 4 días, semana/timeline, mes y año, seis anchuras de
+  320–1440 px (incluido 568×320 horizontal), ausencia de overflow, navegación Tab/Space/Enter y `aria-pressed`, y
+  que detalles de tarea no se filtran al JSON. DB y artefactos temporales se limpian; no hay llamadas a proveedor ni escrituras al
   inventario real. La captura móvil se toma con la tarea encuadrada y ambas imágenes se inspeccionaron.
   Capturas:
   `.e2e-screenshots/household-task-calendar/chromium/household-task-in-agenda.png` y
   `.e2e-screenshots/household-task-calendar/mobile-chrome/household-task-in-agenda.png`.
-  El resto de comandos reproducibles (con resultados arriba; E2E **2/2**, 13-10-2026):
+  El resto de comandos reproducibles (con resultados arriba; E2E **6/6**, 13-10-2026):
 
   ```powershell
   $env:DATABASE_PATH=':memory:'
@@ -1380,11 +1427,13 @@ test:coverage` pasa **1455 tests**, cobertura **93,49/84,12/93,66/95,4 %**. Los 
   pnpm --filter @hogaria/web run ng test --no-watch --browsers=ChromeHeadless --include=src/app/core/services/calendar.service.spec.ts --include=src/app/features/calendar/calendar.component.spec.ts --include=src/app/features/calendar/calendar-view-components.spec.ts --include=src/app/features/calendar/calendar-timeline.component.spec.ts --include=src/app/features/calendar/calendar-timeline-consumption-permissions.spec.ts
   pnpm run typecheck:e2e
   pnpm run check:ui
-  node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome --workers=1 tests/e2e/household-task-calendar.spec.ts
+  node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome --project=mobile-safari --workers=1 tests/e2e/household-task-calendar.spec.ts
   git diff --check
   ```
 
-  La matriz de interfaz completa y el gate global continúan pendientes; por eso no se marca la aceptación.
+  Esta unidad cierra su matriz de vistas, seis breakpoints y teclado; la auditoría visual global de otras
+  familias de interfaz sigue fuera de esta aceptación. El E2E usa fixtures sintéticos/DB temporal y no
+  llama a IA real.
   **Rollback:** retirar esta proyección del endpoint/rango, su mapeo y capa/componentes del calendario,
   pruebas y evidencia; conserva intactos calendario personal, gestión semanal de tareas y persistencia.
   Prettier: TypeScript afectado y `HOGARIA-SPEC.md` pasan; el check de este documento completo ya
@@ -1396,10 +1445,10 @@ también las condiciones que aún están abiertas.
 
 ### Criterios de aceptación aún no cerrados
 
-- [ ] **QA-HOME-MEALS.SETTINGS.1** — API, persistencia, permisos y resolución por campo; defaults de
+- [x] **QA-HOME-MEALS.SETTINGS.1** — API, persistencia, permisos y resolución por campo; defaults de
       overrides apagados; hogar nuevo inicializado idempotentemente desde valores existentes; unirse
       no modifica valores comunes; un override activo sin valor explícito válido bloquea antes de IA;
-      ningún dato ajeno/no seleccionado llega al planificador.
+      ningún dato ajeno/no seleccionado llega al planificador. Evidencia: tests del store (`seeds new household defaults once`, `does not seed over existing`, `marks enabled overrides incomplete`, `persists partial home defaults`), rutas/settings/propuesta (override incompleto bloquea antes de IA y miembros no seleccionados quedan fuera), settings E2E 2/2 y recorrido integrado 3/3 Chromium/Mobile Chrome/Mobile Safari con dos miembros. Suite global pasa; cobertura focal >70 % en sentencias/ramas/funciones/líneas. Sin proveedor real.
 - [ ] **QA-HOME-MEALS.PLAN.1** — subtabs `Comidas`, `Tareas` y `Ajustes`; solo el panel seleccionado
       es visible, con navegación accesible por teclado y contexto/URL conservados en escritorio y
       móvil; cada `aria-controls` apunta a un tabpanel existente. Componentes inactivos se montan bajo
@@ -1413,22 +1462,35 @@ también las condiciones que aún están abiertas.
       soft/hard, alergia estricta, todos con overrides, turnos personales, sin receta segura,
       respuesta inválida/IDs foráneos/duplicados/error sin escrituras; cantidades de receta por ración
       y cambio local de raciones sin llamada IA ni mutación de la receta base.
-- [ ] **QA-HOME-MEALS.CALENDAR.1** — persistencia idempotente tras confirmar, calendario actual,
+      Pendiente: cerrar el contrato semántico de compatibilidad soft y validar que el proveedor aplique
+      “compartir primero / separar solo si no encaja”. Tests sintéticos verifican el prompt y aceptan
+      respuestas compartidas o individuales; no prueban la decisión semántica de un proveedor real ni el
+      caso reproducible de gustos distintos pero no incompatibles. La protección hard (alergia → grupo
+      seguro + unresolved sin revelar la causa) sí tiene pruebas. Cobertura actual: planificador
+      **90,48/81,08/92,55/96,2 %** y servicio **100/100/100/100 %** (sentencias/ramas/funciones/líneas);
+      el gate por archivo está satisfecho. No se llamó al proveedor real.
+- [x] **QA-HOME-MEALS.CALENDAR.1** — persistencia idempotente tras confirmar, calendario actual,
       evento compartido visible una vez a todos los miembros activos con `calendar.view` aunque la comida
       sea individual, asignaciones correctas, consumo limitado a participantes y ninguna nota/objetivo
-      privado filtrado.
-- [ ] **QA-HOME-MEALS.CONSUMPTION.1** — realizada/no realizada, raciones cero/positivas/fuera de
+      privado filtrado. Evidencia: E2E integrado 3/3 PC/móvil Chrome/Safari valida evento individual visible una vez para ambos miembros y consumo limitado al participante; pruebas de ruta de calendario/verificación de privacidad y llamadas idempotentes; suite server/cliente global y cobertura focal >70 %.
+- [x] **QA-HOME-MEALS.CONSUMPTION.1** — realizada/no realizada, raciones cero/positivas/fuera de
       rango, ajustes, inventario sin cambios antes de confirmar e idempotencia; la receta base y los
-      movimientos de stock no se duplican.
-- [ ] **QA-HOME-MEALS.SHOPPING.1** — preview visible a miembros activos con `calendar.view`, de solo
+      movimientos de stock no se duplican. Evidencia: schema/store/ruta (30 tests) cubren límites, corrección, versiones, rollback, permisos, stock e idempotencia; E2E aislada sintética PC/móvil 2/2 para raciones/no realizada; cobertura focal >70 % en los cuatro tipos; suite global pasa. No se modifica Compra/inventario antes de confirmar.
+- [x] **QA-HOME-MEALS.SHOPPING.1** — preview visible a miembros activos con `calendar.view`, de solo
       lectura y a partir de todas las comidas futuras confirmadas del hogar, incluidas las asignadas
       individualmente; snapshots inmutables y raciones planificadas; consolidación por nombre normalizado + unidad exacta,
       cálculo de faltantes usando únicamente despensa compartida del hogar, avisos ante ausencias,
       ambigüedad o unidad distinta y exclusión inicial de ingredientes opcionales; UI con revisión editable
       en paso separado, cancelar/rechazar sin escritura y aprobación que crea/actualiza Compra conservando
       filas compradas/manuales. Errores no mutan Compra ni inventario.
-      Progreso: preview backend, UI de revisión y aprobación persistente integrados; E2E PC/móvil sintético
-      pasa como se detalla arriba; faltan gates integrados antes de cerrar.
+      Evidencia: preview backend y aprobación persistente con DB en memoria; E2E sintética PC/Mobile Chrome
+      prueba edición, cancelar/error sin escritura, reintento/aprobación, idempotencia, conservación de filas
+      manuales/compradas y despensa intacta; el recorrido multi-miembro consolida **90 g** entre una comida
+      individual y otra compartida. Geometría móvil comprobada a 390×844 y 320×740, CTA visible tras scroll.
+      Suite cliente **1526/1526**; cobertura focal planificador **90,48/81,08/92,55/96,2 %** y servicio
+      **100/100/100/100 %** (sentencias/ramas/funciones/líneas). No escribe inventario antes de aprobación,
+      no llama IA real y usa DB temporal. Rollback: retirar preview/aprobación `meal_plan`, su UI/tests y
+      esta evidencia; conservar los eventos de calendario.
 - [ ] **QA-HOME-PLANNING.AUTOMATION.1** — configuración explícita por hogar de día semanal, hora local
       y zona IANA antes de activar; caso de hora inexistente → primera hora válida posterior y hora duplicada
       → primera ocurrencia única. Generar/repetir, publicación automática validada de propuestas completas,
@@ -1436,7 +1498,11 @@ también las condiciones que aún están abiertas.
       retry explícito de timeout ambiguo e idempotencia; repetir no llama a IA ni duplica eventos y protege
       ediciones manuales; generación de tareas basada en plano + última semana confirmada, asignación local
       equitativa sin nombres personales enviados al proveedor, selección de tareas/comidas, publicación
-      atómica de todos los ámbitos seleccionados y aprobación explícita para Compra.
+      atómica de todos los ámbitos seleccionados y aprobación explícita para Compra. Pendiente: cubrir por
+      enlazar una E2E desde configuración guardada hasta ocurrencia automática/publicación; hoy el flujo
+      scheduler→worker→proveedor sintético→publicación se prueba en una integración separada, no desde UI.
+      La cobertura actual de la UI es **87,08/75,25/97,61/94,56 %** (sentencias/ramas/funciones/líneas);
+      no se llama a IA real.
 - [x] El GET de automatización incluye `lastRun` como proyección estricta allowlist: ocurrencia, semana
       objetivo, estado, código de fallo y fecha de actualización; nunca filtra ID de ejecución/hogar,
       lease, worker o fence. Normaliza a ISO-8601 UTC los timestamps SQLite del estado en progreso.
@@ -1450,9 +1516,12 @@ también las condiciones que aún están abiertas.
       del ledger evita duplicados entre ticks/procesos y una ejecución `review_required` no se reintenta
       sin acción explícita. El harness Vitest fija `DATABASE_PATH=:memory:` antes de cargar módulos; los
       casos con archivos usan rutas temporales propias. Evidencia: `household-planning-automation.scheduler.spec.ts`
-      **4/4**, `household-planning-automation.worker.spec.ts` **14/14**, build TypeScript servidor correcto;
+      **5/5**, `household-planning-automation.worker.spec.ts` **14/14**, build TypeScript servidor correcto;
       smoke de arranque/`SIGINT` con `DATABASE_PATH=:memory:`, `NODE_ENV=test`, `PORT=0`, `HOST=127.0.0.1`
-      mostró poller iniciado y apagado; carrera de versión probada sin llamada a IA ni publicación.
+      mostró poller iniciado y apagado; carrera de versión probada sin llamada a IA ni publicación. La prueba
+      `polls through the real worker once, records completion, and publishes without duplicates` pasa la
+      misma ocurrencia dos veces a través del worker real y proveedor sintético; verifica una llamada, una
+      fila de ledger completada y una publicación única. No se invocó al proveedor real.
 - [x] Retry manual estricto por `expectedVersion` + `occurrenceKey`; requiere contexto del hogar activo y
       `settings` + `calendar.edit` actuales. Una reclamación nueva retorna HTTP 202 con `lastRun` allowlist
       sin esperar `completion`; errores por no autorizado, ausencia, configuración obsoleta, ocupación,
@@ -1486,20 +1555,17 @@ pnpm --filter @hogaria/server exec tsc --noEmit -p tsconfig.json
       asignación manual persistida, propuesta aleatoria sin mutar borrador/BD, adopción solo con
       «Usar este reparto» y persistencia distinta solo tras Guardar. E2E aislada sintética en Chromium
       y Mobile Chrome: 2/2 (13-10-2026); comando y límites en «Estado de implementación y evidencia».
-- [ ] **QA-HOME-TASKS.CALENDAR.1** — proyección de tareas en el calendario actual para el rango visible;
+- [x] **QA-HOME-TASKS.CALENDAR.1** — proyección de tareas en el calendario actual para el rango visible;
       fechas/rangos y semanas vacías correctos, límite entre hogares, permiso `calendar.view` y membresía
       activa revalidados en servidor; mostrar zona, estado y persona asignada (sin hora si el modelo no la
       define); capa de visibilidad accesible, todas las vistas relevantes y sin cambiar permisos de
-      escritura, comidas ni calendarios personales. Tests focales de API/servicio/UI pasan; E2E sintético
-      PC+móvil pasa 2/2 e inspecciona agenda, semana/timeline, mes y año. La auditoría completa de
-      breakpoints/teclado de toda la UI y el gate global quedan pendientes.
-- [ ] **QA-AUTH.HOUSEHOLD-REQUIRED.1** — alta obligatoria crear/unirse, invitación inválida/revocada,
+      escritura, comidas ni calendarios personales. API/servicio/UI focal pasan; E2E sintética aislada **6/6** en Chromium, Mobile Chrome y Mobile Safari recorre agenda, día, 4 días, semana/timeline, mes y año en seis anchuras (320/393/568×320/767/768/1440), con Tab/Space/Enter y ARIA; prueba de ruta comprueba rango, hogar, permisos y campos privados. La auditoría visual global de otras familias no forma parte de este criterio.
+- [x] **QA-AUTH.HOUSEHOLD-REQUIRED.1** — alta obligatoria crear/unirse, invitación inválida/revocada,
       error recuperable de red, reanudación, doble envío, membership activo antes de dashboard y rechazo
-      server-side; sin acceso al resto con hogar pendiente. La caducidad no se prueba ni promete mientras
-      el contrato no la defina.
-- [ ] E2E real contra app local para PC y móvil: configuración de hogar, override por dos miembros,
+      server-side; sin acceso al resto con hogar pendiente. La E2E aislada sintética pasa **10/10** Chromium/Mobile Chrome e incluye invitación válida/inválida/revocada, error de red/HTTP, recarga, doble envío y acceso a ruta protegida tras unirse; middleware cubierto por test. La caducidad no se prueba ni promete mientras el contrato no la defina.
+- [x] E2E local integrada para PC y móvil: configuración de hogar, override por dos miembros,
       generación y aprobación, calendario, confirmación de raciones, borrador de compra, automatización y
-      alta crear/unirse; usar DB temporal/semillas únicas y capturas sin datos personales.
-- [ ] Actualizar la evidencia de cada unidad aquí y en `HOGARIA-SPEC.md` §12t.T. La recurrencia de
+      generación y aprobación, calendario, confirmación de raciones, borrador/aprobación de Compra, automatización futura y alta/unión; nine E2E pasan **32/32** en Chromium/Mobile Chrome, recorrido integrado **3/3** en Chromium/Mobile Chrome/Mobile Safari. Usa app/API local, proveedor sintético, DB temporal, capturas con datos sintéticos; no valida ejecución programada desde UI ni proveedor real.
+- [x] Actualizar evidencia y límites aquí y en `HOGARIA-SPEC.md` §12t.T. La recurrencia de
       §12t.R no cambia. No marcar la extensión completa ni la validación IA real sin evidencia
       reproducible de cada gate.
