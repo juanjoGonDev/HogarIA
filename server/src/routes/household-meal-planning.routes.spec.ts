@@ -31,6 +31,9 @@ afterAll(() => closeDatabase?.());
 
 beforeEach(() => {
   db.exec('DROP TRIGGER IF EXISTS reject_meal_planning_update');
+  db.prepare('DELETE FROM meals').run();
+  db.prepare('DELETE FROM weekly_calendars').run();
+  db.prepare('DELETE FROM ingredients').run();
   db.prepare('DELETE FROM household_members').run();
   db.prepare('DELETE FROM users').run();
   db.prepare('DELETE FROM households').run();
@@ -75,6 +78,21 @@ function addUser(id: string, householdId: string | null, settings: boolean): Use
   };
 }
 
+function addCalendarUser(id: string, canView: boolean): User {
+  db.prepare(
+    `INSERT INTO users (id, email, name, password_hash, household_id)
+     VALUES (?, ?, ?, 'hash', 'home')`
+  ).run(id, `${id}@hogaria.test`, id);
+  db.prepare(
+    `INSERT INTO household_members (id, household_id, user_id, role, permissions)
+     VALUES (?, 'home', ?, 'member', ?)`
+  ).run(`membership-${id}`, id, JSON.stringify({ calendar: { view: canView, edit: false } }));
+  return {
+    id,
+    token: jwt.sign({ sub: id, email: `${id}@hogaria.test` }, jwtSecret, { expiresIn: '1h' })
+  };
+}
+
 function call(user: User, method: string, body?: unknown, householdId = 'home') {
   return app.request('/api/household/meal-planning', {
     method,
@@ -85,6 +103,22 @@ function call(user: User, method: string, body?: unknown, householdId = 'home') 
     },
     body: body === undefined ? undefined : JSON.stringify(body)
   });
+}
+
+function callShoppingPreview(user: User, startDate: string, endDate: string, householdId = 'home') {
+  const query = new URLSearchParams({ startDate, endDate });
+  return app.request(`/api/household/meal-planning/shopping-preview?${query}`, {
+    headers: {
+      authorization: `Bearer ${user.token}`,
+      'x-household-id': householdId
+    }
+  });
+}
+
+function addDays(date: string, days: number): string {
+  const value = new Date(`${date}T00:00:00.000Z`);
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
 }
 
 async function responseBody(response: Response): Promise<ApiResponse> {
@@ -264,5 +298,105 @@ describe('household meal-planning settings routes', () => {
     expect(malformed.status).toBe(400);
     expect((await responseBody(malformed)).code).toBe('INVALID_MEAL_PLANNING_SETTINGS');
     expect(unauthenticated.status).toBe(401);
+  });
+
+  it('returns a read-only household preview only with calendar view permission and current household context', async () => {
+    addHousehold();
+    const member = addCalendarUser('calendar-member', true);
+    const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+    db.prepare(
+      `INSERT INTO weekly_calendars (id, household_id, user_id, week_start, week_end, goals)
+       VALUES ('shopping-calendar', 'home', ?, ?, ?, '{}')`
+    ).run(member.id, tomorrow, tomorrow);
+    db.prepare(
+      `INSERT INTO meals
+        (id, calendar_id, date, meal_type, custom_meal, servings, source_proposal_id, proposal_id, recipe_snapshot)
+       VALUES ('shopping-meal', 'shopping-calendar', ?, 'dinner', 'Synthetic dinner', 3,
+         'proposal:event', 'proposal', ?)`
+    ).run(
+      tomorrow,
+      JSON.stringify({
+        name: 'Synthetic recipe',
+        baseServings: 1,
+        ingredients: [{ name: 'Rice', quantity: 50, unit: 'g', isOptional: false }]
+      })
+    );
+    db.prepare(
+      `INSERT INTO ingredients (id, user_id, household_id, name, category, quantity, unit)
+       VALUES ('shopping-rice', ?, 'home', 'rice', 'other', 20, 'g')`
+    ).run(member.id);
+    const before = (db.prepare('SELECT total_changes() AS changes').get() as { changes: number })
+      .changes;
+
+    const response = await callShoppingPreview(member, tomorrow, tomorrow);
+    const body = await responseBody(response);
+    const after = (db.prepare('SELECT total_changes() AS changes').get() as { changes: number })
+      .changes;
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(body.data).toMatchObject({
+      startDate: tomorrow,
+      endDate: tomorrow,
+      plannedMealCount: 1,
+      requiredIngredients: [
+        expect.objectContaining({
+          name: 'Rice',
+          unit: 'g',
+          quantity: 150,
+          stockQuantity: 20,
+          missingQuantity: 130
+        })
+      ]
+    });
+    expect(JSON.stringify(body)).not.toContain(member.id);
+    expect(after).toBe(before);
+
+    db.prepare('UPDATE users SET household_id = NULL WHERE id = ?').run(member.id);
+    const beforeReadOnlyResolution = (
+      db.prepare('SELECT total_changes() AS changes').get() as { changes: number }
+    ).changes;
+    expect((await callShoppingPreview(member, tomorrow, tomorrow)).status).toBe(200);
+    expect(
+      (
+        db.prepare('SELECT household_id FROM users WHERE id = ?').get(member.id) as {
+          household_id: string | null;
+        }
+      ).household_id
+    ).toBeNull();
+    expect(
+      (db.prepare('SELECT total_changes() AS changes').get() as { changes: number }).changes
+    ).toBe(beforeReadOnlyResolution);
+
+    const noView = addCalendarUser('no-calendar-view', false);
+    expect((await callShoppingPreview(noView, tomorrow, tomorrow)).status).toBe(403);
+    expect((await callShoppingPreview(member, tomorrow, tomorrow, 'other-home')).status).toBe(409);
+    const noHousehold = addUser('no-household', null, false);
+    expect((await callShoppingPreview(noHousehold, tomorrow, tomorrow)).status).toBe(404);
+  });
+
+  it('rejects missing, past, malformed, inverted, and oversized shopping preview ranges', async () => {
+    addHousehold();
+    const member = addCalendarUser('calendar-member', true);
+    const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+    const dayAfterTomorrow = addDays(tomorrow, 1);
+    const callQuery = (query: string) =>
+      app.request(`/api/household/meal-planning/shopping-preview${query}`, {
+        headers: {
+          authorization: `Bearer ${member.token}`,
+          'x-household-id': 'home'
+        }
+      });
+
+    for (const query of [
+      '',
+      '?startDate=2000-01-01&endDate=2000-01-01',
+      `?startDate=${tomorrow}&endDate=2026-02-30`,
+      `?startDate=${dayAfterTomorrow}&endDate=${tomorrow}`,
+      `?startDate=${tomorrow}&endDate=${addDays(tomorrow, 31)}`,
+      `?startDate=${tomorrow}&endDate=${tomorrow}&userId=private-user`
+    ]) {
+      expect((await callQuery(query)).status, query).toBe(400);
+    }
   });
 });

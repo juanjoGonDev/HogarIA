@@ -1,14 +1,25 @@
 import { Hono, type Context } from 'hono';
 import { getDatabase } from '../config/database.js';
 import { authMiddleware } from '../middleware/auth.middleware.js';
+import { householdMealShoppingPreviewQuerySchema } from '../schemas/household-meal-shopping-preview.schema.js';
 import { householdMealPlanningPatchSchema } from '../schemas/household-meal-planning.schema.js';
 import type { AppEnv } from '../types/hono-env.js';
-import { activeHouseholdId, needsActiveHouseholdSelection } from '../utils/household-context.js';
+import {
+  activeHouseholdId,
+  hasActiveHouseholdMemberships,
+  needsActiveHouseholdSelection,
+  readActiveHouseholdId
+} from '../utils/household-context.js';
+import { canViewSharedMeals } from '../utils/shared-meal-calendar.store.js';
 import {
   HouseholdMealPlanningError,
   readHouseholdMealPlanning,
   saveHouseholdMealPlanning
 } from '../utils/household-meal-planning.store.js';
+import {
+  HouseholdMealShoppingPreviewError,
+  readHouseholdMealShoppingPreview
+} from '../utils/household-meal-shopping-preview.store.js';
 
 export const householdMealPlanningRoutes = new Hono<AppEnv>();
 householdMealPlanningRoutes.use('*', authMiddleware);
@@ -28,6 +39,36 @@ householdMealPlanningRoutes.get('/meal-planning', (c) => {
       return c.json({ success: false, code: error.code }, 404);
     }
     return c.json({ success: false, code: 'HOUSEHOLD_MEAL_PLANNING_UNAVAILABLE' }, 500);
+  }
+});
+
+householdMealPlanningRoutes.get('/meal-planning/shopping-preview', (c) => {
+  const db = getDatabase();
+  const userId = c.get('userId');
+  const householdId = readActiveHouseholdId(db, userId);
+  if (!householdId) return noHouseholdReadOnlyResponse(c, db, userId);
+  if (c.req.header('x-household-id') !== householdId) return householdContextChanged(c);
+
+  const today = new Date().toISOString().slice(0, 10);
+  const parsed = householdMealShoppingPreviewQuerySchema.safeParse(
+    Object.fromEntries(new URL(c.req.url).searchParams.entries())
+  );
+  if (!parsed.success || parsed.data.startDate < today) {
+    return c.json({ success: false, code: 'INVALID_MEAL_SHOPPING_PREVIEW_RANGE' }, 400);
+  }
+  if (!canViewSharedMeals(db, householdId, userId)) {
+    return c.json({ success: false, code: 'HOUSEHOLD_CALENDAR_VIEW_REQUIRED' }, 403);
+  }
+
+  try {
+    const preview = readHouseholdMealShoppingPreview(db, householdId, parsed.data, today);
+    c.header('Cache-Control', 'no-store');
+    return c.json({ success: true, data: preview });
+  } catch (error) {
+    if (error instanceof HouseholdMealShoppingPreviewError) {
+      return c.json({ success: false, code: 'HOUSEHOLD_MEAL_SHOPPING_PREVIEW_NOT_FOUND' }, 404);
+    }
+    return c.json({ success: false, code: 'HOUSEHOLD_MEAL_SHOPPING_PREVIEW_UNAVAILABLE' }, 500);
   }
 });
 
@@ -107,6 +148,17 @@ function noHouseholdResponse(
   userId: string
 ) {
   if (needsActiveHouseholdSelection(db, userId)) {
+    return c.json({ success: false, code: 'HOUSEHOLD_SELECTION_REQUIRED' }, 409);
+  }
+  return c.json({ success: false, code: 'HOUSEHOLD_REQUIRED' }, 404);
+}
+
+function noHouseholdReadOnlyResponse(
+  c: Context<AppEnv>,
+  db: ReturnType<typeof getDatabase>,
+  userId: string
+) {
+  if (hasActiveHouseholdMemberships(db, userId)) {
     return c.json({ success: false, code: 'HOUSEHOLD_SELECTION_REQUIRED' }, 409);
   }
   return c.json({ success: false, code: 'HOUSEHOLD_REQUIRED' }, 404);

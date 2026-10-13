@@ -1099,6 +1099,20 @@ solo su backend o sus pruebas unitarias.
   `.e2e-screenshots/household-meal-planning/chromium-proposal.png`,
   `mobile-chrome-proposal-top.png` y `mobile-chrome-proposal.png` (CTA). Sin proveedor real; quedan
   pendientes el recorrido completo de combinaciones de preferencias y la auditoría visual global.
+- **Compra de comidas — preview backend parcial:** `GET /api/household/meal-planning/shopping-preview`
+  entrega una previsión de solo lectura para un rango máximo de 31 días a miembros activos con
+  `calendar.view`. Consolida snapshots de comidas futuras del hogar —incluidas las individuales— por
+  producto normalizado y unidad exacta, escala por raciones planificadas y separa ingredientes
+  opcionales. Incluye comidas de hoy todavía pendientes; excluye fechas pasadas y toda comida con
+  registro de consumo (`realized` o `not_realized`). Solo consulta existencias explícitas del hogar
+  cuando `shared_pantry` está activo; reserva stock primero para ingredientes obligatorios y los
+  opcionales usan solo el remanente. No llama a IA ni modifica inventario o listas de compra. El test
+  focal final de 6 specs pasa **41/41**, TypeScript y hooks pasan; coverage aislada del store:
+  **100/96,29/100/100 %** (statements/branches/funciones/líneas). La suite completa de servidor de
+  1501/1 omitida y coverage agregada **91,67/83,14/96,25/94,18 %** fue medida antes de estas dos
+  regresiones y debe revalidarse en el gate integrado. Aún no hay revisión UI ni endpoint de aprobación
+  que actualice Compra y preserve filas compradas/manuales, por lo que `QA-HOME-MEALS.SHOPPING.1` sigue
+  abierto.
 - **Calendario compartido — backend parcial integrado:** un evento del plan se guarda una vez y sus
   asignaciones identifican usuarios del hogar. `GET /api/calendar` y `/range` muestran todas las comidas
   confirmadas del plan a cualquier miembro activo con `calendar.view`, aunque la asignación sea
@@ -1201,6 +1215,7 @@ criterios inferiores permanecen sin marcar hasta validar cada condición en su a
       ambigüedad o unidad distinta y exclusión inicial de ingredientes opcionales; UI con revisión editable
       en paso separado, cancelar/rechazar sin escritura y aprobación que crea/actualiza Compra conservando
       filas compradas/manuales. Errores no mutan Compra ni inventario.
+      Progreso: preview backend de solo lectura integrado; sin UI ni aprobación persistente todavía.
 - [ ] **QA-HOME-PLANNING.AUTOMATION.1** — generar/repetir, play/pause, siguiente fecha, retry e
       idempotencia; repetir no llama a IA ni duplica eventos, protege ediciones manuales y permite
       elegir tareas/comidas.

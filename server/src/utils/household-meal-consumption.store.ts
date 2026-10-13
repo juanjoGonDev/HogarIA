@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { householdMealConsumptionSchema } from '../schemas/household-meal-consumption.schema.js';
 import { activeHouseholdId } from './household-context.js';
+import { normalizeIngredientMatchKey } from './ingredient-match.js';
 
 type SqliteDb = import('better-sqlite3').Database;
 type ConsumptionStatus = 'realized' | 'not_realized';
@@ -223,10 +224,6 @@ function parseSnapshot(raw: string | null): ParsedSnapshot | null {
   }
 }
 
-function normalizeMatchKey(value: string): string {
-  return value.normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase('es');
-}
-
 function listHouseholdIngredients(db: SqliteDb, householdId: string): IngredientRow[] {
   return db
     .prepare(
@@ -241,12 +238,13 @@ function findExactIngredient(
   name: string,
   unit: string
 ): { match?: IngredientRow; warning?: MealConsumptionWarning } {
-  const normalizedName = normalizeMatchKey(name);
+  const normalizedName = normalizeIngredientMatchKey(name);
   const named = ingredients.filter(
-    (ingredient) => normalizeMatchKey(ingredient.name) === normalizedName
+    (ingredient) => normalizeIngredientMatchKey(ingredient.name) === normalizedName
   );
   const exact = named.filter(
-    (ingredient) => normalizeMatchKey(ingredient.unit) === normalizeMatchKey(unit)
+    (ingredient) =>
+      normalizeIngredientMatchKey(ingredient.unit) === normalizeIngredientMatchKey(unit)
   );
   if (exact.length === 1) return { match: exact[0] };
   if (exact.length > 1) {
@@ -298,7 +296,7 @@ function applyStockDelta(
       }
     };
   }
-  if (normalizeMatchKey(latest.unit) !== normalizeMatchKey(unit)) {
+  if (normalizeIngredientMatchKey(latest.unit) !== normalizeIngredientMatchKey(unit)) {
     throw new MealConsumptionError(
       'INVENTORY_UNIT_CHANGED',
       'La unidad del producto cambió; no se puede corregir este consumo con seguridad'

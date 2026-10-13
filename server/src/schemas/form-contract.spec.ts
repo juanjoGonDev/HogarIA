@@ -68,6 +68,7 @@ import {
 } from './household-meal-proposal-request.schema.js';
 import { mealProposalSchema } from './household-meal-proposal.schema.js';
 import { householdMealConsumptionSchema } from './household-meal-consumption.schema.js';
+import { householdMealShoppingPreviewQuerySchema } from './household-meal-shopping-preview.schema.js';
 import { generatedRecipeCandidateSchema } from './generated-recipe.schema.js';
 import {
   applyLinesSchema,
@@ -310,6 +311,13 @@ const ROWS: Row[] = [
     schema: householdMealConsumptionSchema,
     required: { status: 'realized', servings: 1, expectedVersion: 0 },
     note: 'El contrato exige todos los campos y distingue raciones positivas para consumo realizado y cero solo para no realizado.'
+  },
+  {
+    name: 'householdMealShoppingPreviewQuerySchema',
+    schema: householdMealShoppingPreviewQuerySchema,
+    kind: 'query',
+    required: { startDate: '2026-10-13', endDate: '2026-10-13' },
+    note: 'El cálculo requiere un rango explícito y acotado; la ruta rechaza fechas anteriores a hoy.'
   },
   {
     name: 'mealProposalSchema',

@@ -2566,7 +2566,11 @@ calendario en PC/móvil. La API backend de consumo está integrada en PR #47: so
 explícitos con `calendar.view` registran/corrigen; el stock doméstico se ajusta de forma atómica, versionada e
 idempotente desde el snapshot por ración, con warnings conservadores ante falta/ambigüedad. Su UI,
 integración visual en el calendario y E2E siguen pendientes; no se marca `QA-HOME-MEALS.CONSUMPTION.1`
-completo. El borrador de compra y la automatización tampoco están implementados. Evidencia y límites
+completo. El endpoint backend de preview de compra ya es de solo lectura; incluye comidas pendientes
+de hoy, excluye comidas con consumo registrado y asigna primero el stock a ingredientes obligatorios.
+Tests focales pasan 41/41, TSC y hooks pasan; el coverage aislado del store supera todos los umbrales.
+Faltan la revalidación de la suite completa en el árbol integrado, revisión UI y aprobación hacia
+Compra; la automatización tampoco está implementada. Evidencia y límites
 reproducibles están en `HOGARIA-HOUSEHOLD-PLAN-SPEC.md`, «Estado de implementación y evidencia»; no se
 declara `QA-HOME-MEALS.SETTINGS.1` ni `QA-HOME-MEALS.PLAN.1` completo.
 
