@@ -2961,6 +2961,7 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   await page.getByLabel('¿Qué quieres cambiar?').fill('Añade un aseo junto a los dormitorios');
   await page.locator('[data-test="plan-request-proposal"]').click();
   await expect(page.locator('[data-test="plan-proposal-chat-view"]')).toBeVisible();
+  await expect(page.locator('.plan-chat h4')).toHaveText('Asistente IA');
   await expect.poll(() => proposalRequestBodies.length).toBe(2);
   expect(proposalRequestBodies[1]).toContain('"draftPlan"');
   expect(proposalRequestBodies[1]).toContain('"prompt"');
