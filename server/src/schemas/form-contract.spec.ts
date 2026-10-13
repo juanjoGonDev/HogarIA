@@ -61,6 +61,7 @@ import {
   householdTaskWeekWriteSchema
 } from './household-task.schema.js';
 import { householdPlanAssignmentWriteSchema } from './household-plan-assignment.schema.js';
+import { householdMealPlanningPatchSchema } from './household-meal-planning.schema.js';
 import { generatedRecipeCandidateSchema } from './generated-recipe.schema.js';
 import {
   applyLinesSchema,
@@ -238,6 +239,18 @@ const ROWS: Row[] = [
     name: 'createHouseholdSchema',
     schema: createHouseholdSchema,
     required: { name: 'Los del 3B' }
+  },
+  {
+    name: 'householdMealPlanningPatchSchema',
+    schema: householdMealPlanningPatchSchema,
+    required: { household: { mealTypes: { dinner: false } } },
+    note: 'El patch aplica al menos un campo común o personal sin exigir que se envíe el bloque entero.',
+    except: {
+      household:
+        'El bloque vacío no contiene cambios; al menos un ajuste del hogar o de un miembro debe enviarse.',
+      member:
+        'El bloque vacío no contiene cambios; al menos un ajuste del hogar o de un miembro debe enviarse.'
+    }
   },
   {
     name: 'householdPlanWriteSchema',
