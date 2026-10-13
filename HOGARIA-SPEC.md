@@ -2137,6 +2137,13 @@ own dialog (round 12) and every path below goes through it.
 
 ## 12q. Round 16 checklist — the copy says «por defecto», and everything you can press looks pressable
 
+**Fuente de verdad actualizada para planificación del hogar:** los requisitos históricos de esta sección
+describen `mealTimes` en Preferencias y el tour cuando la planificación aún era por cuenta. La extensión
+de planificación del hogar en `HOGARIA-HOUSEHOLD-PLAN-SPEC.md` los supersede como ubicación efectiva:
+los valores existentes se conservan como perfil/origen para inicializar el hogar o activar el override
+personal, sin borrar ni migrar datos de forma destructiva. Desde ese cambio, la configuración común se
+edita en Hogar > Planificación y cada miembro puede activar su propio horario/comidas.
+
 Two sentences of feedback from the user, and they are the same complaint seen from both ends: the app
 described a behaviour with the word for an empty canvas («en blanco») instead of the word for what
 happens («por defecto»), and controls that do nothing when you hover them do not look like controls. The
@@ -2527,28 +2534,15 @@ Pedidos por la persona que usa la app, los dos con su caso detras:
 2. «En la creacion de eventos pueda repetirse: semanal, diario.» Un recado recurrente («sacar la basura los
    lunes») hoy se escribe a mano cada semana.
 
-### T. Bloquear comidas del planificador (`mealPlan`)
+### T. Bloqueo de comidas por cuenta (`mealPlan`) — supersedido como configuración efectiva
 
-- [ ] **El dato**: `users.preferences.mealPlan: { breakfast, lunch, snack, dinner }` de booleanos, con
-      `true` de fabrica (que es exactamente lo que hace la app hoy: una clave ausente no cambia el
-      comportamiento). Se guarda en `preferences` y NO en `users` —misma decision que `mealTimes` (12q).
-- [ ] **El contrato del PATCH, el mismo de `mealTimes`**: `undefined` = no tocar, `null` = borrar la clave
-      (volver al fabrica), `true`/`false` = escribir. Ningun `required` se afloja, y un valor que no es un
-      booleano se rechaza con 400 (`INVALID_FORM`) en lugar de guardarse como verdad rara.
-- [ ] **Quien lo lee**: `plan-week`. Los cuatro checkboxes del dialog pasan a arrancar del bloqueo, y las
-      comidas bloqueadas **no se ofrecen** —una linea dice cuales estan bloqueadas y donde se cambia—. Si estan
-      las cuatro bloqueadas, «Generar» no esta disponible y el motivo se lee al lado del boton.
-- [ ] **Quien lo respeta al escribir**: `persistWeeklyPlan` ignora las comidas bloqueadas aunque el modelo se
-      las invente. Es la diferencia entre «no las pidas» y «no las escribas»: el prompt es una peticion, la
-      persistencia es la garantia.
-- [ ] **Donde se cambia**: en `app-meal-hours`, fila a fila —«Que la IA la planifique» con su `app-checkbox`
-      en la misma linea de la hora—, porque el horario y quien lo rellena son la misma decision. El tour de
-      bienvenida NO lo toca: pregunta las cuatro horas, y ahi bloquear seria una pregunta mas de las seis
-      prometidas (queda en §13).
-- [ ] **Lo que NO cambia**: un bloqueo no borra nada. Ni las comidas ya planificadas de esa semana, ni las
-      siguientes semanas escritas, ni el «+» manual del calendario: bloquear es quitarle la tarea a la IA, no
-      quitarle la comida a la casa. Y los anclajes de la rejilla siguen usando la hora de esa comida,
-      bloqueada o no.
+La clave histórica `users.preferences.mealPlan` y su PATCH triestado se conservan durante la transición,
+pero dejan de ser la fuente efectiva de `plan-week` y no son la ubicación de la configuración común.
+Al crear un hogar pueden servir como valor semilla para sus comidas habilitadas; para una persona se usan
+como valor personal solo cuando su override de horario está activado. La clave existente no se borra ni se
+reescribe automáticamente. La configuración común, los overrides y sus permisos quedan definidos por
+`HOGARIA-HOUSEHOLD-PLAN-SPEC.md` (extensión aprobada en PR #47). La sección siguiente sobre recurrencia
+de eventos es independiente y sigue vigente.
 
 ### R. Recurrencia de los eventos de la casa
 
@@ -5589,7 +5583,7 @@ completa del servidor en DB temporal pasa con **91,56/82,83/95,59/94,13 % S/B/F/
 `recipe-book-seed.ts`/`recipe-images.routes.ts` con 100 % por archivo. Esta revalidación supersede el
 gate de coverage que permanecía abierto en la evidencia histórica; build cliente/servidor,
 `typecheck:e2e`, `check:ui` (**207 ficheros/21 reglas**), `test:config` (**9/9**) y `git diff --check`
- pasan. No se rebajaron umbrales; artifacts de cobertura y DB temporales.
+pasan. No se rebajaron umbrales; artifacts de cobertura y DB temporales.
 
 **Evidencia actualizada (2026-10-05):** `pnpm --filter @hogaria/server exec vitest run
 src/routes/recipes.routes.spec.ts src/utils/recipe-book-seed.spec.ts --reporter=dot`: **18/18** con

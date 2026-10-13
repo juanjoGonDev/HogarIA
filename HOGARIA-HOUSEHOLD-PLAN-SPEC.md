@@ -6,7 +6,8 @@ Este contrato concreta capacidades de HogarIA y complementa las reglas compartid
 `HOGARIA-SPEC.md` §12ap (aislamiento por hogar, membresía, permisos y proveedor de IA) y §13
 (tareas del hogar pendientes). La extensión de planificación de comidas descrita al final mantiene
 el calendario existente como calendario único: añade a él eventos de comida/tareas del hogar, sin
-reemplazar su vista ni modificar las recetas guardadas. Esa extensión aún no está implementada.
+reemplazar su vista ni modificar las recetas guardadas. Su implementación se realiza por unidades
+atómicas en el PR #47; los criterios de aceptación siguen abiertos hasta tener evidencia.
 
 ## Objetivo
 
@@ -949,49 +950,62 @@ debe resolverse mediante una pantalla obligatoria de crear/unirse antes de usar 
 Aunque hoy exista un único usuario real, las pruebas usan miembros sintéticos para verificar invitación,
 asignación, conflictos y aislamiento; no se implementará un atajo que invalide el flujo de unirse.
 
+### Contrato de implementación y criterios pendientes de aceptación
+
+Los nombres y la resolución de configuración quedan fijados para que UI, API y planificador compartan
+el mismo contrato:
+
+- El hogar conserva `objective: { goals, notes }`, `mealTypes` (booleanos por `MealTypeKey`) y
+  `mealTimes` (hora `HH:mm` por `MealTypeKey`). Los valores iniciales de `mealTypes` y `mealTimes`
+  proceden de los valores actuales del creador al crear un hogar, en una operación idempotente; la
+  configuración original del perfil personal no se borra.
+- Cada `household_member` tiene `goalOverrideEnabled` y `scheduleOverrideEnabled`, ambos `false` al
+  crear la membresía. `schedule` contiene los booleanos de comidas y los horarios personales. El
+  valor personal se obtiene del perfil ya existente (`taste.goals`, `taste.goalNotes`, `mealPlan` y
+  `mealTimes`); no se copian alergias ni gustos a la configuración común.
+- La configuración efectiva se resuelve por campo: el objetivo/horario común si el override está
+  apagado; el valor personal correspondiente si está encendido. Un override encendido sin valor
+  válido bloquea la generación y pide completarlo. El estado habilitado de la planificación y los
+  tipos de comida comunes no se confunden con los dos overrides personales.
+- `mealPlan` bajo `users.preferences` deja de ser fuente efectiva de `plan-week`; durante la
+  transición se conserva sin borrado ni migración destructiva y solo sirve como valor de origen al
+  inicializar el hogar/override. El contrato futuro de §12t.T queda supersedido por esta extensión.
+
+El JSON de cada semana representa eventos con `date`, `mealType`, `time`, `recipe`, ingredientes,
+`participantIds`, `servings`, objetivo/resumen visible y estado de resolución. Una comida compartida
+es un evento, no una copia por miembro. Antes de confirmar, el servidor valida pertenencia, selección,
+horario efectivo, raciones y restricciones estrictas; persiste solo tras aprobación. La IA no recibe
+datos de miembros fuera de la selección y el calendario no expone notas privadas de otra persona.
+
 ### Criterios pendientes de aceptación — no implementados
 
-- [ ] Confirmar que el permiso vigente de configuración del hogar protege los valores comunes y la
-      automatización; las personas solo editan sus propios overrides/perfil.
-- [ ] Definir/validar nombres y significado exacto de los campos de objetivo, horarios, comidas habilitadas,
-      participantes de cada semana y controles de automatización; mantener Preferencias para perfil
-      alimentario personal, no como lugar de configuración de la planificación común.
-- [ ] Reconciliar el requisito anterior de `users.preferences.mealPlan` de `HOGARIA-SPEC.md` §12t.T:
-      queda **en conflicto** con este traslado al hogar; no implementar la ubicación antigua hasta actualizar
-      la fuente de verdad. La recurrencia de eventos de §12t.R es independiente y no cambia por esta propuesta.
-- [ ] Pruebas unitarias del resolvedor de objetivos/horarios: overrides apagados por defecto; override de
-      un solo campo; valor personal ausente; hogar sin configuración; miembros incluidos/excluidos; ningún
-      dato de un miembro fuera del hogar o no seleccionado llega al prompt.
-- [ ] Pruebas de creación/unión y origen inicial: copiar configuración actual del creador una vez al crear
-      hogar, conservar sus preferencias personales, unirse sin cambiar defaults del hogar y mantener
-      idempotencia ante reintentos.
-- [ ] Pruebas del planificador con proveedor simulado: plato compartido deduplicado; raciones calculadas por
-      participantes; conflictos soft/hard; alergia estricta nunca violada; todos con overrides; turnos
-      personales solamente cuando corresponda; ausencia de receta segura; JSON malformado/esquema inválido,
-      IDs foráneos, duplicados y errores del proveedor no persisten ningún evento.
-- [ ] Verificar `response_format` JSON Schema estricto en cada petición que solicite JSON y volver a validar
-      la respuesta en servidor; no depender de que el modelo obedezca el prompt.
-- [ ] Pruebas de calendario: un evento compartido aparece una vez y muestra participantes/raciones; los
-      platos distintos se asignan a los miembros correctos; no hay filtración de objetivos/notas privadas;
-      vista actual no se reemplaza y la persistencia es idempotente.
-- [ ] Pruebas de confirmación de comidas: realizada/no realizada, porciones cero/positivas/fuera de rango,
-      ajustes permitidos, stock sin cambios antes de confirmar e idempotencia al reintentar; confirmar una
-      comida no altera la receta base ni crea movimientos duplicados.
-- [ ] Pruebas de propuesta de compra: conciliación de stock editable, consolidación de ingredientes,
-      revisión/edición, cancelación, rechazo y aprobación explícita; ni una ejecución fallida ni una
-      propuesta cancelada modifica inventario o la lista real.
-- [ ] Pruebas de automatización: crear la semana nueva una vez, pausar/reanudar, fecha próxima, reintento,
-      idempotencia, repetición del mismo plan sin llamadas IA y sin duplicados, separación Tareas/Comidas y
-      preservación de ediciones manuales.
-- [ ] Pruebas de reparto de tareas con asignación fija y aleatoria: equilibrio entre elegibles, no repetir
-      persona en días consecutivos si hay solución, excepción explicada cuando no la hay, y asignaciones
-      manuales protegidas.
-- [ ] Pruebas de alta aisladas: crear hogar, unirse con invitación válida, opción omitida bloqueada, código
-      inválido/vencido, error de servidor/red con reintento, recarga y reanudación, doble envío/concurrencia,
-      pertenencia activa antes de acceder al dashboard y denegación server-side al intentar otra casa.
-      No borrar datos reales ni tratar tests sintéticos como prueba de compatibilidad de cuentas antiguas.
+- [ ] **QA-HOME-MEALS.SETTINGS.1** — API, persistencia, permisos y resolución por campo; defaults de
+      overrides apagados; hogar nuevo inicializado idempotentemente desde valores existentes; unirse
+      no modifica valores comunes; ningún dato ajeno/no seleccionado llega al planificador.
+- [ ] **QA-HOME-MEALS.PLAN.1** — plan semanal con proveedor simulado, vista previa explícita y
+      `response_format` estricto; plato compartido una vez, raciones por participantes, conflictos
+      soft/hard, alergia estricta, todos con overrides, turnos personales, sin receta segura,
+      respuesta inválida/IDs foráneos/duplicados/error sin escrituras.
+- [ ] **QA-HOME-MEALS.CALENDAR.1** — persistencia idempotente tras confirmar, calendario actual,
+      evento compartido visible una vez, asignaciones correctas y ninguna nota/objetivo privado
+      filtrado.
+- [ ] **QA-HOME-MEALS.CONSUMPTION.1** — realizada/no realizada, raciones cero/positivas/fuera de
+      rango, ajustes, inventario sin cambios antes de confirmar e idempotencia; la receta base y los
+      movimientos de stock no se duplican.
+- [ ] **QA-HOME-MEALS.SHOPPING.1** — stock editable, consolidación de ingredientes, borrador,
+      revisión, edición/cancelación/rechazo/aprobación; errores y cancelaciones no mutan Compra ni
+      inventario.
+- [ ] **QA-HOME-PLANNING.AUTOMATION.1** — generar/repetir, play/pause, siguiente fecha, retry e
+      idempotencia; repetir no llama a IA ni duplica eventos, protege ediciones manuales y permite
+      elegir tareas/comidas.
+- [ ] **QA-HOME-TASKS.WEEKLY.2** — asignación fija/aleatoria, equilibrio, no repetir días
+      consecutivos si hay solución, excepción explicada y preservación de asignaciones manuales.
+- [ ] **QA-AUTH.HOUSEHOLD-REQUIRED.1** — alta obligatoria crear/unirse, invitación inválida/vencida,
+      error recuperable, reanudación, doble envío, membership activo antes de dashboard y rechazo
+      server-side; sin acceso al resto con hogar pendiente.
 - [ ] E2E real contra app local para PC y móvil: configuración de hogar, override por dos miembros,
       generación y aprobación, calendario, confirmación de raciones, borrador de compra, automatización y
       alta crear/unirse; usar DB temporal/semillas únicas y capturas sin datos personales.
-- [ ] Actualizar `HOGARIA-SPEC.md` §12t.T y este checklist con las decisiones que el usuario confirme.
-      No marcar esta extensión completa ni la validación IA real sin evidencia reproducible de cada gate.
+- [ ] Actualizar la evidencia de cada unidad aquí y en `HOGARIA-SPEC.md` §12t.T. La recurrencia de
+      §12t.R no cambia. No marcar la extensión completa ni la validación IA real sin evidencia
+      reproducible de cada gate.
