@@ -7,6 +7,7 @@ import { Recipe } from '../../shared/models/recipe.model';
 import { RecipeInstructionStep } from '../../shared/models/recipe-instructions';
 import { TimerComponent, type TimerState } from '../../shared/components/ui/timer/timer.component';
 import { scaleRecipeQuantity } from './recipe-detail.util';
+import { RecipeStepVideoPlayerComponent } from './recipe-step-video-player.component';
 
 interface TimerSnapshot {
   state: TimerState;
@@ -23,7 +24,14 @@ interface ActiveRecipeTimer {
 @Component({
   selector: 'app-recipe-cooking-view',
   standalone: true,
-  imports: [CommonModule, TranslatePipe, ButtonComponent, IconComponent, TimerComponent],
+  imports: [
+    CommonModule,
+    TranslatePipe,
+    ButtonComponent,
+    IconComponent,
+    TimerComponent,
+    RecipeStepVideoPlayerComponent
+  ],
   template: `
     <section class="recipe-cooking" data-test="recipe-cooking-view">
       <header class="recipe-cooking__header">
@@ -223,6 +231,18 @@ interface ActiveRecipeTimer {
                 </header>
 
                 <p class="recipe-cooking__instruction">{{ step.instruction }}</p>
+                <p *ngIf="step.temperature" class="recipe-cooking__temperature">
+                  {{
+                    'recipes.step_temperature_value'
+                      | t: { value: step.temperature.value, unit: step.temperature.unit }
+                  }}
+                </p>
+                <app-recipe-step-video-player
+                  *ngIf="focusedStepIndex() === index && step.videoId"
+                  [recipeId]="recipe.id"
+                  [videoId]="step.videoId"
+                  [video]="step.video ?? null"
+                />
                 <p *ngIf="step.tips" class="recipe-cooking__tip">
                   <app-icon name="help_outline" [size]="16" [label]="null" /> {{ step.tips }}
                 </p>
@@ -588,6 +608,13 @@ interface ActiveRecipeTimer {
         margin: var(--space-1) 0 0;
         line-height: var(--leading-relaxed);
         overflow-wrap: anywhere;
+      }
+
+      .recipe-cooking__temperature {
+        margin: var(--space-1) 0 0;
+        color: var(--text-secondary);
+        font-size: var(--text-sm);
+        line-height: var(--leading-normal);
       }
 
       .recipe-cooking__tip,

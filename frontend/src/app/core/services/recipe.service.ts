@@ -4,12 +4,44 @@ import { Observable, tap, catchError, map, of, shareReplay, throwError } from 'r
 import { environment } from '../../../environments/environment';
 import { Recipe, RecipeFilter, RecipeUpdateInput } from '../../shared/models/recipe.model';
 import { RecipeStepPhoto, RecipeStepPhotoScene } from '../../shared/models/recipe-step-photo';
+import {
+  RecipeStepVideoCandidate,
+  RecipeStepVideoScene
+} from '../../shared/models/recipe-step-video';
 import { SILENT_TOAST } from '../interceptors/error.interceptor';
 import { LatestRequest } from '../utils/latest-request';
 
 function normalizeRecipe(recipe: Recipe): Recipe {
-  if (recipe.image != null) return recipe;
-  const { image: _missingImage, ...withoutImage } = recipe;
+  type ApiStep = NonNullable<Recipe['steps']>[number] & {
+    videoAttribution?: Omit<RecipeStepVideoCandidate, 'id'> | null;
+  };
+  const normalizeStep = (step: ApiStep): NonNullable<Recipe['steps']>[number] => {
+    const { videoAttribution, ...normalized } = step;
+    const video =
+      step.video ??
+      (step.videoId && videoAttribution ? { id: step.videoId, ...videoAttribution } : undefined);
+    return { ...normalized, ...(video ? { video } : {}) };
+  };
+  const steps = Array.isArray(recipe.steps)
+    ? recipe.steps.map((step) => normalizeStep(step as ApiStep))
+    : recipe.steps;
+  const instructionsByLevel = recipe.instructionsByLevel
+    ? (Object.fromEntries(
+        Object.entries(recipe.instructionsByLevel).map(([level, levelSteps]) => [
+          level,
+          Array.isArray(levelSteps)
+            ? levelSteps.map((step) => normalizeStep(step as ApiStep))
+            : levelSteps
+        ])
+      ) as Recipe['instructionsByLevel'])
+    : recipe.instructionsByLevel;
+  const normalizedRecipe = {
+    ...recipe,
+    ...(steps ? { steps } : {}),
+    ...(instructionsByLevel ? { instructionsByLevel } : {})
+  };
+  if (normalizedRecipe.image != null) return normalizedRecipe;
+  const { image: _missingImage, ...withoutImage } = normalizedRecipe;
   return withoutImage;
 }
 
@@ -23,6 +55,10 @@ export class RecipeService {
   private readonly stepPhotoSearchRequests = new Map<
     RecipeStepPhotoScene,
     Observable<RecipeStepPhoto | null>
+  >();
+  private readonly stepVideoSearchRequests = new Map<
+    RecipeStepVideoScene,
+    Observable<RecipeStepVideoCandidate[]>
   >();
   private readonly stepPhotoImageRequests = new Map<string, Observable<string>>();
   private readonly stepPhotoObjectUrls = new Map<string, string>();
@@ -76,6 +112,55 @@ export class RecipeService {
   retryStepPhoto(scene: RecipeStepPhotoScene): Observable<RecipeStepPhoto | null> {
     this.stepPhotoSearchRequests.delete(scene);
     return this.searchStepPhoto(scene);
+  }
+
+  searchStepVideos(scene: RecipeStepVideoScene): Observable<RecipeStepVideoCandidate[]> {
+    const cached = this.stepVideoSearchRequests.get(scene);
+    if (cached) return cached;
+
+    let request$: Observable<RecipeStepVideoCandidate[]>;
+    request$ = this.http
+      .get<{ data?: RecipeStepVideoCandidate[] }>(`${this.apiUrl}/step-videos/search`, {
+        params: { scene },
+        context: new HttpContext().set(SILENT_TOAST, true)
+      })
+      .pipe(
+        map((response) => (Array.isArray(response?.data) ? response.data.slice(0, 5) : [])),
+        catchError((error) => {
+          if (this.stepVideoSearchRequests.get(scene) === request$) {
+            this.stepVideoSearchRequests.delete(scene);
+          }
+          return throwError(() => error);
+        }),
+        shareReplay({ bufferSize: 1, refCount: true })
+      );
+    this.stepVideoSearchRequests.set(scene, request$);
+    return request$;
+  }
+
+  retryStepVideos(scene: RecipeStepVideoScene): Observable<RecipeStepVideoCandidate[]> {
+    this.stepVideoSearchRequests.delete(scene);
+    return this.searchStepVideos(scene);
+  }
+
+  prepareStepVideoPlayback(recipeId: string, videoId: string): Observable<boolean> {
+    return this.http
+      .post<{ success?: boolean }>(
+        `${this.apiUrl}/${encodeURIComponent(recipeId)}/step-videos/${encodeURIComponent(videoId)}/playback`,
+        {},
+        {
+          withCredentials: true,
+          context: new HttpContext().set(SILENT_TOAST, true)
+        }
+      )
+      .pipe(
+        map((response) => response?.success === true),
+        catchError(() => of(false))
+      );
+  }
+
+  stepVideoStreamUrl(recipeId: string, videoId: string): string {
+    return `${this.apiUrl}/${encodeURIComponent(recipeId)}/step-videos/${encodeURIComponent(videoId)}/stream`;
   }
 
   searchRecipePhotos(query: string): Observable<RecipeStepPhoto[]> {
@@ -199,7 +284,7 @@ export class RecipeService {
     );
   }
 
-  createRecipe(recipe: Partial<Recipe>): Observable<Recipe | null> {
+  createRecipe(recipe: Partial<Recipe> | RecipeUpdateInput): Observable<Recipe | null> {
     return this.http.post<{ data: Recipe }>(this.apiUrl, recipe).pipe(
       map((response) => normalizeRecipe(response.data)),
       tap((created) => {

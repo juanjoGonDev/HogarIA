@@ -52,6 +52,8 @@ import {
   utensilFilterSchema
 } from './pantry.schema.js';
 import { createRecipeSchema, recipeFilterSchema, updateRecipeSchema } from './recipe.schema.js';
+import { aiRecipeOutputSchema } from './recipe-ai-output.schema.js';
+import { improveRecipeRequestSchema } from './recipe-improvement.schema.js';
 import {
   householdPlanProposalRequestSchema,
   householdPlanWriteSchema
@@ -627,6 +629,18 @@ const ROWS: Row[] = [
       storage: null,
       tags: []
     }
+  },
+  {
+    name: 'aiRecipeOutputSchema',
+    schema: aiRecipeOutputSchema,
+    required: mealRecipeCandidate,
+    note: 'La respuesta JSON canónica de recetas exige todos los campos, los tres niveles y al menos un ingrediente.'
+  },
+  {
+    name: 'improveRecipeRequestSchema',
+    schema: improveRecipeRequestSchema,
+    required: { recipe: mealRecipeCandidate, scopes: ['preparation'] },
+    note: 'La mejora requiere una receta editable y al menos un ámbito explícito.'
   },
   {
     name: 'updateRecipeSchema',

@@ -40,6 +40,18 @@ const detailedRecipe: Recipe = {
       {
         stepNumber: 1,
         instruction: 'Corta la calabaza en cubos y cuece hasta que esté blanda.',
+        videoId: 'f'.repeat(24),
+        video: {
+          id: 'f'.repeat(24),
+          title: 'Cocción de verduras',
+          author: 'Autora sintética',
+          licenseName: 'CC BY 4.0',
+          licenseUrl: 'https://creativecommons.org/licenses/by/4.0/',
+          sourceUrl: 'https://commons.wikimedia.org/wiki/File:Cooking.webm',
+          thumbnailUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a0/Cooking.jpg',
+          durationSeconds: 18,
+          mimeType: 'video/webm'
+        },
         duration: 20,
         temperature: { value: 100, unit: 'C' },
         timerRequired: true,
@@ -100,8 +112,11 @@ describe('recipe edit payload', () => {
     );
     expect(payload?.instructionsByLevel?.basic[0].instruction).toBe('Cuece la calabaza.');
     expect(payload?.instructionsByLevel?.intermediate[0]).toEqual(
-      jasmine.objectContaining({ duration: 20, timerDuration: 20 })
+      jasmine.objectContaining({ duration: 20, timerDuration: 20, videoId: 'f'.repeat(24) })
     );
+    expect(
+      (payload?.instructionsByLevel?.intermediate[0] as { video?: unknown }).video
+    ).toBeUndefined();
     expect(payload?.instructionsByLevel?.expert.length).toBe(1);
     expect(Object.prototype.hasOwnProperty.call(payload, 'steps')).toBeFalse();
   });

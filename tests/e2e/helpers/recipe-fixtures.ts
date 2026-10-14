@@ -26,6 +26,7 @@ export interface SyntheticRecipeOptions {
     substitutes?: string[];
     notes?: string | null;
   }>;
+  utensils?: string[];
   guidance?: {
     appliances: string[];
     parallelTasks: string[];
@@ -77,6 +78,7 @@ export async function createSyntheticRecipe(
       calories: options.calories,
       restTime: options.restTime,
       ingredients: options.ingredients ?? [{ name: 'Tomate QA', quantity: 2, unit: 'unit' }],
+      utensils: options.utensils ?? [],
       ...(options.guidance ? { guidance: options.guidance } : {}),
       ...(options.instructionsByLevel
         ? { instructionsByLevel: options.instructionsByLevel }

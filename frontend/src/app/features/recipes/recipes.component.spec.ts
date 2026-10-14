@@ -290,6 +290,12 @@ describe('RecipesComponent', () => {
     expect(recipes.loadRecipes).toHaveBeenCalledWith({ page: 1, pageSize: 12, catalogOnly: true });
   });
 
+  it('navigates to the dedicated manual recipe creation form', () => {
+    component.createManualRecipe();
+
+    expect(router.navigate).toHaveBeenCalledWith(['/recipes', 'new']);
+  });
+
   it('ignores malformed query values and maps quick filters and favorites to the URL', () => {
     queryParams.next(
       convertToParamMap({

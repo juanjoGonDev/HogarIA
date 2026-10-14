@@ -226,3 +226,38 @@ describe('el visor de logs, servido por el propio proceso', () => {
     expect(texto).toContain('data: {"type":"connected"');
   });
 });
+
+describe('CORS de reproducción de vídeos', () => {
+  it('permite credenciales, Range y expone las cabeceras de respuesta del stream', async () => {
+    const app = createApp({ rateLimit: null });
+    const origin = 'http://localhost:4200';
+    const preflight = await app.request(
+      '/api/recipes/recipe/step-videos/0123456789abcdef01234567/stream',
+      {
+        method: 'OPTIONS',
+        headers: {
+          Origin: origin,
+          'Access-Control-Request-Method': 'GET',
+          'Access-Control-Request-Headers': 'range'
+        }
+      }
+    );
+
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers.get('access-control-allow-origin')).toBe(origin);
+    expect(preflight.headers.get('access-control-allow-credentials')).toBe('true');
+    expect(preflight.headers.get('access-control-allow-headers')?.toLowerCase()).toContain('range');
+
+    const response = await app.request(
+      '/api/recipes/recipe/step-videos/0123456789abcdef01234567/stream',
+      { headers: { Origin: origin, Range: 'bytes=0-0' } }
+    );
+    expect(response.status).toBe(401);
+    expect(response.headers.get('access-control-allow-origin')).toBe(origin);
+    expect(response.headers.get('access-control-allow-credentials')).toBe('true');
+    const exposed = response.headers.get('access-control-expose-headers')?.toLowerCase() ?? '';
+    expect(exposed).toContain('accept-ranges');
+    expect(exposed).toContain('content-range');
+    expect(exposed).toContain('content-length');
+  });
+});

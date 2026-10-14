@@ -24,6 +24,7 @@ import {
   recipePhotoPreviewRoutes,
   recipeStepPhotoRoutes
 } from './routes/recipe-step-photos.routes.js';
+import { recipeStepVideoRoutes } from './routes/recipe-step-videos.routes.js';
 import { householdRoutes } from './routes/household.routes.js';
 import { householdMealPlanningRoutes } from './routes/household-meal-planning.routes.js';
 import { householdMealProposalRoutes } from './routes/household-meal-proposals.routes.js';
@@ -319,13 +320,16 @@ export function createApp(options: AppOptions = {}): Hono {
     cors({
       origin: config.cors.origin,
       allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      allowHeaders: ['Content-Type', 'Authorization'],
+      allowHeaders: ['Content-Type', 'Authorization', 'Range'],
       exposeHeaders: [
         'X-Request-Id',
         'Retry-After',
         'X-RateLimit-Limit',
         'X-RateLimit-Remaining',
-        'X-RateLimit-Reset'
+        'X-RateLimit-Reset',
+        'Accept-Ranges',
+        'Content-Range',
+        'Content-Length'
       ],
       maxAge: 86400,
       credentials: true
@@ -451,6 +455,7 @@ export function createApp(options: AppOptions = {}): Hono {
   app.route('/api/shopping', shoppingRoutes);
   app.route('/api/receipts', receiptsRoutes);
   app.route('/api/recipes/step-photos', recipeStepPhotoRoutes);
+  app.route('/api/recipes', recipeStepVideoRoutes);
   app.route('/api/recipe-photo-previews', recipePhotoPreviewRoutes);
   app.route('/api/recipe-images', recipeImageRoutes);
   app.route('/api/recipes', recipeRoutes);

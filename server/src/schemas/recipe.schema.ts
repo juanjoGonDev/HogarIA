@@ -77,6 +77,8 @@ const recipeStepSchema = z
     image: formField(recipeImageReferenceSchema),
     /** Candidate returned by the bounded photo search; the route replaces it with a local asset path. */
     imagePhotoId: formField(z.string().regex(/^[a-f0-9]{24}$/)),
+    /** A server-resolved Commons selection id; source URLs and attribution are never client-authored. */
+    videoId: formField(z.string().regex(/^[a-f0-9]{24}$/)),
     illustration: formField(recipeStepIllustrationSchema)
   })
   .superRefine((step, context) => {

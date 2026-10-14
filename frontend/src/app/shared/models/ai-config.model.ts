@@ -133,6 +133,50 @@ export interface AIRecipeResponse {
   restTime: number | null;
 }
 
+/** Fields editable through the canonical recipe-improvement contract. Keep media and IDs out. */
+export type RecipeImproveScope =
+  'details' | 'ingredients' | 'timing' | 'preparation' | 'guidance' | 'nutrition' | 'storage';
+
+export type AIRecipeImproveInput = Partial<AIRecipeResponse> & {
+  /** Saved editor quantities are normalized to one serving before they reach the AI. */
+  servings?: number;
+  /** Legacy recipes may still contain flat steps instead of detail-level instructions. */
+  steps?: AIRecipeStep[];
+};
+
+export interface AIRecipeImproveRequest {
+  recipe: AIRecipeImproveInput;
+  scopes: RecipeImproveScope[];
+}
+
+export type AIRecipeImprovePatch = Partial<
+  Pick<
+    AIRecipeResponse,
+    | 'name'
+    | 'description'
+    | 'difficulty'
+    | 'cuisine'
+    | 'totalTime'
+    | 'prepTime'
+    | 'cookTime'
+    | 'calories'
+    | 'ingredients'
+    | 'utensils'
+    | 'guidance'
+    | 'instructionsByLevel'
+    | 'tags'
+    | 'nutrition'
+    | 'storage'
+    | 'restTime'
+  >
+>;
+
+export interface AIRecipeImproveResponse {
+  proposal: AIRecipeResponse;
+  patch: AIRecipeImprovePatch;
+  scopes: RecipeImproveScope[];
+}
+
 export interface AIRecipeIngredient {
   name: string;
   quantity: number;

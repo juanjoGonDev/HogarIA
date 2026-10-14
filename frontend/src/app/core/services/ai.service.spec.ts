@@ -469,4 +469,44 @@ describe('AiService', () => {
     planRequest.flush({ data: { days: [] } });
     expect(plan).toEqual({ data: { days: [] } });
   });
+
+  it('requests a scoped recipe improvement without mutating generated recipe state', () => {
+    const request = {
+      recipe: {
+        name: 'Tortilla de patata',
+        ingredients: [{ name: 'Patata', quantity: 2, unit: 'unit' }],
+        steps: [{ stepNumber: 1, instruction: 'Dorar la patata.' }]
+      },
+      scopes: ['preparation']
+    };
+    const response = {
+      proposal: { name: 'Propuesta sintética' },
+      patch: { instructionsByLevel: { basic: [], intermediate: [], expert: [] } },
+      scopes: ['preparation']
+    };
+    let result: unknown;
+
+    service.improveRecipe(request as never).subscribe((value) => (result = value));
+
+    const improveRequest = http.expectOne('/api/ai/improve-recipe');
+    expect(improveRequest.request.method).toBe('POST');
+    expect(improveRequest.request.body).toEqual(request);
+    expect(improveRequest.request.context.get(SILENT_TOAST)).toBeTrue();
+    expect(service.isImprovingRecipe()).toBeTrue();
+    improveRequest.flush({ data: response });
+
+    expect(result).toEqual(response);
+    expect(service.isImprovingRecipe()).toBeFalse();
+    expect(service.generatedRecipe()).toBeNull();
+  });
+
+  it('returns null and clears improving state when the request fails', () => {
+    let result: unknown = 'pending';
+    service.improveRecipe({ recipe: {} } as never).subscribe((value) => (result = value));
+    const request = http.expectOne('/api/ai/improve-recipe');
+    expect(service.isImprovingRecipe()).toBeTrue();
+    request.flush({}, { status: 503, statusText: 'Unavailable' });
+    expect(result).toBeNull();
+    expect(service.isImprovingRecipe()).toBeFalse();
+  });
 });

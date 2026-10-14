@@ -122,6 +122,15 @@ function difficultyFromQuery(value: string | null): Difficulty | null {
             <span class="recipes__count">{{ recetasLabel() }}</span>
           </div>
           <div class="recipes__actions">
+            <app-button
+              *ngIf="collection() === 'book'"
+              variant="outline"
+              data-test="recipe-create-action"
+              (onClick)="createManualRecipe()"
+            >
+              <app-icon name="add" [size]="16" [label]="null" />
+              {{ 'recipes.create_manual' | t }}
+            </app-button>
             <app-button variant="outline" (onClick)="openFilterModal()">
               <app-icon name="filter_list" [size]="16" [label]="null" />
               {{ 'recipes.filters' | t }}
@@ -1293,9 +1302,17 @@ function difficultyFromQuery(value: string | null): Difficulty | null {
                       <span class="step-card__number">{{
                         'recipes.paso_n' | t: { n: step.stepNumber }
                       }}</span>
-                      <span *ngIf="step.duration" class="step-card__time">{{
-                        'recipes.min' | t: { n: step.duration }
-                      }}</span>
+                      <div class="step-card__metrics">
+                        <span *ngIf="step.duration" class="step-card__time">{{
+                          'recipes.min' | t: { n: step.duration }
+                        }}</span>
+                        <span *ngIf="step.temperature" class="step-card__temperature">
+                          {{
+                            'recipes.step_temperature_value'
+                              | t: { value: step.temperature.value, unit: step.temperature.unit }
+                          }}
+                        </span>
+                      </div>
                     </div>
                     <app-recipe-step-photo
                       [instruction]="step.instruction"
@@ -1486,6 +1503,7 @@ function difficultyFromQuery(value: string | null): Difficulty | null {
 
       .recipes__actions {
         display: flex;
+        flex-wrap: wrap;
         gap: var(--space-2);
       }
 
@@ -2305,6 +2323,22 @@ function difficultyFromQuery(value: string | null): Difficulty | null {
         color: var(--text-secondary);
       }
 
+      .step-card__metrics {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        flex-wrap: wrap;
+        gap: var(--space-1) var(--space-2);
+        min-width: 0;
+      }
+
+      .step-card__temperature {
+        color: var(--text-secondary);
+        font-size: var(--text-xs);
+        overflow-wrap: anywhere;
+        text-align: right;
+      }
+
       .step-card__instruction {
         margin: 0;
         font-size: var(--text-base);
@@ -2448,6 +2482,17 @@ function difficultyFromQuery(value: string | null): Difficulty | null {
       }
 
       @media (max-width: 480px) {
+        .recipes__actions {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          width: 100%;
+        }
+        .recipes__actions [data-test='recipe-create-action'] {
+          grid-column: 1 / -1;
+        }
+        .recipes__actions app-button {
+          min-width: 0;
+        }
         .recipe-ai-wizard__steps {
           gap: var(--space-1);
         }
@@ -2500,6 +2545,10 @@ export class RecipesComponent implements OnInit {
   recetasLabel(): string {
     const n = this.recipeService.total();
     return this.i18n.plural(n, 'recipes.n_recetas_uno', 'recipes.n_recetas_varios', { count: n });
+  }
+
+  createManualRecipe(): void {
+    void this.router.navigate(['/recipes', 'new']);
   }
 
   recipeService = inject(RecipeService);

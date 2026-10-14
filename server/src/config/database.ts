@@ -337,6 +337,28 @@ async function runMigrations(db: Database.Database): Promise<void> {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
+    -- Selected Commons clips survive API cache eviction/restart. Recipe JSON stores only videoId;
+    -- this table owns the validated source and attribution and is removed with its recipe.
+    CREATE TABLE IF NOT EXISTS recipe_step_video_assets (
+      recipe_id TEXT NOT NULL,
+      video_id TEXT NOT NULL CHECK (
+        length(video_id) = 24 AND video_id NOT GLOB '*[^a-f0-9]*'
+      ),
+      title TEXT NOT NULL,
+      author TEXT NOT NULL,
+      license_name TEXT NOT NULL,
+      license_url TEXT NOT NULL,
+      source_url TEXT NOT NULL,
+      thumbnail_url TEXT NOT NULL,
+      media_url TEXT NOT NULL,
+      mime_type TEXT NOT NULL CHECK (mime_type IN ('video/mp4', 'video/webm')),
+      duration_seconds INTEGER NOT NULL CHECK (duration_seconds BETWEEN 1 AND 60),
+      size_bytes INTEGER NOT NULL CHECK (size_bytes BETWEEN 1 AND 31457280),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (recipe_id, video_id),
+      FOREIGN KEY (recipe_id) REFERENCES recipes(id) ON DELETE CASCADE
+    );
+
     -- User recipes (favorites, history)
     CREATE TABLE IF NOT EXISTS user_recipes (
       id TEXT PRIMARY KEY,

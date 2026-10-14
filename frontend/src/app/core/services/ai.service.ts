@@ -6,6 +6,8 @@ import { SILENT_TOAST } from '../interceptors/error.interceptor';
 import {
   AIProviderConfig,
   AIRecipeRequest,
+  AIRecipeImproveRequest,
+  AIRecipeImproveResponse,
   AIRecipeResponse,
   AITestConnectionResponse,
   AIReplacementCandidate,
@@ -25,6 +27,7 @@ export class AiService {
   private configsLoadingSignal = signal(false);
   private configsErrorSignal = signal(false);
   private isGeneratingSignal = signal(false);
+  private isImprovingRecipeSignal = signal(false);
   private generatedRecipeSignal = signal<AIRecipeResponse | null>(null);
   private generatedRecipesSignal = signal<AIRecipeResponse[]>([]);
 
@@ -32,6 +35,7 @@ export class AiService {
   readonly configsLoading = this.configsLoadingSignal.asReadonly();
   readonly configsError = this.configsErrorSignal.asReadonly();
   readonly isGenerating = this.isGeneratingSignal.asReadonly();
+  readonly isImprovingRecipe = this.isImprovingRecipeSignal.asReadonly();
   readonly generatedRecipe = this.generatedRecipeSignal.asReadonly();
   readonly generatedRecipes = this.generatedRecipesSignal.asReadonly();
 
@@ -181,6 +185,20 @@ export class AiService {
         }),
         catchError(() => of(null)),
         finalize(() => this.isGeneratingSignal.set(false))
+      );
+  }
+
+  improveRecipe(request: AIRecipeImproveRequest): Observable<AIRecipeImproveResponse | null> {
+    this.isImprovingRecipeSignal.set(true);
+
+    return this.http
+      .post<{ data?: AIRecipeImproveResponse | null }>(`${this.apiUrl}/improve-recipe`, request, {
+        context: this.silentContext()
+      })
+      .pipe(
+        map((response) => response?.data ?? null),
+        catchError(() => of(null)),
+        finalize(() => this.isImprovingRecipeSignal.set(false))
       );
   }
 

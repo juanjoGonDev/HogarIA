@@ -11,6 +11,7 @@ import {
   StorageInfo
 } from '../../shared/models/recipe.model';
 import type { RecipeInstructionStep } from '../../shared/models/recipe-instructions';
+import type { RecipeStepVideoCandidate } from '../../shared/models/recipe-step-video';
 import {
   RecipeDetailLevel,
   RecipeInstructionsByLevel
@@ -40,6 +41,8 @@ export interface RecipeEditorStep {
   imageUrl: string;
   imagePhotoId: string | null;
   imageAttribution: RecipeStep['imageAttribution'];
+  videoId: string | null;
+  video: RecipeStepVideoCandidate | null;
   photoSearchQuery: string;
   illustration?: RecipeStep['illustration'];
 }
@@ -99,6 +102,73 @@ export interface RecipeEditPayloadResult {
   errors: string[];
 }
 
+function emptyEditorStep(stepNumber = 1): RecipeEditorStep {
+  return {
+    stepNumber,
+    instruction: '',
+    durationText: '',
+    temperatureText: '',
+    temperatureUnit: 'C',
+    timerRequired: false,
+    timerDurationText: '',
+    tips: '',
+    warning: '',
+    imageUrl: '',
+    imagePhotoId: null,
+    imageAttribution: null,
+    videoId: null,
+    video: null,
+    photoSearchQuery: ''
+  };
+}
+
+/** A new recipe starts with one editable row per supported instruction level. */
+export function createRecipeEditDraft(): RecipeEditDraft {
+  return {
+    name: '',
+    description: '',
+    difficulty: 'easy',
+    cuisine: '',
+    countryCode: '',
+    mealType: [],
+    totalTime: '',
+    prepTime: '',
+    cookTime: '',
+    restTime: '',
+    servings: 2,
+    calories: '',
+    image: '',
+    imagePhotoId: null,
+    imageAttribution: null,
+    ingredients: [
+      {
+        name: '',
+        quantityText: '1',
+        unit: 'unit',
+        preparation: '',
+        isOptional: false,
+        substitutesText: '',
+        notes: ''
+      }
+    ],
+    utensilsText: '',
+    tagsText: '',
+    appliancesText: '',
+    parallelTasksText: '',
+    tipsAndVariationsText: '',
+    batchCookingWarningText: '',
+    instructionsByLevel: {
+      basic: [emptyEditorStep()],
+      intermediate: [emptyEditorStep()],
+      expert: [emptyEditorStep()]
+    },
+    nutritionEnabled: false,
+    nutrition: toNutritionEditor(),
+    storageEnabled: false,
+    storage: toStorageEditor()
+  };
+}
+
 const DETAIL_LEVELS: RecipeDetailLevel[] = ['basic', 'intermediate', 'expert'];
 
 function optionalText(value: string | null | undefined): string {
@@ -126,6 +196,8 @@ function toEditorStep(step: EditableRecipeStepInput): RecipeEditorStep {
     imageUrl: optionalText(step.image),
     imagePhotoId: null,
     imageAttribution: step.imageAttribution ?? null,
+    videoId: step.videoId ?? null,
+    video: step.video ?? null,
     photoSearchQuery: '',
     illustration: step.illustration ?? null
   };
@@ -313,6 +385,7 @@ function buildEditorSteps(
         ? {}
         : { temperature: { value: temperature, unit: step.temperatureUnit } }),
       ...(photoId ? { imagePhotoId: photoId } : {}),
+      ...(step.videoId ? { videoId: step.videoId } : {}),
       ...(image ? { image } : {})
     };
   });

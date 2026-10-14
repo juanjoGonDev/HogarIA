@@ -45,7 +45,7 @@ const FOCUSABLE_SELECTOR =
           </button>
         </div>
 
-        <div class="modal__body">
+        <div #body class="modal__body">
           <ng-content></ng-content>
         </div>
 
@@ -181,6 +181,7 @@ const FOCUSABLE_SELECTOR =
 })
 export class ModalComponent implements OnChanges, AfterViewChecked {
   @ViewChild('dialog') private _dialogRef?: ElementRef<HTMLElement>;
+  @ViewChild('body') private _bodyRef?: ElementRef<HTMLElement>;
 
   @Input() isOpen = false;
   @Input() title = '';
@@ -271,6 +272,10 @@ export class ModalComponent implements OnChanges, AfterViewChecked {
 
   getModalClasses(): string {
     return `modal modal--${this.size}`;
+  }
+
+  resetBodyScroll(): void {
+    if (this._bodyRef) this._bodyRef.nativeElement.scrollTop = 0;
   }
 
   private _focusFirstElement(dialog = this._dialogRef?.nativeElement): void {

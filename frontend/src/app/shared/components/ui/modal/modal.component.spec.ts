@@ -35,6 +35,17 @@ describe('ModalComponent', () => {
     expect(overlay).toBeTruthy();
   });
 
+  it('resets body scroll when the active modal view changes', () => {
+    fixture.componentRef.setInput('isOpen', true);
+    fixture.detectChanges();
+
+    const body = fixture.nativeElement.querySelector('.modal__body') as HTMLElement;
+    body.scrollTop = 120;
+    component.resetBodyScroll();
+
+    expect(body.scrollTop).toBe(0);
+  });
+
   it('exposes a modal dialog, moves focus inside and restores it on close', () => {
     const trigger = document.createElement('button');
     document.body.appendChild(trigger);

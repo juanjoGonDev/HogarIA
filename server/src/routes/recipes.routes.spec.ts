@@ -1,6 +1,9 @@
 import { beforeAll, afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Hono } from 'hono';
 import jwt from 'jsonwebtoken';
+import { createHash } from 'node:crypto';
+import { ReadableStream } from 'node:stream/web';
+import { recipeStepVideoProvider } from '../utils/recipe-step-videos.js';
 
 process.env.DATABASE_PATH = ':memory:';
 process.env.NODE_ENV = 'test';
@@ -60,10 +63,12 @@ beforeAll(async () => {
 
   const config = await import('../config/app.config.js');
   const { errorHandler } = await import('../middleware/error.middleware.js');
+  const { recipeStepVideoRoutes } = await import('./recipe-step-videos.routes.js');
   ({ ensureRecipeBookCatalog } = await import('../utils/recipe-book-seed.js'));
   const { recipeRoutes } = await import('./recipes.routes.js');
   app = new Hono();
   app.onError(errorHandler as never);
+  app.route('/api/recipes', recipeStepVideoRoutes);
   app.route('/api/recipes', recipeRoutes);
   userId = 'recipe-levels-user';
   token = jwt.sign(
@@ -97,6 +102,165 @@ beforeEach(() => {
 afterAll(() => closeDatabase?.());
 
 describe('POST /api/recipes recipe instruction storage', () => {
+  it('searches without a draft recipe id, persists only a validated video id and plays after cache loss', async () => {
+    const mediaUrl =
+      'https://upload.wikimedia.org/wikipedia/commons/transcoded/a/ab/Chop.webm/Chop.webm.360p.vp9.webm';
+    const videoId = createHash('sha256').update(mediaUrl).digest('hex').slice(0, 24);
+    const video = {
+      id: videoId,
+      title: 'Corte de verduras',
+      author: 'Autora Commons',
+      licenseName: 'CC BY 4.0',
+      licenseUrl: 'https://creativecommons.org/licenses/by/4.0/',
+      sourceUrl: 'https://commons.wikimedia.org/wiki/File:Chop.webm',
+      thumbnailUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/chop.jpg',
+      durationSeconds: 20,
+      sizeBytes: 680000,
+      mimeType: 'video/webm' as const,
+      mediaUrl
+    };
+    const searchSpy = vi.spyOn(recipeStepVideoProvider, 'search').mockResolvedValue([video]);
+    const candidateSpy = vi
+      .spyOn(recipeStepVideoProvider, 'getSelectedVideo')
+      .mockReturnValue(video);
+    const search = await app.request('/api/recipes/step-videos/search?scene=cut', {
+      headers: { authorization: `Bearer ${token}` }
+    });
+    const searchData = (await search.json()) as { data: Array<Record<string, unknown>> };
+    const created = await call('POST', '', {
+      name: 'Receta con clip persistente',
+      ingredients: [{ name: 'Zanahoria', quantity: 1, unit: 'unit' }],
+      steps: [{ stepNumber: 1, instruction: 'Cortar la zanahoria.', videoId }]
+    });
+
+    expect(search.status).toBe(200);
+    expect(searchData.data[0]).toMatchObject({ id: videoId, author: video.author });
+    expect(searchData.data[0]).not.toHaveProperty('streamUrl');
+    expect(created.status).toBe(201);
+    const recipeId = created.payload.data.id as string;
+    const storedSteps = db.prepare('SELECT steps FROM recipes WHERE id = ?').get(recipeId) as {
+      steps: string;
+    };
+    expect(storedSteps.steps).toContain(videoId);
+    expect(storedSteps.steps).not.toContain('upload.wikimedia.org');
+    expect(storedSteps.steps).not.toContain('commons.wikimedia.org');
+    expect(
+      db
+        .prepare('SELECT COUNT(*) AS count FROM recipe_step_video_assets WHERE recipe_id = ?')
+        .get(recipeId)
+    ).toMatchObject({ count: 1 });
+
+    // Simulate an API process restart: its candidate cache is empty, while SQLite still owns the selection.
+    candidateSpy.mockReturnValue(null);
+    const loaded = await call('GET', `/${recipeId}`);
+    expect(loaded.status).toBe(200);
+    expect(loaded.payload.data.steps[0]).toMatchObject({
+      videoId,
+      videoAttribution: {
+        title: video.title,
+        author: video.author,
+        licenseName: video.licenseName,
+        sourceUrl: video.sourceUrl,
+        thumbnailUrl: video.thumbnailUrl
+      }
+    });
+    const editedAfterReload = await call('PATCH', `/${recipeId}`, {
+      steps: [{ stepNumber: 1, instruction: 'Cortar con cuidado.', videoId }]
+    });
+    expect(editedAfterReload.status).toBe(200);
+    expect(editedAfterReload.payload.data.steps[0]).toMatchObject({
+      instruction: 'Cortar con cuidado.',
+      videoId,
+      videoAttribution: { author: video.author }
+    });
+
+    const playbackBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([1, 2, 3]));
+        controller.close();
+      }
+    });
+    const playbackSpy = vi.spyOn(recipeStepVideoProvider, 'openStoredStream').mockResolvedValue({
+      body: playbackBody,
+      mimeType: 'video/webm',
+      contentRange: 'bytes 0-2/680000',
+      contentLength: 3
+    });
+    const playbackGrant = await app.request(
+      `/api/recipes/${recipeId}/step-videos/${videoId}/playback`,
+      {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${token}`,
+          origin: 'http://localhost:4200',
+          'sec-fetch-site': 'same-site',
+          'content-type': 'application/json'
+        },
+        body: '{}'
+      }
+    );
+    const playbackCookie = playbackGrant.headers.get('set-cookie')?.split(';', 1)[0];
+    expect(playbackGrant.status).toBe(201);
+    expect(playbackCookie).toBeTruthy();
+    const playback = await app.request(`/api/recipes/${recipeId}/step-videos/${videoId}/stream`, {
+      headers: { cookie: playbackCookie!, Range: 'bytes=0-2' }
+    });
+
+    expect(playback.status).toBe(206);
+    expect(playbackSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ id: videoId, mediaUrl }),
+      { start: 0, end: 2 },
+      expect.any(AbortSignal)
+    );
+    expect(Array.from(new Uint8Array(await playback.arrayBuffer()))).toEqual([1, 2, 3]);
+    const removed = await call('PATCH', `/${recipeId}`, {
+      steps: [{ stepNumber: 1, instruction: 'Cortar sin vídeo.' }]
+    });
+    expect(removed.status).toBe(200);
+    expect(
+      db
+        .prepare('SELECT COUNT(*) AS count FROM recipe_step_video_assets WHERE recipe_id = ?')
+        .get(recipeId)
+    ).toMatchObject({ count: 0 });
+    const stalePlayback = await app.request(
+      `/api/recipes/${recipeId}/step-videos/${videoId}/stream`,
+      {
+        headers: { cookie: playbackCookie!, Range: 'bytes=0-2' }
+      }
+    );
+    expect(stalePlayback.status).toBe(404);
+    searchSpy.mockRestore();
+    candidateSpy.mockRestore();
+    playbackSpy.mockRestore();
+  });
+
+  it('rejects expired or invented video ids before creating a recipe', async () => {
+    const videoId = 'e'.repeat(24);
+    const candidateSpy = vi
+      .spyOn(recipeStepVideoProvider, 'getSelectedVideo')
+      .mockReturnValue(null);
+    const before = (
+      db
+        .prepare('SELECT COUNT(*) AS count FROM recipes WHERE name = ?')
+        .get('Receta con clip inválido') as { count: number }
+    ).count;
+    const result = await call('POST', '', {
+      name: 'Receta con clip inválido',
+      ingredients: [{ name: 'Zanahoria', quantity: 1, unit: 'unit' }],
+      steps: [{ stepNumber: 1, instruction: 'Cortar.', videoId }]
+    });
+    const after = (
+      db
+        .prepare('SELECT COUNT(*) AS count FROM recipes WHERE name = ?')
+        .get('Receta con clip inválido') as { count: number }
+    ).count;
+
+    expect(result.status).toBe(400);
+    expect(result.payload.message).toContain('video');
+    expect(after).toBe(before);
+    candidateSpy.mockRestore();
+  });
+
   it('persists the allowed recipe origin without changing personal ownership', async () => {
     const manual = await call('POST', '', {
       name: 'Origen QA manual',

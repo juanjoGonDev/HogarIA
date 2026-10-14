@@ -10,6 +10,17 @@ import {
   adjustServingsSchema
 } from '../schemas/recipe.schema.js';
 import { recipeStepPhotoProvider } from '../utils/recipe-step-photos.js';
+import {
+  recipeStepVideoProvider,
+  type RecipeStepVideoProvider,
+  type RecipeStepVideoSelection
+} from '../utils/recipe-step-videos.js';
+import {
+  attachRecipeStepVideoAttribution,
+  loadRecipeStepVideoSelection,
+  MAX_RECIPE_STEP_VIDEO_SELECTIONS,
+  replaceRecipeStepVideoSelections
+} from '../utils/recipe-step-video-persistence.js';
 import type { AppEnv } from '../types/hono-env.js';
 
 const recipeRoutes = new Hono<AppEnv>();
@@ -80,6 +91,8 @@ type StoredRecipePhoto = {
 };
 
 type PhotoResolutionError = 'expired' | 'unavailable' | 'limit';
+
+type VideoResolutionError = 'expired' | 'limit';
 
 async function resolveStepPhotoSelections(
   instructionData: unknown
@@ -157,6 +170,68 @@ async function resolveStepPhotoSelections(
       continue;
     }
     const resolved = await resolveSteps(levelSteps);
+    if (typeof resolved === 'string') return { error: resolved };
+    data[level] = resolved;
+  }
+  return { data, assets: [...assets.values()] };
+}
+
+function resolveStepVideoSelections(
+  instructionData: unknown,
+  db: ReturnType<typeof getDatabase>,
+  provider: RecipeStepVideoProvider,
+  existingRecipeId?: string
+): { data: unknown; assets: RecipeStepVideoSelection[] } | { error: VideoResolutionError } {
+  const assets = new Map<string, RecipeStepVideoSelection>();
+
+  const resolveSteps = (steps: unknown[]): unknown[] | VideoResolutionError => {
+    const resolved: unknown[] = [];
+    for (const value of steps) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        resolved.push(value);
+        continue;
+      }
+      const step = value as Record<string, unknown>;
+      const videoId = typeof step.videoId === 'string' ? step.videoId : '';
+      if (!videoId) {
+        const { videoAttribution: _untrustedAttribution, ...safeStep } = step;
+        resolved.push(safeStep);
+        continue;
+      }
+
+      let selection = assets.get(videoId);
+      if (!selection) {
+        if (assets.size >= MAX_RECIPE_STEP_VIDEO_SELECTIONS) return 'limit';
+        selection =
+          provider.getSelectedVideo(videoId) ??
+          (existingRecipeId
+            ? (loadRecipeStepVideoSelection(db, existingRecipeId, videoId) ?? undefined)
+            : undefined);
+        if (!selection || selection.id !== videoId) return 'expired';
+        assets.set(videoId, selection);
+      }
+
+      const { videoAttribution: _untrustedAttribution, ...safeStep } = step;
+      resolved.push({ ...safeStep, videoId });
+    }
+    return resolved;
+  };
+
+  if (Array.isArray(instructionData)) {
+    const data = resolveSteps(instructionData);
+    return typeof data === 'string' ? { error: data } : { data, assets: [...assets.values()] };
+  }
+  if (!instructionData || typeof instructionData !== 'object') {
+    return { data: instructionData, assets: [] };
+  }
+
+  const data: Record<string, unknown> = {};
+  for (const [level, levelSteps] of Object.entries(instructionData)) {
+    if (!Array.isArray(levelSteps)) {
+      data[level] = levelSteps;
+      continue;
+    }
+    const resolved = resolveSteps(levelSteps);
     if (typeof resolved === 'string') return { error: resolved };
     data[level] = resolved;
   }
@@ -242,7 +317,12 @@ function attachStepPhotoAttribution(storedSteps: unknown): unknown {
 
 // Helper to convert snake_case DB row to camelCase API object
 function mapRecipe(r: Record<string, unknown>) {
-  const storedSteps = attachStepPhotoAttribution(JSON.parse((r.steps as string) || '[]'));
+  const recipeId = String(r.id ?? '');
+  const storedSteps = attachRecipeStepVideoAttribution(
+    getDatabase(),
+    recipeId,
+    attachStepPhotoAttribution(JSON.parse((r.steps as string) || '[]'))
+  );
   const instructionData = Array.isArray(storedSteps)
     ? { steps: storedSteps }
     : { instructionsByLevel: storedSteps };
@@ -537,6 +617,23 @@ recipeRoutes.post('/', async (c) => {
       status
     );
   }
+  const resolvedVideos = resolveStepVideoSelections(
+    resolvedPhotos.data,
+    db,
+    recipeStepVideoProvider
+  );
+  if ('error' in resolvedVideos) {
+    return c.json(
+      {
+        success: false,
+        message:
+          resolvedVideos.error === 'limit'
+            ? 'The recipe has too many selected videos'
+            : 'A selected video expired; search again'
+      },
+      400
+    );
+  }
 
   db.transaction(() => {
     db.prepare(
@@ -561,7 +658,7 @@ recipeRoutes.post('/', async (c) => {
       input.image,
       JSON.stringify(input.ingredients),
       JSON.stringify(input.utensils),
-      JSON.stringify(resolvedPhotos.data),
+      JSON.stringify(resolvedVideos.data),
       input.guidance ? JSON.stringify(input.guidance) : null,
       input.nutrition ? JSON.stringify(input.nutrition) : null,
       input.storage ? JSON.stringify(input.storage) : null,
@@ -571,6 +668,7 @@ recipeRoutes.post('/', async (c) => {
       input.isPublic ? 1 : 0
     );
     for (const asset of resolvedPhotos.assets) storeRecipePhotoAsset(db, asset);
+    replaceRecipeStepVideoSelections(db, id, resolvedVideos.assets);
   })();
 
   const recipe = db.prepare('SELECT * FROM recipes WHERE id = ?').get(id);
@@ -607,6 +705,7 @@ recipeRoutes.patch('/:id', async (c) => {
 
   let resolvedInstructionData: unknown;
   let stepPhotoAssets: StoredRecipePhoto[] = [];
+  let stepVideoAssets: RecipeStepVideoSelection[] | undefined;
   if (input.steps !== undefined || input.instructionsByLevel !== undefined) {
     const resolved = await resolveStepPhotoSelections(input.instructionsByLevel ?? input.steps);
     if ('error' in resolved) {
@@ -624,7 +723,26 @@ recipeRoutes.patch('/:id', async (c) => {
         status
       );
     }
-    resolvedInstructionData = resolved.data;
+    const resolvedVideos = resolveStepVideoSelections(
+      resolved.data,
+      db,
+      recipeStepVideoProvider,
+      id
+    );
+    if ('error' in resolvedVideos) {
+      return c.json(
+        {
+          success: false,
+          message:
+            resolvedVideos.error === 'limit'
+              ? 'The recipe has too many selected videos'
+              : 'A selected video expired; search again'
+        },
+        400
+      );
+    }
+    resolvedInstructionData = resolvedVideos.data;
+    stepVideoAssets = resolvedVideos.assets;
     stepPhotoAssets = resolved.assets;
   }
 
@@ -700,6 +818,9 @@ recipeRoutes.patch('/:id', async (c) => {
       updates.push('updated_at = CURRENT_TIMESTAMP');
       values.push(id);
       db.prepare(`UPDATE recipes SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+    }
+    if (stepVideoAssets !== undefined) {
+      replaceRecipeStepVideoSelections(db, id, stepVideoAssets);
     }
   })();
 

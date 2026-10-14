@@ -151,6 +151,35 @@ describe('createRecipeSchema guía completa', () => {
       }).success
     ).toBe(true);
   });
+
+  it('persists only a selected Commons video id, not client-provided video URLs or attribution', () => {
+    const videoId = 'c'.repeat(24);
+    const result = createRecipeSchema.safeParse({
+      ...baseRecipe,
+      steps: [
+        {
+          stepNumber: 1,
+          instruction: 'Cortar la verdura.',
+          videoId,
+          videoAttribution: { author: 'No confiable' },
+          videoUrl: 'https://attacker.test/video.mp4'
+        }
+      ]
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.steps?.[0]).toMatchObject({ videoId });
+      expect(result.data.steps?.[0]).not.toHaveProperty('videoAttribution');
+      expect(result.data.steps?.[0]).not.toHaveProperty('videoUrl');
+    }
+    expect(
+      createRecipeSchema.safeParse({
+        ...baseRecipe,
+        steps: [{ stepNumber: 1, instruction: 'Cortar.', videoId: 'https://attacker.test/v.mp4' }]
+      }).success
+    ).toBe(false);
+  });
 });
 
 describe('país de origen y filtros del libro', () => {

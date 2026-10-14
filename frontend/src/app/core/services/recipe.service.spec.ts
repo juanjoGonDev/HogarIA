@@ -3,6 +3,7 @@ import { HttpClientTestingModule, HttpTestingController } from '@angular/common/
 import { SILENT_TOAST } from '../interceptors/error.interceptor';
 import { Recipe, RecipeFilter } from '../../shared/models/recipe.model';
 import { RecipeService } from './recipe.service';
+import type { RecipeStepVideoCandidate } from '../../shared/models/recipe-step-video';
 
 function makeRecipe(overrides: Partial<Recipe> = {}): Recipe {
   return {
@@ -144,6 +145,68 @@ describe('RecipeService', () => {
     expect(failure?.status).toBe(502);
   });
 
+  it('caches bounded video search by generic scene and drops failed cache entries for retry', () => {
+    const video: RecipeStepVideoCandidate = {
+      id: 'a'.repeat(24),
+      title: 'Cortar verduras',
+      author: 'Autora sintética',
+      licenseName: 'CC BY 4.0',
+      licenseUrl: 'https://creativecommons.org/licenses/by/4.0/',
+      sourceUrl: 'https://commons.wikimedia.org/wiki/File:Cutting.webm',
+      thumbnailUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a0/Cutting.jpg',
+      durationSeconds: 12,
+      mimeType: 'video/webm'
+    };
+    let first: RecipeStepVideoCandidate[] | undefined;
+    service.searchStepVideos('cut').subscribe((value) => (first = value));
+    const request = http.expectOne('/api/recipes/step-videos/search?scene=cut');
+    expect(request.request.method).toBe('GET');
+    expect(request.request.context.get(SILENT_TOAST)).toBeTrue();
+    request.flush({
+      data: [
+        video,
+        ...Array.from({ length: 7 }, (_, index) => ({
+          ...video,
+          id: String(index).padStart(24, '0')
+        }))
+      ]
+    });
+    expect(first?.length).toBe(5);
+
+    let cached: RecipeStepVideoCandidate[] | undefined;
+    service.searchStepVideos('cut').subscribe((value) => (cached = value));
+    http.expectNone('/api/recipes/step-videos/search?scene=cut');
+    expect(cached).toEqual(first);
+
+    service.searchStepVideos('mix').subscribe({ error: () => undefined });
+    http
+      .expectOne('/api/recipes/step-videos/search?scene=mix')
+      .flush({}, { status: 502, statusText: 'Bad Gateway' });
+    service.retryStepVideos('mix').subscribe((value) => (cached = value));
+    http.expectOne('/api/recipes/step-videos/search?scene=mix').flush({ data: [] });
+    expect(cached).toEqual([]);
+  });
+
+  it('prepares authenticated native playback without putting a credential in the stream URL', () => {
+    const result: boolean[] = [];
+    service
+      .prepareStepVideoPlayback('recipe id', 'a'.repeat(24))
+      .subscribe((ready) => result.push(ready));
+    const request = http.expectOne(
+      '/api/recipes/recipe%20id/step-videos/aaaaaaaaaaaaaaaaaaaaaaaa/playback'
+    );
+    expect(request.request.withCredentials).toBeTrue();
+    expect(request.request.method).toBe('POST');
+    expect(request.request.body).toEqual({});
+    expect(request.request.context.get(SILENT_TOAST)).toBeTrue();
+    request.flush({ success: true });
+
+    const url = service.stepVideoStreamUrl('recipe id', 'a'.repeat(24));
+    expect(url).toBe('/api/recipes/recipe%20id/step-videos/aaaaaaaaaaaaaaaaaaaaaaaa/stream');
+    expect(url).not.toContain('?');
+    expect(result).toEqual([true]);
+  });
+
   it('does not let an older filter response replace the newest results', () => {
     service.loadRecipes({ search: 'Maíz', catalogOnly: true });
     service.loadRecipes({
@@ -187,6 +250,42 @@ describe('RecipeService', () => {
 
     expect(result).toEqual(expected);
     expect(service.currentRecipe()).toEqual(expected);
+  });
+
+  it('normalizes persisted video attribution into the shared clip shape for cooking and editing', () => {
+    const candidate = {
+      id: 'a'.repeat(24),
+      title: 'Corte de prueba',
+      author: 'Autora sintética',
+      licenseName: 'CC BY 4.0',
+      licenseUrl: 'https://creativecommons.org/licenses/by/4.0/',
+      sourceUrl: 'https://commons.wikimedia.org/wiki/File:Cutting.webm',
+      thumbnailUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a0/Cutting.jpg',
+      durationSeconds: 10,
+      mimeType: 'video/webm' as const
+    };
+    const apiRecipe = {
+      ...makeRecipe(),
+      steps: [
+        {
+          stepNumber: 1,
+          instruction: 'Corta verduras.',
+          videoId: candidate.id,
+          videoAttribution: Object.fromEntries(
+            Object.entries(candidate).filter(([key]) => key !== 'id')
+          )
+        }
+      ]
+    } as unknown as Recipe;
+    let result: Recipe | null | undefined;
+
+    service.getRecipe(apiRecipe.id).subscribe((value) => (result = value));
+    http.expectOne(`/api/recipes/${apiRecipe.id}`).flush({ data: apiRecipe });
+
+    expect(result?.steps?.[0].video).toEqual(candidate);
+    expect(
+      (result?.steps?.[0] as unknown as Record<string, unknown>)['videoAttribution']
+    ).toBeUndefined();
   });
 
   it('returns null for a missing recipe', () => {
