@@ -1598,20 +1598,38 @@ también las condiciones que aún están abiertas.
       aptos y rutas sin escrituras al fallar; suite focal **55/55**, servidor **1712 passed / 1 skipped**,
       cobertura ruta/planificador **90,89/78,36/100/94,87 %** y schema **100/100/100/100 %**. Smoke real
       opt-in: un único HTTP 200 y E2E completa validada.
-- [x] **QA-HOME-MEALS.CONTEXT.1** — cada generación envía, junto al mensaje de texto y `response_format`
-      estricto, exactamente un adjunto JSON versionado con datos acotados al hogar, semana y miembros
-      seleccionados: alias opacos, preferencias, restricciones estrictas, objetivo y horario efectivos con
-      su fuente (persona/hogar), turnos requeridos, existencias positivas visibles, utensilios disponibles
-      accesibles, recetas reutilizables accesibles y el plan confirmado más reciente anterior a la semana
-      solicitada (o `null`). Excluye IDs, nombres, emails, miembros no seleccionados y notas/términos privados
-      que solo se usan para filtrar la salida. Las cadenas libres se tratan como datos no confiables. Pruebas
-      de ruta decodifican `file_data` y verifican nombre, MIME, estructura, datos presentes, permisos,
-      exclusiones, cotas y coexistencia con `response_format`; no vuelcan el contexto a logs. El proxy opt-in
-      inspecciona el adjunto sintético en memoria y solo guarda telemetría no sensible. Evidencia: prueba de
-      ruta decodifica `file_data` y comprueba preferencias, horarios efectivos/fuente, existencias, utensilios,
-      recetas y semana previa; prueba permisos/identidades/cotas y fecha de caducidad inválida oversized
-      normalizada a `null`. El proxy de smoke verifica el mismo contrato en memoria y la llamada real pasó
-      con fixtures sintéticos, sin persistir propuesta ni mostrar contexto en logs.
+- [ ] **QA-HOME-MEALS.CONTEXT.1** — cada generación envía, junto al mensaje de texto y `response_format`
+      estricto, exactamente dos adjuntos JSON versionados: `meal-planning-context.json` contiene datos
+      acotados al hogar, semana y miembros seleccionados (alias opacos, preferencias, restricciones estrictas,
+      objetivo y horario efectivos con su fuente, turnos, existencias positivas visibles, utensilios accesibles
+      y planificación confirmada anterior o `null`); `household-recipes-catalog.json` contiene el catálogo
+      completo de recetas que el solicitante puede consultar según los permisos actuales. El catálogo conserva
+      el título y el contenido culinario de cada receta, pero usa alias opacos de petición como referencia;
+      nunca incluye IDs internos, nombres/datos de personas ni datos de autor. No se duplican recetas en el
+      contexto principal. Ningún adjunto incluye personas no seleccionadas, emails ni notas/términos privados
+      usados únicamente para filtrar. Cadenas libres y ambos adjuntos se tratan como datos no confiables.
+      Si el catálogo supera el máximo seguro de bytes, se devuelve un error recuperable antes de llamar a IA;
+      nunca se trunca silenciosamente. Pruebas decodifican ambos `file_data` y verifican nombres, MIME,
+      estructura, permisos, exclusiones, cotas y coexistencia con `response_format`; no vuelcan contenido a
+      logs. El proxy opt-in inspecciona los dos adjuntos sintéticos en memoria y solo conserva telemetría no
+      sensible. La evidencia previa con un único contexto JSON no satisface esta ampliación.
+- [ ] **QA-HOME-MEALS.RECIPE.1** — cada turno planificado referencia una receta existente del catálogo
+      mediante alias opaco resoluble por el servidor o declara una receta nueva completa. Se prefiere
+      reutilizar una receta accesible si encaja con los objetivos y es segura; no se inventan aliases ni se
+      muta una receta existente para acomodarla. Una receta nueva cumple el contrato canónico de receta IA
+      de HogarIA: rendimiento base de una ración y cantidades por ración, metadatos, tiempos, ingredientes,
+      utensilios, guidance, etiquetas, nutrición/conservación cuando proceda y pasos completos diferenciados
+      para `basic`, `intermediate` y `expert` (con campos de paso compatibles con el editor). El proveedor
+      recibe un `response_format` estricto; el servidor resuelve aliases contra el catálogo autorizado y
+      valida en servidor el objeto completo, la unicidad de referencias y alergias/intolerancias en todos los
+      campos de todos los niveles. Una receta no segura o no verificable deja el turno `unresolved` sin
+      revelar la restricción privada. Previsualizar no escribe recetas ni calendario. Al confirmar, cada receta
+      nueva se guarda una sola vez como privada del solicitante, se enlaza desde sus comidas y queda visible
+      desde el evento/calendario; una receta existente conserva su `recipe_id`. La creación de recetas y los
+      eventos se confirman de forma atómica e idempotente; retry, receta repetida en varios turnos, alias
+      inexistente/foráneo, cambios concurrentes, schema parcial, alergia oculta en instrucciones avanzadas y
+      rollback por fallo de persistencia están cubiertos. La receta abierta desde la planificación permite
+      consultar ingredientes y los tres niveles sin una nueva llamada a IA.
 
 - [x] **QA-HOME-MEALS.CALENDAR.1** — persistencia idempotente tras confirmar, calendario actual,
       evento compartido visible una vez a todos los miembros activos con `calendar.view` aunque la comida
