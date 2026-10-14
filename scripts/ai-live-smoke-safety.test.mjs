@@ -89,6 +89,10 @@ test('household meal smoke succeeds only for one validated strict-schema provide
       strictJsonSchema: true,
       contextJsonAttachmentCount: 1,
       contextJsonAttachmentValid: true,
+      recipeCatalogJsonAttachmentCount: 1,
+      recipeCatalogJsonAttachmentValid: true,
+      recipeCatalogAliasesValid: true,
+      mealRecipeAliasSchemaValid: true,
       memberProfilesValid: true,
       planningInputsValid: true,
       previousPlanValid: true,
@@ -100,6 +104,7 @@ test('household meal smoke succeeds only for one validated strict-schema provide
       hasChoices: true,
       messageContentType: 'text',
       isJsonObject: true,
+      recipeReferencesValid: true,
       finishReason: 'stop'
     }
   };
@@ -158,6 +163,33 @@ test('household meal smoke succeeds only for one validated strict-schema provide
     isSuccessfulAiLiveHouseholdMealSmokeResult({
       ...input,
       calls: [{ ...call, responseFormat: { ...call.responseFormat, isJsonObject: false } }]
+    }),
+    false
+  );
+  assert.equal(
+    isSuccessfulAiLiveHouseholdMealSmokeResult({
+      ...input,
+      calls: [
+        {
+          ...call,
+          requestContract: {
+            ...call.requestContract,
+            recipeCatalogJsonAttachmentCount: 0
+          }
+        }
+      ]
+    }),
+    false
+  );
+  assert.equal(
+    isSuccessfulAiLiveHouseholdMealSmokeResult({
+      ...input,
+      calls: [
+        {
+          ...call,
+          responseFormat: { ...call.responseFormat, recipeReferencesValid: false }
+        }
+      ]
     }),
     false
   );
@@ -1132,22 +1164,126 @@ const SYNTHETIC_MEAL_RESPONSE_FORMAT = {
     schema: {
       type: 'object',
       properties: {
+        newRecipes: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              alias: { type: 'string' },
+              recipe: {
+                type: 'object',
+                properties: { name: { type: 'string' } },
+                required: ['name'],
+                additionalProperties: false
+              }
+            },
+            required: ['alias', 'recipe'],
+            additionalProperties: false
+          }
+        },
         events: {
           type: 'array',
           minItems: 1,
           items: {
             type: 'object',
-            properties: { alias: { type: 'string' } },
-            required: ['alias'],
+            properties: {
+              status: { type: 'string' },
+              recipeAlias: { anyOf: [{ type: 'string' }, { type: 'null' }] }
+            },
+            required: ['status', 'recipeAlias'],
             additionalProperties: false
           }
         }
       },
-      required: ['events'],
+      required: ['newRecipes', 'events'],
       additionalProperties: false
     }
   }
 };
+
+function syntheticMealRecipeCatalog(overrides = {}) {
+  return {
+    version: 1,
+    recipes: [
+      {
+        alias: 'R1',
+        selectable: true,
+        recipe: {
+          name: 'SMOKE_RECIPE_TEST',
+          description: 'Receta sintética de prueba.',
+          difficulty: 'easy',
+          cuisine: 'synthetic',
+          mealType: ['lunch'],
+          totalTime: 30,
+          prepTime: 10,
+          cookTime: 20,
+          restTime: null,
+          baseServings: 2,
+          calories: 450,
+          ingredients: [
+            {
+              name: 'SMOKE_PANTRY_RICE',
+              quantity: 1,
+              unit: 'kg',
+              preparation: null,
+              isOptional: false,
+              substitutes: [],
+              notes: null
+            }
+          ],
+          utensils: ['SMOKE_UTENSIL_POT'],
+          guidance: null,
+          steps: null,
+          instructionsByLevel: {
+            basic: [
+              {
+                stepNumber: 1,
+                instruction: 'Paso sencillo.',
+                duration: null,
+                tips: null,
+                warning: null,
+                temperature: null,
+                timerRequired: false,
+                timerDuration: null,
+                illustration: null
+              }
+            ],
+            intermediate: [
+              {
+                stepNumber: 1,
+                instruction: 'Paso medio.',
+                duration: null,
+                tips: null,
+                warning: null,
+                temperature: null,
+                timerRequired: false,
+                timerDuration: null,
+                illustration: null
+              }
+            ],
+            expert: [
+              {
+                stepNumber: 1,
+                instruction: 'Paso avanzado.',
+                duration: null,
+                tips: null,
+                warning: null,
+                temperature: null,
+                timerRequired: false,
+                timerDuration: null,
+                illustration: null
+              }
+            ]
+          },
+          nutrition: null,
+          storage: null,
+          tags: []
+        }
+      }
+    ],
+    ...overrides
+  };
+}
 
 function syntheticMealContext(overrides = {}) {
   const dates = Array.from({ length: 7 }, (_, index) => {
@@ -1155,7 +1291,7 @@ function syntheticMealContext(overrides = {}) {
     return date.toISOString().slice(0, 10);
   });
   return {
-    version: 1,
+    version: 2,
     targetWeek: { startDate: dates[0], endDate: dates.at(-1) },
     household: {
       objective: { goals: ['balanced'], notes: 'Comidas equilibradas.' },
@@ -1199,13 +1335,6 @@ function syntheticMealContext(overrides = {}) {
     })),
     pantry: [{ name: 'SMOKE_PANTRY_RICE', quantity: 2, unit: 'kg', expirationDate: null }],
     utensils: [{ name: 'SMOKE_UTENSIL_POT', category: 'cooking' }],
-    recipes: [
-      {
-        name: 'SMOKE_RECIPE_TEST',
-        description: 'Receta sintética de prueba.',
-        ingredients: [{ name: 'SMOKE_PANTRY_RICE', quantity: 1, unit: 'kg' }]
-      }
-    ],
     previousConfirmedPlan: {
       weekStart: '2026-10-12',
       weekEnd: '2026-10-18',
@@ -1216,11 +1345,7 @@ function syntheticMealContext(overrides = {}) {
           time: '13:00',
           servings: 2,
           participants: ['P1', 'P2'],
-          recipe: {
-            name: 'SMOKE_PREVIOUS_MEAL',
-            description: 'Comida previa sintética.',
-            ingredients: []
-          }
+          recipeName: 'SMOKE_RECIPE_TEST'
         }
       ]
     },
@@ -1241,12 +1366,28 @@ function mealContextAttachment(context, options = {}) {
   };
 }
 
+function mealRecipeCatalogAttachment(catalog, options = {}) {
+  const serialized = typeof catalog === 'string' ? catalog : JSON.stringify(catalog);
+  const mime = options.mime ?? 'application/json';
+  const filename = options.filename ?? 'household-recipes-catalog.json';
+  return {
+    type: 'file',
+    file: {
+      filename,
+      file_data: `data:${mime};base64,${Buffer.from(serialized, 'utf8').toString('base64')}`
+    }
+  };
+}
+
 function mealPayload({
   context = syntheticMealContext(),
-  prompt = 'Read meal-planning-context.json and create the proposal.',
+  catalog = syntheticMealRecipeCatalog(),
+  prompt = 'Read meal-planning-context.json and household-recipes-catalog.json; create the proposal.',
   responseFormat = SYNTHETIC_MEAL_RESPONSE_FORMAT,
   includeAttachment = true,
   attachmentOptions,
+  includeCatalogAttachment = true,
+  catalogAttachmentOptions,
   extraAttachment
 } = {}) {
   return {
@@ -1257,6 +1398,9 @@ function mealPayload({
         content: [
           { type: 'text', text: prompt },
           ...(includeAttachment ? [mealContextAttachment(context, attachmentOptions)] : []),
+          ...(includeCatalogAttachment
+            ? [mealRecipeCatalogAttachment(catalog, catalogAttachmentOptions)]
+            : []),
           ...(extraAttachment ? [extraAttachment] : [])
         ]
       }
@@ -1268,7 +1412,10 @@ function mealPayload({
 test('meal proxy forwards one strict-schema completion with its verified JSON context and rejects duplicates', async () => {
   const upstreamRequests = [];
   const completionEvents = [];
-  const providerResponseSentinel = 'SMOKE_PRIVATE_RESPONSE_BODY';
+  const providerResponse = {
+    newRecipes: [],
+    events: [{ status: 'scheduled', recipeAlias: 'R1' }]
+  };
   const upstream = createServer(async (request, response) => {
     const chunks = [];
     for await (const chunk of request) chunks.push(chunk);
@@ -1276,12 +1423,7 @@ test('meal proxy forwards one strict-schema completion with its verified JSON co
     response.writeHead(200, { 'content-type': 'application/json' });
     response.end(
       JSON.stringify({
-        choices: [
-          {
-            message: { content: JSON.stringify({ events: [], marker: providerResponseSentinel }) },
-            finish_reason: 'stop'
-          }
-        ]
+        choices: [{ message: { content: JSON.stringify(providerResponse) }, finish_reason: 'stop' }]
       })
     );
   });
@@ -1300,16 +1442,20 @@ test('meal proxy forwards one strict-schema completion with its verified JSON co
     onCompletion: (event) => completionEvents.push(event)
   });
   const context = syntheticMealContext();
+  const catalog = syntheticMealRecipeCatalog();
   const contextData = JSON.stringify(context);
+  const catalogData = JSON.stringify(catalog);
   const mealContextFile = mealContextAttachment(contextData);
-  const promptSentinel = 'Read meal-planning-context.json and create the proposal.';
+  const mealRecipeCatalogFile = mealRecipeCatalogAttachment(catalogData);
+  const promptSentinel =
+    'Read meal-planning-context.json and household-recipes-catalog.json; create the proposal.';
   const request = () =>
     postJson(`${proxy.baseUrl}/chat/completions`, proxy.clientToken, {
       model: 'gpt-5',
       messages: [
         {
           role: 'user',
-          content: [{ type: 'text', text: promptSentinel }, mealContextFile]
+          content: [{ type: 'text', text: promptSentinel }, mealContextFile, mealRecipeCatalogFile]
         }
       ],
       response_format: SYNTHETIC_MEAL_RESPONSE_FORMAT
@@ -1322,16 +1468,27 @@ test('meal proxy forwards one strict-schema completion with its verified JSON co
     assert.equal(proxy.metrics.calls.length, 1);
     const sentPayload = JSON.parse(upstreamRequests[0]);
     assert.deepEqual(sentPayload.response_format, SYNTHETIC_MEAL_RESPONSE_FORMAT);
-    const sentFile = sentPayload.messages[0].content.find((part) => part.type === 'file');
-    assert.equal(sentFile.file.filename, 'meal-planning-context.json');
+    const sentFiles = sentPayload.messages[0].content.filter((part) => part.type === 'file');
+    assert.deepEqual(
+      sentFiles.map((part) => part.file.filename),
+      ['meal-planning-context.json', 'household-recipes-catalog.json']
+    );
     assert.equal(
-      Buffer.from(sentFile.file.file_data.split(',')[1], 'base64').toString('utf8'),
+      Buffer.from(sentFiles[0].file.file_data.split(',')[1], 'base64').toString('utf8'),
       contextData
+    );
+    assert.equal(
+      Buffer.from(sentFiles[1].file.file_data.split(',')[1], 'base64').toString('utf8'),
+      catalogData
     );
     assert.deepEqual(proxy.metrics.calls[0].requestContract, {
       strictJsonSchema: true,
       contextJsonAttachmentCount: 1,
       contextJsonAttachmentValid: true,
+      recipeCatalogJsonAttachmentCount: 1,
+      recipeCatalogJsonAttachmentValid: true,
+      recipeCatalogAliasesValid: true,
+      mealRecipeAliasSchemaValid: true,
       memberProfilesValid: true,
       planningInputsValid: true,
       previousPlanValid: true,
@@ -1339,12 +1496,17 @@ test('meal proxy forwards one strict-schema completion with its verified JSON co
       forbiddenIdentityTermsAbsent: true,
       forbiddenPromptTermsAbsent: true
     });
+    assert.equal(proxy.metrics.calls[0].responseFormat.recipeReferencesValid, true);
     assert.equal(proxy.metrics.calls[0].schemaName, 'weekly_meal_proposal');
     assert.equal(JSON.stringify(proxy.metrics).includes(promptSentinel), false);
     assert.equal(JSON.stringify(proxy.metrics).includes(contextData), false);
     assert.equal(JSON.stringify(proxy.metrics).includes('SMOKE_PANTRY_RICE'), false);
-    assert.equal(JSON.stringify(proxy.metrics).includes(providerResponseSentinel), false);
-    assert.equal(JSON.stringify(completionEvents).includes(providerResponseSentinel), false);
+    assert.equal(JSON.stringify(proxy.metrics).includes('SMOKE_RECIPE_TEST'), false);
+    assert.equal(JSON.stringify(proxy.metrics).includes(JSON.stringify(providerResponse)), false);
+    assert.equal(
+      JSON.stringify(completionEvents).includes(JSON.stringify(providerResponse)),
+      false
+    );
     assert.equal(JSON.stringify(completionEvents).includes(contextData), false);
 
     assert.equal((await request()).status, 429);
@@ -1357,6 +1519,106 @@ test('meal proxy forwards one strict-schema completion with its verified JSON co
         failed: proxy.metrics.failed
       },
       { requestAttempts: 2, rejectedRequests: 1, failed: true }
+    );
+  } finally {
+    await proxy.close();
+    await new Promise((resolve, reject) =>
+      upstream.close((error) => (error ? reject(error) : resolve()))
+    );
+  }
+});
+
+test('meal proxy validates scheduled recipe aliases without retaining proposal content', async () => {
+  const makeAttempt = async (proposal) => {
+    let upstreamCalls = 0;
+    const privateRecipeName = 'SMOKE_PRIVATE_NEW_RECIPE';
+    const upstream = createServer((_request, response) => {
+      upstreamCalls += 1;
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(
+        JSON.stringify({
+          choices: [{ message: { content: JSON.stringify(proposal) }, finish_reason: 'stop' }]
+        })
+      );
+    });
+    const upstreamPort = await listen(upstream);
+    const proxy = await createAiLiveProxy({
+      token: 'synthetic-provider-token',
+      model: 'gpt-5',
+      targetOrigin: `http://127.0.0.1:${upstreamPort}`,
+      maxCalls: 1,
+      expectedSchemaName: 'weekly_meal_proposal'
+    });
+    try {
+      const response = await postJson(
+        `${proxy.baseUrl}/chat/completions`,
+        proxy.clientToken,
+        mealPayload()
+      );
+      assert.equal(response.status, 200);
+      assert.equal(upstreamCalls, 1);
+      assert.equal(proxy.metrics.calls[0].responseFormat.recipeReferencesValid, true);
+      assert.equal(proxy.metrics.failed, false);
+      assert.equal(JSON.stringify(proxy.metrics).includes(privateRecipeName), false);
+    } finally {
+      await proxy.close();
+      await new Promise((resolve, reject) =>
+        upstream.close((error) => (error ? reject(error) : resolve()))
+      );
+    }
+  };
+
+  await makeAttempt({
+    newRecipes: [{ alias: 'N1', recipe: { name: 'SMOKE_PRIVATE_NEW_RECIPE' } }],
+    events: [{ status: 'scheduled', recipeAlias: 'N1' }]
+  });
+
+  let upstreamCalls = 0;
+  const upstream = createServer((_request, response) => {
+    upstreamCalls += 1;
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                newRecipes: [],
+                events: [{ status: 'scheduled', recipeAlias: 'R999' }]
+              })
+            },
+            finish_reason: 'stop'
+          }
+        ]
+      })
+    );
+  });
+  const upstreamPort = await listen(upstream);
+  const proxy = await createAiLiveProxy({
+    token: 'synthetic-provider-token',
+    model: 'gpt-5',
+    targetOrigin: `http://127.0.0.1:${upstreamPort}`,
+    maxCalls: 1,
+    expectedSchemaName: 'weekly_meal_proposal'
+  });
+  try {
+    const response = await postJson(
+      `${proxy.baseUrl}/chat/completions`,
+      proxy.clientToken,
+      mealPayload()
+    );
+    assert.equal(response.status, 200);
+    assert.equal(upstreamCalls, 1);
+    assert.equal(proxy.metrics.calls[0].responseFormat.recipeReferencesValid, false);
+    assert.equal(proxy.metrics.failed, true);
+    assert.equal(
+      isSuccessfulAiLiveHouseholdMealSmokeResult({
+        runnerExit: { code: 0, cancelled: false, timedOut: false, runnerCleaned: true },
+        cleanupFailed: false,
+        calls: proxy.metrics.calls,
+        proxyMetrics: proxy.metrics
+      }),
+      false
     );
   } finally {
     await proxy.close();
@@ -1427,7 +1689,7 @@ test('meal proxy rejects context profile or identity disclosure before provider 
   }
 });
 
-test('meal proxy rejects wrong schema, missing attachment, unrelated attachments, and invalid context before forwarding', async () => {
+test('meal proxy rejects wrong schema, missing or extra recipe/catalog attachments, and invalid context before forwarding', async () => {
   let upstreamCalls = 0;
   const upstream = createServer((_request, response) => {
     upstreamCalls += 1;
@@ -1467,6 +1729,7 @@ test('meal proxy rejects wrong schema, missing attachment, unrelated attachments
 
     const invalidInputs = [
       mealPayload({ context: syntheticMealContext(), includeAttachment: false }),
+      mealPayload({ includeCatalogAttachment: false }),
       mealPayload({
         responseFormat: {
           ...SYNTHETIC_MEAL_RESPONSE_FORMAT,
@@ -1481,6 +1744,41 @@ test('meal proxy rejects wrong schema, missing attachment, unrelated attachments
                   minItems: 0
                 }
               }
+            }
+          }
+        }
+      }),
+      mealPayload({
+        responseFormat: {
+          ...SYNTHETIC_MEAL_RESPONSE_FORMAT,
+          json_schema: {
+            ...SYNTHETIC_MEAL_RESPONSE_FORMAT.json_schema,
+            schema: {
+              ...SYNTHETIC_MEAL_RESPONSE_FORMAT.json_schema.schema,
+              properties: {
+                ...SYNTHETIC_MEAL_RESPONSE_FORMAT.json_schema.schema.properties,
+                events: {
+                  ...SYNTHETIC_MEAL_RESPONSE_FORMAT.json_schema.schema.properties.events,
+                  items: {
+                    type: 'object',
+                    properties: { status: { type: 'string' }, alias: { type: 'string' } },
+                    required: ['status', 'alias'],
+                    additionalProperties: false
+                  }
+                }
+              }
+            }
+          }
+        }
+      }),
+      mealPayload({
+        responseFormat: {
+          ...SYNTHETIC_MEAL_RESPONSE_FORMAT,
+          json_schema: {
+            ...SYNTHETIC_MEAL_RESPONSE_FORMAT.json_schema,
+            schema: {
+              ...SYNTHETIC_MEAL_RESPONSE_FORMAT.json_schema.schema,
+              required: ['events']
             }
           }
         }
@@ -1501,9 +1799,31 @@ test('meal proxy rejects wrong schema, missing attachment, unrelated attachments
       }),
       mealPayload({ context: { version: 1 } }),
       mealPayload({ context: '{not-json' }),
+      mealPayload({ catalog: syntheticMealRecipeCatalog({ version: 2 }) }),
+      mealPayload({
+        catalog: syntheticMealRecipeCatalog({
+          recipes: [
+            ...syntheticMealRecipeCatalog().recipes,
+            syntheticMealRecipeCatalog().recipes[0]
+          ]
+        })
+      }),
+      mealPayload({
+        catalog: syntheticMealRecipeCatalog({
+          recipes: [
+            {
+              ...syntheticMealRecipeCatalog().recipes[0],
+              recipe: {
+                ...syntheticMealRecipeCatalog().recipes[0].recipe,
+                guidance: { author: 'synthetic-private-author' }
+              }
+            }
+          ]
+        })
+      }),
+      mealPayload({ context: syntheticMealContext({ recipes: [] }) }),
       mealPayload({ context: syntheticMealContext({ pantry: [] }) }),
       mealPayload({ context: syntheticMealContext({ utensils: [] }) }),
-      mealPayload({ context: syntheticMealContext({ recipes: [] }) }),
       mealPayload({ context: syntheticMealContext({ previousConfirmedPlan: null }) }),
       mealPayload({
         context: syntheticMealContext({
@@ -1522,6 +1842,12 @@ test('meal proxy rejects wrong schema, missing attachment, unrelated attachments
       mealPayload({
         context: syntheticMealContext(),
         attachmentOptions: { mime: 'application/octet-stream' }
+      }),
+      mealPayload({
+        catalogAttachmentOptions: { filename: 'other-recipes.json' }
+      }),
+      mealPayload({
+        catalogAttachmentOptions: { mime: 'application/octet-stream' }
       })
     ];
     for (const payload of invalidInputs) await assertRejected(payload);

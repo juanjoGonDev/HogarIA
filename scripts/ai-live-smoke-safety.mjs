@@ -44,6 +44,7 @@ export const AI_LIVE_RECEIPT_SMOKE_MAX_REQUEST_BYTES = 15 * 1024 * 1024;
 export const AI_LIVE_HOUSEHOLD_MEAL_SMOKE_COMPLETION_BUDGET = 1;
 export const AI_LIVE_HOUSEHOLD_MEAL_SCHEMA_NAME = 'weekly_meal_proposal';
 export const AI_LIVE_HOUSEHOLD_MEAL_CONTEXT_FILENAME = 'meal-planning-context.json';
+export const AI_LIVE_HOUSEHOLD_MEAL_RECIPE_CATALOG_FILENAME = 'household-recipes-catalog.json';
 export const AI_LIVE_HOUSEHOLD_MEAL_PROMPT_CONTRACT = Object.freeze({
   forbiddenPromptTerms: Object.freeze([
     'HogarIA miembro QA uno',
@@ -223,6 +224,35 @@ function validStrictResponseFormat(value) {
     /^[A-Za-z0-9_-]{1,64}$/.test(format.name) &&
     strictJsonSchemaNode(format.schema) &&
     format.schema.type === 'object'
+  );
+}
+
+function validMealRecipeAliasSchema(schema) {
+  const properties = schema?.properties;
+  const newRecipes = properties?.newRecipes;
+  const newRecipeItem = newRecipes?.items;
+  const events = properties?.events;
+  const eventItem = events?.items;
+  return (
+    schema?.type === 'object' &&
+    Array.isArray(schema.required) &&
+    schema.required.includes('newRecipes') &&
+    schema.required.includes('events') &&
+    newRecipes?.type === 'array' &&
+    newRecipeItem?.type === 'object' &&
+    isRecord(newRecipeItem.properties) &&
+    Object.hasOwn(newRecipeItem.properties, 'alias') &&
+    Object.hasOwn(newRecipeItem.properties, 'recipe') &&
+    events?.type === 'array' &&
+    Number.isInteger(events.minItems) &&
+    events.minItems >= 1 &&
+    eventItem?.type === 'object' &&
+    isRecord(eventItem.properties) &&
+    Object.hasOwn(eventItem.properties, 'status') &&
+    Object.hasOwn(eventItem.properties, 'recipeAlias') &&
+    Array.isArray(eventItem.required) &&
+    eventItem.required.includes('status') &&
+    eventItem.required.includes('recipeAlias')
   );
 }
 
@@ -667,6 +697,10 @@ export function isSuccessfulAiLiveHouseholdMealSmokeResult({
     call.requestContract.nonEmptyEventsSchemaValid === true &&
     call.requestContract.contextJsonAttachmentCount === 1 &&
     call.requestContract.contextJsonAttachmentValid === true &&
+    call.requestContract.recipeCatalogJsonAttachmentCount === 1 &&
+    call.requestContract.recipeCatalogJsonAttachmentValid === true &&
+    call.requestContract.recipeCatalogAliasesValid === true &&
+    call.requestContract.mealRecipeAliasSchemaValid === true &&
     call.requestContract.memberProfilesValid === true &&
     call.requestContract.planningInputsValid === true &&
     call.requestContract.previousPlanValid === true &&
@@ -675,6 +709,7 @@ export function isSuccessfulAiLiveHouseholdMealSmokeResult({
     call?.responseFormat?.hasChoices === true &&
     call.responseFormat.messageContentType === 'text' &&
     call.responseFormat.isJsonObject === true &&
+    call.responseFormat.recipeReferencesValid === true &&
     call.responseFormat.finishReason === 'stop' &&
     proxyMetrics?.requestAttempts === 1 &&
     proxyMetrics.rejectedRequests === 0 &&
@@ -793,16 +828,63 @@ function responseUsage(contentType, body) {
   return usage;
 }
 
-/** Expose only the shape of a text completion, never its content or provider metadata. */
-function responseFormatSummary(contentType, body) {
+/** Inspect in memory; expose only shape/reference booleans, never proposal content. */
+function validMealRecipeReferences(proposal, catalogRecipeAliases) {
+  if (
+    !isRecord(proposal) ||
+    !Array.isArray(proposal.newRecipes) ||
+    !Array.isArray(proposal.events) ||
+    proposal.events.length < 1
+  ) {
+    return false;
+  }
+  const newRecipeAliases = new Set();
+  for (const definition of proposal.newRecipes) {
+    if (
+      !isRecord(definition) ||
+      typeof definition.alias !== 'string' ||
+      !/^N[1-9]\d{0,3}$/.test(definition.alias) ||
+      !isRecord(definition.recipe) ||
+      typeof definition.recipe.name !== 'string' ||
+      !definition.recipe.name.trim() ||
+      newRecipeAliases.has(definition.alias)
+    ) {
+      return false;
+    }
+    newRecipeAliases.add(definition.alias);
+  }
+  const referencedNewRecipes = new Set();
+  for (const event of proposal.events) {
+    if (!isRecord(event)) return false;
+    if (event.status === 'unresolved') {
+      if (event.recipeAlias !== null) return false;
+      continue;
+    }
+    if (
+      event.status !== 'scheduled' ||
+      typeof event.recipeAlias !== 'string' ||
+      (!catalogRecipeAliases.has(event.recipeAlias) && !newRecipeAliases.has(event.recipeAlias))
+    ) {
+      return false;
+    }
+    if (newRecipeAliases.has(event.recipeAlias)) referencedNewRecipes.add(event.recipeAlias);
+  }
+  return [...newRecipeAliases].every((alias) => referencedNewRecipes.has(alias));
+}
+
+function responseFormatSummary(contentType, body, options = {}) {
   if (contentType.includes('text/event-stream')) {
-    return {
+    const summary = {
       hasChoices: false,
       messageContentType: 'stream',
       contentChars: null,
       isJsonObject: false,
       finishReason: 'missing'
     };
+    if (options.expectedSchemaName === AI_LIVE_HOUSEHOLD_MEAL_SCHEMA_NAME) {
+      summary.recipeReferencesValid = false;
+    }
+    return summary;
   }
   if (!contentType.includes('application/json')) return null;
 
@@ -817,10 +899,11 @@ function responseFormatSummary(contentType, body) {
   const choice = hasChoices ? payload.choices[0] : undefined;
   const content = choice?.message?.content;
   let isJsonObject = false;
+  let parsedContent;
   if (typeof content === 'string') {
     try {
-      const parsed = JSON.parse(content);
-      isJsonObject = typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed);
+      parsedContent = JSON.parse(content);
+      isJsonObject = isRecord(parsedContent);
     } catch {
       // The response content itself is deliberately never retained in diagnostics.
     }
@@ -834,7 +917,7 @@ function responseFormatSummary(contentType, body) {
     'content_filter'
   ]);
 
-  return {
+  const summary = {
     hasChoices,
     messageContentType:
       typeof content === 'string'
@@ -853,6 +936,13 @@ function responseFormatSummary(contentType, body) {
           ? 'missing'
           : 'other'
   };
+  if (options.expectedSchemaName === AI_LIVE_HOUSEHOLD_MEAL_SCHEMA_NAME) {
+    summary.recipeReferencesValid =
+      isJsonObject &&
+      options.catalogRecipeAliases instanceof Set &&
+      validMealRecipeReferences(parsedContent, options.catalogRecipeAliases);
+  }
+  return summary;
 }
 
 function redactBearerFromResponse(body, token) {
@@ -978,6 +1068,10 @@ function containsPrivateIdentityKey(value) {
       normalized.endsWith('id') ||
       [
         'email',
+        'author',
+        'authorname',
+        'owner',
+        'ownername',
         'realname',
         'householdname',
         'membername',
@@ -988,6 +1082,192 @@ function containsPrivateIdentityKey(value) {
       containsPrivateIdentityKey(child)
     );
   });
+}
+
+function parseMealJsonAttachment(part, filename) {
+  if (
+    part?.type !== 'file' ||
+    !hasExactKeys(part, ['type', 'file']) ||
+    !hasExactKeys(part.file, ['filename', 'file_data']) ||
+    part.file.filename !== filename ||
+    !validBase64DataUri(part.file.file_data, 'data:application/json;base64,')
+  ) {
+    return undefined;
+  }
+  const encoded = part.file.file_data.slice('data:application/json;base64,'.length);
+  const bytes = Buffer.from(encoded, 'base64');
+  if (bytes.toString('base64') !== encoded) return undefined;
+  try {
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    const value = JSON.parse(text);
+    return isRecord(value) ? { value, text } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function validSelectableCatalogRecipe(recipe) {
+  const steps = recipe.steps;
+  if (Array.isArray(steps) && steps.length > 0) return true;
+  const levels = recipe.instructionsByLevel;
+  return (
+    isRecord(levels) &&
+    ['basic', 'intermediate', 'expert'].every(
+      (level) => Array.isArray(levels[level]) && levels[level].length > 0
+    )
+  );
+}
+
+function validCatalogRecipeStep(step) {
+  return (
+    hasExactKeys(step, [
+      'stepNumber',
+      'instruction',
+      'duration',
+      'tips',
+      'warning',
+      'temperature',
+      'timerRequired',
+      'timerDuration',
+      'illustration'
+    ]) &&
+    Number.isInteger(step.stepNumber) &&
+    step.stepNumber > 0 &&
+    typeof step.instruction === 'string' &&
+    step.instruction.trim() !== '' &&
+    (step.duration === null || Number.isFinite(step.duration)) &&
+    (step.tips === null || typeof step.tips === 'string') &&
+    (step.warning === null || typeof step.warning === 'string') &&
+    (step.temperature === null || isRecord(step.temperature)) &&
+    typeof step.timerRequired === 'boolean' &&
+    (step.timerDuration === null || Number.isFinite(step.timerDuration)) &&
+    step.illustration === null
+  );
+}
+
+function validCatalogRecipe(recipe) {
+  return (
+    hasExactKeys(recipe, [
+      'name',
+      'description',
+      'difficulty',
+      'cuisine',
+      'mealType',
+      'totalTime',
+      'prepTime',
+      'cookTime',
+      'restTime',
+      'baseServings',
+      'calories',
+      'ingredients',
+      'utensils',
+      'guidance',
+      'steps',
+      'instructionsByLevel',
+      'nutrition',
+      'storage',
+      'tags'
+    ]) &&
+    typeof recipe.name === 'string' &&
+    recipe.name.trim() !== '' &&
+    typeof recipe.description === 'string' &&
+    (recipe.cuisine === null || typeof recipe.cuisine === 'string') &&
+    Array.isArray(recipe.mealType) &&
+    recipe.mealType.every((value) => typeof value === 'string') &&
+    [recipe.totalTime, recipe.prepTime, recipe.cookTime, recipe.restTime].every(
+      (value) => value === null || (Number.isFinite(value) && value >= 0)
+    ) &&
+    (recipe.baseServings === null ||
+      (Number.isFinite(recipe.baseServings) && recipe.baseServings > 0)) &&
+    (recipe.calories === null || (Number.isFinite(recipe.calories) && recipe.calories >= 0)) &&
+    Array.isArray(recipe.ingredients) &&
+    recipe.ingredients.every(
+      (ingredient) =>
+        hasExactKeys(ingredient, [
+          'name',
+          'quantity',
+          'unit',
+          'preparation',
+          'isOptional',
+          'substitutes',
+          'notes'
+        ]) &&
+        typeof ingredient.name === 'string' &&
+        (ingredient.quantity === null ||
+          (Number.isFinite(ingredient.quantity) && ingredient.quantity > 0)) &&
+        (ingredient.unit === null || typeof ingredient.unit === 'string') &&
+        (ingredient.preparation === null || typeof ingredient.preparation === 'string') &&
+        typeof ingredient.isOptional === 'boolean' &&
+        Array.isArray(ingredient.substitutes) &&
+        ingredient.substitutes.every((value) => typeof value === 'string') &&
+        (ingredient.notes === null || typeof ingredient.notes === 'string')
+    ) &&
+    Array.isArray(recipe.utensils) &&
+    recipe.utensils.every((value) => typeof value === 'string') &&
+    (recipe.guidance === null || isRecord(recipe.guidance)) &&
+    (recipe.steps === null ||
+      (Array.isArray(recipe.steps) && recipe.steps.every(validCatalogRecipeStep))) &&
+    (recipe.instructionsByLevel === null ||
+      (hasExactKeys(recipe.instructionsByLevel, ['basic', 'intermediate', 'expert']) &&
+        ['basic', 'intermediate', 'expert'].every(
+          (level) =>
+            Array.isArray(recipe.instructionsByLevel[level]) &&
+            recipe.instructionsByLevel[level].every(validCatalogRecipeStep)
+        ))) &&
+    (recipe.nutrition === null || isRecord(recipe.nutrition)) &&
+    (recipe.storage === null || isRecord(recipe.storage)) &&
+    Array.isArray(recipe.tags) &&
+    recipe.tags.every((value) => typeof value === 'string')
+  );
+}
+
+function validMealRecipeCatalog(catalog) {
+  if (
+    !hasExactKeys(catalog, ['version', 'recipes']) ||
+    catalog.version !== 1 ||
+    !Array.isArray(catalog.recipes) ||
+    catalog.recipes.length === 0
+  ) {
+    return undefined;
+  }
+  const selectableAliases = new Set();
+  const aliases = new Set();
+  for (const entry of catalog.recipes) {
+    if (
+      !hasExactKeys(entry, ['alias', 'selectable', 'recipe']) ||
+      typeof entry.alias !== 'string' ||
+      !/^R[1-9]\d{0,3}$/.test(entry.alias) ||
+      aliases.has(entry.alias) ||
+      typeof entry.selectable !== 'boolean' ||
+      !isRecord(entry.recipe) ||
+      !validCatalogRecipe(entry.recipe) ||
+      containsPrivateIdentityKey(entry.recipe)
+    ) {
+      return undefined;
+    }
+    aliases.add(entry.alias);
+    if (
+      entry.selectable &&
+      Number.isFinite(entry.recipe.baseServings) &&
+      entry.recipe.baseServings > 0 &&
+      entry.recipe.ingredients.length > 0 &&
+      entry.recipe.ingredients.every(
+        (ingredient) =>
+          isRecord(ingredient) &&
+          typeof ingredient.name === 'string' &&
+          Number.isFinite(ingredient.quantity) &&
+          ingredient.quantity > 0 &&
+          typeof ingredient.unit === 'string' &&
+          ingredient.unit.trim() !== ''
+      ) &&
+      validSelectableCatalogRecipe(entry.recipe)
+    ) {
+      selectableAliases.add(entry.alias);
+    } else if (entry.selectable) {
+      return undefined;
+    }
+  }
+  return selectableAliases.size > 0 ? selectableAliases : undefined;
 }
 
 function validMealContextAttachment(messages) {
@@ -1011,36 +1291,40 @@ function validMealContextAttachment(messages) {
   );
   const parts = userMessages[0].content;
   if (
-    attachments.length !== 1 ||
-    attachments[0]?.type !== 'file' ||
-    !parts.includes(attachments[0]) ||
+    attachments.length !== 2 ||
+    attachments.some((part) => part?.type !== 'file' || !parts.includes(part)) ||
     nonUserParts.some((part) => part?.type !== 'text') ||
     parts.filter((part) => part?.type === 'text' && typeof part.text === 'string').length === 0 ||
     parts.some((part) => part?.type !== 'text' && part?.type !== 'file')
   ) {
     return undefined;
   }
-  const attachment = attachments[0];
-  const file = attachment.file;
-  const prefix = 'data:application/json;base64,';
-  if (
-    !hasExactKeys(attachment, ['type', 'file']) ||
-    !hasExactKeys(file, ['filename', 'file_data']) ||
-    file.filename !== AI_LIVE_HOUSEHOLD_MEAL_CONTEXT_FILENAME ||
-    !validBase64DataUri(file.file_data, prefix)
-  ) {
-    return undefined;
-  }
-  const encoded = file.file_data.slice(prefix.length);
-  const bytes = Buffer.from(encoded, 'base64');
-  if (bytes.toString('base64') !== encoded) return undefined;
-  try {
-    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-    const context = JSON.parse(text);
-    return isRecord(context) ? { context, text } : undefined;
-  } catch {
-    return undefined;
-  }
+  const contextAttachment = attachments.find(
+    (part) => part.file?.filename === AI_LIVE_HOUSEHOLD_MEAL_CONTEXT_FILENAME
+  );
+  const catalogAttachment = attachments.find(
+    (part) => part.file?.filename === AI_LIVE_HOUSEHOLD_MEAL_RECIPE_CATALOG_FILENAME
+  );
+  if (!contextAttachment || !catalogAttachment) return undefined;
+  const contextData = parseMealJsonAttachment(
+    contextAttachment,
+    AI_LIVE_HOUSEHOLD_MEAL_CONTEXT_FILENAME
+  );
+  const catalogData = parseMealJsonAttachment(
+    catalogAttachment,
+    AI_LIVE_HOUSEHOLD_MEAL_RECIPE_CATALOG_FILENAME
+  );
+  const selectableRecipeAliases = catalogData
+    ? validMealRecipeCatalog(catalogData.value)
+    : undefined;
+  if (!contextData || !catalogData || !selectableRecipeAliases) return undefined;
+  return {
+    context: contextData.value,
+    text: contextData.text,
+    catalog: catalogData.value,
+    catalogText: catalogData.text,
+    selectableRecipeAliases
+  };
 }
 
 function validEffectiveMemberProfiles(context) {
@@ -1114,24 +1398,6 @@ function validRequiredMealTurns(context) {
   );
 }
 
-function validContextRecipe(recipe, expectedName) {
-  return (
-    hasExactKeys(recipe, ['name', 'description', 'ingredients']) &&
-    (expectedName === undefined || recipe.name === expectedName) &&
-    typeof recipe.name === 'string' &&
-    typeof recipe.description === 'string' &&
-    Array.isArray(recipe.ingredients) &&
-    recipe.ingredients.every(
-      (ingredient) =>
-        hasAllowedKeys(ingredient, ['name'], ['quantity', 'unit']) &&
-        typeof ingredient.name === 'string' &&
-        (ingredient.quantity === undefined ||
-          (Number.isFinite(ingredient.quantity) && ingredient.quantity > 0)) &&
-        (ingredient.unit === undefined || typeof ingredient.unit === 'string')
-    )
-  );
-}
-
 function validPantryItem(item) {
   return (
     hasExactKeys(item, ['name', 'quantity', 'unit', 'expirationDate']) &&
@@ -1164,20 +1430,26 @@ function validPreviousPlan(context) {
     Array.isArray(previous.events) &&
     previous.events.every(
       (event) =>
-        hasExactKeys(event, ['date', 'mealType', 'time', 'servings', 'participants', 'recipe']) &&
+        hasExactKeys(event, [
+          'date',
+          'mealType',
+          'time',
+          'servings',
+          'participants',
+          'recipeName'
+        ]) &&
         isIsoDate(event.date) &&
         typeof event.mealType === 'string' &&
         typeof event.time === 'string' &&
         Number.isFinite(event.servings) &&
         Array.isArray(event.participants) &&
         event.participants.every((alias) => alias === 'P1' || alias === 'P2') &&
-        (event.recipe === null || validContextRecipe(event.recipe))
+        (event.recipeName === null || typeof event.recipeName === 'string')
     ) &&
     previous.events.some(
       (event) =>
         isRecord(event) &&
-        isRecord(event.recipe) &&
-        event.recipe.name === 'SMOKE_PREVIOUS_MEAL' &&
+        event.recipeName === 'SMOKE_RECIPE_TEST' &&
         Array.isArray(event.participants) &&
         event.participants.includes('P1') &&
         event.participants.includes('P2')
@@ -1188,7 +1460,7 @@ function validPreviousPlan(context) {
 function mealContextContract(messages, state) {
   const attachment = validMealContextAttachment(messages);
   if (!attachment) return undefined;
-  const { context, text } = attachment;
+  const { context, text, catalog, catalogText, selectableRecipeAliases } = attachment;
   const topLevelValid =
     hasExactKeys(context, [
       'version',
@@ -1198,10 +1470,9 @@ function mealContextContract(messages, state) {
       'requiredTurns',
       'pantry',
       'utensils',
-      'recipes',
       'previousConfirmedPlan'
     ]) &&
-    context.version === 1 &&
+    context.version === 2 &&
     isRecord(context.household) &&
     (context.household.objective === null ||
       hasExactKeys(context.household.objective, ['goals', 'notes'])) &&
@@ -1217,15 +1488,13 @@ function mealContextContract(messages, state) {
     context.pantry.some((item) => item.name === 'SMOKE_PANTRY_RICE') &&
     Array.isArray(context.utensils) &&
     context.utensils.every(validUtensil) &&
-    context.utensils.some((item) => item.name === 'SMOKE_UTENSIL_POT') &&
-    Array.isArray(context.recipes) &&
-    context.recipes.every((recipe) => validContextRecipe(recipe)) &&
-    context.recipes.some((recipe) => validContextRecipe(recipe, 'SMOKE_RECIPE_TEST'));
+    context.utensils.some((item) => item.name === 'SMOKE_UTENSIL_POT');
   const previousPlanValid = topLevelValid && validPreviousPlan(context);
   const forbiddenTerms = (state.forbiddenPromptTerms ?? []).map((term) => term.toLowerCase());
-  const fullText = `${text}\n${collectTextMessages(messages)}`.toLowerCase();
+  const fullText = `${text}\n${catalogText}\n${collectTextMessages(messages)}`.toLowerCase();
   const forbiddenIdentityTermsAbsent =
     !containsPrivateIdentityKey(context) &&
+    !containsPrivateIdentityKey(catalog) &&
     forbiddenTerms.every((term) => !fullText.includes(term));
   if (
     !topLevelValid ||
@@ -1239,10 +1508,14 @@ function mealContextContract(messages, state) {
   return {
     contextJsonAttachmentCount: 1,
     contextJsonAttachmentValid: true,
+    recipeCatalogJsonAttachmentCount: 1,
+    recipeCatalogJsonAttachmentValid: true,
+    recipeCatalogAliasesValid: true,
     memberProfilesValid,
     planningInputsValid,
     previousPlanValid,
-    forbiddenIdentityTermsAbsent
+    forbiddenIdentityTermsAbsent,
+    selectableRecipeAliases
   };
 }
 
@@ -1351,6 +1624,9 @@ async function handleProxyRequest(request, response, state) {
     (eventsSchema?.type === 'array' &&
       Number.isInteger(eventsSchema.minItems) &&
       eventsSchema.minItems >= 1);
+  const mealRecipeAliasSchemaValid =
+    requestSchemaName !== AI_LIVE_HOUSEHOLD_MEAL_SCHEMA_NAME ||
+    validMealRecipeAliasSchema(payload.response_format.json_schema.schema);
   const contextContract =
     state.expectedSchemaName === AI_LIVE_HOUSEHOLD_MEAL_SCHEMA_NAME
       ? mealContextContract(payload.messages, state)
@@ -1359,6 +1635,7 @@ async function handleProxyRequest(request, response, state) {
     state.expectedSchemaName &&
     (requestSchemaName !== state.expectedSchemaName ||
       !nonEmptyEventsSchemaValid ||
+      !mealRecipeAliasSchemaValid ||
       !contextContract)
   ) {
     rejectLiveProxyRequest(
@@ -1382,8 +1659,14 @@ async function handleProxyRequest(request, response, state) {
     );
     return;
   }
+  const selectableRecipeAliases = contextContract?.selectableRecipeAliases;
+  const safeContextContract = contextContract
+    ? Object.fromEntries(
+        Object.entries(contextContract).filter(([key]) => key !== 'selectableRecipeAliases')
+      )
+    : undefined;
   const verifiedContextContract = contextContract
-    ? { ...contextContract, nonEmptyEventsSchemaValid }
+    ? { ...safeContextContract, nonEmptyEventsSchemaValid, mealRecipeAliasSchemaValid }
     : undefined;
   const expectedStreaming = !state.fallbackPending;
   if (state.requireReceiptAttachments && requestStream !== expectedStreaming) {
@@ -1498,7 +1781,17 @@ async function handleProxyRequest(request, response, state) {
       }
       const rawBody = Buffer.concat(chunks, byteLength);
       const usage = responseUsage(contentType, rawBody);
-      const responseFormat = responseFormatSummary(contentType, rawBody);
+      const responseFormat = responseFormatSummary(contentType, rawBody, {
+        expectedSchemaName: requestSchemaName,
+        catalogRecipeAliases: selectableRecipeAliases
+      });
+      if (
+        state.expectedSchemaName === AI_LIVE_HOUSEHOLD_MEAL_SCHEMA_NAME &&
+        responseFormat?.recipeReferencesValid !== true
+      ) {
+        state.failed = true;
+        state.metrics.failed = true;
+      }
       const safeProviderBody = redactBearerFromResponse(rawBody, state.token);
       const safeBody = redactBearerFromResponse(safeProviderBody, state.clientToken);
       completeMetrics(status, usage, responseFormat);

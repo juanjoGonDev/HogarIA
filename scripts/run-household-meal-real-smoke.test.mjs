@@ -32,6 +32,10 @@ function successfulCall() {
       strictJsonSchema: true,
       contextJsonAttachmentCount: 1,
       contextJsonAttachmentValid: true,
+      recipeCatalogJsonAttachmentCount: 1,
+      recipeCatalogJsonAttachmentValid: true,
+      recipeCatalogAliasesValid: true,
+      mealRecipeAliasSchemaValid: true,
       memberProfilesValid: true,
       planningInputsValid: true,
       previousPlanValid: true,
@@ -43,6 +47,7 @@ function successfulCall() {
       hasChoices: true,
       messageContentType: 'text',
       isJsonObject: true,
+      recipeReferencesValid: true,
       finishReason: 'stop'
     },
     usage: { promptTokens: 40, completionTokens: 80, totalTokens: 120 }
@@ -158,9 +163,11 @@ test('meal-only coordinator spends one strict-schema call, cleans up and reports
     verifiedStrictSchema: true,
     verifiedNonEmptyEventsSchema: true,
     verifiedMealContextJson: true,
+    verifiedRecipeCatalogJson: true,
+    verifiedRecipeAliases: true,
     verifiedMemberProfiles: true,
     verifiedSchedulesAndTurns: true,
-    verifiedPantryUtensilsRecipes: true,
+    verifiedPantryAndUtensils: true,
     verifiedPreviousPlan: true,
     verifiedSyntheticNamesExcluded: true,
     elapsedMs: [12],
@@ -191,6 +198,43 @@ test('session preflight failure never starts the proxy or isolated application',
   assert.equal(result, 1);
   assert.deepEqual(calls, ['session']);
   assert.match(errors.join('\n'), /WebAPI.*inicies sesión/i);
+});
+
+test('reports isolated runner progress and confirms a pre-request failure made no provider call', async () => {
+  const progress = [];
+  const errors = [];
+  const result = await runHouseholdMealRealSmoke({
+    env: { [AI_LIVE_SMOKE_ENV.optIn]: '1', CI: '' },
+    dependencies: {
+      isSuccessfulAiLiveHouseholdMealSmokeResult,
+      prepareExistingAiLiveSmokeSession: async () => ({
+        origin: 'http://127.0.0.1:3001',
+        token: 'synthetic-existing-webapi-token',
+        model: 'gpt-5',
+        cleanup: async () => {}
+      }),
+      createAiLiveProxy: async () => ({
+        clientToken: 'synthetic-local-proxy-token',
+        baseUrl: 'http://127.0.0.1:43210/v1',
+        metrics: { calls: [], requestAttempts: 0, rejectedRequests: 0, failed: false },
+        close: async () => {}
+      }),
+      createAiLiveSmokeRunnerEnvironment: () => ({}),
+      runAiLiveSmokeRunner: async ({ onProgress }) => {
+        onProgress('Último hito E2E: preferencias blandas sintéticas configuradas.');
+        onProgress('Los escenarios de Chrome fallaron; cerrando el entorno aislado.');
+        return { code: 1, cancelled: false, timedOut: false, runnerCleaned: true };
+      }
+    },
+    writeProgress: (message) => progress.push(message),
+    writeError: (message) => errors.push(message),
+    writeSuccess: () => assert.fail('A failed isolated run cannot pass the smoke.')
+  });
+
+  assert.equal(result, 1);
+  assert.ok(progress.includes('Último hito E2E: preferencias blandas sintéticas configuradas.'));
+  assert.ok(progress.includes('Los escenarios de Chrome fallaron; cerrando el entorno aislado.'));
+  assert.match(errors.join('\n'), /E2E aislada falló antes de contactar al proveedor/i);
 });
 
 test('distinguishes a local proxy contract rejection from a provider completion', async () => {

@@ -97,7 +97,11 @@ export async function runHouseholdMealRealSmoke({
       householdMealOnly: true
     });
     writeProgress('Iniciando la E2E aislada, sin datos de tickets ni confirmación de calendario.');
-    runnerExit = await dependencies.runAiLiveSmokeRunner({ env: runnerEnv, signal });
+    runnerExit = await dependencies.runAiLiveSmokeRunner({
+      env: runnerEnv,
+      signal,
+      onProgress: writeProgress
+    });
   } catch (error) {
     runnerExit = {
       code: 1,
@@ -147,6 +151,9 @@ export async function runHouseholdMealRealSmoke({
         .map((call) => (Number.isInteger(call.status) ? call.status : 'sin estado'))
         .join(',');
       safeFailure = `Smoke no validado tras ${calls.length} completion(s) y ${proxy.metrics.requestAttempts} intento(s) (rechazos locales: ${proxy.metrics.rejectedRequests ?? 0}; HTTP: ${statuses || 'sin respuesta'}); no se reintentará automáticamente para evitar un coste duplicado.`;
+    } else if (proxy?.metrics.requestAttempts === 0) {
+      safeFailure =
+        'La E2E aislada falló antes de contactar al proveedor; no se hizo ninguna llamada al modelo.';
     }
     writeError(safeFailure);
     return 1;
@@ -163,9 +170,11 @@ export async function runHouseholdMealRealSmoke({
       verifiedStrictSchema: true,
       verifiedNonEmptyEventsSchema: true,
       verifiedMealContextJson: true,
+      verifiedRecipeCatalogJson: true,
+      verifiedRecipeAliases: true,
       verifiedMemberProfiles: true,
       verifiedSchedulesAndTurns: true,
-      verifiedPantryUtensilsRecipes: true,
+      verifiedPantryAndUtensils: true,
       verifiedPreviousPlan: true,
       verifiedSyntheticNamesExcluded: true,
       elapsedMs: calls.map((call) => call.elapsedMs),

@@ -43,7 +43,21 @@ interface MealProposalEvent {
   participantIds: string[];
   servings: number;
   status: string;
-  recipe: { name: string } | null;
+  recipeAlias: string | null;
+}
+
+interface MealProposalRecipe {
+  alias: string;
+  source: 'new' | 'catalog';
+  recipeId: string | null;
+  recipe: {
+    name: string;
+    instructionsByLevel: {
+      basic: Array<{ stepNumber: number; instruction: string }>;
+      intermediate: Array<{ stepNumber: number; instruction: string }>;
+      expert: Array<{ stepNumber: number; instruction: string }>;
+    };
+  };
 }
 
 interface CalendarRange {
@@ -144,22 +158,88 @@ async function seedSmokePlanningContext(
   });
   expect(utensil.status(), await utensil.text()).toBe(201);
 
+  const recipeInput = {
+    name: 'SMOKE_RECIPE_TEST',
+    description: 'Receta sintética accesible para el smoke de planificación.',
+    difficulty: 'easy',
+    cuisine: null,
+    mealType: ['lunch'],
+    totalTime: 15,
+    prepTime: 5,
+    cookTime: 10,
+    restTime: null,
+    servings: 2,
+    calories: null,
+    ingredients: [
+      {
+        name: 'SMOKE_PANTRY_RICE',
+        quantity: 80,
+        unit: 'g',
+        preparation: null,
+        isOptional: false,
+        substitutes: [],
+        notes: null
+      }
+    ],
+    utensils: ['SMOKE_UTENSIL_POT'],
+    guidance: {
+      appliances: [],
+      parallelTasks: [],
+      tipsAndVariations: [],
+      batchCookingWarning: null
+    },
+    instructionsByLevel: {
+      basic: [{ stepNumber: 1, instruction: 'Cocer el arroz sintético.' }],
+      intermediate: [{ stepNumber: 1, instruction: 'Cocer el arroz sintético.' }],
+      expert: [{ stepNumber: 1, instruction: 'Cocer el arroz sintético.' }]
+    },
+    nutrition: null,
+    storage: null,
+    tags: ['sintética']
+  };
   const recipe = await page.request.post('/api/recipes', {
     headers: ownerHeaders,
-    data: {
-      name: 'SMOKE_RECIPE_TEST',
-      description: 'Receta sintética accesible para el smoke de planificación.',
-      difficulty: 'easy',
-      totalTime: 15,
-      prepTime: 5,
-      cookTime: 10,
-      servings: 2,
-      ingredients: [{ name: 'SMOKE_PANTRY_RICE', quantity: 80, unit: 'g' }],
-      utensils: ['SMOKE_UTENSIL_POT'],
-      steps: [{ stepNumber: 1, instruction: 'Cocer el arroz sintético.' }]
-    }
+    data: recipeInput
   });
   expect(recipe.status(), await recipe.text()).toBe(201);
+  const savedRecipe = (await recipe.json()) as { data: { id: string } };
+  expect(savedRecipe.data.id).toBeTruthy();
+  const step = (instruction: string) => ({
+    stepNumber: 1,
+    instruction,
+    duration: null,
+    temperature: null,
+    tips: null,
+    warning: null,
+    timerRequired: false,
+    timerDuration: null,
+    illustration: null
+  });
+  const recipeForConfirmation = {
+    name: recipeInput.name,
+    description: recipeInput.description,
+    difficulty: recipeInput.difficulty,
+    cuisine: recipeInput.cuisine,
+    mealType: recipeInput.mealType,
+    totalTime: recipeInput.totalTime,
+    prepTime: recipeInput.prepTime,
+    cookTime: recipeInput.cookTime,
+    restTime: recipeInput.restTime,
+    baseServings: recipeInput.servings,
+    calories: recipeInput.calories,
+    ingredients: recipeInput.ingredients,
+    utensils: recipeInput.utensils,
+    guidance: recipeInput.guidance,
+    instructionsByLevel: {
+      basic: [step('Cocer el arroz sintético.')],
+      intermediate: [step('Cocer el arroz sintético.')],
+      expert: [step('Cocer el arroz sintético.')]
+    },
+    steps: null,
+    nutrition: null,
+    storage: null,
+    tags: recipeInput.tags
+  };
 
   const previousWeekStart = addDays(targetWeekStart, -7);
   const previousWeekEnd = addDays(previousWeekStart, 6);
@@ -170,24 +250,7 @@ async function seedSmokePlanningContext(
     date: addDays(previousWeekStart, day),
     mealType: 'lunch',
     time: '13:00',
-    recipe: {
-      name: 'SMOKE_PREVIOUS_MEAL',
-      description: 'Comida sintética de la semana anterior.',
-      baseServings: 1,
-      prepTimeMinutes: 5,
-      cookTimeMinutes: 10,
-      ingredients: [
-        {
-          name: 'SMOKE_PANTRY_RICE',
-          quantity: 80,
-          unit: 'g',
-          preparation: null,
-          isOptional: false,
-          notes: null
-        }
-      ],
-      instructions: ['Cocer arroz sintético.']
-    },
+    recipeAlias: 'R1',
     participantAliases: ['P1', 'P2'],
     servings: activeMembers.length,
     objectiveSummary: 'Comida equilibrada.',
@@ -200,6 +263,14 @@ async function seedSmokePlanningContext(
       proposalId: 'smoke-previous-plan',
       weekStart: previousWeekStart,
       householdMemberIds: activeMembers.map((member) => member.id),
+      recipes: [
+        {
+          alias: 'R1',
+          source: 'catalog',
+          recipeId: savedRecipe.data.id,
+          recipe: recipeForConfirmation
+        }
+      ],
       events
     }
   });
@@ -341,6 +412,7 @@ test('envía una propuesta semanal compartida al proveedor y no la persiste ante
         proposalId: string;
         weekStart: string;
         participants: Array<{ alias: string; householdMemberId: string }>;
+        recipes: MealProposalRecipe[];
         events: MealProposalEvent[];
       };
     };
@@ -348,6 +420,18 @@ test('envía una propuesta semanal compartida al proveedor y no la persiste ante
     expect(result.data.proposalId).toBeTruthy();
     expect(result.data.weekStart).toBe(start);
     expect(result.data.participants).toHaveLength(2);
+    expect(result.data.recipes.length).toBeGreaterThan(0);
+    expect(new Set(result.data.recipes.map((recipe) => recipe.alias)).size).toBe(
+      result.data.recipes.length
+    );
+    expect(
+      result.data.events.every(
+        (event) =>
+          event.status !== 'scheduled' ||
+          (typeof event.recipeAlias === 'string' &&
+            result.data.recipes.some((recipe) => recipe.alias === event.recipeAlias))
+      )
+    ).toBe(true);
     expect(new Set(result.data.participants.map((participant) => participant.alias))).toEqual(
       new Set(['P1', 'P2'])
     );
@@ -387,7 +471,8 @@ test('envía una propuesta semanal compartida al proveedor y no la persiste ante
           [...event.participantIds].sort().join('|') === selectedUsers.join('|') &&
           event.servings === selectedUsers.length &&
           event.status === 'scheduled' &&
-          event.recipe?.name
+          event.recipeAlias &&
+          result.data.recipes.some((recipe) => recipe.alias === event.recipeAlias)
       ),
       'Los gustos distintos son blandos: al menos un turno debe quedar compartido y seguro.'
     ).toBe(true);
