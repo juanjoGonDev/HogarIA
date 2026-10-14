@@ -562,7 +562,7 @@ const ROWS: Row[] = [
       prepTime: 5,
       cookTime: 15,
       restTime: null,
-      servings: 1,
+      baseServings: 1,
       calories: 180,
       ingredients: [
         {
@@ -571,6 +571,7 @@ const ROWS: Row[] = [
           unit: 'unit',
           preparation: null,
           isOptional: false,
+          substitutes: [],
           notes: null
         }
       ],
@@ -587,6 +588,9 @@ const ROWS: Row[] = [
             stepNumber: 1,
             instruction: 'Cocer.',
             duration: null,
+            temperature: null,
+            timerRequired: false,
+            timerDuration: null,
             tips: null,
             warning: null,
             illustration: null
@@ -597,6 +601,9 @@ const ROWS: Row[] = [
             stepNumber: 1,
             instruction: 'Cortar y cocer.',
             duration: null,
+            temperature: null,
+            timerRequired: false,
+            timerDuration: null,
             tips: null,
             warning: null,
             illustration: null
@@ -607,6 +614,9 @@ const ROWS: Row[] = [
             stepNumber: 1,
             instruction: 'Cortar en dados y cocer a hervor suave.',
             duration: null,
+            temperature: null,
+            timerRequired: false,
+            timerDuration: null,
             tips: null,
             warning: null,
             illustration: null

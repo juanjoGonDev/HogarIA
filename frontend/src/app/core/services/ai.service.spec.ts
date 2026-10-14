@@ -22,6 +22,20 @@ const CONFIG: AIProviderConfig = {
   updatedAt: new Date('2026-01-01T00:00:00Z')
 };
 
+function recipeStep(instruction: string) {
+  return {
+    stepNumber: 1,
+    instruction,
+    duration: null,
+    temperature: null,
+    timerRequired: false,
+    timerDuration: null,
+    tips: null,
+    warning: null,
+    illustration: null
+  };
+}
+
 describe('AiService', () => {
   let service: AiService;
   let http: HttpTestingController;
@@ -364,7 +378,7 @@ describe('AiService', () => {
       ingredients: [],
       utensils: [],
       servings: 2,
-      difficulty: 'easy',
+      difficulty: 'easy' as const,
       detailLevel: 'basic' as const,
       dietaryRestrictions: [],
       allergies: [],
@@ -374,18 +388,29 @@ describe('AiService', () => {
       name: 'Synthetic recipe',
       description: 'Fixture only',
       difficulty: 'easy',
+      cuisine: null,
       totalTime: 20,
       prepTime: 10,
       cookTime: 10,
-      servings: 2,
+      restTime: null,
+      baseServings: 1,
+      calories: null,
       ingredients: [],
       utensils: [],
-      guidance: { appliances: [], parallelTasks: [], tipsAndVariations: [] },
+      guidance: {
+        appliances: [],
+        parallelTasks: [],
+        tipsAndVariations: [],
+        batchCookingWarning: null
+      },
       instructionsByLevel: {
-        basic: [{ stepNumber: 1, instruction: 'Cocer.' }],
-        intermediate: [{ stepNumber: 1, instruction: 'Cortar y cocer.' }],
-        expert: [{ stepNumber: 1, instruction: 'Cocer a hervor suave.' }]
-      }
+        basic: [recipeStep('Cocer.')],
+        intermediate: [recipeStep('Cortar y cocer.')],
+        expert: [recipeStep('Cocer a hervor suave.')]
+      },
+      tags: [],
+      nutrition: null,
+      storage: null
     };
 
     service.generateRecipe(request).subscribe();

@@ -10,7 +10,7 @@ const validCandidate = {
   prepTime: 5,
   cookTime: 15,
   restTime: null,
-  servings: 2,
+  baseServings: 1,
   calories: 180,
   ingredients: [
     {
@@ -30,6 +30,9 @@ const validCandidate = {
         stepNumber: 1,
         instruction: 'Cocer la zanahoria.',
         duration: null,
+        temperature: null,
+        timerRequired: false,
+        timerDuration: null,
         tips: null,
         warning: null,
         illustration: null
@@ -40,6 +43,9 @@ const validCandidate = {
         stepNumber: 1,
         instruction: 'Cortar la zanahoria y cocerla hasta que esté tierna.',
         duration: null,
+        temperature: null,
+        timerRequired: false,
+        timerDuration: null,
         tips: null,
         warning: null,
         illustration: null
@@ -50,6 +56,9 @@ const validCandidate = {
         stepNumber: 1,
         instruction: 'Cortar dados uniformes y cocer a hervor suave hasta textura tierna.',
         duration: null,
+        temperature: null,
+        timerRequired: false,
+        timerDuration: null,
         tips: null,
         warning: null,
         illustration: null
@@ -66,7 +75,7 @@ const validCandidate = {
   storage: {
     method: 'Refrigerada',
     duration: '2 días',
-    reheating: 'Calentar',
+    reheatingInstructions: 'Calentar',
     container: null,
     freezingPossible: false,
     freezingDuration: null
@@ -198,22 +207,8 @@ describe('generatedRecipeCandidateSchema', () => {
         instructionsByLevel: {
           ...validCandidate.instructionsByLevel,
           intermediate: [
-            {
-              stepNumber: 2,
-              instruction: 'Segundo paso.',
-              duration: null,
-              tips: null,
-              warning: null,
-              illustration: null
-            },
-            {
-              stepNumber: 1,
-              instruction: 'Primer paso.',
-              duration: null,
-              tips: null,
-              warning: null,
-              illustration: null
-            }
+            { ...validCandidate.instructionsByLevel.intermediate[0], stepNumber: 2 },
+            { ...validCandidate.instructionsByLevel.intermediate[0], stepNumber: 1 }
           ]
         }
       }).success

@@ -67,7 +67,7 @@ type SmokeRecipe = {
   totalTime: number;
   prepTime: number;
   cookTime: number;
-  servings: number;
+  baseServings: 1;
   calories: number | null;
   ingredients: Array<{
     name: string;
@@ -179,7 +179,7 @@ function expectComplexRecipe(recipe: SmokeRecipe): void {
   expect(recipe.totalTime).toBeGreaterThan(0);
   expect(recipe.prepTime).toBeGreaterThan(0);
   expect(recipe.cookTime).toBeGreaterThan(0);
-  expect(recipe.servings).toBe(6);
+  expect(recipe.baseServings).toBe(1);
   expect(recipe.calories ?? 0).toBeGreaterThan(0);
   expect(recipe).not.toHaveProperty('steps');
   expect(recipe.ingredients.length).toBeGreaterThanOrEqual(8);
@@ -218,6 +218,9 @@ function complexRecipeFixture() {
       stepNumber: index + 1,
       instruction,
       duration: [15, 10, 120, 20, 15, 20][index],
+      temperature: null,
+      timerRequired: true,
+      timerDuration: [15, 10, 120, 20, 15, 20][index],
       tips: `Fase ${index + 1}: comprueba el cambio observable antes de seguir.`,
       warning: null,
       illustration: null
@@ -232,19 +235,21 @@ function complexRecipeFixture() {
     prepTime: 30,
     cookTime: 150,
     restTime: null,
-    servings: 6,
+    baseServings: 1,
     calories: 520,
     ingredients: COMPLEX_RECIPE_INGREDIENTS.map((ingredient) => ({
       ...ingredient,
       preparation: 'lavado, pelado o troceado según corresponda',
       isOptional: false,
+      substitutes: [],
       notes: ''
     })),
     utensils: ['Olla grande', 'cazo', 'colador'],
     guidance: {
       appliances: ['Cocina de gas'],
       parallelTasks: ['Lava y corta el repollo mientras el caldo cuece a fuego suave.'],
-      tipsAndVariations: ['Añade el chorizo al final para controlar la grasa del caldo.']
+      tipsAndVariations: ['Añade el chorizo al final para controlar la grasa del caldo.'],
+      batchCookingWarning: null
     },
     instructionsByLevel: {
       basic: steps([
@@ -273,7 +278,7 @@ function complexRecipeFixture() {
     storage: {
       method: 'Refrigerar por separado',
       duration: '3 días',
-      reheating: 'Calentar el caldo y las partes por separado.',
+      reheatingInstructions: 'Calentar el caldo y las partes por separado.',
       container: 'Recipientes herméticos',
       freezingPossible: true,
       freezingDuration: '2 meses'
@@ -1388,7 +1393,7 @@ test('cubre los ocho AiJobKind con fixtures de proveedor loopback', async ({ pag
       prepTime: 5,
       cookTime: 15,
       restTime: null,
-      servings: 2,
+      baseServings: 1,
       calories: 180,
       ingredients: ingredientNames.map((ingredientName) => ({
         name: ingredientName,
@@ -1396,13 +1401,15 @@ test('cubre los ocho AiJobKind con fixtures de proveedor loopback', async ({ pag
         unit: 'unit',
         preparation: 'lavado',
         isOptional: false,
+        substitutes: [],
         notes: ''
       })),
       utensils: ['cuchillo'],
       guidance: {
         appliances: ['Cocina de gas'],
         parallelTasks: ['Lava y prepara las verduras mientras se calienta la olla.'],
-        tipsAndVariations: ['Ajusta el fuego para mantener una cocción suave.']
+        tipsAndVariations: ['Ajusta el fuego para mantener una cocción suave.'],
+        batchCookingWarning: null
       },
       instructionsByLevel: {
         basic: [
@@ -1410,6 +1417,9 @@ test('cubre los ocho AiJobKind con fixtures de proveedor loopback', async ({ pag
             stepNumber: 1,
             instruction: `Lava los ingredientes que lo necesiten. ${instruction}`,
             duration: 5,
+            temperature: null,
+            timerRequired: true,
+            timerDuration: 5,
             tips: 'Fixture breve',
             warning: null,
             illustration: null
@@ -1420,6 +1430,9 @@ test('cubre los ocho AiJobKind con fixtures de proveedor loopback', async ({ pag
             stepNumber: 1,
             instruction: `${instruction} Comprueba la textura antes de continuar.`,
             duration: 5,
+            temperature: null,
+            timerRequired: true,
+            timerDuration: 5,
             tips: 'Ajusta el fuego si hace falta.',
             warning: null,
             illustration: null
@@ -1430,6 +1443,9 @@ test('cubre los ocho AiJobKind con fixtures de proveedor loopback', async ({ pag
             stepNumber: 1,
             instruction: `${instruction} Mantén temperatura estable y evalúa el punto final.`,
             duration: 5,
+            temperature: null,
+            timerRequired: true,
+            timerDuration: 5,
             tips: 'Busca señales observables de cocción.',
             warning: null,
             illustration: null
@@ -1440,7 +1456,7 @@ test('cubre los ocho AiJobKind con fixtures de proveedor loopback', async ({ pag
       storage: {
         method: 'Refrigerar',
         duration: '2 días',
-        reheating: 'No aplica',
+        reheatingInstructions: 'No aplica',
         container: 'Recipiente hermético',
         freezingPossible: false,
         freezingDuration: ''

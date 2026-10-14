@@ -37,6 +37,7 @@ import { IconComponent } from '../../shared/components/ui/icon/icon.component';
 import type { IconName } from '../../shared/components/ui/icon/icon-paths';
 import { Recipe, Difficulty, MealType, RecipeFilter } from '../../shared/models/recipe.model';
 import type {
+  AIRecipeRequest,
   AIGuestPreferences,
   AIRecipeResponse,
   DetailLevel
@@ -944,8 +945,8 @@ function difficultyFromQuery(value: string | null): Difficulty | null {
               <p *ngIf="recipe.storage.freezingPossible === false">
                 {{ 'recipes.no_freezing' | t }}
               </p>
-              <p *ngIf="recipe.storage.reheating">
-                {{ 'recipes.recalentar' | t: { text: recipe.storage.reheating } }}
+              <p *ngIf="recipe.storage.reheatingInstructions">
+                {{ 'recipes.recalentar' | t: { text: recipe.storage.reheatingInstructions } }}
               </p>
             </section>
 
@@ -2907,7 +2908,7 @@ export class RecipesComponent implements OnInit {
   }
 
   generatedPreviewIngredientQuantity(recipe: AIRecipeResponse, quantity: number): number {
-    return scaleRecipeQuantity(quantity, recipe.servings || 1, this.generatedPreviewServings());
+    return scaleRecipeQuantity(quantity, recipe.baseServings, this.generatedPreviewServings());
   }
 
   setGeneratedPreviewServings(value: number | string): void {
@@ -3246,7 +3247,7 @@ export class RecipesComponent implements OnInit {
       servings: requestedServings,
       householdMemberIds: this.recipeMemberIds(),
       guests: this.recipeGuests(),
-      difficulty: this.aiOptions.difficulty,
+      difficulty: this.aiOptions.difficulty as AIRecipeRequest['difficulty'],
       detailLevel: this.aiOptions.detailLevel as any,
       dietaryRestrictions: [],
       allergies: [],
@@ -3292,7 +3293,7 @@ export class RecipesComponent implements OnInit {
       servings: requestedServings,
       householdMemberIds: this.recipeMemberIds(),
       guests: this.recipeGuests(),
-      difficulty: this.aiOptions.difficulty,
+      difficulty: this.aiOptions.difficulty as AIRecipeRequest['difficulty'],
       detailLevel: this.aiOptions.detailLevel as any,
       dietaryRestrictions: [],
       allergies: [],
@@ -3337,19 +3338,18 @@ export class RecipesComponent implements OnInit {
         stepNumber: step.stepNumber,
         instruction: step.instruction,
         duration: step.duration,
-        timerRequired: Boolean(step.duration),
-        timerDuration: step.duration,
+        temperature: step.temperature,
+        timerRequired: step.timerRequired,
+        timerDuration: step.timerDuration,
         tips: step.tips,
         warning: step.warning,
         illustration: step.illustration ?? null
       }));
-    const instructionsByLevel = recipe.instructionsByLevel
-      ? {
-          basic: convertSteps(recipe.instructionsByLevel.basic),
-          intermediate: convertSteps(recipe.instructionsByLevel.intermediate),
-          expert: convertSteps(recipe.instructionsByLevel.expert)
-        }
-      : undefined;
+    const instructionsByLevel = {
+      basic: convertSteps(recipe.instructionsByLevel.basic),
+      intermediate: convertSteps(recipe.instructionsByLevel.intermediate),
+      expert: convertSteps(recipe.instructionsByLevel.expert)
+    };
 
     this.recipeService
       .createRecipe({
@@ -3362,7 +3362,7 @@ export class RecipesComponent implements OnInit {
         prepTime: recipe.prepTime,
         cookTime: recipe.cookTime,
         restTime: recipe.restTime,
-        servings: recipe.servings,
+        servings: recipe.baseServings,
         calories: recipe.calories,
         ingredients: recipe.ingredients.map((i) => ({
           name: i.name,
@@ -3375,9 +3375,7 @@ export class RecipesComponent implements OnInit {
         })),
         utensils: recipe.utensils,
         guidance: recipe.guidance,
-        ...(instructionsByLevel
-          ? { instructionsByLevel }
-          : { steps: convertSteps(recipe.steps ?? []) }),
+        instructionsByLevel,
         nutrition: recipe.nutrition
           ? {
               calories: recipe.nutrition.calories,
@@ -3392,8 +3390,8 @@ export class RecipesComponent implements OnInit {
               method: recipe.storage.method,
               container: recipe.storage.container,
               duration: recipe.storage.duration,
-              reheatingInstructions: recipe.storage.reheating,
-              freezingPossible: recipe.storage.freezingPossible ?? false,
+              reheatingInstructions: recipe.storage.reheatingInstructions,
+              freezingPossible: recipe.storage.freezingPossible,
               freezingDuration: recipe.storage.freezingDuration
             }
           : undefined,

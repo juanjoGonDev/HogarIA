@@ -1,9 +1,5 @@
-import type {
-  RecipeDetailLevel,
-  RecipeInstructionStep,
-  RecipeInstructionsByLevel
-} from './recipe-instructions';
-import type { RecipeGuidance } from './recipe.model';
+import type { RecipeDetailLevel } from './recipe-instructions';
+import type { MeasurementUnit } from './recipe.model';
 
 export interface AIProviderConfig {
   id: string;
@@ -69,7 +65,7 @@ export interface AIRecipeRequest {
   servings: number;
   householdMemberIds?: string[];
   guests?: AIGuestPreferences[];
-  difficulty: string;
+  difficulty: 'easy' | 'medium' | 'hard';
   detailLevel: DetailLevel;
   dietaryRestrictions: string[];
   allergies: string[];
@@ -117,42 +113,59 @@ export interface AIUtensil {
 export interface AIRecipeResponse {
   name: string;
   description: string;
-  difficulty: string;
-  cuisine?: string | null;
+  difficulty: 'easy' | 'medium' | 'hard';
+  cuisine: string | null;
   totalTime: number;
   prepTime: number;
   cookTime: number;
-  servings: number;
-  calories?: number | null;
+  /** Must match server `aiRecipeOutputSchema`; do not fork for a planning or recipe UI flow. */
+  baseServings: 1;
+  calories: number | null;
   ingredients: AIRecipeIngredient[];
   utensils: string[];
-  guidance: RecipeGuidance;
-  /** Canonical output: all detail variants in one provider response. */
-  instructionsByLevel?: RecipeInstructionsByLevel;
+  guidance: AIRecipeGuidance;
+  instructionsByLevel: AIRecipeInstructionsByLevel;
   /** Initial view selection returned by the API; changing it is local-only. */
   selectedDetailLevel?: DetailLevel;
-  /** Legacy provider response support during rolling upgrades. */
-  steps?: AIRecipeStep[];
-  tags?: string[];
-  nutrition?: AINutritionInfo | null;
-  storage?: AIStorageInfo | null;
-  restTime?: number | null;
-  difficultyNotes?: string;
+  tags: string[];
+  nutrition: AINutritionInfo | null;
+  storage: AIStorageInfo | null;
+  restTime: number | null;
 }
 
 export interface AIRecipeIngredient {
   name: string;
   quantity: number;
-  unit: string;
-  preparation?: string | null;
-  isOptional?: boolean;
-  substitutes?: string[];
-  notes?: string | null;
+  unit: MeasurementUnit;
+  preparation: string | null;
+  isOptional: boolean;
+  substitutes: string[];
+  notes: string | null;
 }
 
-export interface AIRecipeStep extends RecipeInstructionStep {
-  timerRequired?: boolean;
-  timerDuration?: number;
+export interface AIRecipeGuidance {
+  appliances: string[];
+  parallelTasks: string[];
+  tipsAndVariations: string[];
+  batchCookingWarning: string | null;
+}
+
+export interface AIRecipeStep {
+  stepNumber: number;
+  instruction: string;
+  duration: number | null;
+  temperature: { value: number; unit: 'C' | 'F' } | null;
+  timerRequired: boolean;
+  timerDuration: number | null;
+  tips: string | null;
+  warning: string | null;
+  illustration: null;
+}
+
+export interface AIRecipeInstructionsByLevel {
+  basic: AIRecipeStep[];
+  intermediate: AIRecipeStep[];
+  expert: AIRecipeStep[];
 }
 
 export interface AINutritionInfo {
@@ -160,16 +173,16 @@ export interface AINutritionInfo {
   protein: number;
   carbs: number;
   fat: number;
-  fiber?: number | null;
+  fiber: number | null;
 }
 
 export interface AIStorageInfo {
   method: string;
   duration: string;
-  reheating?: string | null;
-  container?: string | null;
-  freezingPossible?: boolean;
-  freezingDuration?: string | null;
+  reheatingInstructions: string | null;
+  container: string | null;
+  freezingPossible: boolean;
+  freezingDuration: string | null;
 }
 
 export interface AIWeeklyPlanRequest {

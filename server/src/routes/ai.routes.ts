@@ -421,8 +421,9 @@ function isSavableGeneratedRecipe(recipe: GeneratedRecipeCandidate): boolean {
       stepNumber: step.stepNumber,
       instruction: step.instruction,
       duration: step.duration,
-      timerRequired: Boolean(step.duration),
-      timerDuration: step.duration,
+      temperature: step.temperature,
+      timerRequired: step.timerRequired,
+      timerDuration: step.timerDuration,
       tips: step.tips,
       warning: step.warning,
       illustration: step.illustration
@@ -437,7 +438,7 @@ function isSavableGeneratedRecipe(recipe: GeneratedRecipeCandidate): boolean {
     prepTime: recipe.prepTime,
     cookTime: recipe.cookTime,
     restTime: recipe.restTime,
-    servings: recipe.servings,
+    servings: recipe.baseServings,
     calories: recipe.calories,
     ingredients: recipe.ingredients.map((ingredient) => ({
       name: ingredient.name,
@@ -469,8 +470,8 @@ function isSavableGeneratedRecipe(recipe: GeneratedRecipeCandidate): boolean {
           method: recipe.storage.method,
           container: recipe.storage.container,
           duration: recipe.storage.duration,
-          reheatingInstructions: recipe.storage.reheating,
-          freezingPossible: recipe.storage.freezingPossible ?? false,
+          reheatingInstructions: recipe.storage.reheatingInstructions,
+          freezingPossible: recipe.storage.freezingPossible,
           freezingDuration: recipe.storage.freezingDuration
         }
       : recipe.storage,
@@ -575,30 +576,7 @@ ${participants.prompt}
 ${input.cookingTime ? `Tiempo de cocción: entre ${input.cookingTime.min} y ${input.cookingTime.max} minutos` : ''}
 ${kind === 'multiple_recipes' && candidateNumber !== undefined ? `Esta es la candidata ${candidateNumber} de ${input.count}. Propón una alternativa culinariamente distinta, variando de forma real los ingredientes y/o la técnica, sin dejar de respetar los ingredientes disponibles y las restricciones.` : ''}
 
-Responde SOLO con un JSON válido y exactamente estas propiedades. Los datos comunes e ingredientes se escriben una sola vez; nunca repitas los ingredientes en cada nivel. No incluyas una propiedad steps aparte: cada lista de instrucciones vive solo en instructionsByLevel. Cada lista debe contener todos los pasos, numerados en orden empezando en 1.
-{
-  "name": "Nombre de la receta",
-  "description": "Descripción breve",
-  "difficulty": "easy|medium|hard",
-  "cuisine": "Tipo de cocina",
-  "totalTime": número en minutos,
-  "prepTime": número en minutos,
-  "cookTime": número en minutos,
-  "restTime": número en minutos o null,
-  "servings": 1,
-  "calories": kcal aproximadas por ración,
-  "ingredients": [{"name": "", "quantity": número para 1 ración, "unit": "g|kg|ml|l|cup|tbsp|tsp|unit|bunch|slice|piece", "preparation": "", "isOptional": false, "substitutes": ["alternativas razonables que se suelen tener en casa"], "notes": ""}],
-  "utensils": ["utensilios necesarios"],
-  "guidance": {"appliances": ["solo electrodomésticos de la lista anterior que se necesiten"], "parallelTasks": ["tarea segura que ahorra tiempo"], "tipsAndVariations": ["consejo o variación concreta de sabor, textura o presentación"], "batchCookingWarning": "aviso concreto de tandas si hace falta" o null},
-  "instructionsByLevel": {
-    "basic": [{"stepNumber": 1, "instruction": "", "duration": minutos o null, "tips": "" o null, "warning": "" o null, "illustration": null}],
-    "intermediate": [{"stepNumber": 1, "instruction": "", "duration": minutos o null, "tips": "" o null, "warning": "" o null, "illustration": null}],
-    "expert": [{"stepNumber": 1, "instruction": "", "duration": minutos o null, "tips": "" o null, "warning": "" o null, "illustration": null}]
-  },
-  "nutrition": {"calories": 0, "protein": 0, "carbs": 0, "fat": 0, "fiber": 0} o null (valores estimados por ración),
-  "storage": {"method": "", "duration": "", "reheating": "" o null, "container": "" o null, "freezingPossible": true/false, "freezingDuration": "" o null} o null,
-  "tags": ["tag1", "tag2"]
-}`;
+Devuelve un objeto JSON que cumpla exactamente el response_format estricto recibido. Ese es el contrato canónico compartido con la planificación semanal: rendimiento base de 1 ración (baseServings=1), cantidades de ingredientes por ración, objetos completos de paso con temporizadores/temperatura y nombres de propiedades exactos. No añadas propiedades ni omitas campos. Los ingredientes y datos comunes aparecen una sola vez; cada nivel en instructionsByLevel lleva todos sus pasos completos, numerados desde 1. No generes ilustraciones ni URLs.`;
 
   const response = await callAI(
     userId,
@@ -808,7 +786,7 @@ aiRoutes.post('/generate-recipe', async (c) => {
     const parsedRecipe = generatedRecipeCandidateSchema.safeParse(rawRecipe);
     if (
       !parsedRecipe.success ||
-      parsedRecipe.data.servings !== 1 ||
+      parsedRecipe.data.baseServings !== 1 ||
       !isSavableGeneratedRecipe(parsedRecipe.data)
     ) {
       throw new AiCallError('BAD_JSON', 'AI response does not contain a complete recipe draft');
@@ -880,7 +858,7 @@ aiRoutes.post('/generate-multiple-recipes', async (c) => {
       const parsedRecipe = generatedRecipeCandidateSchema.safeParse(rawRecipe);
       if (
         !parsedRecipe.success ||
-        parsedRecipe.data.servings !== 1 ||
+        parsedRecipe.data.baseServings !== 1 ||
         !isSavableGeneratedRecipe(parsedRecipe.data)
       ) {
         throw new AiCallError('BAD_JSON', 'AI response does not contain a usable recipe draft');

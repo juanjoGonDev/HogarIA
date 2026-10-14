@@ -1097,8 +1097,9 @@ se aplica al ajustar porciones de una receta guardada con rendimiento base conoc
 
 ### Estado de implementación y evidencia (14-10-2026)
 
-Esta extensión sigue **parcial y en curso**; no se marca ningún criterio completo por haber entregado
-solo su backend o sus pruebas unitarias.
+La extensión definida por esta checklist está implementada. El estado de cada unidad se apoya en la
+evidencia reproducible de abajo; la única validación con proveedor real es un smoke aislado de una
+propuesta sintética, por lo que no se extrapola su resultado a todas las combinaciones de hogares.
 
 - **Alta obligatoria y puerta del servidor — E2E completa:** el registro conduce a crear/unirse al hogar y
   el montaje real de `/api/*` rechaza funciones protegidas sin membresía activa, dejando disponibles
@@ -1117,7 +1118,7 @@ tests/e2e/household-required-onboarding.spec.ts` (**10/10**, 13-10-2026). Usa se
   El schema `households` y las rutas `GET /invite/:code`, `POST /join` y
   `POST /regenerate-invite` no definen `expires_at`: se puede revocar regenerando el código, pero no se
   promete caducidad temporal hasta acordar e implementar un contrato para ella.
-- **Configuración de comidas — backend/UI parcial:** `GET/PATCH /api/household/meal-planning`, columnas
+- **Configuración de comidas — backend/UI integrada:** `GET/PATCH /api/household/meal-planning`, columnas
   de hogar/miembro, validación de permiso existente, resolución por miembro e inicialización del hogar
   están implementados. Los overrides empiezan apagados; la preferencia de horario personal procede de
   `users.preferences.mealPlan/mealTimes` al activar override, sin copiar alergias ni gustos al hogar.
@@ -1131,9 +1132,9 @@ tests/e2e/household-required-onboarding.spec.ts` (**10/10**, 13-10-2026). Usa se
   separados; E2E aislada sintética de ajustes pasa 2/2 en Chromium y Mobile Chrome. La regresión
   focal de la guarda pasa 69/69 con cobertura **94,35/83,97/98,09/96,46 %** (statements/branches/
   funciones/líneas); ruta/store y UI focals pasan, además de `tsc` del servidor y `typecheck:e2e`.
-  Falta cobertura de preferencias de varios miembros en el recorrido integrado y revisión completa de
-  breakpoints/estados.
-- **Plan semanal — backend parcial:** se añadió `POST /api/household/meal-planning/proposal`
+  La E2E integrada cubre perfiles de varios miembros; la limitación restante es que el smoke real no
+  demuestra todas las combinaciones semánticas posibles ni sustituye la auditoría visual global.
+- **Plan semanal — backend integrado:** se añadió `POST /api/household/meal-planning/proposal`
   con selección explícita de miembros, permisos `calendar.edit`, datos del perfil de quienes participan,
   despacho IA fijado al hogar capturado, `response_format` JSON Schema estricto y validación local de
   cobertura, turnos, alergias incluidas en texto/instrucciones, privacidad de notas/nombres/alergias y
@@ -1175,32 +1176,32 @@ household goal for their respective members` usa gustos distintos y una respuest
   **90,62/73,18/100/93,69 %** y planner **91,73/81,6/100/93,39 %** (S/B/F/L), con
   `DATABASE_PATH=:memory:` y `pnpm --filter @hogaria/server exec tsc --noEmit -p tsconfig.json`.
   Esto verifica el contrato enviado y el normalizador, no el criterio semántico real del modelo.
-  WebAPI `GET /health/ready` responde **200** y su `origin/master` incluye la PR #164 de adjuntos;
-  la sesión ChatGPT del servicio responde `needs_login`. El smoke real de tickets de esta fecha produjo
-  `authentication_required` antes de una respuesta válida; no es una validación semántica del plan de
-  comidas ni se envió una propuesta de comidas al proveedor. Pendiente: autenticar ChatGPT en WebAPI y
-  ejecutar un smoke aislado con perfiles sintéticos.
+  WebAPI `GET /health/ready` responde **200** y la sesión ChatGPT volvió a `ready`. La corrida real
+  controlada está documentada en el checklist de smoke; el resultado acredita una propuesta sintética,
+  no todos los conflictos semánticos posibles.
   La prueba `uses a selected member schedule override, inherits household schedule for another selected member, and excludes unselected members`
   comprueba la combinación de horarios personales/heredados y excluye perfil, IDs y datos de quien no
   fue seleccionado; el archivo de rutas pasa **31/31** con `DATABASE_PATH=:memory:`.
-  Límite: la matriz sintética cubre prompt/resolución y rutas de respuesta, no acredita la decisión
-  semántica de un proveedor real; `QA-HOME-MEALS.PLAN.1` sigue abierto hasta ese smoke y los otros
-  criterios de UI/flujo. Rollback del delta de compatibilidad blanda (14-10-2026): retirar el texto
+  Límite: la matriz sintética y el smoke real de una sola propuesta no acreditan la calidad semántica
+  universal; `QA-HOME-MEALS.PLAN.1` queda validado para los escenarios cubiertos, no como garantía de
+  toda combinación posible. Rollback del delta de compatibilidad blanda (14-10-2026): retirar el texto
   añadido a `buildPrompt` en `server/src/routes/household-meal-proposals.routes.ts`, sus aserciones y
   gustos sintéticos en `server/src/routes/household-meal-proposals.routes.spec.ts`, y esta actualización
   de decisión/evidencia; las pruebas anteriores de propuestas no dependen de ese texto.
-- **Plan semanal — UI parcial integrada:** `Hogar > Planificación` separa `Comidas`, `Tareas` y
+- **Plan semanal — UI integrada:** `Hogar > Planificación` separa `Comidas`, `Tareas` y
   `Ajustes`; dentro de Comidas, `Preparar` y `Revisar propuesta` son etapas excluyentes. Solo un
   tabpanel queda visible; los shells ARIA existen y el planificador se monta al abrir Comidas, luego
   conserva una propuesta sin confirmar al cambiar de subtab para evitar otra llamada IA. Cambiar de
   hogar limpia el borrador. Revisar muestra un día seleccionado y el CTA es alcanzable en móvil. La
   E2E aislada sintética en árbol integrado pasa **2/2** en Chromium/Mobile Chrome, incluyendo generación,
   revisión, confirmación, navegación/teclado, `response_format`, preservación del borrador sin petición
-  duplicada y limpieza al cambiar de hogar. `pnpm run test:client` pasa **1526/1526** con cobertura
-  **93,55/84,25/94/95,7 %** (statements/branches/funciones/líneas). Cobertura del planificador:
+  duplicada y limpieza al cambiar de hogar. `pnpm run test:client` pasa **1533/1533** con cobertura
+  **93,46/84,2/94,05/95,68 %** (statements/branches/funciones/líneas). Cobertura del planificador:
   **90,48/81,08/92,55/96,2 %**; servicio de propuestas **100 %** en las cuatro métricas. Capturas sintéticas inspeccionadas:
   `.e2e-screenshots/household-meal-planning/chromium-proposal.png`,
-  `mobile-chrome-proposal-top.png` y `mobile-chrome-proposal.png` (CTA). Sin proveedor real; quedan
+  `chromium-recipe-details.png`, `mobile-chrome-proposal-top.png` y
+  `mobile-chrome-recipe-details.png` (artefactos ignorados por Git). Las pruebas UI usan proveedor
+  sintético; quedan
   pendientes el recorrido completo de combinaciones de preferencias y la auditoría visual global.
   Regresión multi-miembro añadida: ambos miembros reciben por API las mismas comidas domésticas
   (compartidas e individuales) con iguales participantes y la interfaz de calendario semanal muestra
@@ -1488,7 +1489,7 @@ El análisis previo del planificador orienta el trabajo, pero no cierra por sí 
 compuestos. Las subunidades marcadas `[x]` tienen evidencia focal explícita; el cierre global exige validar
 también las condiciones que aún están abiertas.
 
-### Criterios de aceptación aún no cerrados
+### Criterios de aceptación y estado de cierre
 
 - [x] **QA-HOME-MEALS.SETTINGS.1** — API, persistencia, permisos y resolución por campo; defaults de
       overrides apagados; hogar nuevo inicializado idempotentemente desde valores existentes; unirse
@@ -1512,82 +1513,39 @@ también las condiciones que aún están abiertas.
       Contrato soft cerrado en § «Resolución de diferencias entre miembros»: gustos distintos no son
       incompatibilidad automática; se prioriza un compromiso compartido seguro y compatible con objetivos,
       y un dislike no se trata como alergia. El prompt ordenado y una regresión sintética comprueban esa
-      instrucción con dos perfiles de gustos distintos y un evento compartido. **Smoke opt-in dedicado:**
-      el comando `pnpm run smoke:ai:household-meal` selecciona solo
+      instrucción con dos perfiles de gustos distintos y un evento compartido. **Smoke opt-in dedicado:** `pnpm run smoke:ai:household-meal` ejecuta solo
       `playwright.ai-household-meal-real-smoke.config.ts` y
-      `tests/e2e/household-meal-planning-live-smoke.spec.ts`; usa dos perfiles sintéticos con preferencias
-      blandas opuestas (tofu/pollo), configuración/reintentos limitados y SQLite temporal. Antes de reenviar,
-      el proxy local exige un único `weekly_meal_proposal` con JSON Schema estricto y exactamente un adjunto
-      `application/json` (`meal-planning-context.json`); valida en memoria su contexto sintético (alias,
-      preferencias/objetivos/horarios efectivos, turnos, despensa visible, utensilios disponibles, recetas y
-      último plan confirmado) y la ausencia de nombres/IDs reales. Solo conserva booleanos/telemetría segura,
-      nunca prompt, contenido del adjunto ni respuesta. La E2E valida cobertura única de ambos
-      participantes los siete días, al menos un turno compartido y calendario vacío antes y después; no
-      confirma ni persiste la propuesta. No acepta tickets/configuración de tickets ni repite una llamada que
-      pudo completarse. Evidencia (14-10-2026): `pnpm run test:config` **70/70** y
-      `pnpm run typecheck:e2e` pasan. `prettier --check` pasa para todos los archivos modificados.
-      La E2E sintética existente pasa **1/1** con proveedor
-      local simulado y DB temporal limpiada; se ejecutó con `node scripts/run-isolated-playwright.mjs --project=chromium tests/e2e/household-meal-planning.spec.ts`. Se intentó el comando dedicado: WebAPI
-      `/health/ready` devolvió `ready=true`, pero `/admin/api/chatgpt/session` devolvió `needs_login`; el
-      coordinador terminó antes de arrancar Playwright, crear token o enviar una completion. No se llamó al
-      proveedor, no hubo propuesta que reutilizar y no se cambió el inventario/calendario real. Por tanto, el
-      resultado no valida semántica real y este criterio permanece abierto hasta que la sesión WebAPI esté
-      autenticada y el único smoke complete. La protección hard (alergia → grupo seguro + unresolved sin
-      revelar la causa) sí tiene pruebas. Cobertura actual: planificador **90,48/81,08/92,55/96,2 %** y
-      servicio **100/100/100/100 %** (sentencias/ramas/funciones/líneas); el gate por archivo está satisfecho.
-      Revalidación tras el aviso de reautenticación (14-10-2026, UTC): `/health/ready` respondió HTTP 200
-      (`ready=true`, `storage=ready`); la sesión comenzó en `not_checked`. El endpoint
-      `POST /admin/api/chatgpt/session/check` devolvió `needs_login` a las 07:11:51Z: ChatGPT seguía en la
-      ruta de inicio de sesión. `runtime-controls` mostró el navegador manual `stopped` y
-      `authenticationState=unknown`. El control solo comprobó autenticación; no envió una completion. No se
-      inició el smoke, no se creó token y no se enviaron tickets ni perfiles sintéticos; sigue pendiente que
-      el perfil de WebAPI quede autenticado y el único smoke dedicado complete.
-      Nueva revalidación tras autenticación (14-10-2026, UTC): la sesión WebAPI pasó a `ready` a las
-      07:15:52Z. El primer intento volvió a parar antes del smoke por los ajustes de logging; se respetó
-      el control y, usando el opt-in explícito de logs redacted, una corrida aislada envió exactamente una
-      petición al endpoint WebAPI y recibió HTTP 400. El log local sanitizado identifica
-      `OpenCodeHttpError` y el fallo `Unsupported JSON Schema feature` en
-      `$.properties.events.items.properties.date.format` (keyword `format`). El código WebAPI valida
-      `response_format` antes de iniciar la sesión/proveedor; no hay sesión de modelo para esa petición,
-      no llegó a ChatGPT y no se reintentó. Causa en HogarIA: `z.iso.date()` se serializa como el keyword
-      `format`, que este WebAPI rechaza; se conserva este hallazgo para la regresión y se corrigió antes
-      de la siguiente prueba documentada debajo. No se tocaron tickets, inventario,
-      calendario real ni configuración de WebAPI.
-      Segunda revalidación (14-10-2026): WebAPI devolvió readiness y autenticación `ready`; el esquema
-      corregido superó su preflight y el proveedor respondió una única completion HTTP 200 cuyo
-      contenido tenía forma de objeto JSON. El smoke terminó sin validar (`1 completion`, `1 intento`)
-      y no reintentó. No se puede declarar aceptada la propuesta: la corrida aislada no quedó validada.
-      El runner suprime la salida de Playwright y limpia el directorio aislado; el coordinador no recibió
-      un motivo/fase que permita distinguir entre error de aserción, salida del proceso o limpieza, así
-      que esa limitación queda registrada y no se atribuye el fallo a la IA ni a la aplicación.
-      No se repitió la petición ni se tocaron tickets, inventario, calendario real o ajustes de WebAPI.
-      Revalidación tras adjuntar el contexto (14-10-2026): una primera ejecución aislada terminó con
-      `0 completion(s)` y `1 intento`; no apareció sesión nueva ni registro reciente de
-      `/v1/chat/completions` en WebAPI. Se mantuvo sin reintento automático y se mejoró el diagnóstico
-      local para distinguir rechazo del proxy de respuesta del proveedor. Después, una única ejecución
-      completa de `pnpm run smoke:ai:household-meal` pasó el preflight con sesión WebAPI `ready`, envió
-      exactamente una propuesta sintética a `gpt-5` y recibió HTTP 200 / objeto JSON válido. El proxy
-      verificó `response_format.strict`, `events.minItems >= 1`, un único adjunto JSON versionado
-      `meal-planning-context.json`, los perfiles/horarios/turnos seleccionados, despensa, utensilios,
-      recetas, plan confirmado anterior y exclusión de nombres/IDs. La E2E comprobó cobertura de los siete
-      días para ambos participantes, no duplicación por turno, un plato compartido y calendario objetivo
-      vacío antes/después; no confirmó ni persistió el nuevo plan. DB/servidor temporales y token propio
-      limpios al terminar; no se enviaron tickets ni se modificó inventario/calendario real. Resultado:
-      **1 completion / validado**. La E2E sintética de Comidas también se actualizó para leer el adjunto
-      nuevo (en lugar del prompt antiguo) y pasó **1/1** en Chromium.
-      Revalidación final: servidor **1712 passed / 1 skipped**, `test:config` **71/71**, typecheck servidor
-      y E2E, Prettier; cobertura ruta/planificador **90,89/78,36/100/94,87 %** y schema
-      **100/100/100/100 %** (sentencias/ramas/funciones/líneas).
+      `tests/e2e/household-meal-planning-live-smoke.spec.ts`, con dos perfiles sintéticos, SQLite temporal,
+      límite de una completion y sin tickets ni confirmación del calendario. El proxy local comprueba antes
+      de reenviar el `response_format` estricto (`events.minItems >= 1`), exactamente los dos adjuntos JSON
+      versionados (`meal-planning-context.json` y `household-recipes-catalog.json`), su contenido sintético
+      (perfiles, horarios/turnos, despensa, utensilios, catálogo y plan anterior), aliases y ausencia de
+      identidad. Solo conserva telemetría allowlist; nunca prompt, adjuntos ni respuesta. La E2E comprueba
+      los siete turnos, participantes/duplicados y que el calendario siga vacío; no confirma ni persiste la
+      propuesta. El primer intento de adjuntos fue rechazado localmente, sin contactar al proveedor: el
+      contrato de prueba esperaba un nombre distinto para la receta sintética del plan anterior. Se
+      corrigieron el fixture y la aserción antes de la siguiente ejecución.
 
-- **Hallazgo posterior (14-10-2026):** el registro de WebAPI compartido por la persona usuaria
-  muestra que la completion terminó con éxito y devolvió `{"events":[]}`. Es éxito de
-  transporte/proveedor, no una propuesta aceptable; el esquema enviado no declara `minItems` en
-  `events`, y por eso permite la lista vacía. El texto pegado para esa ejecución deja vacías las
-  secciones de participantes, turnos, objetivo, existencias y recetas. El código local actual
-  construye algunos de esos valores inline, pero esto no demuestra qué contexto recibió el
-  proveedor. Para cerrar esta discrepancia, el contexto debe viajar como el adjunto JSON descrito
-  arriba y una prueba debe decodificar y verificar el contenido real de la petición sin registrar
-  datos privados.
+**Evidencia final (14-10-2026):** sesión WebAPI `ready`; una única propuesta a `gpt-5`, HTTP 200,
+JSON válido, contrato estricto validado y una completion; `pnpm run smoke:ai:household-meal` salió
+correctamente. La DB/app aisladas y el token temporal propio se limpiaron. No se reenviaron tickets,
+no se confirmó el plan y el calendario/inventario reales no cambiaron. Esto valida una propuesta
+sintética concreta, no la calidad semántica de todas las combinaciones del hogar. La E2E de
+interfaz con proveedor sintético pasa **2/2** en Chromium/Mobile Chrome. La suite servidor
+`pnpm --filter @hogaria/server run test:coverage` pasa **1728 tests / 1 omitido**, cobertura global
+**90,31/82,57/96,18/93,3 %**; el alcance de propuesta/catálogo supera 70 % en los cuatro gates.
+`pnpm run test:client` pasa **1533/1533** (cobertura **93,46/84,2/94,05/95,68 %**),
+`pnpm run test:config` **73/73**, E2E UI **2/2**, build, `typecheck:e2e`, TypeScript servidor y
+`check:ui` pasan. Capturas PC/móvil sintéticas quedan en `.e2e-screenshots/household-meal-planning/`
+(ignoradas por Git). `pnpm run lint` sigue sin operar en este checkout porque falta
+`@angular-eslint/builder` y la configuración ESLint 9 del servidor está incompleta; build emite
+avisos existentes de presupuesto de bundle/estilos.
+
+- **Hallazgo posterior resuelto (14-10-2026):** el registro antiguo de WebAPI mostró una completion con
+  `{"events":[]}` y sin evidencia de participantes/contexto adjunto. Ahora el esquema y la validación
+  local rechazan eventos vacíos, y la prueba decodifica los dos adjuntos desde la petición real del
+  proveedor simulado. El smoke aislado con el proveedor real verificó ambos JSON versionados y devolvió
+  una propuesta válida sin persistirla; evidencia y límites en `QA-HOME-MEALS.PLAN.1`/`CONTEXT.1`.
 
 - [x] **QA-HOME-MEALS.OUTPUT.1** — `events` tiene al menos un elemento tanto en el JSON Schema estricto
       del proveedor como en la validación local. Un resultado vacío se rechaza antes de cualquier escritura;
@@ -1595,10 +1553,10 @@ también las condiciones que aún están abiertas.
       los turnos carecen de participantes aptos para IA, el servidor genera localmente sus eventos
       `unresolved` sin llamar al proveedor ni pasar por un array vacío; las restricciones no se relajan para
       admitir `events: []`. Evidencia: schema de proveedor/Zod, cobertura incompleta, caso sin participantes
-      aptos y rutas sin escrituras al fallar; suite focal **55/55**, servidor **1712 passed / 1 skipped**,
-      cobertura ruta/planificador **90,89/78,36/100/94,87 %** y schema **100/100/100/100 %**. Smoke real
-      opt-in: un único HTTP 200 y E2E completa validada.
-- [ ] **QA-HOME-MEALS.CONTEXT.1** — cada generación envía, junto al mensaje de texto y `response_format`
+      aptos y rutas sin escrituras al fallar. `pnpm --filter @hogaria/server run test:coverage` pasa
+      **1728 tests / 1 omitido**, todos los gates globales; el smoke opt-in real validó una completion
+      HTTP 200, objeto JSON y E2E completa aislada sin escritura en calendario.
+- [x] **QA-HOME-MEALS.CONTEXT.1** — cada generación envía, junto al mensaje de texto y `response_format`
       estricto, exactamente dos adjuntos JSON versionados: `meal-planning-context.json` contiene datos
       acotados al hogar, semana y miembros seleccionados (alias opacos, preferencias, restricciones estrictas,
       objetivo y horario efectivos con su fuente, turnos, existencias positivas visibles, utensilios accesibles
@@ -1612,8 +1570,30 @@ también las condiciones que aún están abiertas.
       nunca se trunca silenciosamente. Pruebas decodifican ambos `file_data` y verifican nombres, MIME,
       estructura, permisos, exclusiones, cotas y coexistencia con `response_format`; no vuelcan contenido a
       logs. El proxy opt-in inspecciona los dos adjuntos sintéticos en memoria y solo conserva telemetría no
-      sensible. La evidencia previa con un único contexto JSON no satisface esta ampliación.
-- [ ] **QA-HOME-MEALS.RECIPE.1** — cada turno planificado referencia una receta existente del catálogo
+      sensible. Evidencia (14-10-2026): tests de ruta decodifican ambos `file_data` y comprueban nombres,
+      MIME, versionado, permisos, exclusiones de identidad/notas, límite de bytes antes de IA y coexistencia
+      con `response_format` estricto; tests del catálogo ejercitan acceso vigente y recetas incompletas no
+      elegibles. `pnpm run test:config` (**73/73**) comprueba el contrato del proxy opt-in para ambos
+      adjuntos sintéticos sin retener su contenido. Verificación aislada completa:
+      `DATABASE_PATH=:memory: pnpm --filter @hogaria/server run test:coverage` (**1728 tests / 1 omitido**;
+      suite server 90,31/82,57/96,18/93,3 % global; todos los archivos incluidos del alcance superan 70 %
+      por sentencias/ramas/funciones/líneas); `pnpm run test:client` (**1533/1533**, cobertura global
+      93,46/84,2/94,05/95,68 %); E2E de navegador, app y DB aisladas con proveedor local sintético
+      `pnpm run test:e2e -- --project=chromium --project=mobile-chrome
+tests/e2e/household-meal-planning.spec.ts` (**2/2**); `pnpm run build`,
+      `pnpm run typecheck:e2e`, `pnpm --filter @hogaria/server exec tsc --noEmit -p tsconfig.json` y
+      `pnpm run check:ui` pasan. Capturas sintéticas de PC/móvil, generadas e inspeccionadas:
+      `.e2e-screenshots/household-meal-planning/chromium-proposal.png`,
+      `.e2e-screenshots/household-meal-planning/chromium-recipe-details.png`,
+      `.e2e-screenshots/household-meal-planning/mobile-chrome-proposal.png` y
+      `.e2e-screenshots/household-meal-planning/mobile-chrome-recipe-details.png` (artefactos ignorados por
+      Git). El smoke real final de una llamada verificó el contrato de dos adjuntos descrito arriba; la
+      propuesta no se confirmó ni se guardó en el calendario.
+      Limitaciones del entorno: `pnpm run lint` no está operativo en este checkout (falta
+      `@angular-eslint/builder`; el lint del servidor usa `--ext`, incompatible con ESLint 9, y no dispone
+      de `eslint.config.js`). `pnpm run build` termina correctamente, aunque emite avisos de presupuesto
+      de bundle/estilos, incluido el del componente del planificador.
+- [x] **QA-HOME-MEALS.RECIPE.1** — cada turno planificado referencia una receta existente del catálogo
       mediante alias opaco resoluble por el servidor o declara una receta nueva completa. Se prefiere
       reutilizar una receta accesible si encaja con los objetivos y es segura; no se inventan aliases ni se
       muta una receta existente para acomodarla. Una receta nueva cumple el contrato canónico de receta IA
@@ -1629,7 +1609,39 @@ también las condiciones que aún están abiertas.
       eventos se confirman de forma atómica e idempotente; retry, receta repetida en varios turnos, alias
       inexistente/foráneo, cambios concurrentes, schema parcial, alergia oculta en instrucciones avanzadas y
       rollback por fallo de persistencia están cubiertos. La receta abierta desde la planificación permite
-      consultar ingredientes y los tres niveles sin una nueva llamada a IA.
+      consultar ingredientes y los tres niveles sin una nueva llamada a IA. Evidencia (14-10-2026): el
+      schema estricto limita la propuesta a turnos no vacíos, referencias opacas y recetas nuevas completas;
+      schema local y planner revalidan estructura, referencias, duplicados, permisos y restricciones en todos
+      los niveles. Tests de ruta/store cubren preview sin escrituras, alta privada solo al confirmar, enlace
+      con comidas, retry/idempotencia, receta existente con ID estable, alias inválido/foráneo, revalidación
+      actual y rollback transaccional; worker automatizado guarda snapshots de receta junto a eventos. La E2E
+      sintética confirma la propuesta y comprueba cantidades escaladas localmente, utensilios, tiempos,
+      temporizadores, conservación y tabs accesibles `basic/intermediate/expert`; test de UI oculta guidance
+      vacía. La evidencia cuantitativa y limitaciones de ejecución están en `QA-HOME-MEALS.CONTEXT.1` arriba.
+      El smoke real descrito arriba validó una propuesta con los dos adjuntos; no la confirmó, así que
+      no guardó recetas ni cambió calendario/inventario reales. La creación privada se verifica con
+      proveedor sintético al confirmar una receta nueva; el smoke real no garantiza que esa única salida
+      haya seleccionado una receta nueva.
+
+- [x] **QA-HOME-MEALS.RECIPE-CONTRACT.1** — hay un único contrato JSON de receta generado por IA,
+      `server/src/schemas/recipe-ai-output.schema.ts`, compartido por generación de recetas y por
+      `newRecipes[].recipe` en la planificación semanal. `response_format` estricto, validación local y
+      persistencia reutilizan ese esquema; una prueba compara tanto la identidad del esquema Zod como el
+      subesquema JSON Schema exacto en ambas peticiones. El formato canónico usa `baseServings: 1`,
+      `storage.reheatingInstructions` y todos los campos de temperatura/temporizador por paso. `selectedDetailLevel`
+      es metadato de respuesta de la API de recetas, no parte del JSON que genera la IA. La futura
+      refactorización de la vista de recetas debe actualizar este contrato/tipo compartido y no crear un
+      esquema paralelo. Evidencia (14-10-2026): `recipe-ai-contract.spec.ts` verifica identidad Zod y
+      igualdad exacta de ambos subesquemas JSON Schema; ruta/generador, validador, calendario y persistencia
+      usan el mismo objeto canónico. `household-meal-recipe-snapshot.spec.ts` comprueba además que nutrientes
+      históricos (`sugar`, `sodium`) se proyectan al contrato compartido sin campos extra. `test:config`
+      **73/73**, `test:client` **1533/1533** y el server aislado con `DATABASE_PATH=:memory:` y
+      `pnpm --filter @hogaria/server run test:coverage` (**1731 pasados / 1 omitido**; cobertura global
+      **90,32/82,60/96,17/93,30 %**); typecheck server/E2E, build y `check:ui` pasan. Playwright
+      sintético aislado: confirmación del plan **2/2** (Chromium/Mobile Chrome) y generación/guardado de
+      recetas **12/12** focalizados en ambas plataformas. No se repitió ninguna llamada real al proveedor;
+      el contrato completo y la compatibilidad entre flujos quedan verificados con schemas y proveedor
+      sintético.
 
 - [x] **QA-HOME-MEALS.CALENDAR.1** — persistencia idempotente tras confirmar, calendario actual,
       evento compartido visible una vez a todos los miembros activos con `calendar.view` aunque la comida
@@ -1649,7 +1661,7 @@ también las condiciones que aún están abiertas.
       prueba edición, cancelar/error sin escritura, reintento/aprobación, idempotencia, conservación de filas
       manuales/compradas y despensa intacta; el recorrido multi-miembro consolida **90 g** entre una comida
       individual y otra compartida. Geometría móvil comprobada a 390×844 y 320×740, CTA visible tras scroll.
-      Suite cliente **1526/1526**; cobertura focal planificador **90,48/81,08/92,55/96,2 %** y servicio
+      Suite cliente **1533/1533**; cobertura focal planificador **90,48/81,08/92,55/96,2 %** y servicio
       **100/100/100/100 %** (sentencias/ramas/funciones/líneas). No escribe inventario antes de aprobación,
       no llama IA real y usa DB temporal. Rollback: retirar preview/aprobación `meal_plan`, su UI/tests y
       esta evidencia; conservar los eventos de calendario.

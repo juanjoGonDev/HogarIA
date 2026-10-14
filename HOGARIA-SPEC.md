@@ -5850,23 +5850,26 @@ La extensión integra las comidas del hogar en el calendario existente, mantiene
 hasta confirmación y calcula tareas/compras a partir de los datos reales confirmados. No modifica la
 recurrencia general del calendario de §12at.
 
-**Estado revalidado (2026-10-14):** UI, propuesta simulada, resolución de gustos blandos, controles de
-alergias, asignaciones, calendario, consumo y compra tienen evidencia en la spec enfocada. El schema
-estricto de la propuesta exige `events.minItems >= 1` tanto localmente como para el proveedor; cada
-generación adjunta exactamente un `meal-planning-context.json` versionado con perfiles efectivos,
-horarios/turnos, existencias visibles, utensilios disponibles, recetas reutilizables y el último plan
-confirmado anterior. El contexto se limita por hogar/miembros seleccionados, se valida en memoria y no se
-vuelca a logs.
+**Estado revalidado (2026-10-14):** UI, propuesta, resolución de gustos blandos, controles de alergias,
+asignaciones, calendario, consumo y compra tienen evidencia en la spec enfocada. El JSON Schema estricto
+exige `events.minItems >= 1` tanto al proveedor como a la validación local. Cada petición incluye dos
+adjuntos versionados: `meal-planning-context.json` (miembros seleccionados, preferencias efectivas,
+horarios/turnos, despensa, utensilios y plan anterior) y `household-recipes-catalog.json` (recetas
+accesibles, con alias opacos y sin identidades). Las rutas/tests decodifican ambos ficheros y el proxy
+opt-in verifica su contrato en memoria sin guardar prompt, adjuntos ni respuesta.
 
-El smoke opt-in `pnpm run smoke:ai:household-meal` pasó tras la reautenticación de WebAPI: una sola
-completion `gpt-5`, HTTP **200** y JSON válido; el proxy verificó el schema no vacío y todo el adjunto
-sintético (dos perfiles, horarios/turnos, despensa, utensilios, receta y plan anterior), sin identidades.
-La E2E aislada probó siete fechas con cobertura de ambos participantes, sin duplicados, al menos un plato
-compartido y calendario objetivo vacío antes/después; no confirmó ni persistió la nueva propuesta. El runner,
-SQLite temporal y token propio quedaron limpios. La E2E sintética de interfaz se adaptó al nuevo adjunto y
-pasa **1/1** en Chromium. Servidor: **1712 passed / 1 skipped**; `test:config` **71/71**; server/E2E
-typecheck, Prettier y `git diff --check` pasan. Cobertura focal de ruta/planificador
-**90,89/78,36/100/94,87 %** y schema **100/100/100/100 %** (sentencias/ramas/funciones/líneas).
-La semántica real solo quedó validada para este caso sintético; no garantiza resultados universales. La
-spec enfocada conserva el procedimiento, evidencia y límites, y sigue siendo la fuente detallada para los
-criterios de HogarIA que aún estén abiertos.
+La salida de receta IA tiene una única fuente canónica, `server/src/schemas/recipe-ai-output.schema.ts`,
+compartida por `generate-recipe`, `generate-multiple-recipes` y `newRecipes[].recipe` del plan semanal.
+La futura refactorización de Recetas debe actualizar este esquema/tipo, no abrir otro contrato.
+
+El smoke `pnpm run smoke:ai:household-meal` pasó con WebAPI autenticada: una única completion `gpt-5`,
+HTTP **200** y objeto JSON válido. Se verificaron el schema no vacío y ambos adjuntos sintéticos
+(perfiles, horarios/turnos, despensa, utensilios, catálogo y plan anterior), sin identidades. La E2E
+aislada comprobó siete turnos, cobertura de ambos participantes, ausencia de duplicados y calendario
+objetivo vacío antes/después; no confirmó ni persistió la propuesta. App/SQLite temporal y token propio
+quedaron limpios; no se enviaron tickets ni se cambió el inventario real. La E2E sintética del plan pasa
+**2/2** en Chromium/Mobile Chrome; generación de recetas valida **12/12** escenarios focales en ambas
+plataformas. Revalidación: servidor **1731 tests / 1 omitido** (cobertura 90,32/82,60/96,17/93,30 %);
+cliente **1533/1533**; `test:config` **73/73**; build, typecheck server/E2E,
+`check:ui` y `git diff --check` pasan. La semántica real solo se observó para esta propuesta sintética;
+no es una garantía universal. Esta spec enfocada conserva el procedimiento, evidencia y límites detallados.

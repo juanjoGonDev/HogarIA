@@ -72,7 +72,7 @@ export function createHouseholdMealRecipeSnapshot(
     utensils: stringArray(rawRecipe.utensils),
     guidance: normalizeGuidance(rawRecipe.guidance),
     instructionsByLevel,
-    nutrition: normalizeObject(rawRecipe.nutrition),
+    nutrition: normalizeNutrition(rawRecipe.nutrition),
     storage: normalizeStorage(rawRecipe.storage),
     tags: stringArray(rawRecipe.tags)
   };
@@ -100,6 +100,32 @@ function normalizeObject(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+}
+
+function normalizeNutrition(value: unknown): Record<string, unknown> | null {
+  const nutrition = normalizeObject(value);
+  if (!nutrition) return null;
+  const calories = finiteNumber(nutrition.calories);
+  const protein = finiteNumber(nutrition.protein);
+  const carbs = finiteNumber(nutrition.carbs);
+  const fat = finiteNumber(nutrition.fat);
+  if (
+    calories === null ||
+    protein === null ||
+    carbs === null ||
+    fat === null ||
+    [calories, protein, carbs, fat].some((metric) => metric < 0)
+  ) {
+    return null;
+  }
+  const fiber = finiteNumber(nutrition.fiber);
+  return {
+    calories,
+    protein,
+    carbs,
+    fat,
+    fiber: fiber !== null && fiber >= 0 ? fiber : null
+  };
 }
 
 function normalizeStorage(value: unknown): Record<string, unknown> | null {

@@ -100,7 +100,7 @@ const singleRecipe = {
   prepTime: 5,
   cookTime: 15,
   restTime: 5,
-  servings: 1,
+  baseServings: 1,
   calories: 180,
   ingredients: [
     {
@@ -126,6 +126,9 @@ const singleRecipe = {
         stepNumber: 1,
         instruction: 'Cocer la zanahoria.',
         duration: 15,
+        temperature: null,
+        timerRequired: true,
+        timerDuration: 15,
         tips: 'Fixture de prueba',
         warning: 'No dejes la olla caliente sin vigilancia.',
         illustration: null
@@ -136,6 +139,9 @@ const singleRecipe = {
         stepNumber: 1,
         instruction: 'Cortar la zanahoria en trozos iguales y cocerla hasta que esté tierna.',
         duration: 15,
+        temperature: null,
+        timerRequired: true,
+        timerDuration: 15,
         tips: 'Fixture de prueba',
         warning: 'Usa una tabla estable y seca.',
         illustration: null
@@ -146,6 +152,9 @@ const singleRecipe = {
         stepNumber: 1,
         instruction: 'Cortar dados uniformes de 2 cm y cocer a hervor suave hasta textura tierna.',
         duration: 15,
+        temperature: null,
+        timerRequired: true,
+        timerDuration: 15,
         tips: 'Fixture de prueba',
         warning: '',
         illustration: null
@@ -156,7 +165,7 @@ const singleRecipe = {
   storage: {
     method: 'Refrigerada',
     duration: '2 días',
-    reheating: 'Calentar',
+    reheatingInstructions: 'Calentar',
     container: 'Tarro hermético',
     freezingPossible: true,
     freezingDuration: '1 mes'
@@ -187,9 +196,7 @@ const submittedInstructionsByLevel = Object.fromEntries(
     level,
     singleRecipeWithAllLevels.instructionsByLevel[level].map((step) => ({
       ...step,
-      illustration: step.illustration ?? null,
-      timerRequired: Boolean(step.duration),
-      timerDuration: step.duration
+      illustration: step.illustration ?? null
     }))
   ])
 );
@@ -201,9 +208,7 @@ const persistedInstructionsByLevel = Object.fromEntries(
       ...step,
       illustration: step.illustration ?? null,
       tips: step.tips?.trim() ? step.tips : null,
-      warning: step.warning?.trim() ? step.warning : null,
-      timerRequired: Boolean(step.duration),
-      timerDuration: step.duration
+      warning: step.warning?.trim() ? step.warning : null
     }))
   ])
 );
@@ -259,7 +264,7 @@ async function openGenerator(
 ) {
   await page.setViewportSize(viewport);
   await mockRecipeStepPhotos(page);
-  await registerAndGoto(page, '/dashboard', 'qa-recipes-ai-flow');
+  await registerWithHousehold(page, '/dashboard', 'qa-recipes-ai-flow');
   const token = await page.evaluate((key) => localStorage.getItem(key), TOKEN_KEY);
   expect(token, 'la prueba debe usar la sesión sintética del runner aislado').toBeTruthy();
 
@@ -717,7 +722,8 @@ test.describe('Generación de recetas IA', () => {
       const recipeDialog = page.getByRole('dialog', { name: 'Generar Receta con IA' });
       await expect(recipeDialog).toHaveClass(/modal--lg/);
       await expect(recipeDialog.locator('.ai-form')).toBeVisible();
-      await expect(recipeDialog.locator('#recipe-serving-input')).toHaveValue('2');
+      // A new household starts with one member, so its default portion count is one.
+      await expect(recipeDialog.locator('#recipe-serving-input')).toHaveValue('1');
       await recipeDialog.locator('#recipe-serving-input').fill('4');
 
       const generate = page.getByRole('button', { name: 'Generar 1 receta' });
@@ -1091,7 +1097,7 @@ test.describe('Generación de recetas IA', () => {
         const generatedOption = generatedOptions.nth(index);
         await expect(generatedOption.getByRole('heading')).toHaveText(`Opción sintética ${option}`);
         await expect(generatedOption.locator('.generated-option__meta')).toContainText(
-          '2 porciones'
+          '1 porciones'
         );
       }
       await expect(page.getByText('¡Recetas generadas!', { exact: true })).toBeVisible();
@@ -1105,7 +1111,7 @@ test.describe('Generación de recetas IA', () => {
       await expect(
         optionPreview.getByRole('heading', { name: 'Opción sintética 1' })
       ).toBeVisible();
-      await expect(optionPreview.locator('.generated-recipe__meta')).toContainText('2 porciones');
+      await expect(optionPreview.locator('.generated-recipe__meta')).toContainText('1 porciones');
       await expect(optionPreview.locator('[data-test="generated-recipe-timings"]')).toContainText(
         'Preparación'
       );

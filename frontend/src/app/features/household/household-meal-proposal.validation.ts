@@ -5,6 +5,11 @@ import type {
   HouseholdMealRecipeInstructionStep
 } from '../../core/services/household-meal-proposal.service';
 
+/**
+ * Client-side defense-in-depth for proposal payloads. The model-facing recipe source of truth is
+ * `server/src/schemas/recipe-ai-output.schema.ts`; keep this guard aligned with that contract and
+ * do not use it to define a second recipe-generation response format.
+ */
 const MEAL_TYPES = new Set(['breakfast', 'lunch', 'dinner', 'snack']);
 const RECIPE_DIFFICULTIES = new Set(['easy', 'medium', 'hard']);
 const MAX_EVENTS = 7 * 4 * 100;

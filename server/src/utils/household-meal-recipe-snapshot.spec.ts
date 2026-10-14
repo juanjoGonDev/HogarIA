@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { aiRecipeOutputSchema } from '../schemas/recipe-ai-output.schema.js';
 import {
   createHouseholdMealRecipeId,
   createHouseholdMealRecipeSnapshot
@@ -113,6 +114,54 @@ describe('household meal recipe snapshot', () => {
         freezingDuration: null
       }
     });
+  });
+
+  it('projects legacy catalog nutrition into the canonical AI recipe shape', () => {
+    const snapshot = createHouseholdMealRecipeSnapshot({
+      name: 'Arroz con verduras',
+      description: 'Plato sintético.',
+      difficulty: 'medium',
+      cuisine: 'española',
+      totalTime: 30,
+      prepTime: 10,
+      cookTime: 20,
+      restTime: null,
+      baseServings: 1,
+      calories: 350,
+      ingredients: [{ name: 'arroz', quantity: 80, unit: 'g' }],
+      utensils: ['olla'],
+      guidance: {
+        appliances: [],
+        parallelTasks: [],
+        tipsAndVariations: [],
+        batchCookingWarning: null
+      },
+      instructionsByLevel: {
+        basic: [{ ...step, temperature: null }],
+        intermediate: [{ ...step, temperature: null }],
+        expert: [{ ...step, temperature: null }]
+      },
+      nutrition: {
+        calories: 350,
+        protein: 8,
+        carbs: 65,
+        fat: 7,
+        fiber: 3,
+        sugar: 2,
+        sodium: 120
+      },
+      storage: null,
+      tags: ['almuerzo']
+    });
+
+    expect(snapshot.nutrition).toEqual({
+      calories: 350,
+      protein: 8,
+      carbs: 65,
+      fat: 7,
+      fiber: 3
+    });
+    expect(aiRecipeOutputSchema.safeParse(snapshot).success).toBe(true);
   });
 
   it('creates a deterministic opaque private-recipe ID from proposal and alias', () => {

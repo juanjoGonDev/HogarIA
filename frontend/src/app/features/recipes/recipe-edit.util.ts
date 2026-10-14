@@ -10,6 +10,7 @@ import {
   RecipeUpdateInput,
   StorageInfo
 } from '../../shared/models/recipe.model';
+import type { RecipeInstructionStep } from '../../shared/models/recipe-instructions';
 import {
   RecipeDetailLevel,
   RecipeInstructionsByLevel
@@ -108,7 +109,10 @@ function optionalNumberText(value: number | null | undefined): string {
   return value == null ? '' : String(value);
 }
 
-function toEditorStep(step: RecipeStep): RecipeEditorStep {
+type EditableRecipeStepInput = RecipeInstructionStep &
+  Partial<Pick<RecipeStep, 'image' | 'imageAttribution'>>;
+
+function toEditorStep(step: EditableRecipeStepInput): RecipeEditorStep {
   return {
     stepNumber: step.stepNumber,
     instruction: step.instruction,

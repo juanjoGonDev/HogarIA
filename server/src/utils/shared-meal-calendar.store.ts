@@ -2,6 +2,7 @@ import { nanoid } from 'nanoid';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import { MEAL_PROPOSAL_LIMITS } from '../schemas/household-meal-proposal.schema.js';
+import { aiRecipeOutputSchema } from '../schemas/recipe-ai-output.schema.js';
 import { activeHouseholdId } from './household-context.js';
 import { ensureWeekCalendar, utcDate } from './week-calendar.js';
 
@@ -11,98 +12,6 @@ const MEAL_TYPES = new Set(['breakfast', 'lunch', 'snack', 'dinner']);
 const MAX_RECIPE_DEFINITIONS = MEAL_PROPOSAL_LIMITS.maxEvents;
 const TIME_RE = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 const snapshotMinuteSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
-const recipeStepSchema = z.object({
-  stepNumber: z.number().int().positive(),
-  instruction: z.string().trim().min(1).max(2_000),
-  duration: z.number().int().positive().max(1_440).nullable(),
-  tips: z.string().trim().max(500).nullable(),
-  warning: z.string().trim().max(500).nullable(),
-  illustration: z.null(),
-  temperature: z.object({ value: z.number().finite(), unit: z.enum(['C', 'F']) }).nullable(),
-  timerRequired: z.boolean(),
-  timerDuration: z.number().int().positive().max(1_440).nullable()
-});
-const orderedRecipeStepsSchema = z
-  .array(recipeStepSchema)
-  .min(1)
-  .max(MEAL_PROPOSAL_LIMITS.maxInstructions)
-  .superRefine((steps, context) => {
-    steps.forEach((step, index) => {
-      if (step.stepNumber !== index + 1) {
-        context.addIssue({
-          code: 'custom',
-          path: [index, 'stepNumber'],
-          message: 'Orden inválido'
-        });
-      }
-    });
-  });
-const instructionsByLevelSchema = z.object({
-  basic: orderedRecipeStepsSchema,
-  intermediate: orderedRecipeStepsSchema,
-  expert: orderedRecipeStepsSchema
-});
-const recipeIngredientSchema = z.object({
-  name: z.string().trim().min(1).max(120),
-  quantity: z.number().finite().positive().max(1_000_000),
-  unit: z.string().trim().min(1).max(40),
-  preparation: z.string().trim().max(500).nullable(),
-  isOptional: z.boolean(),
-  substitutes: z.array(z.string().trim().min(1).max(200)).max(10),
-  notes: z.string().trim().max(500).nullable()
-});
-const recipeGuidanceSchema = z.object({
-  appliances: z.array(z.string().trim().min(1).max(120)).max(10),
-  parallelTasks: z.array(z.string().trim().min(1).max(500)).max(10),
-  tipsAndVariations: z.array(z.string().trim().min(1).max(500)).max(10),
-  batchCookingWarning: z.string().trim().min(1).max(500).nullable()
-});
-const recipeNutritionSchema = z
-  .object({
-    calories: z.number().nonnegative(),
-    protein: z.number().nonnegative(),
-    carbs: z.number().nonnegative(),
-    fat: z.number().nonnegative(),
-    fiber: z.number().nonnegative().nullable()
-  })
-  .nullable();
-const recipeStorageSchema = z
-  .object({
-    method: z.string().trim().min(1).max(200),
-    duration: z.string().trim().min(1).max(100),
-    reheatingInstructions: z.string().trim().max(500).nullable(),
-    container: z.string().trim().max(200).nullable(),
-    freezingPossible: z.boolean(),
-    freezingDuration: z.string().trim().max(100).nullable()
-  })
-  .nullable();
-
-/** Strict canonical recipe persisted only after the proposal is confirmed. */
-const householdMealRecipeCandidateSchema = z
-  .object({
-    name: z.string().trim().min(1).max(200),
-    description: z.string().trim().min(1).max(1_000),
-    difficulty: z.enum(['easy', 'medium', 'hard']),
-    cuisine: z.string().trim().max(50).nullable(),
-    totalTime: z.number().int().positive().max(1_440),
-    prepTime: z.number().int().positive().max(1_440),
-    cookTime: z.number().int().nonnegative().max(1_440),
-    restTime: z.number().int().nonnegative().max(1_440).nullable(),
-    baseServings: z.literal(1),
-    calories: z.number().positive().nullable(),
-    ingredients: z
-      .array(recipeIngredientSchema)
-      .min(1)
-      .max(MEAL_PROPOSAL_LIMITS.maxIngredientsPerRecipe),
-    utensils: z.array(z.string().trim().min(1).max(120)).max(30),
-    guidance: recipeGuidanceSchema,
-    instructionsByLevel: instructionsByLevelSchema,
-    nutrition: recipeNutritionSchema,
-    storage: recipeStorageSchema,
-    tags: z.array(z.string().trim().min(1).max(50)).max(30)
-  })
-  .strict();
-
 const legacySharedRecipeSnapshotSchema = z.object({
   name: z.string().trim().min(1).max(200),
   description: z.string().trim().min(1).max(1000),
@@ -132,7 +41,7 @@ const legacySharedRecipeSnapshotSchema = z.object({
 /** Accept the legacy calendar snapshot during rollout and keep canonical details losslessly. */
 const sharedRecipeSnapshotSchema = z.union([
   legacySharedRecipeSnapshotSchema,
-  householdMealRecipeCandidateSchema
+  aiRecipeOutputSchema
 ]);
 
 export type SharedMealErrorCode =
@@ -160,8 +69,7 @@ export type SharedMealType = 'breakfast' | 'lunch' | 'snack' | 'dinner';
  * and other proposal metadata are neither accepted nor written.
  */
 export type SharedRecipeSnapshot =
-  | z.infer<typeof legacySharedRecipeSnapshotSchema>
-  | z.infer<typeof householdMealRecipeCandidateSchema>;
+  z.infer<typeof legacySharedRecipeSnapshotSchema> | z.infer<typeof aiRecipeOutputSchema>;
 
 export interface SharedMealRecipeToCreate {
   alias: string;
@@ -223,7 +131,7 @@ interface NormalizedSharedMealsInput {
 interface NormalizedMealRecipeToCreate {
   alias: string;
   recipeId: string;
-  recipe: z.infer<typeof householdMealRecipeCandidateSchema>;
+  recipe: z.infer<typeof aiRecipeOutputSchema>;
   snapshot: SharedRecipeSnapshot;
 }
 
@@ -281,7 +189,7 @@ function normalizeRecipesToCreate(
     const recipeId = typeof entry.recipeId === 'string' ? entry.recipeId.trim() : '';
     if (!/^N[1-9]\d{0,3}$/.test(alias)) return invalidInput('alias de receta inválido');
     if (!recipeId || recipeId.length > 40) return invalidInput('recipeId de receta inválido');
-    const parsedRecipe = householdMealRecipeCandidateSchema.safeParse(entry.recipe);
+    const parsedRecipe = aiRecipeOutputSchema.safeParse(entry.recipe);
     if (!parsedRecipe.success) return invalidInput('Candidata de receta inválida');
     const snapshot = normalizeRecipeSnapshot(parsedRecipe.data);
     if (!snapshot) return invalidInput('Candidata de receta inválida');

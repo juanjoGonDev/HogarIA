@@ -351,7 +351,7 @@ const recetaGenerada = {
   prepTime: 10,
   cookTime: 20,
   restTime: null,
-  servings: 1,
+  baseServings: 1,
   calories: 420,
   ingredients: [
     {
@@ -377,6 +377,9 @@ const recetaGenerada = {
         stepNumber: 1,
         instruction: 'Cocer las lentejas.',
         duration: 20,
+        temperature: null,
+        timerRequired: true,
+        timerDuration: 20,
         tips: '',
         warning: '',
         illustration: null
@@ -387,6 +390,9 @@ const recetaGenerada = {
         stepNumber: 1,
         instruction: 'Sofreír y cocer las lentejas hasta que estén tiernas.',
         duration: 20,
+        temperature: null,
+        timerRequired: true,
+        timerDuration: 20,
         tips: '',
         warning: '',
         illustration: null
@@ -397,6 +403,9 @@ const recetaGenerada = {
         stepNumber: 1,
         instruction: 'Sofreír a fuego medio y cocer a hervor suave hasta textura al dente.',
         duration: 20,
+        temperature: null,
+        timerRequired: true,
+        timerDuration: 20,
         tips: '',
         warning: '',
         illustration: null
@@ -407,7 +416,7 @@ const recetaGenerada = {
   storage: {
     method: 'Refrigerar',
     duration: '3 días',
-    reheating: 'Calentar',
+    reheatingInstructions: 'Calentar',
     container: null,
     freezingPossible: true,
     freezingDuration: '3 meses'
@@ -532,10 +541,10 @@ describe('POST /generate-recipe y /generate-multiple-recipes', () => {
     expect(providerRequest.response_format.json_schema.strict).toBe(true);
     expect(prompt).toContain('Raciones solicitadas para cocinar: 4');
     expect(prompt).toContain('rendimiento base de exactamente 1 ración');
-    expect(prompt).toContain('quantity": número para 1 ración');
-    expect(prompt).toContain('"servings": 1');
+    expect(prompt).toContain('cantidades de ingredientes por ración');
+    expect(prompt).toContain('baseServings=1');
     expect(result.data).toMatchObject({
-      servings: 1,
+      baseServings: 1,
       ingredients: [{ name: 'lentejas', quantity: 200, unit: 'g' }],
       guidance: { batchCookingWarning: null }
     });
@@ -548,7 +557,9 @@ describe('POST /generate-recipe y /generate-multiple-recipes', () => {
       () =>
         new Response(
           JSON.stringify({
-            choices: [{ message: { content: JSON.stringify({ ...recetaGenerada, servings: 4 }) } }]
+            choices: [
+              { message: { content: JSON.stringify({ ...recetaGenerada, baseServings: 4 }) } }
+            ]
           }),
           { status: 200 }
         )
@@ -585,7 +596,7 @@ describe('POST /generate-recipe y /generate-multiple-recipes', () => {
     }
     await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
 
-    const generated = { ...recetaGenerada, servings: 1 };
+    const generated = { ...recetaGenerada, baseServings: 1 };
     const requests = stubRecipeProvider(
       () =>
         new Response(
@@ -601,7 +612,7 @@ describe('POST /generate-recipe y /generate-multiple-recipes', () => {
     const prompt = JSON.parse(requests[0].body).messages[1].content as string;
 
     expect(response.status).toBe(200);
-    expect(result.data.servings).toBe(1);
+    expect(result.data.baseServings).toBe(1);
     expect(prompt).toContain('Raciones solicitadas para cocinar: 3');
   });
 
@@ -661,7 +672,7 @@ describe('POST /generate-recipe y /generate-multiple-recipes', () => {
     const prompt = JSON.parse(requests[0].body).messages[1].content as string;
 
     expect(response.status).toBe(200);
-    expect(result.data.servings).toBe(1);
+    expect(result.data.baseServings).toBe(1);
     expect(prompt).toContain('marisco');
     expect(prompt).toContain('tomate');
     expect(prompt).toContain('huevo');
@@ -933,7 +944,7 @@ describe('POST /generate-recipe y /generate-multiple-recipes', () => {
       totalTime: 30,
       prepTime: 10,
       cookTime: 20,
-      servings: 1,
+      baseServings: 1,
       ingredients: [{ name: 'lentejas', quantity: 200, unit: 'g' }],
       guidance: { batchCookingWarning: null },
       instructionsByLevel: recetaGenerada.instructionsByLevel
@@ -958,14 +969,14 @@ describe('POST /generate-recipe y /generate-multiple-recipes', () => {
     expect(response.status).toBe(200);
     expect(providerRequest.response_format.json_schema.strict).toBe(true);
     expect(result.data).toHaveLength(1);
-    expect(result.data.map((recipe: { servings: number }) => recipe.servings)).toEqual([1]);
+    expect(result.data.map((recipe: { baseServings: number }) => recipe.baseServings)).toEqual([1]);
     expect(
       result.data.map(
         (recipe: { ingredients: { quantity: number }[] }) => recipe.ingredients[0].quantity
       )
     ).toEqual([200]);
     expect(prompt).toContain('Raciones solicitadas para cocinar: 5');
-    expect(prompt).toContain('quantity": número para 1 ración');
+    expect(prompt).toContain('cantidades de ingredientes por ración');
     expect(requests).toHaveLength(1);
     expect(recipeCount()).toBe(0);
   });

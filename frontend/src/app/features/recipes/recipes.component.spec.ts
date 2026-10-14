@@ -48,7 +48,7 @@ const GENERATED: AIRecipeResponse = {
   prepTime: 15,
   cookTime: 30,
   restTime: 0,
-  servings: 1,
+  baseServings: 1,
   calories: 410,
   ingredients: [
     {
@@ -68,14 +68,56 @@ const GENERATED: AIRecipeResponse = {
     tipsAndVariations: ['Añadir perejil'],
     batchCookingWarning: null
   },
-  steps: [{ stepNumber: 1, instruction: 'Cocinar', duration: 10, tips: 'Remover' }],
+  instructionsByLevel: {
+    basic: [
+      {
+        stepNumber: 1,
+        instruction: 'Cocinar',
+        duration: 10,
+        temperature: null,
+        timerRequired: true,
+        timerDuration: 10,
+        tips: 'Remover',
+        warning: null,
+        illustration: null
+      }
+    ],
+    intermediate: [
+      {
+        stepNumber: 1,
+        instruction: 'Cocinar removiendo',
+        duration: 10,
+        temperature: null,
+        timerRequired: true,
+        timerDuration: 10,
+        tips: null,
+        warning: null,
+        illustration: null
+      }
+    ],
+    expert: [
+      {
+        stepNumber: 1,
+        instruction: 'Cocinar hasta el punto deseado',
+        duration: 10,
+        temperature: null,
+        timerRequired: true,
+        timerDuration: 10,
+        tips: null,
+        warning: null,
+        illustration: null
+      }
+    ]
+  },
   tags: ['guiso'],
   nutrition: { calories: 410, protein: 12, carbs: 50, fat: 14, fiber: 6 },
   storage: {
     method: 'frigorífico',
     duration: '2 días',
+    reheatingInstructions: null,
     container: 'recipiente',
-    freezingPossible: true
+    freezingPossible: true,
+    freezingDuration: null
   }
 };
 
@@ -743,9 +785,25 @@ describe('RecipesComponent', () => {
     const multi = {
       ...GENERATED,
       instructionsByLevel: {
-        basic: [{ stepNumber: 1, instruction: 'Paso básico', duration: 5, tips: 'Cuidado' }],
-        intermediate: [{ stepNumber: 1, instruction: 'Paso medio', warning: 'Caliente' }],
-        expert: [{ stepNumber: 1, instruction: 'Paso experto' }]
+        basic: [
+          {
+            ...GENERATED.instructionsByLevel.basic[0],
+            instruction: 'Paso básico',
+            duration: 5,
+            temperature: { value: 90, unit: 'C' as const },
+            timerRequired: true,
+            timerDuration: 5,
+            tips: 'Cuidado'
+          }
+        ],
+        intermediate: [
+          {
+            ...GENERATED.instructionsByLevel.intermediate[0],
+            instruction: 'Paso medio',
+            warning: 'Caliente'
+          }
+        ],
+        expert: [{ ...GENERATED.instructionsByLevel.expert[0], instruction: 'Paso experto' }]
       }
     };
     component.openAiModal();
@@ -757,7 +815,9 @@ describe('RecipesComponent', () => {
     expect(payload.instructionsByLevel.basic[0]).toEqual(
       jasmine.objectContaining({
         instruction: 'Paso básico',
+        temperature: { value: 90, unit: 'C' },
         timerRequired: true,
+        timerDuration: 5,
         illustration: null
       })
     );
@@ -776,10 +836,7 @@ describe('RecipesComponent', () => {
     expect(component.isAiModalOpen()).toBeFalse();
 
     recipes.createRecipe.and.returnValue(throwError(() => new Error('synthetic')));
-    component.saveGeneratedRecipe({ ...GENERATED, instructionsByLevel: undefined }, 'basic');
-    const legacy = recipes.createRecipe.calls.mostRecent().args[0] as any;
-    expect(legacy.steps[0].instruction).toBe('Cocinar');
-    expect(legacy.instructionsByLevel).toBeUndefined();
+    component.saveGeneratedRecipe(multi, 'basic');
     expect(toast.error).toHaveBeenCalledWith('ui.error', 'recipes.no_se_pudo_guardar');
 
     recipes.createRecipe.and.returnValue(of(RECIPE));
@@ -787,26 +844,35 @@ describe('RecipesComponent', () => {
     component.saveGeneratedRecipe({
       ...GENERATED,
       selectedDetailLevel: 'basic',
-      ingredients: [{ name: 'Agua', quantity: 1, unit: 'l' }],
-      steps: [{ stepNumber: 1, instruction: 'Añadir', tips: 'Poco a poco' }],
+      ingredients: [
+        {
+          ...GENERATED.ingredients[0],
+          name: 'Agua',
+          quantity: 1,
+          unit: 'l'
+        }
+      ],
       nutrition: null,
-      storage: { method: 'nevera', duration: '1 día', freezingPossible: undefined },
-      tags: undefined
+      storage: null,
+      tags: []
     });
     const defaults = recipes.createRecipe.calls.mostRecent().args[0] as any;
     expect(component.singleGeneratedDetailLevel()).toBe('basic');
     expect(defaults.ingredients[0]).toEqual(
-      jasmine.objectContaining({ isOptional: false, substitutes: [] })
-    );
-    expect(defaults.steps[0]).toEqual(
       jasmine.objectContaining({
-        instruction: 'Añadir',
-        timerRequired: false,
-        timerDuration: undefined
+        isOptional: false,
+        substitutes: ['tomate en conserva']
+      })
+    );
+    expect(defaults.instructionsByLevel.basic[0]).toEqual(
+      jasmine.objectContaining({
+        instruction: GENERATED.instructionsByLevel.basic[0].instruction,
+        timerRequired: true,
+        timerDuration: 10
       })
     );
     expect(defaults.nutrition).toBeUndefined();
-    expect(defaults.storage.freezingPossible).toBeFalse();
+    expect(defaults.storage).toBeUndefined();
     expect(defaults.tags).toEqual([]);
   });
 });
