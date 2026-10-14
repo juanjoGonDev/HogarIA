@@ -5887,7 +5887,7 @@ pequeño; el sondeo continuo sí añade despertares/consultas y el SQL trace pue
 terminales o supervisores. No se dispone de una medición de RAM de la Raspberry; no atribuirle saturación
 de RAM sin esa evidencia.
 
-- [ ] Categorías: la unicidad refleja el ámbito (persona para despensa personal; persona + hogar para
+- [x] Categorías: la unicidad refleja el ámbito (persona para despensa personal; persona + hogar para
       catálogos de hogar); una migración repetible reemplaza el índice antiguo sin descartar filas. Crear
       o unirse a un hogar funciona aunque esa persona conserve claves iguales en otro hogar; duplicar una
       clave en el mismo ámbito sigue rechazándose.
@@ -5899,3 +5899,8 @@ de RAM sin esa evidencia.
       de tiempo, typecheck y coverage local sin tocar datos ni procesos de uso normal.
 - [ ] Registrar evidencia, límite del análisis de memoria (sin Raspberry disponible) y efecto en el log de
       desarrollo; no desactivar el SQL trace explícito para ocultar consultas.
+
+**Evidencia TDD de categorías (2026-10-14):** la prueba de creación devolvía primero **500** al reutilizar
+una clave presente en otro hogar. `household.routes.spec.ts -t 'another household'` pasa **2/2**;
+`database.spec.ts -t 'migra la unicidad'` pasa **1/1**. La migración conserva la categoría heredada y tras
+reiniciar permite la misma clave en otro hogar, mientras rechaza el duplicado dentro del mismo ámbito.

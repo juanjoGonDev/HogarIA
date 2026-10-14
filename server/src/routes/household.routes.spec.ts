@@ -310,6 +310,68 @@ describe('household create and join transactions', () => {
     });
   });
 
+  it('creates another household when the same user has category keys in an older household', async () => {
+    db.prepare('INSERT INTO households (id, name, invite_code) VALUES (?, ?, ?)').run(
+      'previous-house',
+      'Hogar anterior',
+      'PREVIOUS1'
+    );
+    const owner = await makeUser('returning-owner', 'previous-house');
+    db.prepare(
+      `INSERT INTO household_members (id, household_id, user_id, role, permissions)
+       VALUES ('previous-owner-membership', 'previous-house', ?, 'admin', '{}')`
+    ).run(owner.id);
+    db.prepare(
+      `INSERT INTO pantry_categories (id, user_id, household_id, key, name, color, position)
+       VALUES ('previous-vegetables', ?, 'previous-house', 'vegetables', 'Mi huerto', '#123456', 1)`
+    ).run(owner.id);
+
+    const response = await call(owner, 'POST', '', { name: 'Hogar nuevo' });
+    const result = (await response.json()) as { success: boolean; data?: { id: string } };
+
+    expect(response.status).toBe(201);
+    expect(result.success).toBe(true);
+    expect(result.data?.id).toBeTruthy();
+    expect(
+      db
+        .prepare('SELECT name FROM pantry_categories WHERE id = ? AND household_id = ?')
+        .get('previous-vegetables', 'previous-house')
+    ).toEqual({ name: 'Mi huerto' });
+    expect(
+      db
+        .prepare(
+          `SELECT name FROM pantry_categories
+           WHERE user_id = ? AND household_id = ? AND key = 'vegetables'`
+        )
+        .get(owner.id, result.data?.id)
+    ).toEqual({ name: 'Verduras' });
+  });
+
+  it('joins another household without colliding with category keys in the current home', async () => {
+    const { member } = await createJoinFixture();
+    db.prepare(
+      `INSERT INTO pantry_categories (id, user_id, household_id, key, name, color, position)
+       VALUES ('current-vegetables', ?, 'old-house', 'vegetables', 'Mi huerto', '#123456', 1)`
+    ).run(member.id);
+
+    const response = await call(member, 'POST', '/join', { inviteCode: 'TARGET01' });
+
+    expect(response.status).toBe(200);
+    expect(
+      db
+        .prepare('SELECT name FROM pantry_categories WHERE id = ? AND household_id = ?')
+        .get('current-vegetables', 'old-house')
+    ).toEqual({ name: 'Mi huerto' });
+    expect(
+      db
+        .prepare(
+          `SELECT name FROM pantry_categories
+           WHERE user_id = ? AND household_id = 'target-house' AND key = 'vegetables'`
+        )
+        .get(member.id)
+    ).toEqual({ name: 'Verduras' });
+  });
+
   it.each([
     { label: 'el endpoint con código en el body', path: '/join', useBody: true },
     { label: 'el endpoint con código en la ruta', path: '/join/TARGET01', useBody: false }

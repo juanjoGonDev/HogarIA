@@ -669,7 +669,6 @@ async function runMigrations(db: Database.Database): Promise<void> {
     );
     CREATE INDEX IF NOT EXISTS idx_pantry_categories_user ON pantry_categories(user_id, position);
     CREATE INDEX IF NOT EXISTS idx_pantry_categories_household ON pantry_categories(household_id, position);
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_pantry_categories_key ON pantry_categories(user_id, key);
 
     -- La oferta (3x2, 2x1) es de la LINEA porque cambia cuantas unidades se pagan.
     -- Un promo_take >= promo_buy no tiene sentido (pagarias todo), y se ignora en
@@ -825,6 +824,16 @@ async function runMigrations(db: Database.Database): Promise<void> {
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (list_id) REFERENCES shopping_lists(id) ON DELETE CASCADE
     );
+  `);
+
+  // A category key is unique for one user's personal catalog or within one user's catalog in a
+  // household. The old user-only index rejected valid reuse in a different home and could make
+  // household creation roll back when the user still had categories attached to another home.
+  // Drop the legacy index once; the scoped replacement is stable across subsequent startups.
+  db.exec(`
+    DROP INDEX IF EXISTS idx_pantry_categories_key;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_pantry_categories_scope_key
+      ON pantry_categories(user_id, COALESCE(household_id, ''), key);
   `);
 
   // Auto-migrations: add columns that may be missing in older databases

@@ -103,6 +103,98 @@ describe('adoptLegacyDatabase', () => {
 });
 
 describe('initializeDatabase con fichero heredado', () => {
+  it('migra la unicidad de categorías al ámbito y conserva claves al reiniciar', async () => {
+    const databaseFile = target();
+    const previous = new Database(databaseFile);
+    previous.exec(`
+      CREATE TABLE pantry_categories (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        household_id TEXT,
+        key TEXT NOT NULL,
+        name TEXT NOT NULL,
+        color TEXT NOT NULL DEFAULT '#8A8F98',
+        description TEXT,
+        parent_key TEXT,
+        position INTEGER NOT NULL DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX idx_pantry_categories_key ON pantry_categories(user_id, key);
+      INSERT INTO pantry_categories (id, user_id, household_id, key, name, color)
+      VALUES ('legacy-category', 'legacy-user', 'old-home', 'vegetables', 'Mi huerto', '#123456');
+    `);
+    previous.close();
+
+    let activeModule: DbModule | undefined;
+    try {
+      activeModule = await dbModuleWith(databaseFile);
+      await activeModule.initializeDatabase();
+      let db = activeModule.getDatabase();
+      db.prepare('INSERT INTO households (id, name, invite_code) VALUES (?, ?, ?)').run(
+        'old-home',
+        'Casa anterior',
+        'OLDHOME1'
+      );
+      db.prepare('INSERT INTO households (id, name, invite_code) VALUES (?, ?, ?)').run(
+        'new-home',
+        'Casa nueva',
+        'NEWHOME1'
+      );
+      db.prepare(
+        'INSERT INTO users (id, email, name, password_hash, household_id) VALUES (?, ?, ?, ?, ?)'
+      ).run('legacy-user', 'legacy@hogaria.test', 'Usuario', 'hash', 'old-home');
+
+      expect(
+        db.prepare('SELECT name FROM pantry_categories WHERE id = ?').get('legacy-category')
+      ).toEqual({ name: 'Mi huerto' });
+      expect(
+        db
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_pantry_categories_key'"
+          )
+          .get()
+      ).toBeUndefined();
+      expect(
+        db
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_pantry_categories_scope_key'"
+          )
+          .get()
+      ).toEqual({ name: 'idx_pantry_categories_scope_key' });
+
+      const insert = db.prepare(
+        `INSERT INTO pantry_categories (id, user_id, household_id, key, name, color)
+         VALUES (?, 'legacy-user', ?, 'vegetables', 'Verduras', '#4CAF50')`
+      );
+      expect(() => insert.run('new-home-category', 'new-home')).not.toThrow();
+      expect(() => insert.run('duplicate-new-home-category', 'new-home')).toThrow(
+        /UNIQUE constraint/
+      );
+
+      activeModule.closeDatabase();
+      activeModule = await dbModuleWith(databaseFile);
+      await activeModule.initializeDatabase();
+      db = activeModule.getDatabase();
+      expect(
+        db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM pantry_categories WHERE user_id = 'legacy-user' AND key = 'vegetables'"
+          )
+          .get()
+      ).toEqual({ count: 2 });
+      expect(
+        db
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_pantry_categories_scope_key'"
+          )
+          .get()
+      ).toEqual({ name: 'idx_pantry_categories_scope_key' });
+    } finally {
+      activeModule?.closeDatabase();
+    }
+  });
+
   it('añade claves idempotentes a meals legacy conservando la comida y crea las asignaciones aditivas', async () => {
     const databaseFile = target();
     const previous = new Database(databaseFile);
