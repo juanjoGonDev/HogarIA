@@ -34,6 +34,96 @@ const recipeSnapshot = {
   personalGoal: 'no persistir este dato'
 };
 
+const generatedRecipe = {
+  name: 'Crema de calabaza',
+  description: 'Crema suave de calabaza con aceite de oliva.',
+  difficulty: 'easy' as const,
+  cuisine: 'española',
+  totalTime: 35,
+  prepTime: 10,
+  cookTime: 25,
+  restTime: null,
+  baseServings: 1 as const,
+  calories: 180,
+  ingredients: [
+    {
+      name: 'calabaza',
+      quantity: 300,
+      unit: 'g',
+      preparation: 'pelada y troceada',
+      isOptional: false,
+      substitutes: ['boniato'],
+      notes: null
+    }
+  ],
+  utensils: ['olla', 'batidora'],
+  guidance: {
+    appliances: ['vitrocerámica'],
+    parallelTasks: ['Prepara el caldo mientras cuece la calabaza.'],
+    tipsAndVariations: ['Añade pimienta al servir.'],
+    batchCookingWarning: null
+  },
+  instructionsByLevel: {
+    basic: [
+      {
+        stepNumber: 1,
+        instruction: 'Cuece la calabaza hasta que esté tierna.',
+        duration: 20,
+        tips: null,
+        warning: null,
+        illustration: null,
+        temperature: null,
+        timerRequired: false,
+        timerDuration: null
+      }
+    ],
+    intermediate: [
+      {
+        stepNumber: 1,
+        instruction: 'Cuece la calabaza en caldo y tritura.',
+        duration: 25,
+        tips: 'Tritura fuera del fuego.',
+        warning: null,
+        illustration: null,
+        temperature: null,
+        timerRequired: false,
+        timerDuration: null
+      }
+    ],
+    expert: [
+      {
+        stepNumber: 1,
+        instruction: 'Cuece a fuego suave, emulsiona y ajusta la textura.',
+        duration: 25,
+        tips: null,
+        warning: 'No llenes la batidora caliente por encima de la mitad.',
+        illustration: null,
+        temperature: { value: 80, unit: 'C' as const },
+        timerRequired: true,
+        timerDuration: 5
+      }
+    ]
+  },
+  nutrition: { calories: 180, protein: 4, carbs: 22, fat: 8, fiber: 5 },
+  storage: {
+    method: 'Refrigerar en recipiente cerrado.',
+    duration: '3 días',
+    reheatingInstructions: 'Calentar a fuego suave.',
+    container: 'Recipiente hermético',
+    freezingPossible: true,
+    freezingDuration: '2 meses'
+  },
+  tags: ['vegetariana', 'sin gluten']
+};
+
+const generatedRecipeSnapshot = { ...generatedRecipe };
+
+const recipeToCreate = {
+  alias: 'N1',
+  recipeId: 'recipe-planning-test-generated-1',
+  recipe: generatedRecipe
+};
+
 function makeMember(
   userId: string,
   permissions: { calendar?: { view?: boolean; edit?: boolean } } = {
@@ -75,6 +165,9 @@ describe('persistSharedMeal', () => {
   beforeEach(() => {
     db.prepare('DELETE FROM meal_participants').run();
     db.prepare('DELETE FROM meals').run();
+    db.prepare(
+      "DELETE FROM recipes WHERE id LIKE 'recipe-planning-test-%' OR id = 'existing-planning-test-recipe'"
+    ).run();
     db.prepare('DELETE FROM weekly_calendars').run();
     db.prepare('DELETE FROM household_members').run();
     db.prepare('DELETE FROM users').run();
@@ -470,5 +563,219 @@ describe('persistSharedMeal', () => {
       count: 0
     });
     expect(db.prepare('SELECT COUNT(*) AS count FROM meals').get()).toEqual({ count: 0 });
+  });
+
+  it('guarda las recetas nuevas como privadas, conserva todos sus niveles y enlaza la comida', () => {
+    const result = persistSharedMeals(db, 'alice', {
+      proposalId: 'proposal-generated-recipe',
+      recipesToCreate: [recipeToCreate],
+      events: [
+        {
+          eventId: 'crema-lunch',
+          date: '2026-10-14',
+          mealType: 'lunch',
+          recipeId: recipeToCreate.recipeId,
+          customMeal: generatedRecipe.name,
+          servings: 2,
+          participantIds: ['alice', 'bob'],
+          recipeSnapshot: generatedRecipeSnapshot
+        }
+      ]
+    });
+
+    const saved = db.prepare('SELECT * FROM recipes WHERE id = ?').get(recipeToCreate.recipeId) as
+      Record<string, unknown> | undefined;
+    expect(saved).toMatchObject({
+      id: recipeToCreate.recipeId,
+      name: generatedRecipe.name,
+      difficulty: 'easy',
+      cuisine: 'española',
+      total_time: 35,
+      prep_time: 10,
+      cook_time: 25,
+      rest_time: null,
+      servings: 1,
+      calories: 180,
+      author: 'ai',
+      author_id: 'alice',
+      is_public: 0
+    });
+    expect(JSON.parse(saved!.ingredients as string)).toEqual(generatedRecipe.ingredients);
+    expect(JSON.parse(saved!.utensils as string)).toEqual(generatedRecipe.utensils);
+    expect(JSON.parse(saved!.steps as string)).toEqual(generatedRecipe.instructionsByLevel);
+    expect(JSON.parse(saved!.recipe_guidance as string)).toEqual(generatedRecipe.guidance);
+    expect(JSON.parse(saved!.nutrition as string)).toEqual(generatedRecipe.nutrition);
+    expect(JSON.parse(saved!.storage as string)).toEqual({
+      method: 'Refrigerar en recipiente cerrado.',
+      duration: '3 días',
+      reheatingInstructions: 'Calentar a fuego suave.',
+      container: 'Recipiente hermético',
+      freezingPossible: true,
+      freezingDuration: '2 meses'
+    });
+    expect(JSON.parse(saved!.tags as string)).toEqual(generatedRecipe.tags);
+    expect(saved!.meal_type).toBe('[]');
+    expect(saved!.image).toBeNull();
+    expect(result.meals[0].recipe_id).toBe(recipeToCreate.recipeId);
+    expect(JSON.parse(result.meals[0].recipe_snapshot!)).toEqual(generatedRecipeSnapshot);
+    expect(
+      db
+        .prepare('SELECT COUNT(*) AS count FROM meal_participants WHERE meal_id = ?')
+        .get(result.meals[0].id)
+    ).toEqual({ count: 2 });
+    expect(result.idempotent).toBe(false);
+  });
+
+  it('reintenta la misma propuesta sin duplicar recetas y rechaza contenido o propietario alterado', () => {
+    const proposal = {
+      proposalId: 'proposal-generated-recipe-retry',
+      recipesToCreate: [recipeToCreate],
+      events: [
+        {
+          eventId: 'crema-lunch',
+          date: '2026-10-14',
+          mealType: 'lunch' as const,
+          recipeId: recipeToCreate.recipeId,
+          customMeal: generatedRecipe.name,
+          servings: 2,
+          participantIds: ['alice', 'bob'],
+          recipeSnapshot: generatedRecipeSnapshot
+        }
+      ]
+    };
+    const first = persistSharedMeals(db, 'alice', proposal);
+    const retry = persistSharedMeals(db, 'alice', proposal);
+
+    expect(retry.idempotent).toBe(true);
+    expect(retry.meals[0].id).toBe(first.meals[0].id);
+    expect(
+      db.prepare('SELECT COUNT(*) AS count FROM recipes WHERE id = ?').get(recipeToCreate.recipeId)
+    ).toEqual({
+      count: 1
+    });
+    expect(() =>
+      persistSharedMeals(db, 'alice', {
+        ...proposal,
+        recipesToCreate: [
+          { ...recipeToCreate, recipe: { ...generatedRecipe, description: 'Contenido cambiado.' } }
+        ]
+      })
+    ).toThrowError(SharedMealPersistenceError);
+
+    db.prepare('UPDATE recipes SET author_id = ? WHERE id = ?').run('bob', recipeToCreate.recipeId);
+    expect(() => persistSharedMeals(db, 'alice', proposal)).toThrowError(
+      SharedMealPersistenceError
+    );
+  });
+
+  it('revierte receta, calendario, comida y participantes si falla la escritura de la comida', () => {
+    db.exec(`
+      CREATE TEMP TRIGGER fail_shared_meal_insert
+      BEFORE INSERT ON meals
+      WHEN NEW.custom_meal = 'FALLA DE PRUEBA'
+      BEGIN SELECT RAISE(ABORT, 'synthetic meal insert failure'); END;
+    `);
+
+    try {
+      expect(() =>
+        persistSharedMeals(db, 'alice', {
+          proposalId: 'proposal-atomic-generated-recipe',
+          recipesToCreate: [recipeToCreate],
+          events: [
+            {
+              eventId: 'fail-lunch',
+              date: '2026-10-14',
+              mealType: 'lunch',
+              recipeId: recipeToCreate.recipeId,
+              customMeal: 'FALLA DE PRUEBA',
+              servings: 2,
+              participantIds: ['alice'],
+              recipeSnapshot: generatedRecipeSnapshot
+            }
+          ]
+        })
+      ).toThrow(/synthetic meal insert failure/);
+    } finally {
+      db.exec('DROP TRIGGER IF EXISTS fail_shared_meal_insert');
+    }
+
+    expect(
+      db.prepare('SELECT COUNT(*) AS count FROM recipes WHERE id = ?').get(recipeToCreate.recipeId)
+    ).toEqual({
+      count: 0
+    });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM meals').get()).toEqual({ count: 0 });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM meal_participants').get()).toEqual({
+      count: 0
+    });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM weekly_calendars').get()).toEqual({
+      count: 0
+    });
+  });
+
+  it('rechaza candidatas inválidas o snapshots inconsistentes antes de cualquier escritura', () => {
+    const event = {
+      eventId: 'invalid-lunch',
+      date: '2026-10-14',
+      mealType: 'lunch' as const,
+      recipeId: recipeToCreate.recipeId,
+      customMeal: generatedRecipe.name,
+      servings: 1,
+      participantIds: ['alice'],
+      recipeSnapshot: generatedRecipeSnapshot
+    };
+    expect(() =>
+      persistSharedMeals(db, 'alice', {
+        proposalId: 'proposal-invalid-generated-recipe',
+        recipesToCreate: [
+          { ...recipeToCreate, recipe: { ...generatedRecipe, instructionsByLevel: { basic: [] } } }
+        ],
+        events: [event]
+      })
+    ).toThrowError(SharedMealPersistenceError);
+    expect(() =>
+      persistSharedMeals(db, 'alice', {
+        proposalId: 'proposal-inconsistent-generated-recipe',
+        recipesToCreate: [recipeToCreate],
+        events: [{ ...event, recipeSnapshot: { ...generatedRecipeSnapshot, name: 'Otra receta' } }]
+      })
+    ).toThrowError(SharedMealPersistenceError);
+    expect(
+      db.prepare('SELECT COUNT(*) AS count FROM recipes WHERE id = ?').get(recipeToCreate.recipeId)
+    ).toEqual({
+      count: 0
+    });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM meals').get()).toEqual({ count: 0 });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM weekly_calendars').get()).toEqual({
+      count: 0
+    });
+  });
+
+  it('enlaza una receta existente sin duplicarla', () => {
+    db.prepare(
+      'INSERT INTO recipes (id, name, author, is_public, ingredients) VALUES (?, ?, ?, ?, ?)'
+    ).run('existing-planning-test-recipe', 'Sopa existente', 'catalog', 1, '[]');
+    const before = (db.prepare('SELECT COUNT(*) AS count FROM recipes').get() as { count: number })
+      .count;
+
+    const result = persistSharedMeals(db, 'alice', {
+      proposalId: 'proposal-existing-recipe',
+      events: [
+        {
+          eventId: 'existing-lunch',
+          date: '2026-10-14',
+          mealType: 'lunch',
+          recipeId: 'existing-planning-test-recipe',
+          servings: 2,
+          participantIds: ['alice'],
+          recipeSnapshot
+        }
+      ]
+    });
+
+    expect(result.meals[0].recipe_id).toBe('existing-planning-test-recipe');
+    expect(
+      (db.prepare('SELECT COUNT(*) AS count FROM recipes').get() as { count: number }).count
+    ).toBe(before);
   });
 });

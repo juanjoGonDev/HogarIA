@@ -44,15 +44,6 @@ export interface MealPlanningContextAttachmentInput {
     name: string;
     category: string | null;
   }>;
-  recipes: Array<{
-    name: string;
-    description: string;
-    ingredients: Array<{
-      name: string;
-      quantity?: number;
-      unit?: string;
-    }>;
-  }>;
   previousConfirmedPlan: {
     weekStart: string;
     weekEnd: string;
@@ -62,21 +53,13 @@ export interface MealPlanningContextAttachmentInput {
       time: string;
       servings: number;
       participants: string[];
-      recipe: {
-        name: string;
-        description: string;
-        ingredients: Array<{
-          name: string;
-          quantity?: number;
-          unit?: string;
-        }>;
-      } | null;
+      recipeName: string | null;
     }>;
   } | null;
 }
 
 export type SerializedMealPlanningContext = MealPlanningContextAttachmentInput & {
-  version: 1;
+  version: 2;
 };
 
 export type MealPlanningContextFilePart = Extract<AiMessagePart, { type: 'file' }>;
@@ -85,7 +68,7 @@ export function createMealPlanningContextFilePart(
   context: MealPlanningContextAttachmentInput
 ): MealPlanningContextFilePart {
   const serializedContext: SerializedMealPlanningContext = {
-    version: 1,
+    version: 2,
     ...context
   };
   const fileData = Buffer.from(JSON.stringify(serializedContext), 'utf8').toString('base64');

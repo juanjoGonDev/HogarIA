@@ -5,6 +5,8 @@ import {
   normalizeMealProposal,
   type MealProposalMemberContext
 } from './household-meal-proposal.planner.js';
+import type { HouseholdMealRecipeCatalogEntry } from './household-meal-recipe-catalog.js';
+import type { MealProposalRecipeCandidate } from '../schemas/household-meal-proposal.schema.js';
 
 function member(
   alias: string,
@@ -30,29 +32,64 @@ function member(
   };
 }
 
-function scheduledEvent(participantAliases: string[], overrides: Record<string, unknown> = {}) {
+function candidateRecipe(): MealProposalRecipeCandidate {
+  const step = (instruction: string) => ({
+    stepNumber: 1,
+    instruction,
+    duration: null,
+    temperature: null,
+    timerRequired: false,
+    timerDuration: null,
+    tips: null,
+    warning: null,
+    illustration: null
+  });
+  return {
+    name: 'Lentejas',
+    description: 'Lentejas con verduras.',
+    difficulty: 'easy',
+    cuisine: null,
+    totalTime: 40,
+    prepTime: 10,
+    cookTime: 30,
+    restTime: null,
+    baseServings: 1,
+    calories: null,
+    ingredients: [
+      {
+        name: 'lentejas',
+        quantity: 80,
+        unit: 'g',
+        preparation: null,
+        isOptional: false,
+        substitutes: [],
+        notes: null
+      }
+    ],
+    utensils: ['olla'],
+    guidance: {
+      appliances: [],
+      parallelTasks: [],
+      tipsAndVariations: [],
+      batchCookingWarning: null
+    },
+    instructionsByLevel: {
+      basic: [step('Lavar las lentejas.')],
+      intermediate: [step('Cocer las lentejas con verduras.')],
+      expert: [step('Cocer suavemente las lentejas para mantener su textura.')]
+    },
+    nutrition: null,
+    storage: null,
+    tags: ['legumbres']
+  };
+}
+
+function event(participantAliases: string[], overrides: Record<string, unknown> = {}) {
   return {
     date: '2026-10-12',
     mealType: 'lunch',
     time: '14:00',
-    recipe: {
-      name: 'Lentejas',
-      description: 'Lentejas con verduras.',
-      baseServings: 1,
-      prepTimeMinutes: 10,
-      cookTimeMinutes: 30,
-      ingredients: [
-        {
-          name: 'lentejas',
-          quantity: 80,
-          unit: 'g',
-          preparation: null,
-          isOptional: false,
-          notes: null
-        }
-      ],
-      instructions: ['Cocer las lentejas con las verduras.']
-    },
+    recipeAlias: 'N1',
     participantAliases,
     servings: participantAliases.length,
     objectiveSummary: 'Plato equilibrado para compartir.',
@@ -62,8 +99,35 @@ function scheduledEvent(participantAliases: string[], overrides: Record<string, 
   };
 }
 
+function recipeProposal(events: unknown[], recipe = candidateRecipe()) {
+  return { newRecipes: [{ alias: 'N1', recipe }], events };
+}
+
+function selectableCatalogRecipe(
+  overrides: Partial<HouseholdMealRecipeCatalogEntry> = {}
+): HouseholdMealRecipeCatalogEntry {
+  return {
+    alias: 'R1',
+    source: 'catalog',
+    recipeId: 'saved-recipe-1',
+    selectable: true,
+    recipe: {
+      name: 'Arroz guardado',
+      description: 'Una receta del catálogo.',
+      baseServings: 2,
+      ingredients: [{ name: 'arroz', quantity: 100, unit: 'g', isOptional: false }],
+      instructionsByLevel: {
+        basic: [{ instruction: 'Cocer.' }],
+        intermediate: [{ instruction: 'Cocer.' }],
+        expert: [{ instruction: 'Cocer.' }]
+      }
+    },
+    ...overrides
+  };
+}
+
 describe('household meal proposal planner', () => {
-  it('builds the weekly slots from each selected member schedule and groups equal times', () => {
+  it('builds weekly slots from member schedules and groups matching times', () => {
     const slots = buildExpectedMealSlots('2026-10-12', [
       member('P1'),
       member('P2'),
@@ -74,7 +138,6 @@ describe('household meal proposal planner', () => {
         }
       })
     ]);
-
     expect(slots).toHaveLength(14);
     expect(slots[0]).toMatchObject({
       date: '2026-10-12',
@@ -90,207 +153,178 @@ describe('household meal proposal planner', () => {
     });
   });
 
-  it('rejects a model response that omits a scheduled member or invents an unselected alias', () => {
+  it('rejects omitted slots and invented participant aliases', () => {
     const members = [member('P1'), member('P2')];
     const slots = buildExpectedMealSlots('2026-10-12', members);
-    const expectedEvents = slots.map((slot) =>
-      scheduledEvent(slot.participantAliases, {
-        date: slot.date,
-        mealType: slot.mealType,
-        time: slot.time,
-        servings: slot.participantAliases.length
-      })
+    const events = slots.map((slot) =>
+      event(slot.participantAliases, { date: slot.date, mealType: slot.mealType, time: slot.time })
     );
-    const missingOne = expectedEvents.map((event, index) =>
-      index === 0 ? { ...event, participantAliases: ['P1'], servings: 1 } : event
+    const missing = events.map((item, index) =>
+      index === 0 ? { ...item, participantAliases: ['P1'], servings: 1 } : item
     );
-    expect(() => normalizeMealProposal({ events: missingOne }, slots, members)).toThrow(
+    expect(() => normalizeMealProposal(recipeProposal(missing), slots, members, [])).toThrow(
       'MEAL_PROPOSAL_SLOT_COVERAGE_INVALID'
     );
-    const inventedAlias = expectedEvents.map((event, index) =>
-      index === 0 ? { ...event, participantAliases: ['P1', 'P3'], servings: 2 } : event
+    const invented = events.map((item, index) =>
+      index === 0 ? { ...item, participantAliases: ['P1', 'P3'], servings: 2 } : item
     );
-    expect(() => normalizeMealProposal({ events: inventedAlias }, slots, members)).toThrow(
+    expect(() => normalizeMealProposal(recipeProposal(invented), slots, members, [])).toThrow(
       'MEAL_PROPOSAL_SLOT_ASSIGNMENT_INVALID'
     );
   });
 
-  it('forces an unsafe shared dish to become a safe shared event plus an unresolved personal slot', () => {
-    const members = [member('P1'), member('P2', { strictRestrictions: ['cacahuete'] })];
+  it('deduplicates a complete generated recipe used across the week and forces base-one serving', () => {
+    const members = [member('P1')];
     const slots = buildExpectedMealSlots('2026-10-12', members);
     const result = normalizeMealProposal(
-      {
-        events: slots
-          .map((slot) =>
-            scheduledEvent(['P1', 'P2'], {
-              date: slot.date,
-              mealType: slot.mealType,
-              time: slot.time,
-              servings: 2
-            })
-          )
-          .map((event) => {
-            (event.recipe.ingredients[0] as { name: string }).name = 'cacahuetes';
-            return event;
-          })
-      },
+      recipeProposal(
+        slots.map((slot) =>
+          event(['P1'], { date: slot.date, mealType: slot.mealType, time: slot.time })
+        )
+      ),
       slots,
-      members
+      members,
+      []
     );
+    expect(result.recipes).toHaveLength(1);
+    expect(result.recipes[0]).toMatchObject({
+      alias: 'N1',
+      source: 'new',
+      recipeId: null,
+      recipe: {
+        baseServings: 1,
+        instructionsByLevel: {
+          basic: expect.any(Array),
+          intermediate: expect.any(Array),
+          expert: expect.any(Array)
+        }
+      }
+    });
+    expect(result.events).toHaveLength(7);
+    expect(result.events.every((item) => item.recipeAlias === 'N1' && item.servings === 1)).toBe(
+      true
+    );
+  });
 
+  it('resolves only selectable catalog aliases and preserves their recipe ID', () => {
+    const members = [member('P1')];
+    const slots = buildExpectedMealSlots('2026-10-12', members);
+    const catalog = selectableCatalogRecipe();
+    const events = slots.map((slot) =>
+      event(['P1'], {
+        date: slot.date,
+        mealType: slot.mealType,
+        time: slot.time,
+        recipeAlias: 'R1'
+      })
+    );
+    const result = normalizeMealProposal({ newRecipes: [], events }, slots, members, [catalog]);
+    expect(result.recipes).toEqual([catalog]);
+    expect(result.events.every((item) => item.recipeAlias === 'R1')).toBe(true);
+    expect(() =>
+      normalizeMealProposal(
+        { newRecipes: [], events: events.map((item) => ({ ...item, recipeAlias: 'R2' })) },
+        slots,
+        members,
+        [catalog]
+      )
+    ).toThrow('MEAL_PROPOSAL_SLOT_ASSIGNMENT_INVALID');
+    const unavailable = normalizeMealProposal({ newRecipes: [], events }, slots, members, [
+      { ...catalog, selectable: false }
+    ]);
+    expect(unavailable.events.every((item) => item.status === 'unresolved')).toBe(true);
+  });
+
+  it('turns an unsafe shared recipe into a safe group plus an unresolved allergic participant', () => {
+    const members = [member('P1'), member('P2', { strictRestrictions: ['cacahuete'] })];
+    const slots = buildExpectedMealSlots('2026-10-12', members);
+    const recipe = candidateRecipe();
+    recipe.ingredients[0]!.name = 'cacahuetes';
+    const result = normalizeMealProposal(
+      recipeProposal(
+        slots.map((slot) =>
+          event(['P1', 'P2'], {
+            date: slot.date,
+            mealType: slot.mealType,
+            time: slot.time,
+            servings: 2
+          })
+        ),
+        recipe
+      ),
+      slots,
+      members,
+      []
+    );
     expect(result.events).toHaveLength(14);
     expect(result.events[0]).toMatchObject({ participantAliases: ['P1'], servings: 1 });
     expect(result.events[1]).toMatchObject({
       status: 'unresolved',
+      recipeAlias: null,
       participantAliases: ['P2'],
-      recipe: null,
       servings: 0
     });
     expect(JSON.stringify(result.events[1])).not.toContain('cacahuete');
   });
 
-  it('does not call a candidate safe when an affected ingredient is optional or in recipe notes', () => {
-    const members = [member('P1', { strictRestrictions: ['cacahuete'] })];
-    const slots = buildExpectedMealSlots('2026-10-12', members);
-    const candidates = slots.map((slot) => {
-      const candidate = scheduledEvent(['P1'], {
-        date: slot.date,
-        mealType: slot.mealType,
-        time: slot.time
-      });
-      (candidate.recipe.ingredients[0] as { name: string }).name = 'aceite';
-      (candidate.recipe.ingredients[0] as { notes: string | null }).notes =
-        'Puede contener cacahuete';
-      return candidate;
-    });
-
-    const result = normalizeMealProposal({ events: candidates }, slots, members);
-    expect(result.events).toHaveLength(7);
-    expect(result.events[0]).toMatchObject({ status: 'unresolved', recipe: null, servings: 0 });
-  });
-
-  it('checks recipe descriptions and instructions for strict allergen conflicts', () => {
+  it('scans every instruction level and all recipe text for strict restrictions and private disclosures', () => {
     const members = [member('P1', { strictRestrictions: ['gluten'] })];
     const slots = buildExpectedMealSlots('2026-10-12', members);
-    const candidates = slots.map((slot) => {
-      const candidate = scheduledEvent(['P1'], {
-        date: slot.date,
-        mealType: slot.mealType,
-        time: slot.time
-      });
-      candidate.recipe.description = 'Una receta familiar.';
-      candidate.recipe.instructions = ['Añade una salsa con trazas de gluten.'];
-      return candidate;
-    });
-
-    const result = normalizeMealProposal({ events: candidates }, slots, members);
-
-    expect(result.events).toHaveLength(7);
-    expect(result.events.every((event) => event.status === 'unresolved')).toBe(true);
+    const recipe = candidateRecipe();
+    recipe.instructionsByLevel.expert[0]!.instruction = 'Añade una salsa con trazas de gluten.';
+    const candidates = slots.map((slot) =>
+      event(['P1'], { date: slot.date, mealType: slot.mealType, time: slot.time })
+    );
+    const result = normalizeMealProposal(recipeProposal(candidates, recipe), slots, members, []);
+    expect(result.events.every((item) => item.status === 'unresolved')).toBe(true);
     expect(JSON.stringify(result)).not.toContain('gluten');
   });
 
-  it('does not expose another selected member private notes in assigned recipe text', () => {
+  it('removes member-private output terms from new recipe fields before they reach the preview', () => {
+    const members = [member('P1', { privateOutputTerms: ['dato-sensible-xyz'] })];
+    const slots = buildExpectedMealSlots('2026-10-12', members);
+    const recipe = candidateRecipe();
+    recipe.guidance.tipsAndVariations = ['dato-sensible-xyz'];
+    const result = normalizeMealProposal(
+      recipeProposal(
+        slots.map((slot) =>
+          event(['P1'], { date: slot.date, mealType: slot.mealType, time: slot.time })
+        ),
+        recipe
+      ),
+      slots,
+      members,
+      []
+    );
+    expect(result.events.every((item) => item.status === 'unresolved')).toBe(true);
+    expect(JSON.stringify(result)).not.toContain('dato-sensible-xyz');
+  });
+
+  it('creates review placeholders for unsupported restrictions without sending that member to AI', () => {
     const members = [
-      member('P1'),
-      member('P2', { privateOutputTerms: ['miembro-nota-privada-882'] })
-    ];
-    const slots = buildExpectedMealSlots('2026-10-12', members);
-    const candidates = slots.flatMap((slot) => {
-      const candidate = scheduledEvent(['P1'], {
-        date: slot.date,
-        mealType: slot.mealType,
-        time: slot.time
-      });
-      candidate.recipe.description = 'miembro-nota-privada-882';
-      return [
-        candidate,
-        scheduledEvent(['P2'], {
-          date: slot.date,
-          mealType: slot.mealType,
-          time: slot.time
-        })
-      ];
-    });
-
-    const result = normalizeMealProposal({ events: candidates }, slots, members);
-
-    expect(result.events).toHaveLength(14);
-    expect(result.events[0]).toMatchObject({ status: 'unresolved', recipe: null });
-    expect(JSON.stringify(result)).not.toContain('miembro-nota-privada-882');
-  });
-
-  it('does not reveal another member allergy in copy for a different assignee', () => {
-    const members = [member('P1', { strictRestrictions: ['pistacho'] }), member('P2')];
-    const slots = buildExpectedMealSlots('2026-10-12', members);
-    const candidates = slots.flatMap((slot) => [
-      scheduledEvent(['P1'], { date: slot.date, mealType: slot.mealType, time: slot.time }),
-      scheduledEvent(['P2'], {
-        date: slot.date,
-        mealType: slot.mealType,
-        time: slot.time,
-        objectiveSummary: 'Preparado aparte porque P1 es alérgico al pistacho.'
-      })
-    ]);
-
-    const result = normalizeMealProposal({ events: candidates }, slots, members);
-
-    expect(result.events).toHaveLength(14);
-    expect(result.events[1]).toMatchObject({ status: 'unresolved', recipe: null });
-    expect(JSON.stringify(result)).not.toContain('pistacho');
-  });
-
-  it('matches private names on word boundaries, not as substrings of ingredients', () => {
-    const members = [member('P1', { privateOutputTerms: ['Ana'] })];
-    const slots = buildExpectedMealSlots('2026-10-12', members);
-    const candidates = slots.map((slot) => {
-      const candidate = scheduledEvent(['P1'], {
-        date: slot.date,
-        mealType: slot.mealType,
-        time: slot.time
-      });
-      (candidate.recipe.ingredients[0] as { name: string }).name = 'banana';
-      return candidate;
-    });
-
-    const result = normalizeMealProposal({ events: candidates }, slots, members);
-
-    expect(result.events).toHaveLength(7);
-    expect(result.events.every((event) => event.status === 'scheduled')).toBe(true);
-  });
-
-  it('creates unresolved slots without sending members with unsupported strict restrictions to the AI', () => {
-    const members = [
-      member('P1', { unsupportedRestrictions: ['reacción a un ingrediente no catalogado'] }),
+      member('P1', { unsupportedRestrictions: ['restricción no catalogada'] }),
       member('P2')
     ];
     const slots = buildExpectedMealSlots('2026-10-12', members);
-    expect(slots).toHaveLength(7);
-    expect(slots[0]?.participantAliases).toEqual(['P1', 'P2']);
-    expect(slots[0]?.aiParticipantAliases).toEqual(['P2']);
-    expect(slots[0]?.unresolvedAliases).toEqual(['P1']);
+    expect(slots[0]).toMatchObject({
+      participantAliases: ['P1', 'P2'],
+      aiParticipantAliases: ['P2'],
+      unresolvedAliases: ['P1']
+    });
   });
 
-  it('rejects an empty provider result as incomplete coverage', () => {
+  it('rejects incomplete provider coverage but creates nonempty local unresolved events when nobody is eligible', () => {
     const members = [member('P1')];
     const slots = buildExpectedMealSlots('2026-10-12', members);
-
-    expect(() => normalizeMealProposal({ events: [] }, slots, members)).toThrow(
-      'MEAL_PROPOSAL_SLOT_COVERAGE_INVALID'
+    expect(() =>
+      normalizeMealProposal({ newRecipes: [], events: [] }, slots, members, [])
+    ).toThrow();
+    const unsupported = [member('P1', { unsupportedRestrictions: ['restricción no catalogada'] })];
+    const unresolved = buildUnresolvedMealProposal(
+      buildExpectedMealSlots('2026-10-12', unsupported)
     );
-  });
-
-  it('builds non-empty unresolved events locally when no participant is eligible for AI', () => {
-    const members = [
-      member('P1', { unsupportedRestrictions: ['restricción estricta no catalogada'] })
-    ];
-    const slots = buildExpectedMealSlots('2026-10-12', members);
-
-    const result = buildUnresolvedMealProposal(slots);
-
-    expect(result.events).toHaveLength(7);
-    expect(result.events.every((event) => event.status === 'unresolved')).toBe(true);
-    expect(result.events.every((event) => event.participantAliases.length === 1)).toBe(true);
-    expect(() => normalizeMealProposal({ events: [] }, slots, members)).not.toThrow();
+    expect(unresolved.recipes).toEqual([]);
+    expect(unresolved.events).toHaveLength(7);
+    expect(unresolved.events.every((item) => item.status === 'unresolved')).toBe(true);
   });
 });

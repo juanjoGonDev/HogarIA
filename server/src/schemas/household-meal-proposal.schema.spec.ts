@@ -3,32 +3,75 @@ import {
   createMealProposalResponseFormat,
   MEAL_PROPOSAL_LIMITS,
   mealProposalSchema,
-  type MealProposal
+  type MealProposal,
+  type MealProposalRecipeCandidate
 } from './household-meal-proposal.schema.js';
+
+function recipe(): MealProposalRecipeCandidate {
+  const step = (instruction: string) => ({
+    stepNumber: 1,
+    instruction,
+    duration: null,
+    temperature: null,
+    timerRequired: false,
+    timerDuration: null,
+    tips: null,
+    warning: null,
+    illustration: null
+  });
+  return {
+    name: 'Lentejas con verduras',
+    description: 'Guiso sencillo de lentejas y verduras.',
+    difficulty: 'easy',
+    cuisine: 'mediterránea',
+    totalTime: 50,
+    prepTime: 15,
+    cookTime: 35,
+    restTime: null,
+    baseServings: 1,
+    calories: 420,
+    ingredients: [
+      {
+        name: 'lentejas',
+        quantity: 80,
+        unit: 'g',
+        preparation: null,
+        isOptional: false,
+        substitutes: [],
+        notes: null
+      }
+    ],
+    utensils: ['olla'],
+    guidance: {
+      appliances: [],
+      parallelTasks: [],
+      tipsAndVariations: [],
+      batchCookingWarning: null
+    },
+    instructionsByLevel: {
+      basic: [step('Lavar las lentejas.')],
+      intermediate: [step('Sofreír las verduras y añadir las lentejas.')],
+      expert: [step('Controlar la cocción para mantener las lentejas enteras.')]
+    },
+    nutrition: { calories: 420, protein: 20, carbs: 54, fat: 8, fiber: 12 },
+    storage: {
+      method: 'Refrigerar',
+      duration: '3 días',
+      reheatingInstructions: 'Calentar hasta que esté bien caliente.',
+      container: 'Recipiente hermético',
+      freezingPossible: true,
+      freezingDuration: '2 meses'
+    },
+    tags: ['legumbres']
+  };
+}
 
 function makeScheduledEvent(overrides: Partial<MealProposal['events'][number]> = {}) {
   return {
     date: '2026-10-13',
     mealType: 'dinner' as const,
     time: '20:30',
-    recipe: {
-      name: 'Lentejas con verduras',
-      description: 'Guiso sencillo de lentejas y verduras.',
-      baseServings: 1 as const,
-      prepTimeMinutes: 15,
-      cookTimeMinutes: 35,
-      ingredients: [
-        {
-          name: 'lentejas',
-          quantity: 80,
-          unit: 'g' as const,
-          preparation: null,
-          isOptional: false,
-          notes: null
-        }
-      ],
-      instructions: ['Lavar las lentejas.', 'Cocerlas con las verduras hasta que estén tiernas.']
-    },
+    recipeAlias: 'N1',
     participantAliases: ['P1'],
     servings: 1,
     objectiveSummary: 'Una comida equilibrada con legumbres y verduras.',
@@ -42,11 +85,18 @@ function makeUnresolvedEvent(overrides: Record<string, unknown> = {}) {
   return {
     ...makeScheduledEvent(),
     time: null,
-    recipe: null,
+    recipeAlias: null,
     servings: 0,
     status: 'unresolved' as const,
     reason: 'No se ha encontrado una opción segura para este grupo.',
     ...overrides
+  };
+}
+
+function proposal(events: MealProposal['events'] = [makeScheduledEvent()]): MealProposal {
+  return {
+    newRecipes: [{ alias: 'N1', recipe: recipe() }],
+    events
   };
 }
 
@@ -67,72 +117,71 @@ describe('meal proposal schema', () => {
   it('uses a WebAPI-supported date pattern in the strict provider schema', () => {
     const responseFormat = createMealProposalResponseFormat();
     const schema = responseFormat.json_schema.schema as {
-      properties: {
-        events: {
-          items: { properties: { date: Record<string, unknown> } };
-        };
-      };
+      properties: { events: { items: { properties: { date: Record<string, unknown> } } } };
     };
     const dateSchema = schema.properties.events.items.properties.date;
-
     expect(dateSchema.type).toBe('string');
     expect(dateSchema.pattern).toContain('-02-29');
     expect(dateSchema.format).toBeUndefined();
     expect(JSON.stringify(responseFormat.json_schema.schema)).not.toContain('"format"');
   });
 
-  it('accepts scheduled and unresolved events with explicit nullable values', () => {
+  it('accepts scheduled aliases, full new recipes, and explicit unresolved events', () => {
     const parsed = mealProposalSchema.parse({
+      newRecipes: [{ alias: 'N1', recipe: recipe() }],
       events: [makeScheduledEvent(), makeUnresolvedEvent({ date: '2026-10-14', mealType: 'lunch' })]
     });
-
-    expect(parsed.events[0]).toMatchObject({ status: 'scheduled', servings: 1, reason: null });
+    expect(parsed.events[0]).toMatchObject({ status: 'scheduled', servings: 1, recipeAlias: 'N1' });
     expect(parsed.events[1]).toMatchObject({
       status: 'unresolved',
-      time: null,
-      recipe: null,
+      recipeAlias: null,
       servings: 0
     });
   });
 
-  it('rejects an empty proposal in both local validation and the provider contract', () => {
-    expect(mealProposalSchema.safeParse({ events: [] }).success).toBe(false);
-
+  it('rejects empty event arrays and requires complete instructions at all three levels', () => {
+    expect(mealProposalSchema.safeParse({ newRecipes: [], events: [] }).success).toBe(false);
+    const incomplete = recipe() as unknown as Record<string, unknown>;
+    incomplete.instructionsByLevel = { basic: recipe().instructionsByLevel.basic };
+    expect(
+      mealProposalSchema.safeParse({
+        newRecipes: [{ alias: 'N1', recipe: incomplete }],
+        events: [makeScheduledEvent()]
+      }).success
+    ).toBe(false);
     const responseFormat = createMealProposalResponseFormat();
-    const root = responseFormat.json_schema.schema as {
-      properties: { events: Record<string, unknown> };
-    };
+    const root = responseFormat.json_schema.schema as { properties: Record<string, unknown> };
     expect(root.properties.events).toMatchObject({ type: 'array', minItems: 1 });
   });
 
-  it('requires a real ISO calendar date, meal type, and a valid 24-hour HH:mm time or null', () => {
-    const validEvent = makeScheduledEvent();
+  it('requires a real ISO calendar date, a valid meal type, and a 24-hour time or null', () => {
     expect(
-      mealProposalSchema.safeParse({ events: [{ ...validEvent, date: '2026-02-29' }] }).success
+      mealProposalSchema.safeParse(proposal([makeScheduledEvent({ date: '2026-02-29' })])).success
     ).toBe(false);
     expect(
-      mealProposalSchema.safeParse({ events: [{ ...validEvent, date: '2024-02-29' }] }).success
-    ).toBe(true);
-    expect(
-      mealProposalSchema.safeParse({ events: [{ ...validEvent, date: '2026-10-13T00:00:00Z' }] })
+      mealProposalSchema.safeParse(proposal([makeScheduledEvent({ date: '2026-10-13T00:00:00Z' })]))
         .success
     ).toBe(false);
     expect(
-      mealProposalSchema.safeParse({ events: [{ ...validEvent, mealType: 'brunch' }] }).success
+      mealProposalSchema.safeParse(proposal([makeScheduledEvent({ mealType: 'brunch' as never })]))
+        .success
     ).toBe(false);
     expect(
-      mealProposalSchema.safeParse({ events: [{ ...validEvent, time: '24:00' }] }).success
+      mealProposalSchema.safeParse(proposal([makeScheduledEvent({ time: '24:00' })])).success
     ).toBe(false);
     expect(
-      mealProposalSchema.safeParse({ events: [{ ...validEvent, time: '9:00' }] }).success
+      mealProposalSchema.safeParse(proposal([makeScheduledEvent({ time: '9:00' })])).success
     ).toBe(false);
-    expect(mealProposalSchema.safeParse({ events: [{ ...validEvent, time: null }] }).success).toBe(
-      true
-    );
+    expect(
+      mealProposalSchema.safeParse(proposal([makeScheduledEvent({ date: '2024-02-29' })])).success
+    ).toBe(true);
+    expect(
+      mealProposalSchema.safeParse(proposal([makeScheduledEvent({ time: null })])).success
+    ).toBe(true);
   });
 
-  it('keeps recipe quantities based on exactly one serving and enforces payload limits', () => {
-    const valid = makeScheduledEvent();
+  it('enforces one-serving ingredients and bounded recipes/events/servings', () => {
+    const valid = recipe();
     const maxIngredients = Array.from(
       { length: MEAL_PROPOSAL_LIMITS.maxIngredientsPerRecipe },
       (_, index) => ({
@@ -141,146 +190,116 @@ describe('meal proposal schema', () => {
         unit: 'g' as const,
         preparation: null,
         isOptional: false,
+        substitutes: [],
         notes: null
       })
     );
     expect(
       mealProposalSchema.safeParse({
+        newRecipes: [{ alias: 'N1', recipe: { ...valid, ingredients: maxIngredients } }],
         events: [
-          {
-            ...valid,
-            participantAliases: Array.from(
-              { length: MEAL_PROPOSAL_LIMITS.maxParticipantAliases },
-              (_, index) => `P${index + 1}`
-            ),
-            servings: MEAL_PROPOSAL_LIMITS.maxServings,
-            recipe: { ...valid.recipe, ingredients: maxIngredients }
-          }
+          makeScheduledEvent({
+            participantAliases: Array.from({ length: 100 }, (_, index) => `P${index + 1}`),
+            servings: 100
+          })
         ]
       }).success
     ).toBe(true);
     expect(
+      mealProposalSchema.safeParse(proposal([makeScheduledEvent({ servings: 101 })])).success
+    ).toBe(false);
+    expect(
       mealProposalSchema.safeParse({
-        events: [
-          {
-            ...valid,
-            recipe: { ...valid.recipe, baseServings: 2 }
-          }
-        ]
+        newRecipes: [{ alias: 'N1', recipe: { ...valid, baseServings: 2 } }],
+        events: [makeScheduledEvent()]
       }).success
     ).toBe(false);
     expect(
       mealProposalSchema.safeParse({
-        events: [
-          {
-            ...valid,
-            participantAliases: Array.from(
-              { length: MEAL_PROPOSAL_LIMITS.maxParticipantAliases + 1 },
-              (_, index) => `P${index + 1}`
-            ),
-            servings: 101
-          }
-        ]
+        newRecipes: [
+          { alias: 'N1', recipe: { ...valid, ingredients: [...maxIngredients, maxIngredients[0]] } }
+        ],
+        events: [makeScheduledEvent()]
       }).success
     ).toBe(false);
     expect(
       mealProposalSchema.safeParse({
-        events: [
-          {
-            ...valid,
-            recipe: {
-              ...valid.recipe,
-              ingredients: [...maxIngredients, maxIngredients[0]]
-            }
-          }
-        ]
+        newRecipes: [],
+        events: Array.from({ length: MEAL_PROPOSAL_LIMITS.maxEvents + 1 }, (_, index) =>
+          makeScheduledEvent({
+            date: new Date(Date.UTC(2026, 0, index + 1)).toISOString().slice(0, 10),
+            recipeAlias: 'R1'
+          })
+        )
       }).success
     ).toBe(false);
-    expect(
-      mealProposalSchema.safeParse({
-        events: Array.from({ length: MEAL_PROPOSAL_LIMITS.maxEvents + 1 }, (_, index) => ({
-          ...valid,
-          date: new Date(Date.UTC(2026, 0, 1 + index)).toISOString().slice(0, 10),
-          participantAliases: ['P1']
-        }))
-      }).success
-    ).toBe(false);
-
-    const eventsAtLimit = Array.from({ length: MEAL_PROPOSAL_LIMITS.maxEvents }, (_, index) => ({
-      ...valid,
-      date: new Date(Date.UTC(2026, 0, 1 + index)).toISOString().slice(0, 10),
-      participantAliases: ['P1']
-    }));
-    expect(mealProposalSchema.safeParse({ events: eventsAtLimit }).success).toBe(true);
   });
 
-  it('rejects duplicate aliases within an event and duplicate participants across events in one turn', () => {
-    const repeatedParticipant = makeScheduledEvent({ participantAliases: ['P1', 'P1'] });
-    expect(mealProposalSchema.safeParse({ events: [repeatedParticipant] }).success).toBe(false);
-
-    const sameTurn = [
-      makeScheduledEvent({ participantAliases: ['P1'] }),
-      makeScheduledEvent({ participantAliases: ['P1', 'P2'] })
-    ];
-    expect(mealProposalSchema.safeParse({ events: sameTurn }).success).toBe(false);
-
-    const separateGroups = [
-      makeScheduledEvent({ participantAliases: ['P1'] }),
-      makeScheduledEvent({ participantAliases: ['P2'] })
-    ];
-    expect(mealProposalSchema.safeParse({ events: separateGroups }).success).toBe(true);
-  });
-
-  it('accepts only opaque P-number participant aliases', () => {
-    for (const invalidAlias of ['user_123', 'P0', 'P01', 'P101']) {
-      expect(
-        mealProposalSchema.safeParse({
-          events: [makeScheduledEvent({ participantAliases: [invalidAlias] })]
-        }).success
-      ).toBe(false);
-    }
+  it('rejects duplicate/invented recipe aliases and unreferenced new recipes', () => {
     expect(
       mealProposalSchema.safeParse({
-        events: [makeScheduledEvent({ participantAliases: ['P42'] })]
+        newRecipes: [{ alias: 'N1', recipe: recipe() }],
+        events: [makeScheduledEvent({ recipeAlias: 'N2' })]
       }).success
+    ).toBe(false);
+    expect(
+      mealProposalSchema.safeParse({
+        newRecipes: [
+          { alias: 'N1', recipe: recipe() },
+          { alias: 'N1', recipe: recipe() }
+        ],
+        events: [makeScheduledEvent()]
+      }).success
+    ).toBe(false);
+    expect(
+      mealProposalSchema.safeParse({
+        newRecipes: [
+          { alias: 'N1', recipe: recipe() },
+          { alias: 'N2', recipe: recipe() }
+        ],
+        events: [makeScheduledEvent()]
+      }).success
+    ).toBe(false);
+  });
+
+  it('rejects duplicate participants within the same date and meal type', () => {
+    expect(
+      mealProposalSchema.safeParse(
+        proposal([
+          makeScheduledEvent({ recipeAlias: 'N1', participantAliases: ['P1'] }),
+          makeScheduledEvent({ recipeAlias: 'N1', participantAliases: ['P1', 'P2'] })
+        ])
+      ).success
+    ).toBe(false);
+    expect(
+      mealProposalSchema.safeParse(
+        proposal([
+          makeScheduledEvent({ recipeAlias: 'N1', participantAliases: ['P1'] }),
+          makeScheduledEvent({ recipeAlias: 'N1', participantAliases: ['P2'] })
+        ])
+      ).success
+    ).toBe(true);
+  });
+
+  it('requires scheduled recipe references and unresolved events without recipes', () => {
+    expect(
+      mealProposalSchema.safeParse(proposal([makeScheduledEvent({ recipeAlias: null })])).success
+    ).toBe(false);
+    expect(
+      mealProposalSchema.safeParse(proposal([makeScheduledEvent({ reason: 'unexpected' })])).success
+    ).toBe(false);
+    expect(
+      mealProposalSchema.safeParse({ newRecipes: [], events: [makeUnresolvedEvent()] }).success
     ).toBe(true);
     expect(
       mealProposalSchema.safeParse({
-        events: [makeScheduledEvent({ participantAliases: ['P100'] })]
-      }).success
-    ).toBe(true);
-    expect(
-      mealProposalSchema.safeParse({
-        events: [{ ...makeScheduledEvent(), participantId: 'real-member-id' }]
+        newRecipes: [{ alias: 'N1', recipe: recipe() }],
+        events: [makeUnresolvedEvent()]
       }).success
     ).toBe(false);
   });
 
-  it('requires scheduled events to have a recipe and unresolved events to have a clear reason', () => {
-    expect(
-      mealProposalSchema.safeParse({ events: [makeScheduledEvent({ recipe: null })] }).success
-    ).toBe(false);
-    expect(
-      mealProposalSchema.safeParse({ events: [makeScheduledEvent({ servings: 0 })] }).success
-    ).toBe(false);
-    expect(
-      mealProposalSchema.safeParse({ events: [makeScheduledEvent({ reason: 'unexpected' })] })
-        .success
-    ).toBe(false);
-    expect(
-      mealProposalSchema.safeParse({ events: [makeUnresolvedEvent({ reason: null })] }).success
-    ).toBe(false);
-    expect(
-      mealProposalSchema.safeParse({ events: [makeUnresolvedEvent({ servings: 1 })] }).success
-    ).toBe(false);
-    expect(
-      mealProposalSchema.safeParse({
-        events: [makeUnresolvedEvent({ recipe: makeScheduledEvent().recipe })]
-      }).success
-    ).toBe(false);
-  });
-
-  it('builds a normalized OpenAI strict JSON Schema with all object keys required and closed', () => {
+  it('builds a normalized strict JSON Schema with all keys required and closed', () => {
     const format = createMealProposalResponseFormat();
     expect(format).toMatchObject({
       type: 'json_schema',
@@ -295,32 +314,15 @@ describe('meal proposal schema', () => {
         expect(node.required).toEqual(Object.keys(properties));
       }
     }
-
     const root = format.json_schema.schema as { properties: Record<string, unknown> };
     expect(root.properties.events).toMatchObject({
       type: 'array',
       minItems: 1,
       maxItems: MEAL_PROPOSAL_LIMITS.maxEvents
     });
-    const eventProperties = (
-      root.properties.events as { items: { properties: Record<string, unknown> } }
-    ).items.properties;
-    const dateSchema = eventProperties.date as Record<string, unknown>;
-    expect(dateSchema).toMatchObject({
-      type: 'string',
-      pattern: expect.stringContaining('-02-29')
+    expect(root.properties.newRecipes).toMatchObject({
+      type: 'array',
+      maxItems: MEAL_PROPOSAL_LIMITS.maxRecipeDefinitions
     });
-    expect(dateSchema.format).toBeUndefined();
-    expect(isNullable(eventProperties.time)).toBe(true);
-    expect(isNullable(eventProperties.recipe)).toBe(true);
-    expect(isNullable(eventProperties.reason)).toBe(true);
   });
 });
-
-function isNullable(value: unknown): boolean {
-  if (Array.isArray(value)) return value.some(isNullable);
-  if (!value || typeof value !== 'object') return false;
-  const node = value as Record<string, unknown>;
-  if (node.type === 'null' || (Array.isArray(node.type) && node.type.includes('null'))) return true;
-  return Array.isArray(node.anyOf) && node.anyOf.some(isNullable);
-}

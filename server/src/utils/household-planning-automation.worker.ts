@@ -50,8 +50,13 @@ import { readHouseholdTaskWeek, saveHouseholdTaskWeek } from './household-task.s
 import {
   persistSharedMeals,
   SharedMealPersistenceError,
-  type SharedMealEventInput
+  type SharedMealEventInput,
+  type SharedMealRecipeToCreate
 } from './shared-meal-calendar.store.js';
+import {
+  createHouseholdMealRecipeId,
+  createHouseholdMealRecipeSnapshot
+} from './household-meal-recipe-snapshot.js';
 
 const DEFAULT_LEASE_MS = 5 * 60_000;
 const ISO_DAY_MS = 86_400_000;
@@ -116,6 +121,7 @@ interface TaskWeekContext {
 interface PreparedPublication {
   tasks: HouseholdTaskOccurrence[] | null;
   meals: SharedMealEventInput[] | null;
+  recipesToCreate: SharedMealRecipeToCreate[] | null;
   mealProposalId: string | null;
 }
 
@@ -350,6 +356,7 @@ async function processClaimedRun(
         persistSharedMeals(db, authorizer, {
           proposalId: prepared.mealProposalId,
           expectedHouseholdId: run.householdId,
+          recipesToCreate: prepared.recipesToCreate ?? [],
           events: prepared.meals
         });
       }
@@ -383,6 +390,7 @@ async function preparePublication(input: {
 }): Promise<PreparedPublication | HouseholdPlanningAutomationWorkerResult> {
   let tasks: HouseholdTaskOccurrence[] | null = null;
   let meals: SharedMealEventInput[] | null = null;
+  let recipesToCreate: SharedMealRecipeToCreate[] | null = null;
   const proposalId = stableProposalId(input.run.householdId, input.run.occurrenceKey);
   if (input.scopes.includes('tasks')) {
     if (input.mode === 'repeat') {
@@ -451,6 +459,7 @@ async function preparePublication(input: {
         input.members,
         proposalId
       );
+      recipesToCreate = [];
     } else {
       const renewal = input.renewBeforeProvider();
       if (renewal) return renewal;
@@ -466,7 +475,9 @@ async function preparePublication(input: {
         },
         input.provider as HouseholdMealProposalProvider
       );
-      meals = normalizeMealProposalForPublication(proposal, proposalId);
+      const normalized = normalizeMealProposalForPublication(proposal, proposalId);
+      meals = normalized.events;
+      recipesToCreate = normalized.recipesToCreate;
       const afterProposal = input.renewBeforeProvider();
       if (afterProposal) return afterProposal;
     }
@@ -478,13 +489,13 @@ async function preparePublication(input: {
   ) {
     throw new WorkerError('INVALID_PROPOSAL');
   }
-  return { tasks, meals, mealProposalId: meals ? proposalId : null };
+  return { tasks, meals, recipesToCreate, mealProposalId: meals ? proposalId : null };
 }
 
 function normalizeMealProposalForPublication(
   proposal: AutomatedHouseholdMealProposal,
   proposalId: string
-): SharedMealEventInput[] {
+): { events: SharedMealEventInput[]; recipesToCreate: SharedMealRecipeToCreate[] } {
   const aliasToUserId = new Map<string, string>();
   for (const participant of proposal.participants) {
     if (!participant.alias || !participant.userId || aliasToUserId.has(participant.alias)) {
@@ -499,8 +510,23 @@ function normalizeMealProposalForPublication(
     throw new WorkerError('INVALID_PROPOSAL');
   }
 
-  return proposal.events.map((event, index) => {
-    if (!event.recipe) throw new WorkerError('INVALID_PROPOSAL');
+  const recipeByAlias = new Map(proposal.recipes.map((recipe) => [recipe.alias, recipe]));
+  const recipesToCreate = proposal.recipes.flatMap((recipe) => {
+    if (recipe.source !== 'new') return [];
+    if (!recipe.alias.startsWith('N')) throw new WorkerError('INVALID_PROPOSAL');
+    return [
+      {
+        alias: recipe.alias,
+        recipeId: createHouseholdMealRecipeId(proposalId, recipe.alias),
+        recipe: recipe.recipe
+      }
+    ];
+  });
+
+  const events = proposal.events.map((event, index) => {
+    if (!event.recipeAlias) throw new WorkerError('INVALID_PROPOSAL');
+    const recipe = recipeByAlias.get(event.recipeAlias);
+    if (!recipe) throw new WorkerError('INVALID_PROPOSAL');
     const participantIds = event.participantAliases.map((alias) => aliasToUserId.get(alias));
     if (
       participantIds.some((id) => !id) ||
@@ -508,29 +534,25 @@ function normalizeMealProposalForPublication(
     ) {
       throw new WorkerError('INVALID_PROPOSAL');
     }
-    const recipeSnapshot = {
-      name: event.recipe.name,
-      description: event.recipe.description,
-      baseServings: 1,
-      times: {
-        prepTimeMinutes: event.recipe.prepTimeMinutes,
-        cookTimeMinutes: event.recipe.cookTimeMinutes
-      },
-      ingredients: event.recipe.ingredients,
-      instructions: event.recipe.instructions
-    };
+    const recipeId =
+      recipe.source === 'catalog'
+        ? recipe.recipeId
+        : createHouseholdMealRecipeId(proposalId, recipe.alias);
+    if (!recipeId) throw new WorkerError('INVALID_PROPOSAL');
+    const recipeSnapshot = createHouseholdMealRecipeSnapshot(recipe.recipe);
     return {
       eventId: stableEventId(proposalId, `${index}|${event.date}|${event.mealType}`),
       date: event.date,
       mealType: event.mealType,
       time: event.time,
-      recipeId: null,
-      customMeal: event.recipe.name,
+      recipeId,
+      customMeal: typeof recipeSnapshot.name === 'string' ? recipeSnapshot.name : 'Receta',
       servings: event.servings,
       participantIds: participantIds as string[],
       recipeSnapshot
     };
   });
+  return { events, recipesToCreate };
 }
 
 function copyLatestTaskWeek(

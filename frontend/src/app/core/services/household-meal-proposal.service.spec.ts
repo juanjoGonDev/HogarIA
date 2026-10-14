@@ -22,11 +22,13 @@ describe('HouseholdMealProposalService', () => {
     proposalId: 'proposal-1',
     weekStart: '2026-10-12',
     participants: [],
+    recipes: [],
     events: []
   };
   const confirmationRequest: HouseholdMealProposalConfirmRequest = {
     ...proposalRequest,
     proposalId: 'proposal-1',
+    recipes: [],
     events: []
   };
   const confirmation: HouseholdMealProposalConfirmation = {

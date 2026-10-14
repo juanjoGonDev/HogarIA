@@ -1,6 +1,7 @@
 import {
   mealProposalSchema,
-  type MealProposal
+  type MealProposalEvent,
+  type ResolvedMealProposalRecipe
 } from '../schemas/household-meal-proposal.schema.js';
 import type { MealTypeKey } from '../schemas/household-meal-planning.schema.js';
 import type {
@@ -8,6 +9,16 @@ import type {
   MealPlanningSchedule
 } from './household-meal-planning.store.js';
 import { findIngredientRestrictionConflicts } from './recipe-replacement.js';
+import type { HouseholdMealRecipeCatalogEntry } from './household-meal-recipe-catalog.js';
+
+export interface ResolvedMealProposalEvent extends Omit<MealProposalEvent, 'recipeAlias'> {
+  recipeAlias: string | null;
+}
+
+export interface ResolvedMealProposal {
+  recipes: ResolvedMealProposalRecipe[];
+  events: ResolvedMealProposalEvent[];
+}
 
 export interface MealProposalMemberContext {
   alias: string;
@@ -85,43 +96,31 @@ function containsPrivateTerm(text: string, term: string): boolean {
   return false;
 }
 
-function recipeText(event: MealProposal['events'][number]): string[] {
-  if (!event.recipe) return [event.objectiveSummary, event.reason ?? ''];
-  return [
-    event.objectiveSummary,
-    event.reason ?? '',
-    event.recipe.name,
-    event.recipe.description,
-    ...event.recipe.ingredients.flatMap((ingredient) => [
-      ingredient.name,
-      ingredient.preparation ?? '',
-      ingredient.notes ?? ''
-    ]),
-    ...event.recipe.instructions
-  ];
+function collectStrings(value: unknown): string[] {
+  if (typeof value === 'string') return [value];
+  if (Array.isArray(value)) return value.flatMap(collectStrings);
+  if (!value || typeof value !== 'object') return [];
+  return Object.values(value).flatMap(collectStrings);
 }
 
-function privacyVisibleText(event: MealProposal['events'][number]): string[] {
-  if (!event.recipe) return [event.objectiveSummary, event.reason ?? ''];
-  return [
-    event.objectiveSummary,
-    event.reason ?? '',
-    event.recipe.name,
-    event.recipe.description,
-    ...event.recipe.ingredients.flatMap((ingredient) => [
-      ingredient.preparation ?? '',
-      ingredient.notes ?? ''
-    ]),
-    ...event.recipe.instructions
-  ];
+function recipeText(event: MealProposalEvent, recipe: Record<string, unknown> | null): string[] {
+  return [event.objectiveSummary, event.reason ?? '', ...collectStrings(recipe)];
+}
+
+function privacyVisibleText(
+  event: MealProposalEvent,
+  recipe: Record<string, unknown> | null
+): string[] {
+  return [event.objectiveSummary, event.reason ?? '', ...collectStrings(recipe)];
 }
 
 function containsAllergyDisclosure(
-  event: MealProposal['events'][number],
+  event: MealProposalEvent,
+  recipe: Record<string, unknown> | null,
   member: MealProposalMemberContext
 ): boolean {
   if (!member.strictRestrictions.length) return false;
-  const narrative = comparableText(privacyVisibleText(event).join(' '));
+  const narrative = comparableText(privacyVisibleText(event, recipe).join(' '));
   if (/(?:alergi|allerg|intoleran)/.test(narrative)) return true;
   return member.strictRestrictions.some(
     (restriction) =>
@@ -130,10 +129,11 @@ function containsAllergyDisclosure(
 }
 
 function hasPrivateOutputLeak(
-  event: MealProposal['events'][number],
+  event: MealProposalEvent,
+  recipe: Record<string, unknown> | null,
   members: readonly MealProposalMemberContext[]
 ): boolean {
-  const visibleText = comparableText(privacyVisibleText(event).join(' '));
+  const visibleText = comparableText(privacyVisibleText(event, recipe).join(' '));
   if (!visibleText) return false;
 
   return members.some((member) => {
@@ -145,18 +145,18 @@ function hasPrivateOutputLeak(
     ];
     return (
       privateTerms.some((term) => containsPrivateTerm(visibleText, term)) ||
-      containsAllergyDisclosure(event, member)
+      containsAllergyDisclosure(event, recipe, member)
     );
   });
 }
 
 function unresolvedEvent(
-  event: MealProposal['events'][number],
+  event: MealProposalEvent,
   participantAliases = event.participantAliases
-): MealProposal['events'][number] {
+): ResolvedMealProposalEvent {
   return {
     ...event,
-    recipe: null,
+    recipeAlias: null,
     participantAliases,
     servings: 0,
     objectiveSummary: UNRESOLVED_SUMMARY,
@@ -202,7 +202,7 @@ export function buildExpectedMealSlots(
 /** Build review placeholders locally when every scheduled participant must stay out of AI. */
 export function buildUnresolvedMealProposal(
   expectedSlots: readonly ExpectedMealSlot[]
-): MealProposal {
+): ResolvedMealProposal {
   if (
     !expectedSlots.length ||
     expectedSlots.some(
@@ -217,11 +217,12 @@ export function buildUnresolvedMealProposal(
   }
 
   const result = mealProposalSchema.safeParse({
+    newRecipes: [],
     events: expectedSlots.map((slot) => ({
       date: slot.date,
       mealType: slot.mealType,
       time: slot.time,
-      recipe: null,
+      recipeAlias: null,
       participantAliases: slot.unresolvedAliases,
       servings: 0,
       objectiveSummary: UNRESOLVED_SUMMARY,
@@ -232,39 +233,49 @@ export function buildUnresolvedMealProposal(
   if (!result.success) {
     throw new MealProposalValidationError('MEAL_PROPOSAL_SLOT_ASSIGNMENT_INVALID');
   }
-  return result.data;
+  return { recipes: [], events: result.data.events.map((event) => ({ ...event })) };
 }
 
 /** Validate the provider's schedule against the resolved household inputs and fail closed. */
 export function normalizeMealProposal(
   value: unknown,
   expectedSlots: readonly ExpectedMealSlot[],
-  members: readonly MealProposalMemberContext[]
-): MealProposal {
-  if (
-    value !== null &&
-    typeof value === 'object' &&
-    !Array.isArray(value) &&
-    'events' in value &&
-    Array.isArray(value.events) &&
-    value.events.length === 0
-  ) {
-    if (expectedSlots.some((slot) => slot.aiParticipantAliases.length > 0)) {
-      throw new MealProposalValidationError('MEAL_PROPOSAL_SLOT_COVERAGE_INVALID');
-    }
-    return buildUnresolvedMealProposal(expectedSlots);
-  }
-
+  members: readonly MealProposalMemberContext[],
+  catalog: readonly HouseholdMealRecipeCatalogEntry[]
+): ResolvedMealProposal {
   const parsed = mealProposalSchema.safeParse(value);
   if (!parsed.success)
     throw new MealProposalValidationError('MEAL_PROPOSAL_SLOT_ASSIGNMENT_INVALID');
 
   const memberByAlias = new Map(members.map((member) => [member.alias, member]));
+  const recipeByAlias = new Map<string, ResolvedMealProposalRecipe>();
+  const selectableCatalogByAlias = new Map(catalog.map((recipe) => [recipe.alias, recipe]));
+  const newRecipesByAlias = new Map(parsed.data.newRecipes.map((entry) => [entry.alias, entry]));
+  for (const event of parsed.data.events) {
+    if (event.status !== 'scheduled' || !event.recipeAlias) continue;
+    const catalogRecipe = selectableCatalogByAlias.get(event.recipeAlias);
+    if (event.recipeAlias.startsWith('R')) {
+      if (!catalogRecipe)
+        throw new MealProposalValidationError('MEAL_PROPOSAL_SLOT_ASSIGNMENT_INVALID');
+      recipeByAlias.set(event.recipeAlias, catalogRecipe);
+    } else {
+      const generatedRecipe = newRecipesByAlias.get(event.recipeAlias);
+      if (!generatedRecipe)
+        throw new MealProposalValidationError('MEAL_PROPOSAL_SLOT_ASSIGNMENT_INVALID');
+      recipeByAlias.set(event.recipeAlias, {
+        alias: event.recipeAlias,
+        source: 'new',
+        recipeId: null,
+        recipe: generatedRecipe.recipe
+      });
+    }
+  }
+
   const expectedByKey = new Map(
     expectedSlots.map((slot) => [slotKey(slot.date, slot.mealType, slot.time), slot])
   );
   const assignedBySlot = new Map<string, Set<string>>();
-  const normalized: MealProposal['events'] = [];
+  const normalized: ResolvedMealProposalEvent[] = [];
 
   for (const event of parsed.data.events) {
     const key = slotKey(event.date, event.mealType, event.time ?? '');
@@ -282,23 +293,30 @@ export function normalizeMealProposal(
     const eventMemberRestrictions = event.participantAliases.map(
       (alias) => memberByAlias.get(alias)?.strictRestrictions ?? []
     );
-    if (event.status === 'unresolved' || !event.recipe) {
+    const definition = event.recipeAlias ? recipeByAlias.get(event.recipeAlias) : undefined;
+    if (event.status === 'unresolved' || !definition) {
       normalized.push({
         ...event,
+        recipeAlias: null,
         objectiveSummary: UNRESOLVED_SUMMARY,
         reason: UNSAFE_REASON
       });
       continue;
     }
 
-    if (hasPrivateOutputLeak(event, members)) {
+    const catalogEntry = selectableCatalogByAlias.get(definition.alias);
+    if (catalogEntry && !catalogEntry.selectable) {
       normalized.push(unresolvedEvent(event));
       continue;
     }
 
-    // Check every model-controlled field, not only the ingredient list. A forbidden allergen can
-    // also be hidden in a description or instruction even when all listed ingredients look safe.
-    const ingredientText = recipeText(event);
+    if (hasPrivateOutputLeak(event, definition.recipe, members)) {
+      normalized.push(unresolvedEvent(event));
+      continue;
+    }
+
+    // Check every field and every detail level; restrictions can be hidden in advanced instructions.
+    const ingredientText = recipeText(event, definition.recipe);
     const unsafeAliases = event.participantAliases.filter(
       (_, index) =>
         findIngredientRestrictionConflicts(ingredientText, eventMemberRestrictions[index] ?? [])
@@ -310,6 +328,7 @@ export function normalizeMealProposal(
       const summary = safeAliases.length > 1 ? SHARED_SUMMARY : event.objectiveSummary;
       normalized.push({
         ...event,
+        recipeAlias: definition.alias,
         participantAliases: safeAliases,
         servings: safeAliases.length,
         objectiveSummary: summary,
@@ -336,7 +355,7 @@ export function normalizeMealProposal(
         date: slot.date,
         mealType: slot.mealType,
         time: slot.time,
-        recipe: null,
+        recipeAlias: null,
         participantAliases: slot.unresolvedAliases,
         servings: 0,
         objectiveSummary: UNRESOLVED_SUMMARY,
@@ -346,8 +365,15 @@ export function normalizeMealProposal(
     }
   }
 
-  const result = mealProposalSchema.safeParse({ events: normalized });
-  if (!result.success)
-    throw new MealProposalValidationError('MEAL_PROPOSAL_SLOT_ASSIGNMENT_INVALID');
-  return result.data;
+  const usedAliases = new Set(
+    normalized.flatMap((event) =>
+      event.status === 'scheduled' && event.recipeAlias ? [event.recipeAlias] : []
+    )
+  );
+  return {
+    recipes: [...usedAliases]
+      .map((alias) => recipeByAlias.get(alias))
+      .filter((recipe): recipe is ResolvedMealProposalRecipe => Boolean(recipe)),
+    events: normalized
+  };
 }

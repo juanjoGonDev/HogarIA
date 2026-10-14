@@ -44,24 +44,8 @@ describe('householdMealProposalConfirmRequestSchema', () => {
     date: '2026-10-12',
     mealType: 'lunch',
     time: '13:00',
-    recipe: {
-      name: 'Lentejas',
-      description: 'Lentejas sencillas.',
-      baseServings: 1,
-      prepTimeMinutes: 10,
-      cookTimeMinutes: 30,
-      ingredients: [
-        {
-          name: 'lentejas',
-          quantity: 80,
-          unit: 'g',
-          preparation: null,
-          isOptional: false,
-          notes: null
-        }
-      ],
-      instructions: ['Cocer las lentejas.']
-    },
+    recipeAlias: 'R1',
+    participantIds: ['untrusted-user-id'],
     participantAliases: ['P1'],
     servings: 1,
     objectiveSummary: 'Plato sencillo.',
@@ -69,12 +53,39 @@ describe('householdMealProposalConfirmRequestSchema', () => {
     reason: null
   } as const;
 
+  const recipes = [
+    {
+      alias: 'R1',
+      source: 'catalog',
+      recipeId: 'recipe-1',
+      recipe: {
+        name: 'Lentejas',
+        description: 'Lentejas sencillas.',
+        baseServings: 1,
+        prepTimeMinutes: 10,
+        cookTimeMinutes: 30,
+        ingredients: [
+          {
+            name: 'lentejas',
+            quantity: 80,
+            unit: 'g',
+            preparation: null,
+            isOptional: false,
+            notes: null
+          }
+        ],
+        instructions: ['Cocer las lentejas.']
+      }
+    }
+  ] as const;
+
   it('accepts opaque aliases and stable event ids without trusting participant IDs', () => {
     expect(
       householdMealProposalConfirmRequestSchema.safeParse({
         proposalId: 'proposal-1',
         weekStart: '2026-10-12',
         householdMemberIds: ['membership-1'],
+        recipes,
         events: [event]
       }).success
     ).toBe(true);
@@ -85,6 +96,7 @@ describe('householdMealProposalConfirmRequestSchema', () => {
       proposalId: 'proposal-1',
       weekStart: '2026-10-12',
       householdMemberIds: ['membership-1'],
+      recipes,
       events: [event]
     };
     for (const value of [

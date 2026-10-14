@@ -16,17 +16,75 @@ export interface HouseholdMealProposalIngredient {
   unit: string;
   preparation: string | null;
   isOptional: boolean;
+  substitutes: string[];
   notes: string | null;
+}
+
+export interface HouseholdMealRecipeInstructionStep {
+  stepNumber: number;
+  instruction: string;
+  temperature?: { value: number; unit: 'C' | 'F' } | null;
+  timerRequired?: boolean;
+  timerDuration?: number | null;
+  duration?: number | null;
+  tips?: string | null;
+  warning?: string | null;
+  illustration?: unknown;
+}
+
+export type HouseholdMealRecipeInstructionLevel = 'basic' | 'intermediate' | 'expert';
+
+export interface HouseholdMealProposalRecipeInstructionsByLevel {
+  basic: HouseholdMealRecipeInstructionStep[];
+  intermediate: HouseholdMealRecipeInstructionStep[];
+  expert: HouseholdMealRecipeInstructionStep[];
 }
 
 export interface HouseholdMealProposalRecipe {
   name: string;
   description: string;
-  baseServings: 1;
-  prepTimeMinutes: number;
-  cookTimeMinutes: number;
+  baseServings: number;
+  difficulty: 'easy' | 'medium' | 'hard';
+  cuisine: string | null;
+  totalTime: number;
+  prepTime: number;
+  cookTime: number;
+  restTime: number | null;
+  calories: number | null;
   ingredients: HouseholdMealProposalIngredient[];
-  instructions: string[];
+  utensils: string[];
+  guidance: {
+    appliances: string[];
+    parallelTasks: string[];
+    tipsAndVariations: string[];
+    batchCookingWarning: string | null;
+  };
+  instructionsByLevel?: HouseholdMealProposalRecipeInstructionsByLevel;
+  /** Saved catalog recipes can still use the editor's historical flat-step shape. */
+  steps?: HouseholdMealRecipeInstructionStep[] | null;
+  nutrition: {
+    calories: number;
+    protein: number;
+    carbs: number;
+    fat: number;
+    fiber: number | null;
+  } | null;
+  storage: {
+    method: string;
+    duration: string;
+    reheatingInstructions: string | null;
+    container: string | null;
+    freezingPossible: boolean;
+    freezingDuration: string | null;
+  } | null;
+  tags: string[];
+}
+
+export interface HouseholdMealProposalRecipeReference {
+  alias: string;
+  source: 'catalog' | 'new';
+  recipeId: string | null;
+  recipe: HouseholdMealProposalRecipe;
 }
 
 export interface HouseholdMealProposalEvent {
@@ -34,7 +92,7 @@ export interface HouseholdMealProposalEvent {
   date: string;
   mealType: MealType;
   time: string | null;
-  recipe: HouseholdMealProposalRecipe | null;
+  recipeAlias: string | null;
   participantAliases: string[];
   participantIds: string[];
   servings: number;
@@ -47,11 +105,13 @@ export interface HouseholdMealProposal {
   proposalId: string;
   weekStart: string;
   participants: Array<{ alias: string; householdMemberId: string }>;
+  recipes: HouseholdMealProposalRecipeReference[];
   events: HouseholdMealProposalEvent[];
 }
 
 export interface HouseholdMealProposalConfirmRequest extends HouseholdMealProposalRequest {
   proposalId: string;
+  recipes: HouseholdMealProposalRecipeReference[];
   events: HouseholdMealProposalEvent[];
 }
 

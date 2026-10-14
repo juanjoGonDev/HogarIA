@@ -1,4 +1,5 @@
 import { nanoid } from 'nanoid';
+import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import { MEAL_PROPOSAL_LIMITS } from '../schemas/household-meal-proposal.schema.js';
 import { activeHouseholdId } from './household-context.js';
@@ -7,9 +8,102 @@ import { ensureWeekCalendar, utcDate } from './week-calendar.js';
 type SqliteDb = import('better-sqlite3').Database;
 
 const MEAL_TYPES = new Set(['breakfast', 'lunch', 'snack', 'dinner']);
+const MAX_RECIPE_DEFINITIONS = MEAL_PROPOSAL_LIMITS.maxEvents;
 const TIME_RE = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 const snapshotMinuteSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
-const sharedRecipeSnapshotSchema = z.object({
+const recipeStepSchema = z.object({
+  stepNumber: z.number().int().positive(),
+  instruction: z.string().trim().min(1).max(2_000),
+  duration: z.number().int().positive().max(1_440).nullable(),
+  tips: z.string().trim().max(500).nullable(),
+  warning: z.string().trim().max(500).nullable(),
+  illustration: z.null(),
+  temperature: z.object({ value: z.number().finite(), unit: z.enum(['C', 'F']) }).nullable(),
+  timerRequired: z.boolean(),
+  timerDuration: z.number().int().positive().max(1_440).nullable()
+});
+const orderedRecipeStepsSchema = z
+  .array(recipeStepSchema)
+  .min(1)
+  .max(MEAL_PROPOSAL_LIMITS.maxInstructions)
+  .superRefine((steps, context) => {
+    steps.forEach((step, index) => {
+      if (step.stepNumber !== index + 1) {
+        context.addIssue({
+          code: 'custom',
+          path: [index, 'stepNumber'],
+          message: 'Orden inválido'
+        });
+      }
+    });
+  });
+const instructionsByLevelSchema = z.object({
+  basic: orderedRecipeStepsSchema,
+  intermediate: orderedRecipeStepsSchema,
+  expert: orderedRecipeStepsSchema
+});
+const recipeIngredientSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  quantity: z.number().finite().positive().max(1_000_000),
+  unit: z.string().trim().min(1).max(40),
+  preparation: z.string().trim().max(500).nullable(),
+  isOptional: z.boolean(),
+  substitutes: z.array(z.string().trim().min(1).max(200)).max(10),
+  notes: z.string().trim().max(500).nullable()
+});
+const recipeGuidanceSchema = z.object({
+  appliances: z.array(z.string().trim().min(1).max(120)).max(10),
+  parallelTasks: z.array(z.string().trim().min(1).max(500)).max(10),
+  tipsAndVariations: z.array(z.string().trim().min(1).max(500)).max(10),
+  batchCookingWarning: z.string().trim().min(1).max(500).nullable()
+});
+const recipeNutritionSchema = z
+  .object({
+    calories: z.number().nonnegative(),
+    protein: z.number().nonnegative(),
+    carbs: z.number().nonnegative(),
+    fat: z.number().nonnegative(),
+    fiber: z.number().nonnegative().nullable()
+  })
+  .nullable();
+const recipeStorageSchema = z
+  .object({
+    method: z.string().trim().min(1).max(200),
+    duration: z.string().trim().min(1).max(100),
+    reheatingInstructions: z.string().trim().max(500).nullable(),
+    container: z.string().trim().max(200).nullable(),
+    freezingPossible: z.boolean(),
+    freezingDuration: z.string().trim().max(100).nullable()
+  })
+  .nullable();
+
+/** Strict canonical recipe persisted only after the proposal is confirmed. */
+const householdMealRecipeCandidateSchema = z
+  .object({
+    name: z.string().trim().min(1).max(200),
+    description: z.string().trim().min(1).max(1_000),
+    difficulty: z.enum(['easy', 'medium', 'hard']),
+    cuisine: z.string().trim().max(50).nullable(),
+    totalTime: z.number().int().positive().max(1_440),
+    prepTime: z.number().int().positive().max(1_440),
+    cookTime: z.number().int().nonnegative().max(1_440),
+    restTime: z.number().int().nonnegative().max(1_440).nullable(),
+    baseServings: z.literal(1),
+    calories: z.number().positive().nullable(),
+    ingredients: z
+      .array(recipeIngredientSchema)
+      .min(1)
+      .max(MEAL_PROPOSAL_LIMITS.maxIngredientsPerRecipe),
+    utensils: z.array(z.string().trim().min(1).max(120)).max(30),
+    guidance: recipeGuidanceSchema,
+    instructionsByLevel: instructionsByLevelSchema,
+    nutrition: recipeNutritionSchema,
+    storage: recipeStorageSchema,
+    tags: z.array(z.string().trim().min(1).max(50)).max(30)
+  })
+  .strict();
+
+const legacySharedRecipeSnapshotSchema = z.object({
   name: z.string().trim().min(1).max(200),
   description: z.string().trim().min(1).max(1000),
   baseServings: z.literal(1),
@@ -35,6 +129,11 @@ const sharedRecipeSnapshotSchema = z.object({
     .max(100),
   instructions: z.array(z.string().trim().min(1).max(2000)).min(1).max(100)
 });
+/** Accept the legacy calendar snapshot during rollout and keep canonical details losslessly. */
+const sharedRecipeSnapshotSchema = z.union([
+  legacySharedRecipeSnapshotSchema,
+  householdMealRecipeCandidateSchema
+]);
 
 export type SharedMealErrorCode =
   | 'INVALID_INPUT'
@@ -57,29 +156,18 @@ export class SharedMealPersistenceError extends Error {
 export type SharedMealType = 'breakfast' | 'lunch' | 'snack' | 'dinner';
 
 /**
- * Deliberately small persisted recipe projection: private generation prompts, member goals,
- * notes, guidance and other proposal metadata are neither accepted nor written.
+ * Calendar snapshots are whitelisted recipe data only. Prompts, member goals, notes, identities,
+ * and other proposal metadata are neither accepted nor written.
  */
-export interface SharedRecipeSnapshot {
-  name: string;
-  description: string;
-  baseServings: 1;
-  times: {
-    prepTimeMinutes: number;
-    cookTimeMinutes: number;
-    totalTimeMinutes?: number | null;
-    restTimeMinutes?: number | null;
-  };
-  ingredients: Array<{
-    name: string;
-    quantity: number;
-    unit: string;
-    preparation?: string | null;
-    isOptional?: boolean;
-    substitutes?: string[];
-    notes?: string | null;
-  }>;
-  instructions: string[];
+export type SharedRecipeSnapshot =
+  | z.infer<typeof legacySharedRecipeSnapshotSchema>
+  | z.infer<typeof householdMealRecipeCandidateSchema>;
+
+export interface SharedMealRecipeToCreate {
+  alias: string;
+  /** Stable identifier derived by the caller from the proposal id and the opaque recipe alias. */
+  recipeId: string;
+  recipe: unknown;
 }
 
 export interface SharedMealEventInput {
@@ -100,6 +188,8 @@ export interface SharedMealsInput {
   /** Stable parent proposal id; all events in this confirmation are committed atomically. */
   proposalId: string;
   events: SharedMealEventInput[];
+  /** New canonical candidates are inserted once, atomically with their confirmed calendar meals. */
+  recipesToCreate?: SharedMealRecipeToCreate[];
   /** Reject a context switch after request parsing, before writing into another active home. */
   expectedHouseholdId?: string;
 }
@@ -126,7 +216,15 @@ interface NormalizedSharedMealEvent {
 interface NormalizedSharedMealsInput {
   proposalId: string;
   events: NormalizedSharedMealEvent[];
+  recipesToCreate: NormalizedMealRecipeToCreate[];
   expectedHouseholdId?: string;
+}
+
+interface NormalizedMealRecipeToCreate {
+  alias: string;
+  recipeId: string;
+  recipe: z.infer<typeof householdMealRecipeCandidateSchema>;
+  snapshot: SharedRecipeSnapshot;
 }
 
 export interface PersistedSharedMeal {
@@ -166,6 +264,51 @@ function normalizeRecipeSnapshot(raw: unknown): SharedRecipeSnapshot | null {
   const snapshot = sharedRecipeSnapshotSchema.safeParse(raw);
   if (!snapshot.success) return invalidInput('recipeSnapshot inválido');
   return snapshot.data;
+}
+
+function normalizeRecipesToCreate(
+  raw: SharedMealRecipeToCreate[] | undefined,
+  events: NormalizedSharedMealEvent[]
+): NormalizedMealRecipeToCreate[] {
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw) || raw.length > MAX_RECIPE_DEFINITIONS) {
+    return invalidInput('recipesToCreate debe ser una lista de recetas válidas');
+  }
+
+  const recipes = raw.map((entry) => {
+    if (!entry || typeof entry !== 'object') return invalidInput('Receta por crear inválida');
+    const alias = typeof entry.alias === 'string' ? entry.alias.trim() : '';
+    const recipeId = typeof entry.recipeId === 'string' ? entry.recipeId.trim() : '';
+    if (!/^N[1-9]\d{0,3}$/.test(alias)) return invalidInput('alias de receta inválido');
+    if (!recipeId || recipeId.length > 40) return invalidInput('recipeId de receta inválido');
+    const parsedRecipe = householdMealRecipeCandidateSchema.safeParse(entry.recipe);
+    if (!parsedRecipe.success) return invalidInput('Candidata de receta inválida');
+    const snapshot = normalizeRecipeSnapshot(parsedRecipe.data);
+    if (!snapshot) return invalidInput('Candidata de receta inválida');
+    return { alias, recipeId, recipe: parsedRecipe.data, snapshot };
+  });
+
+  if (new Set(recipes.map(({ alias }) => alias)).size !== recipes.length) {
+    return invalidInput('Los alias de recipesToCreate no pueden repetirse');
+  }
+  if (new Set(recipes.map(({ recipeId }) => recipeId)).size !== recipes.length) {
+    return invalidInput('Los recipeId de recipesToCreate no pueden repetirse');
+  }
+
+  for (const recipe of recipes) {
+    const references = events.filter((event) => event.recipeId === recipe.recipeId);
+    if (!references.length) return invalidInput('Cada receta nueva debe usarse en un evento');
+    if (
+      references.some(
+        (event) =>
+          !event.recipeSnapshot || !isDeepStrictEqual(event.recipeSnapshot, recipe.snapshot)
+      )
+    ) {
+      return invalidInput('El snapshot del evento no coincide con la receta nueva');
+    }
+  }
+
+  return recipes.sort((left, right) => left.alias.localeCompare(right.alias));
 }
 
 function readRecipeSnapshot(raw: string | null): SharedRecipeSnapshot | null {
@@ -270,11 +413,130 @@ function normalizeBatch(raw: SharedMealsInput): NormalizedSharedMealsInput {
   if (new Set(events.map(({ eventId }) => eventId)).size !== events.length) {
     return invalidInput('eventId no puede repetirse dentro de la propuesta');
   }
+  const recipesToCreate = normalizeRecipesToCreate(raw.recipesToCreate, events);
   return {
     proposalId,
     events,
+    recipesToCreate,
     ...(raw.expectedHouseholdId ? { expectedHouseholdId: raw.expectedHouseholdId.trim() } : {})
   };
+}
+
+function jsonColumn(row: Record<string, unknown>, column: string): unknown {
+  const value = row[column];
+  if (value == null) return null;
+  if (typeof value !== 'string') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+}
+
+function storedRecipeMatches(
+  row: Record<string, unknown> | undefined,
+  actorId: string,
+  recipe: NormalizedMealRecipeToCreate
+): boolean {
+  if (
+    !row ||
+    row.author !== 'ai' ||
+    row.author_id !== actorId ||
+    Number(row.is_public) !== 0 ||
+    row.id !== recipe.recipeId
+  ) {
+    return false;
+  }
+  const candidate = recipe.recipe;
+  const storage = candidate.storage
+    ? {
+        method: candidate.storage.method,
+        duration: candidate.storage.duration,
+        reheatingInstructions: candidate.storage.reheatingInstructions,
+        container: candidate.storage.container,
+        freezingPossible: candidate.storage.freezingPossible,
+        freezingDuration: candidate.storage.freezingDuration
+      }
+    : null;
+  return (
+    row.name === candidate.name &&
+    row.description === candidate.description &&
+    row.difficulty === candidate.difficulty &&
+    row.cuisine === candidate.cuisine &&
+    row.country_code == null &&
+    row.meal_type === '[]' &&
+    row.total_time === candidate.totalTime &&
+    row.prep_time === candidate.prepTime &&
+    row.cook_time === candidate.cookTime &&
+    row.rest_time === candidate.restTime &&
+    row.servings === candidate.baseServings &&
+    row.calories === candidate.calories &&
+    row.image == null &&
+    isDeepStrictEqual(jsonColumn(row, 'ingredients'), candidate.ingredients) &&
+    isDeepStrictEqual(jsonColumn(row, 'utensils'), candidate.utensils) &&
+    isDeepStrictEqual(jsonColumn(row, 'steps'), candidate.instructionsByLevel) &&
+    isDeepStrictEqual(jsonColumn(row, 'recipe_guidance'), candidate.guidance) &&
+    isDeepStrictEqual(jsonColumn(row, 'nutrition'), candidate.nutrition) &&
+    isDeepStrictEqual(jsonColumn(row, 'storage'), storage) &&
+    isDeepStrictEqual(jsonColumn(row, 'tags'), candidate.tags)
+  );
+}
+
+function writeNewRecipes(
+  db: SqliteDb,
+  actorId: string,
+  recipes: NormalizedMealRecipeToCreate[]
+): void {
+  if (!recipes.length) return;
+  const find = db.prepare('SELECT id FROM recipes WHERE id = ?');
+  const insert = db.prepare(
+    `INSERT INTO recipes
+     (id, name, description, difficulty, cuisine, country_code, meal_type, total_time, prep_time,
+      cook_time, rest_time, servings, calories, image, ingredients, utensils, steps, recipe_guidance,
+      nutrition, storage, author, author_id, tags, is_public)
+     VALUES (?, ?, ?, ?, ?, NULL, '[]', ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, 'ai', ?, ?, 0)`
+  );
+
+  for (const entry of recipes) {
+    if (find.get(entry.recipeId)) {
+      throw new SharedMealPersistenceError(
+        'PROPOSAL_CONFLICT',
+        'El identificador estable de la receta ya está ocupado'
+      );
+    }
+    const { recipe } = entry;
+    const storage = recipe.storage
+      ? {
+          method: recipe.storage.method,
+          duration: recipe.storage.duration,
+          reheatingInstructions: recipe.storage.reheatingInstructions,
+          container: recipe.storage.container,
+          freezingPossible: recipe.storage.freezingPossible,
+          freezingDuration: recipe.storage.freezingDuration
+        }
+      : null;
+    insert.run(
+      entry.recipeId,
+      recipe.name,
+      recipe.description,
+      recipe.difficulty,
+      recipe.cuisine,
+      recipe.totalTime,
+      recipe.prepTime,
+      recipe.cookTime,
+      recipe.restTime,
+      recipe.baseServings,
+      recipe.calories,
+      JSON.stringify(recipe.ingredients),
+      JSON.stringify(recipe.utensils),
+      JSON.stringify(recipe.instructionsByLevel),
+      JSON.stringify(recipe.guidance),
+      recipe.nutrition === null ? null : JSON.stringify(recipe.nutrition),
+      storage === null ? null : JSON.stringify(storage),
+      actorId,
+      JSON.stringify(recipe.tags)
+    );
+  }
 }
 
 function canUseCalendarPermission(
@@ -448,6 +710,16 @@ export function persistSharedMeals(
           'proposalId ya está confirmado con otro conjunto de eventos'
         );
       }
+      for (const recipe of input.recipesToCreate) {
+        const stored = db.prepare('SELECT * FROM recipes WHERE id = ?').get(recipe.recipeId) as
+          Record<string, unknown> | undefined;
+        if (!storedRecipeMatches(stored, actorId, recipe)) {
+          throw new SharedMealPersistenceError(
+            'PROPOSAL_CONFLICT',
+            'La receta privada de la propuesta ya no coincide con la receta confirmada'
+          );
+        }
+      }
       const byKey = new Map(existingRows.map((row) => [row.source_proposal_id, row]));
       const meals = input.events.map((event) => {
         const existing = byKey.get(event.proposalKey);
@@ -486,6 +758,10 @@ export function persistSharedMeals(
       }
       assertNoExistingSharedSlotConflict(db, householdId, event);
     }
+
+    // Recipes, meals, calendar rows and participants share this immediate transaction. Any later
+    // calendar write failure rolls back these private recipe rows too.
+    writeNewRecipes(db, actorId, input.recipesToCreate);
 
     const calendars = new Map<string, ReturnType<typeof ensureWeekCalendar>>();
     const writeMeal = db.prepare(

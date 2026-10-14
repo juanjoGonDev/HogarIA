@@ -43,13 +43,6 @@ describe('createMealPlanningContextFilePart', () => {
       ],
       pantry: [{ name: 'Lentejas', quantity: 400, unit: 'g', expirationDate: '2026-12-01' }],
       utensils: [{ name: 'Olla a presión', category: 'cocción' }],
-      recipes: [
-        {
-          name: 'Lentejas guisadas',
-          description: 'Guiso sencillo',
-          ingredients: [{ name: 'lentejas', quantity: 80, unit: 'g' }]
-        }
-      ],
       previousConfirmedPlan: {
         weekStart: '2026-10-05',
         weekEnd: '2026-10-11',
@@ -60,11 +53,7 @@ describe('createMealPlanningContextFilePart', () => {
             time: '20:30',
             servings: 2,
             participants: ['P1', 'P2'],
-            recipe: {
-              name: 'Sopa de verduras',
-              description: 'Sopa casera',
-              ingredients: [{ name: 'zanahoria', quantity: 2, unit: 'ud' }]
-            }
+            recipeName: 'Sopa de verduras'
           }
         ]
       }
@@ -81,7 +70,8 @@ describe('createMealPlanningContextFilePart', () => {
     const decodedContext = JSON.parse(
       Buffer.from(encodedJson, 'base64').toString('utf8')
     ) as SerializedMealPlanningContext;
-    expect(decodedContext).toEqual({ version: 1, ...context });
+    expect(decodedContext).toEqual({ version: 2, ...context });
+    expect(decodedContext).not.toHaveProperty('recipes');
   });
 
   it('preserves a null household value and absent prior confirmed plan as JSON null', () => {
@@ -92,7 +82,6 @@ describe('createMealPlanningContextFilePart', () => {
       requiredTurns: [],
       pantry: [],
       utensils: [],
-      recipes: [],
       previousConfirmedPlan: null
     };
 
@@ -100,7 +89,7 @@ describe('createMealPlanningContextFilePart', () => {
     const encodedJson = part.file.file_data.slice('data:application/json;base64,'.length);
 
     expect(JSON.parse(Buffer.from(encodedJson, 'base64').toString('utf8'))).toEqual({
-      version: 1,
+      version: 2,
       ...context
     });
   });

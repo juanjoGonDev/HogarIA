@@ -4,6 +4,7 @@ import { Hono } from 'hono';
 import jwt from 'jsonwebtoken';
 import { createMealProposalResponseFormat } from '../schemas/household-meal-proposal.schema.js';
 import { HOUSEHOLD_MEAL_PLANNING_CONTEXT_FILENAME } from '../utils/household-meal-planning-context-attachment.js';
+import { HOUSEHOLD_RECIPE_CATALOG_FILENAME } from '../utils/household-meal-recipe-catalog-attachment.js';
 import type { HouseholdMealProposalProvider } from './household-meal-proposals.routes.js';
 
 process.env.DATABASE_PATH = ':memory:';
@@ -25,30 +26,73 @@ function addDays(date: string, days: number): string {
   return new Date(Date.UTC(year!, month! - 1, day! + days)).toISOString().slice(0, 10);
 }
 
+function generatedRecipe(name = 'Arroz con verduras') {
+  const step = (instruction: string) => ({
+    stepNumber: 1,
+    instruction,
+    duration: null,
+    temperature: null,
+    timerRequired: false,
+    timerDuration: null,
+    tips: null,
+    warning: null,
+    illustration: null
+  });
+  return {
+    name,
+    description: 'Plato de prueba',
+    difficulty: 'easy',
+    cuisine: 'española',
+    totalTime: 35,
+    prepTime: 10,
+    cookTime: 25,
+    restTime: null,
+    baseServings: 1,
+    calories: 350,
+    ingredients: [
+      {
+        name: 'arroz',
+        quantity: 80,
+        unit: 'g',
+        preparation: null,
+        isOptional: false,
+        substitutes: [],
+        notes: null
+      }
+    ],
+    utensils: ['olla'],
+    guidance: {
+      appliances: [],
+      parallelTasks: [],
+      tipsAndVariations: [],
+      batchCookingWarning: null
+    },
+    instructionsByLevel: {
+      basic: [step('Cocina el arroz.')],
+      intermediate: [step('Sofríe las verduras y cocina el arroz.')],
+      expert: [step('Controla el punto del arroz antes de servir.')]
+    },
+    nutrition: { calories: 350, protein: 8, carbs: 65, fat: 7, fiber: 3 },
+    storage: {
+      method: 'Refrigerar',
+      duration: '3 días',
+      reheatingInstructions: 'Calentar completamente.',
+      container: 'Recipiente cerrado',
+      freezingPossible: true,
+      freezingDuration: '2 meses'
+    },
+    tags: ['almuerzo']
+  };
+}
+
 function validProposal(aliases: string[] = ['P1', 'P2']) {
   return {
+    newRecipes: [{ alias: 'N1', recipe: generatedRecipe() }],
     events: Array.from({ length: 7 }, (_, index) => ({
       date: addDays(WEEK_START, index),
       mealType: 'lunch',
       time: '13:00',
-      recipe: {
-        name: 'Arroz con verduras',
-        description: 'Plato de prueba',
-        baseServings: 1,
-        prepTimeMinutes: 10,
-        cookTimeMinutes: 25,
-        ingredients: [
-          {
-            name: 'arroz',
-            quantity: 80,
-            unit: 'g',
-            preparation: null,
-            isOptional: false,
-            notes: null
-          }
-        ],
-        instructions: ['Cocina el arroz.']
-      },
+      recipeAlias: 'N1',
       participantAliases: aliases,
       servings: aliases.length,
       objectiveSummary: 'Comida equilibrada para el grupo.',
@@ -59,14 +103,17 @@ function validProposal(aliases: string[] = ['P1', 'P2']) {
 }
 
 function individuallyAssignedProposal() {
+  const one = generatedRecipe('Plato de P1');
+  const two = generatedRecipe('Plato de P2');
   return {
+    newRecipes: [
+      { alias: 'N1', recipe: one },
+      { alias: 'N2', recipe: two }
+    ],
     events: validProposal().events.flatMap((event) =>
       (['P1', 'P2'] as const).map((alias) => ({
         ...event,
-        recipe: {
-          ...event.recipe,
-          name: `Plato de ${alias}`
-        },
+        recipeAlias: alias === 'P1' ? 'N1' : 'N2',
         participantAliases: [alias],
         servings: 1,
         objectiveSummary:
@@ -223,6 +270,36 @@ describe('household meal proposal preview route', () => {
     ).run(id, authorId, name, JSON.stringify(ingredients), isPublic ? 1 : 0);
   }
 
+  function addCanonicalRecipe(id: string, authorId: string, recipe = generatedRecipe()) {
+    db.prepare(
+      `INSERT INTO recipes
+        (id, author_id, name, description, difficulty, cuisine, meal_type, total_time, prep_time,
+         cook_time, rest_time, servings, calories, ingredients, utensils, steps, recipe_guidance,
+         nutrition, storage, tags, is_public)
+       VALUES (?, ?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`
+    ).run(
+      id,
+      authorId,
+      recipe.name,
+      recipe.description,
+      recipe.difficulty,
+      recipe.cuisine,
+      recipe.totalTime,
+      recipe.prepTime,
+      recipe.cookTime,
+      recipe.restTime,
+      recipe.baseServings,
+      recipe.calories,
+      JSON.stringify(recipe.ingredients),
+      JSON.stringify(recipe.utensils),
+      JSON.stringify(recipe.instructionsByLevel),
+      JSON.stringify(recipe.guidance),
+      JSON.stringify(recipe.nutrition),
+      JSON.stringify(recipe.storage),
+      JSON.stringify(recipe.tags)
+    );
+  }
+
   function call(user: User, body: unknown, householdId = 'home') {
     return app.request('/api/household/meal-planning/proposal', {
       method: 'POST',
@@ -275,15 +352,32 @@ describe('household meal proposal preview route', () => {
     return (await response.json()) as ApiResponse;
   }
 
-  function readProviderMealContext(providerBody: any): Record<string, any> {
+  function readProviderFile(providerBody: any, filename: string): Record<string, any> {
     const content = providerBody.messages[1].content;
     expect(Array.isArray(content)).toBe(true);
     const fileParts = content.filter((part: any) => part.type === 'file');
-    expect(fileParts).toHaveLength(1);
-    expect(fileParts[0].file.filename).toBe(HOUSEHOLD_MEAL_PLANNING_CONTEXT_FILENAME);
-    expect(fileParts[0].file.file_data.startsWith('data:application/json;base64,')).toBe(true);
-    const base64 = fileParts[0].file.file_data.slice('data:application/json;base64,'.length);
+    expect(fileParts).toHaveLength(2);
+    expect(fileParts.map((part: any) => part.file.filename)).toEqual([
+      HOUSEHOLD_MEAL_PLANNING_CONTEXT_FILENAME,
+      HOUSEHOLD_RECIPE_CATALOG_FILENAME
+    ]);
+    expect(
+      fileParts.every((part: any) =>
+        part.file.file_data.startsWith('data:application/json;base64,')
+      )
+    ).toBe(true);
+    const filePart = fileParts.find((part: any) => part.file.filename === filename);
+    expect(filePart).toBeDefined();
+    const base64 = filePart.file.file_data.slice('data:application/json;base64,'.length);
     return JSON.parse(Buffer.from(base64, 'base64').toString('utf8')) as Record<string, any>;
+  }
+
+  function readProviderMealContext(providerBody: any): Record<string, any> {
+    return readProviderFile(providerBody, HOUSEHOLD_MEAL_PLANNING_CONTEXT_FILENAME);
+  }
+
+  function readProviderRecipeCatalog(providerBody: any): Record<string, any> {
+    return readProviderFile(providerBody, HOUSEHOLD_RECIPE_CATALOG_FILENAME);
   }
 
   function readProviderPrompt(providerBody: any): string {
@@ -738,6 +832,7 @@ describe('household meal proposal preview route', () => {
               finish_reason: 'stop',
               message: {
                 content: JSON.stringify({
+                  newRecipes: validProposal().newRecipes,
                   events: [...dinnerEvents, ...validProposal(['P2']).events]
                 })
               }
@@ -797,6 +892,31 @@ describe('household meal proposal preview route', () => {
     addRecipe('public-recipe', second.id, 'PUBLIC_RECIPE', ['tomate'], true);
     addRecipe('private-recipe', second.id, 'SECOND_PRIVATE_RECIPE', ['leche']);
     addRecipe('broken-recipe', planner.id, 'BROKEN_INGREDIENTS_RECIPE', { invalid: true });
+    db.prepare('UPDATE recipes SET nutrition = ? WHERE id = ?').run(
+      JSON.stringify({
+        calories: 123,
+        protein: 4,
+        carbs: 20,
+        fat: 2,
+        fiber: null,
+        sugar: 6,
+        sodium: 32,
+        authorEmail: 'private-author@example.invalid',
+        privateNote: 'PRIVATE_NUTRITION_NOTE_883'
+      }),
+      'planner-recipe'
+    );
+    db.prepare('UPDATE recipes SET storage = ? WHERE id = ?').run(
+      JSON.stringify({
+        method: 'Refrigerar',
+        duration: '2 días',
+        reheating: 'Calentar completamente.',
+        container: 'Recipiente cerrado',
+        freezingPossible: false,
+        freezingDuration: null
+      }),
+      'planner-recipe'
+    );
 
     let providerBody: any;
     vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
@@ -816,6 +936,7 @@ describe('household meal proposal preview route', () => {
       householdMemberIds: [planner.membershipId, second.membershipId]
     });
     const context = readProviderMealContext(providerBody);
+    const catalog = readProviderRecipeCatalog(providerBody);
 
     expect(response.status).toBe(200);
     expect(context.pantry.map((item: any) => item.name)).toEqual(
@@ -824,12 +945,167 @@ describe('household meal proposal preview route', () => {
     expect(context.pantry.map((item: any) => item.name)).not.toEqual(
       expect.arrayContaining(['SECOND_PRIVATE_ITEM', 'EMPTY_ITEM'])
     );
-    expect(context.recipes.map((recipe: any) => recipe.name)).toEqual(
-      expect.arrayContaining(['PLANNER_RECIPE', 'PUBLIC_RECIPE'])
+    expect(catalog.recipes.map((entry: any) => entry.recipe.name)).toEqual(
+      expect.arrayContaining(['PLANNER_RECIPE', 'PUBLIC_RECIPE', 'BROKEN_INGREDIENTS_RECIPE'])
     );
-    expect(context.recipes.map((recipe: any) => recipe.name)).not.toEqual(
-      expect.arrayContaining(['SECOND_PRIVATE_RECIPE', 'BROKEN_INGREDIENTS_RECIPE'])
+    expect(catalog.recipes.map((entry: any) => entry.recipe.name)).not.toContain(
+      'SECOND_PRIVATE_RECIPE'
     );
+    expect(
+      catalog.recipes.find((entry: any) => entry.recipe.name === 'BROKEN_INGREDIENTS_RECIPE')
+    ).toMatchObject({ selectable: false });
+    expect(
+      catalog.recipes.find((entry: any) => entry.recipe.name === 'PLANNER_RECIPE')?.recipe.storage
+    ).toMatchObject({ reheatingInstructions: 'Calentar completamente.' });
+    expect(
+      catalog.recipes.find((entry: any) => entry.recipe.name === 'PLANNER_RECIPE')?.recipe.nutrition
+    ).toEqual({
+      calories: 123,
+      protein: 4,
+      carbs: 20,
+      fat: 2,
+      fiber: null,
+      sugar: 6,
+      sodium: 32
+    });
+    expect(JSON.stringify(catalog)).not.toContain('planner-recipe');
+    expect(JSON.stringify(catalog)).not.toContain('private-author@example.invalid');
+    expect(JSON.stringify(catalog)).not.toContain('PRIVATE_NUTRITION_NOTE_883');
+  });
+
+  it('links an accessible catalog recipe by its real ID instead of cloning it on confirmation', async () => {
+    addHousehold('home', true);
+    const planner = addUser('planner', 'home');
+    addAiConfig(planner.id, 'home');
+    const catalogRecipe = generatedRecipe('Receta ya guardada');
+    addCanonicalRecipe('owned-recipe', planner.id, catalogRecipe);
+    let providerBody: any;
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      providerBody = JSON.parse(String(init.body));
+      const output = {
+        newRecipes: [],
+        events: validProposal(['P1']).events.map((event) => ({ ...event, recipeAlias: 'R1' }))
+      };
+      return new Response(
+        JSON.stringify({
+          choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(output) } }]
+        }),
+        { status: 200 }
+      );
+    });
+
+    const previewResponse = await call(planner, {
+      weekStart: WEEK_START,
+      householdMemberIds: [planner.membershipId]
+    });
+    const preview = await read(previewResponse);
+    expect(previewResponse.status, JSON.stringify(preview)).toBe(200);
+    expect(preview.data.recipes).toEqual([
+      expect.objectContaining({ alias: 'R1', source: 'catalog', recipeId: 'owned-recipe' })
+    ]);
+    const attachedCatalog = readProviderRecipeCatalog(providerBody);
+    expect(attachedCatalog.recipes).toHaveLength(1);
+    expect(attachedCatalog.recipes[0]).toMatchObject({
+      alias: 'R1',
+      selectable: true,
+      recipe: { name: 'Receta ya guardada' }
+    });
+    expect(JSON.stringify(attachedCatalog)).not.toContain('owned-recipe');
+
+    const confirmation = await callConfirm(planner, {
+      proposalId: preview.data.proposalId,
+      weekStart: WEEK_START,
+      householdMemberIds: [planner.membershipId],
+      recipes: preview.data.recipes,
+      events: preview.data.events
+    });
+
+    expect(confirmation.status).toBe(200);
+    expect(
+      (
+        db
+          .prepare('SELECT COUNT(*) AS count FROM recipes WHERE name = ?')
+          .get('Receta ya guardada') as { count: number }
+      ).count
+    ).toBe(1);
+    expect(
+      (
+        db
+          .prepare('SELECT DISTINCT recipe_id FROM meals WHERE proposal_id = ?')
+          .get(preview.data.proposalId) as { recipe_id: string }
+      ).recipe_id
+    ).toBe('owned-recipe');
+  });
+
+  it('rejects confirmation if a selected catalog recipe changed after preview', async () => {
+    addHousehold('home', true);
+    const planner = addUser('planner', 'home');
+    addAiConfig(planner.id, 'home');
+    addCanonicalRecipe('owned-recipe', planner.id, generatedRecipe('Receta revisada'));
+    vi.stubGlobal('fetch', async () => {
+      const output = {
+        newRecipes: [],
+        events: validProposal(['P1']).events.map((event) => ({ ...event, recipeAlias: 'R1' }))
+      };
+      return new Response(
+        JSON.stringify({
+          choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(output) } }]
+        }),
+        { status: 200 }
+      );
+    });
+
+    const previewResponse = await call(planner, {
+      weekStart: WEEK_START,
+      householdMemberIds: [planner.membershipId]
+    });
+    const preview = await read(previewResponse);
+    expect(previewResponse.status, JSON.stringify(preview)).toBe(200);
+    db.prepare('UPDATE recipes SET description = ? WHERE id = ?').run(
+      'Contenido cambiado tras revisar la propuesta.',
+      'owned-recipe'
+    );
+
+    const confirmation = await callConfirm(planner, {
+      proposalId: preview.data.proposalId,
+      weekStart: WEEK_START,
+      householdMemberIds: [planner.membershipId],
+      recipes: preview.data.recipes,
+      events: preview.data.events
+    });
+
+    expect(confirmation.status).toBe(409);
+    expect(await read(confirmation)).toMatchObject({
+      success: false,
+      code: 'MEAL_PROPOSAL_RECIPE_CHANGED'
+    });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM meals').get()).toEqual({ count: 0 });
+  });
+
+  it('rejects an oversized complete recipe catalog before calling the provider or writing meals', async () => {
+    addHousehold('home', true);
+    const planner = addUser('planner', 'home');
+    addAiConfig(planner.id, 'home');
+    addRecipe('oversized-recipe', planner.id, 'RECETA_EXTENSA', ['arroz']);
+    db.prepare('UPDATE recipes SET description = ? WHERE id = ?').run(
+      'x'.repeat(2 * 1024 * 1024),
+      'oversized-recipe'
+    );
+    const provider = vi.fn();
+    vi.stubGlobal('fetch', provider);
+
+    const response = await call(planner, {
+      weekStart: WEEK_START,
+      householdMemberIds: [planner.membershipId]
+    });
+
+    expect(response.status).toBe(413);
+    expect(await read(response)).toMatchObject({
+      success: false,
+      code: 'HOUSEHOLD_RECIPE_CATALOG_TOO_LARGE'
+    });
+    expect(provider).not.toHaveBeenCalled();
+    expect(db.prepare('SELECT COUNT(*) AS count FROM meals').get()).toEqual({ count: 0 });
   });
 
   it('bounds every collection and free-text field in the attached context snapshot', async () => {
@@ -892,6 +1168,7 @@ describe('household meal proposal preview route', () => {
       householdMemberIds: [planner.membershipId]
     });
     const context = readProviderMealContext(providerBody);
+    const catalog = readProviderRecipeCatalog(providerBody);
 
     expect(response.status).toBe(200);
     expect(context.participants[0].preferences.likes).toHaveLength(60);
@@ -907,14 +1184,11 @@ describe('household meal proposal preview route', () => {
     expect(
       context.utensils.every((item: any) => item.name.length <= 120 && item.category.length <= 60)
     ).toBe(true);
-    expect(context.recipes).toHaveLength(30);
-    const boundedRecipe = context.recipes.find((recipe: any) => recipe.name.startsWith('A'));
-    expect(boundedRecipe.name).toHaveLength(200);
-    expect(boundedRecipe.ingredients).toHaveLength(40);
-    expect(boundedRecipe.ingredients.every((item: any) => item.name.length <= 120)).toBe(true);
-    expect(boundedRecipe.ingredients.some((item: any) => item.name === 'invalid quantity')).toBe(
-      false
-    );
+    expect(catalog.recipes).toHaveLength(31);
+    const catalogRecipe = catalog.recipes.find((entry: any) => entry.recipe.name.startsWith('A'));
+    expect(catalogRecipe.recipe.name).toHaveLength(250);
+    expect(catalogRecipe.recipe.ingredients).toHaveLength(41);
+    expect(catalogRecipe.selectable).toBe(false);
   });
 
   it('attaches a bounded JSON snapshot of effective household context without private identities', async () => {
@@ -1078,7 +1352,9 @@ describe('household meal proposal preview route', () => {
     const json = await read(response);
     expect(providerBody, JSON.stringify(json)).toBeDefined();
     const context = readProviderMealContext(providerBody);
+    const catalog = readProviderRecipeCatalog(providerBody);
     const serializedContext = JSON.stringify(context);
+    const serializedCatalog = JSON.stringify(catalog);
     const textParts = providerBody.messages[1].content.filter((part: any) => part.type === 'text');
 
     expect(response.status).toBe(200);
@@ -1087,7 +1363,7 @@ describe('household meal proposal preview route', () => {
     expect(textParts).toHaveLength(1);
     expect(textParts[0].text).toContain('meal-planning-context.json');
     expect(context).toMatchObject({
-      version: 1,
+      version: 2,
       targetWeek: { startDate: WEEK_START, endDate: addDays(WEEK_START, 6) },
       household: {
         objective: { goals: ['balanced'], notes: 'HOME_OBJECTIVE_CONTEXT' },
@@ -1143,7 +1419,7 @@ describe('household meal proposal preview route', () => {
         { name: 'PLANNER_PRIVATE_POT', category: 'cooking' }
       ])
     );
-    expect(context.recipes.map((recipe: any) => recipe.name)).toEqual(
+    expect(catalog.recipes.map((entry: any) => entry.recipe.name)).toEqual(
       expect.arrayContaining(['PLANNER_RECIPE_CONTEXT', 'PUBLIC_RECIPE_CONTEXT'])
     );
     expect(context.previousConfirmedPlan.events).toContainEqual(
@@ -1153,10 +1429,7 @@ describe('household meal proposal preview route', () => {
         time: '13:00',
         servings: 2,
         participants: ['P1'],
-        recipe: expect.objectContaining({
-          name: 'SMOKE_PREVIOUS_MEAL',
-          ingredients: [{ name: 'garbanzos', quantity: 80, unit: 'g' }]
-        })
+        recipeName: 'SMOKE_PREVIOUS_MEAL'
       })
     );
     expect(serializedContext).not.toContain('EXCLUDED_PREVIOUS_MEAL_SECRET');
@@ -1166,8 +1439,8 @@ describe('household meal proposal preview route', () => {
     expect(context.utensils.map((item: any) => item.name)).not.toEqual(
       expect.arrayContaining(['SECOND_PRIVATE_POT', 'UNAVAILABLE_POT'])
     );
-    expect(context.recipes.map((item: any) => item.name)).not.toEqual(
-      expect.arrayContaining(['SECOND_PRIVATE_RECIPE'])
+    expect(catalog.recipes.map((item: any) => item.recipe.name)).not.toContain(
+      'SECOND_PRIVATE_RECIPE'
     );
     for (const privateIdentity of [
       planner.id,
@@ -1183,6 +1456,7 @@ describe('household meal proposal preview route', () => {
       'EXCLUDED_LIKE_SECRET'
     ]) {
       expect(serializedContext).not.toContain(privateIdentity);
+      expect(serializedCatalog).not.toContain(privateIdentity);
     }
     expect(json.success).toBe(true);
   });
@@ -1376,6 +1650,7 @@ describe('household meal proposal preview route', () => {
       proposalId: preview.data.proposalId,
       weekStart: WEEK_START,
       householdMemberIds: [planner.membershipId, member.membershipId],
+      recipes: preview.data.recipes,
       events: preview.data.events
     });
 
@@ -1530,7 +1805,7 @@ describe('household meal proposal preview route', () => {
     expect(json.data.events).toHaveLength(7);
     expect(json.data.events[0]).toMatchObject({
       status: 'unresolved',
-      recipe: null,
+      recipeAlias: null,
       servings: 0,
       participantIds: [planner.id]
     });
@@ -1561,7 +1836,7 @@ describe('household meal proposal preview route', () => {
     });
 
     expect(response.status).toBe(502);
-    expect(await read(response)).toMatchObject({ code: 'MEAL_PROPOSAL_SLOT_COVERAGE_INVALID' });
+    expect(await read(response)).toMatchObject({ code: 'MEAL_PROPOSAL_SLOT_ASSIGNMENT_INVALID' });
     expect(db.prepare('SELECT COUNT(*) AS count FROM meals').get()).toEqual({ count: 0 });
     expect(db.prepare('SELECT COUNT(*) AS count FROM calendar_events').get()).toEqual({ count: 0 });
   });
@@ -1594,6 +1869,7 @@ describe('household meal proposal preview route', () => {
       proposalId: preview.data.proposalId,
       weekStart: WEEK_START,
       householdMemberIds: [planner.membershipId, second.membershipId],
+      recipes: preview.data.recipes,
       events: preview.data.events.map((event: Record<string, any>) => ({
         ...event,
         // These echoed IDs are deliberately tampered with; the route must derive them from aliases.
@@ -1603,16 +1879,30 @@ describe('household meal proposal preview route', () => {
 
     const first = await callConfirm(planner, confirmation);
     const firstJson = await read(first);
-    expect(first.status).toBe(200);
+    expect(first.status, JSON.stringify(firstJson)).toBe(200);
     expect(firstJson).toMatchObject({ success: true, data: { idempotent: false } });
     expect(firstJson.data.events).toHaveLength(7);
     expect(firstJson.data.events[0].participantIds).toEqual([planner.id, second.id]);
     expect(firstJson.data.events[0].recipeSnapshot).toMatchObject({
       name: 'Arroz con verduras',
       baseServings: 1,
-      times: { prepTimeMinutes: 10, cookTimeMinutes: 25, totalTimeMinutes: 35 },
       ingredients: [{ name: 'arroz', quantity: 80, unit: 'g' }]
     });
+    const savedRecipeId = (
+      db
+        .prepare('SELECT recipe_id FROM meals WHERE proposal_id = ? LIMIT 1')
+        .get(confirmation.proposalId) as { recipe_id: string }
+    ).recipe_id;
+    expect(
+      db.prepare('SELECT author, author_id, is_public FROM recipes WHERE id = ?').get(savedRecipeId)
+    ).toEqual({
+      author: 'ai',
+      author_id: planner.id,
+      is_public: 0
+    });
+    expect(
+      db.prepare('SELECT COUNT(*) AS count FROM recipes WHERE name = ?').get('Arroz con verduras')
+    ).toEqual({ count: 1 });
     expect(db.prepare('SELECT COUNT(*) AS count FROM meals').get()).toEqual({ count: 7 });
     expect(db.prepare('SELECT COUNT(*) AS count FROM meal_participants').get()).toEqual({
       count: 14
@@ -1655,6 +1945,14 @@ describe('household meal proposal preview route', () => {
       proposalId: 'proposal-foreign',
       weekStart: WEEK_START,
       householdMemberIds: [outsider.membershipId],
+      recipes: [
+        {
+          alias: 'N1',
+          source: 'new',
+          recipeId: null,
+          recipe: generatedRecipe()
+        }
+      ],
       events: [{ ...validProposal(['P1']).events[0], id: 'event-1' }]
     });
 
@@ -1718,6 +2016,7 @@ describe('household meal proposal preview route', () => {
       proposalId: preview.data.proposalId,
       weekStart: WEEK_START,
       householdMemberIds: [planner.membershipId],
+      recipes: preview.data.recipes,
       events: [event, { ...event, id: 'second-event' }]
     };
 
@@ -1754,6 +2053,7 @@ describe('household meal proposal preview route', () => {
       proposalId: preview.data.proposalId,
       weekStart: WEEK_START,
       householdMemberIds: [planner.membershipId],
+      recipes: preview.data.recipes,
       events: preview.data.events
     };
     const first = await callConfirm(planner, confirmation);
@@ -1761,10 +2061,10 @@ describe('household meal proposal preview route', () => {
 
     const changed = {
       ...confirmation,
-      events: confirmation.events.map((event: Record<string, any>, index: number) =>
+      recipes: confirmation.recipes.map((recipe: Record<string, any>, index: number) =>
         index === 0
-          ? { ...event, recipe: { ...event.recipe, description: 'Cambio posterior' } }
-          : event
+          ? { ...recipe, recipe: { ...recipe.recipe, description: 'Cambio posterior' } }
+          : recipe
       )
     };
     const retry = await callConfirm(planner, changed);
@@ -1813,10 +2113,22 @@ describe('household meal proposal preview route', () => {
       proposalId: preview.data.proposalId,
       weekStart: WEEK_START,
       householdMemberIds: [planner.membershipId, restricted.membershipId],
-      events: preview.data.events.map((event: Record<string, any>) => ({
-        ...event,
-        recipe: { ...event.recipe, instructions: ['Añade una salsa con trazas de gluten.'] }
-      }))
+      recipes: preview.data.recipes.map((recipe: Record<string, any>) => ({
+        ...recipe,
+        recipe: {
+          ...recipe.recipe,
+          instructionsByLevel: {
+            ...recipe.recipe.instructionsByLevel,
+            expert: recipe.recipe.instructionsByLevel.expert.map(
+              (step: Record<string, unknown>) => ({
+                ...step,
+                instruction: 'Añade una salsa con trazas de gluten.'
+              })
+            )
+          }
+        }
+      })),
+      events: preview.data.events
     };
 
     const response = await callConfirm(planner, confirmation);
@@ -1866,6 +2178,7 @@ describe('household meal proposal preview route', () => {
       proposalId: preview.data.proposalId,
       weekStart: WEEK_START,
       householdMemberIds: [planner.membershipId],
+      recipes: preview.data.recipes,
       events: preview.data.events
     };
     const response = await callConfirm(planner, confirmation);

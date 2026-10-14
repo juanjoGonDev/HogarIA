@@ -43,28 +43,90 @@ function addDays(isoDate: string, days: number): string {
 
 function mealProposal(weekStart = TARGET_WEEK): string {
   return JSON.stringify({
+    newRecipes: [
+      {
+        alias: 'N1',
+        recipe: {
+          name: 'Arroz del día',
+          description: 'Plato sintético de prueba',
+          difficulty: 'easy',
+          cuisine: 'española',
+          totalTime: 30,
+          prepTime: 10,
+          cookTime: 20,
+          restTime: null,
+          baseServings: 1,
+          calories: null,
+          ingredients: [
+            {
+              name: 'arroz',
+              quantity: 80,
+              unit: 'g',
+              preparation: null,
+              isOptional: false,
+              substitutes: [],
+              notes: null
+            }
+          ],
+          utensils: ['olla'],
+          guidance: {
+            appliances: [],
+            parallelTasks: [],
+            tipsAndVariations: [],
+            batchCookingWarning: null
+          },
+          instructionsByLevel: {
+            basic: [
+              {
+                stepNumber: 1,
+                instruction: 'Cocer el arroz.',
+                duration: 20,
+                temperature: null,
+                timerRequired: false,
+                timerDuration: null,
+                tips: null,
+                warning: null,
+                illustration: null
+              }
+            ],
+            intermediate: [
+              {
+                stepNumber: 1,
+                instruction: 'Cocer el arroz y controlar el agua.',
+                duration: 20,
+                temperature: null,
+                timerRequired: false,
+                timerDuration: null,
+                tips: null,
+                warning: null,
+                illustration: null
+              }
+            ],
+            expert: [
+              {
+                stepNumber: 1,
+                instruction: 'Cocer el arroz hasta su punto.',
+                duration: 20,
+                temperature: null,
+                timerRequired: true,
+                timerDuration: 20,
+                tips: null,
+                warning: null,
+                illustration: null
+              }
+            ]
+          },
+          nutrition: null,
+          storage: null,
+          tags: ['sintética']
+        }
+      }
+    ],
     events: Array.from({ length: 7 }, (_, day) => ({
       date: addDays(weekStart, day),
       mealType: 'lunch',
       time: '13:00',
-      recipe: {
-        name: `Arroz del día ${day + 1}`,
-        description: 'Plato sintético de prueba',
-        baseServings: 1,
-        prepTimeMinutes: 10,
-        cookTimeMinutes: 20,
-        ingredients: [
-          {
-            name: 'arroz',
-            quantity: 80,
-            unit: 'g',
-            preparation: null,
-            isOptional: false,
-            notes: null
-          }
-        ],
-        instructions: ['Cocer el arroz.']
-      },
+      recipeAlias: 'N1',
       participantAliases: ['P1', 'P2'],
       servings: 2,
       objectiveSummary: 'Plato compartido de prueba.',
@@ -80,7 +142,7 @@ function unresolvedMealProposal(): string {
   };
   parsed.events[0] = {
     ...parsed.events[0],
-    recipe: null,
+    recipeAlias: null,
     servings: 0,
     status: 'unresolved',
     reason: 'No se pudo resolver la receta.'
@@ -248,6 +310,7 @@ describe('household planning automation worker', () => {
     db.prepare('DELETE FROM household_task_weeks').run();
     db.prepare('DELETE FROM meal_participants').run();
     db.prepare('DELETE FROM meals').run();
+    db.prepare("DELETE FROM recipes WHERE id LIKE 'ai_%'").run();
     db.prepare('DELETE FROM weekly_calendars').run();
     db.prepare('DELETE FROM calendar_event_attendees').run();
     db.prepare('DELETE FROM calendar_events').run();

@@ -1,39 +1,86 @@
 import type { HouseholdMember } from '../../shared/models/household.model';
-import type { HouseholdMealProposal } from '../../core/services/household-meal-proposal.service';
+import type {
+  HouseholdMealProposal,
+  HouseholdMealProposalRecipeReference,
+  HouseholdMealRecipeInstructionStep
+} from '../../core/services/household-meal-proposal.service';
 
 const MEAL_TYPES = new Set(['breakfast', 'lunch', 'dinner', 'snack']);
+const RECIPE_DIFFICULTIES = new Set(['easy', 'medium', 'hard']);
 const MAX_EVENTS = 7 * 4 * 100;
+const MAX_RECIPES = MAX_EVENTS;
 
 interface ApiRecord {
   [key: string]: unknown;
   alias?: unknown;
+  appliances?: unknown;
+  basic?: unknown;
+  batchCookingWarning?: unknown;
   baseServings?: unknown;
-  cookTimeMinutes?: unknown;
+  calories?: unknown;
+  carbs?: unknown;
+  container?: unknown;
+  cookTime?: unknown;
+  cuisine?: unknown;
   date?: unknown;
   description?: unknown;
+  difficulty?: unknown;
+  duration?: unknown;
   events?: unknown;
+  expert?: unknown;
+  fat?: unknown;
+  fiber?: unknown;
+  freezingDuration?: unknown;
+  freezingPossible?: unknown;
+  guidance?: unknown;
   householdMemberId?: unknown;
   id?: unknown;
   ingredients?: unknown;
-  instructions?: unknown;
+  instruction?: unknown;
+  instructionsByLevel?: unknown;
+  intermediate?: unknown;
   isOptional?: unknown;
+  illustration?: unknown;
+  method?: unknown;
   mealType?: unknown;
   name?: unknown;
   notes?: unknown;
+  nutrition?: unknown;
   objectiveSummary?: unknown;
+  parallelTasks?: unknown;
   participantAliases?: unknown;
   participantIds?: unknown;
   participants?: unknown;
-  prepTimeMinutes?: unknown;
+  prepTime?: unknown;
   preparation?: unknown;
+  protein?: unknown;
   proposalId?: unknown;
   quantity?: unknown;
-  reason?: unknown;
   recipe?: unknown;
+  recipeAlias?: unknown;
+  recipeId?: unknown;
+  recipes?: unknown;
+  reheatingInstructions?: unknown;
+  reason?: unknown;
+  restTime?: unknown;
   servings?: unknown;
+  source?: unknown;
+  stepNumber?: unknown;
+  steps?: unknown;
+  storage?: unknown;
+  substitutes?: unknown;
+  tags?: unknown;
+  temperature?: unknown;
+  timerDuration?: unknown;
+  timerRequired?: unknown;
+  tips?: unknown;
+  tipsAndVariations?: unknown;
+  totalTime?: unknown;
+  utensils?: unknown;
+  unit?: unknown;
   status?: unknown;
   time?: unknown;
-  unit?: unknown;
+  warning?: unknown;
   weekStart?: unknown;
 }
 
@@ -44,10 +91,17 @@ export function validateHouseholdMealProposal(
   selectedMemberIds: readonly string[],
   members: readonly HouseholdMember[]
 ): value is HouseholdMealProposal {
-  if (!isRecord(value) || !nonEmpty(value.proposalId) || value.weekStart !== weekStart)
+  if (!isRecord(value) || !nonEmpty(value.proposalId) || value.weekStart !== weekStart) {
     return false;
-  if (!Array.isArray(value.participants) || !Array.isArray(value.events)) return false;
-  if (value.events.length > MAX_EVENTS) return false;
+  }
+  if (
+    !Array.isArray(value.participants) ||
+    !Array.isArray(value.events) ||
+    !Array.isArray(value.recipes)
+  ) {
+    return false;
+  }
+  if (value.events.length > MAX_EVENTS || value.recipes.length > MAX_RECIPES) return false;
 
   const selected = new Set(selectedMemberIds);
   const membersByMembershipId = new Map(
@@ -69,10 +123,25 @@ export function validateHouseholdMealProposal(
     if (!/^P(?:[1-9]|[1-9]\d|100)$/.test(participant.alias)) return false;
     if (!nonEmpty(participant.householdMemberId)) return false;
     const member = membersByMembershipId.get(participant.householdMemberId);
-    if (!member || aliasToMember.has(participant.alias) || usedMembershipIds.has(member.id))
+    if (!member || aliasToMember.has(participant.alias) || usedMembershipIds.has(member.id)) {
       return false;
+    }
     aliasToMember.set(participant.alias, member);
     usedMembershipIds.add(member.id);
+  }
+
+  const recipesByAlias = new Map<string, HouseholdMealProposalRecipeReference>();
+  const catalogRecipeIds = new Set<string>();
+  for (const recipeReference of value.recipes) {
+    if (!isValidRecipeReference(recipeReference)) return false;
+    if (recipesByAlias.has(recipeReference.alias)) return false;
+    if (recipeReference.source === 'catalog') {
+      if (!recipeReference.recipeId || catalogRecipeIds.has(recipeReference.recipeId)) return false;
+      catalogRecipeIds.add(recipeReference.recipeId);
+    } else if (recipeReference.recipeId !== null) {
+      return false;
+    }
+    recipesByAlias.set(recipeReference.alias, recipeReference);
   }
 
   const seenEventIds = new Set<string>();
@@ -89,8 +158,9 @@ export function validateHouseholdMealProposal(
       return false;
     }
     if (!nonEmpty(event.objectiveSummary)) return false;
-    if (!Array.isArray(event.participantAliases) || event.participantAliases.length === 0)
+    if (!Array.isArray(event.participantAliases) || event.participantAliases.length === 0) {
       return false;
+    }
     if (!Array.isArray(event.participantIds)) return false;
     const participantIds = event.participantIds as unknown[];
 
@@ -120,12 +190,14 @@ export function validateHouseholdMealProposal(
         (event.servings as number) < 1 ||
         (event.servings as number) > 100 ||
         event.reason !== null ||
-        !isValidRecipe(event.recipe)
+        !nonEmpty(event.recipeAlias) ||
+        !recipesByAlias.has(event.recipeAlias)
       ) {
         return false;
       }
     } else if (event.status === 'unresolved') {
-      if (event.servings !== 0 || event.recipe !== null || !nonEmpty(event.reason)) return false;
+      if (event.servings !== 0 || event.recipeAlias !== null || !nonEmpty(event.reason))
+        return false;
     } else {
       return false;
     }
@@ -134,32 +206,158 @@ export function validateHouseholdMealProposal(
   return true;
 }
 
+function isValidRecipeReference(value: unknown): value is HouseholdMealProposalRecipeReference {
+  if (!isRecord(value) || !nonEmpty(value.alias) || value.alias.length > 100) return false;
+  if (value.source !== 'catalog' && value.source !== 'new') return false;
+  if (value.source === 'catalog' && !nonEmpty(value.recipeId)) return false;
+  if (value.source === 'new' && value.recipeId !== null) return false;
+  return isValidRecipe(value.recipe);
+}
+
 function isValidRecipe(value: unknown): boolean {
-  if (!isRecord(value) || !nonEmpty(value.name) || !nonEmpty(value.description)) return false;
   if (
-    value.baseServings !== 1 ||
-    !Number.isInteger(value.prepTimeMinutes) ||
-    !Number.isInteger(value.cookTimeMinutes) ||
+    !isRecord(value) ||
+    !nonEmpty(value.name) ||
+    !nonEmpty(value.description) ||
+    !Number.isInteger(value.baseServings) ||
+    (value.baseServings as number) < 1 ||
+    (value.baseServings as number) > 100 ||
+    typeof value.difficulty !== 'string' ||
+    !RECIPE_DIFFICULTIES.has(value.difficulty) ||
+    !(value.cuisine === null || typeof value.cuisine === 'string') ||
+    !positiveInteger(value.totalTime) ||
+    !nonNegativeInteger(value.prepTime) ||
+    !nonNegativeInteger(value.cookTime) ||
+    !(value.restTime === null || nonNegativeInteger(value.restTime)) ||
+    !(value.calories === null || nonNegativeNumber(value.calories)) ||
     !Array.isArray(value.ingredients) ||
     value.ingredients.length === 0 ||
-    !Array.isArray(value.instructions) ||
-    value.instructions.length === 0
+    !isStringArray(value.utensils) ||
+    !isValidGuidance(value.guidance) ||
+    !isValidNutrition(value.nutrition) ||
+    !isValidStorage(value.storage) ||
+    !isStringArray(value.tags)
   ) {
     return false;
   }
+
+  const hasLevelProperty = value.instructionsByLevel !== undefined;
+  // The server serializes a missing flat-step representation as `null` for catalog recipes that
+  // already have three explicit instruction levels. Treat that exactly like an omitted field.
+  const hasLegacyProperty = value.steps !== undefined && value.steps !== null;
+  if (hasLevelProperty === hasLegacyProperty) return false;
+  const hasLevels = isRecord(value.instructionsByLevel);
+  const hasLegacySteps = Array.isArray(value.steps);
+  if (hasLevels !== hasLevelProperty || hasLegacySteps !== hasLegacyProperty) return false;
+  const validInstructions = hasLevels
+    ? isValidInstructionLevels(value.instructionsByLevel as ApiRecord)
+    : isValidLegacySteps(value.steps);
+
+  return validInstructions && value.ingredients.every(isValidIngredient);
+}
+
+function isValidIngredient(value: unknown): boolean {
   return (
-    value.ingredients.every(
-      (ingredient) =>
-        isRecord(ingredient) &&
-        nonEmpty(ingredient.name) &&
-        typeof ingredient.quantity === 'number' &&
-        Number.isFinite(ingredient.quantity) &&
-        ingredient.quantity > 0 &&
-        nonEmpty(ingredient.unit) &&
-        (ingredient.preparation === null || typeof ingredient.preparation === 'string') &&
-        typeof ingredient.isOptional === 'boolean' &&
-        (ingredient.notes === null || typeof ingredient.notes === 'string')
-    ) && value.instructions.every(nonEmpty)
+    isRecord(value) &&
+    nonEmpty(value.name) &&
+    positiveNumber(value.quantity) &&
+    nonEmpty(value.unit) &&
+    (value.preparation === null || typeof value.preparation === 'string') &&
+    typeof value.isOptional === 'boolean' &&
+    isStringArray(value.substitutes) &&
+    (value.notes === null || typeof value.notes === 'string')
+  );
+}
+
+function isValidGuidance(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    isStringArray(value.appliances) &&
+    isStringArray(value.parallelTasks) &&
+    isStringArray(value.tipsAndVariations) &&
+    (value.batchCookingWarning === null || typeof value.batchCookingWarning === 'string')
+  );
+}
+
+function isValidInstructionLevels(value: ApiRecord): boolean {
+  return (
+    isOrderedSteps(value.basic, true) &&
+    isOrderedSteps(value.intermediate, true) &&
+    isOrderedSteps(value.expert, true)
+  );
+}
+
+function isValidLegacySteps(value: unknown): value is HouseholdMealRecipeInstructionStep[] {
+  return isOrderedSteps(value, false);
+}
+
+function isOrderedSteps(value: unknown, strictIllustration: boolean): value is unknown[] {
+  if (!Array.isArray(value) || value.length === 0) return false;
+  return value.every((step, index) => {
+    if (!isRecord(step) || !positiveInteger(step.stepNumber) || !nonEmpty(step.instruction)) {
+      return false;
+    }
+    if (
+      strictIllustration &&
+      (!('duration' in step) || !('tips' in step) || !('warning' in step))
+    ) {
+      return false;
+    }
+    if (strictIllustration && step.illustration !== null) return false;
+    if (!strictIllustration && 'illustration' in step && step.illustration !== null) {
+      // Legacy saved recipes may carry an illustration object; it is never rendered as trusted HTML.
+      if (!isRecord(step.illustration)) return false;
+    }
+    if ('duration' in step && !(step.duration === null || positiveInteger(step.duration))) {
+      return false;
+    }
+    if ('temperature' in step && !isValidTemperature(step.temperature)) return false;
+    if ('timerRequired' in step && typeof step.timerRequired !== 'boolean') return false;
+    if (
+      'timerDuration' in step &&
+      !(step.timerDuration === null || positiveInteger(step.timerDuration))
+    ) {
+      return false;
+    }
+    if ('tips' in step && !(step.tips === null || typeof step.tips === 'string')) return false;
+    if ('warning' in step && !(step.warning === null || typeof step.warning === 'string')) {
+      return false;
+    }
+    return strictIllustration ? step.stepNumber === index + 1 : true;
+  });
+}
+
+function isValidNutrition(value: unknown): boolean {
+  if (value === null) return true;
+  return (
+    isRecord(value) &&
+    finiteNumber(value.calories) &&
+    finiteNumber(value.protein) &&
+    finiteNumber(value.carbs) &&
+    finiteNumber(value.fat) &&
+    (value.fiber === null || finiteNumber(value.fiber))
+  );
+}
+
+function isValidTemperature(value: unknown): boolean {
+  if (value === null) return true;
+  return (
+    isRecord(value) &&
+    finiteNumber(value['value']) &&
+    (value['unit'] === 'C' || value['unit'] === 'F')
+  );
+}
+
+function isValidStorage(value: unknown): boolean {
+  if (value === null) return true;
+  return (
+    isRecord(value) &&
+    nonEmpty(value.method) &&
+    nonEmpty(value.duration) &&
+    (value.reheatingInstructions === null || typeof value.reheatingInstructions === 'string') &&
+    (value.container === null || typeof value.container === 'string') &&
+    typeof value.freezingPossible === 'boolean' &&
+    (value.freezingDuration === null || typeof value.freezingDuration === 'string')
   );
 }
 
@@ -172,6 +370,30 @@ function isDateInWeek(value: unknown, weekStart: string): value is string {
 
 function isRecord(value: unknown): value is ApiRecord {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string');
+}
+
+function positiveInteger(value: unknown): value is number {
+  return Number.isInteger(value) && (value as number) > 0;
+}
+
+function nonNegativeInteger(value: unknown): value is number {
+  return Number.isInteger(value) && (value as number) >= 0;
+}
+
+function positiveNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0;
+}
+
+function nonNegativeNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
+function finiteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
 }
 
 function nonEmpty(value: unknown): value is string {

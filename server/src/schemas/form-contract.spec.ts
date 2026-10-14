@@ -66,7 +66,10 @@ import {
   householdMealProposalConfirmRequestSchema,
   householdMealProposalRequestSchema
 } from './household-meal-proposal-request.schema.js';
-import { mealProposalSchema } from './household-meal-proposal.schema.js';
+import {
+  householdMealRecipeCandidateSchema,
+  mealProposalSchema
+} from './household-meal-proposal.schema.js';
 import { householdMealConsumptionSchema } from './household-meal-consumption.schema.js';
 import { householdMealShoppingApprovalSchema } from './household-meal-shopping-approval.schema.js';
 import { householdMealShoppingPreviewQuerySchema } from './household-meal-shopping-preview.schema.js';
@@ -159,6 +162,69 @@ const query = (
   schema,
   kind: 'query',
   required
+});
+
+const mealRecipeStep = (instruction: string) => ({
+  stepNumber: 1,
+  instruction,
+  duration: null,
+  temperature: null,
+  timerRequired: false,
+  timerDuration: null,
+  tips: null,
+  warning: null,
+  illustration: null
+});
+
+const mealRecipeCandidate = {
+  name: 'Lentejas',
+  description: 'Plato sencillo.',
+  difficulty: 'easy',
+  cuisine: 'española',
+  totalTime: 40,
+  prepTime: 10,
+  cookTime: 30,
+  restTime: null,
+  baseServings: 1,
+  calories: null,
+  ingredients: [
+    {
+      name: 'lentejas',
+      quantity: 80,
+      unit: 'g',
+      preparation: null,
+      isOptional: false,
+      substitutes: [],
+      notes: null
+    }
+  ],
+  utensils: ['olla'],
+  guidance: {
+    appliances: [],
+    parallelTasks: [],
+    tipsAndVariations: [],
+    batchCookingWarning: null
+  },
+  instructionsByLevel: {
+    basic: [mealRecipeStep('Cocer las lentejas.')],
+    intermediate: [mealRecipeStep('Cocer las lentejas a fuego suave.')],
+    expert: [mealRecipeStep('Controlar la textura y el punto.')]
+  },
+  nutrition: null,
+  storage: null,
+  tags: []
+};
+
+const mealProposalEvent = (recipeAlias: string) => ({
+  date: '2026-10-12',
+  mealType: 'lunch',
+  time: '13:00',
+  recipeAlias,
+  participantAliases: ['P1'],
+  servings: 1,
+  objectiveSummary: 'Plato sencillo.',
+  status: 'scheduled',
+  reason: null
 });
 
 const ROWS: Row[] = [
@@ -278,39 +344,17 @@ const ROWS: Row[] = [
       proposalId: 'proposal-1',
       weekStart: '2026-10-12',
       householdMemberIds: ['membership-1'],
-      events: [
+      recipes: [
         {
-          id: 'event-1',
-          date: '2026-10-12',
-          mealType: 'lunch',
-          time: '13:00',
-          recipe: {
-            name: 'Lentejas',
-            description: 'Plato sencillo.',
-            baseServings: 1,
-            prepTimeMinutes: 10,
-            cookTimeMinutes: 30,
-            ingredients: [
-              {
-                name: 'lentejas',
-                quantity: 80,
-                unit: 'g',
-                preparation: null,
-                isOptional: false,
-                notes: null
-              }
-            ],
-            instructions: ['Cocer las lentejas.']
-          },
-          participantAliases: ['P1'],
-          servings: 1,
-          objectiveSummary: 'Plato sencillo.',
-          status: 'scheduled',
-          reason: null
+          alias: 'R1',
+          source: 'catalog',
+          recipeId: 'recipe-1',
+          recipe: mealRecipeCandidate
         }
-      ]
+      ],
+      events: [{ id: 'event-1', ...mealProposalEvent('R1') }]
     },
-    note: 'La confirmación acepta solo alias opacos; el servidor resuelve las membresías y vuelve a validar receta y turnos.'
+    note: 'La confirmación acepta recetas incluidas por alias opaco; el servidor resuelve las membresías, el catálogo autorizado y vuelve a validar receta y turnos.'
   },
   {
     name: 'householdMealConsumptionSchema',
@@ -337,41 +381,19 @@ const ROWS: Row[] = [
     note: 'La aprobación referencia un preview y solo admite líneas en un rango y cantidad válidos.'
   },
   {
+    name: 'householdMealRecipeCandidateSchema',
+    schema: householdMealRecipeCandidateSchema,
+    required: mealRecipeCandidate,
+    note: 'Objeto completo de receta nueva enviado en la confirmación; debe conservar la plantilla canónica y permitir solo campos explícitos.'
+  },
+  {
     name: 'mealProposalSchema',
     schema: mealProposalSchema,
     required: {
-      events: [
-        {
-          date: '2026-10-12',
-          mealType: 'lunch',
-          time: '13:00',
-          recipe: {
-            name: 'Lentejas',
-            description: 'Plato sencillo.',
-            baseServings: 1,
-            prepTimeMinutes: 10,
-            cookTimeMinutes: 30,
-            ingredients: [
-              {
-                name: 'lentejas',
-                quantity: 80,
-                unit: 'g',
-                preparation: null,
-                isOptional: false,
-                notes: null
-              }
-            ],
-            instructions: ['Cocer las lentejas.']
-          },
-          participantAliases: ['P1'],
-          servings: 1,
-          objectiveSummary: 'Plato sencillo.',
-          status: 'scheduled',
-          reason: null
-        }
-      ]
+      newRecipes: [{ alias: 'N1', recipe: mealRecipeCandidate }],
+      events: [mealProposalEvent('N1')]
     },
-    note: 'Contrato de salida JSON de la IA: al menos un evento válido con receta y alias opaco; la cobertura real se valida con el planificador.'
+    note: 'Contrato JSON estricto: al menos un turno válido referencia por alias una receta completa existente o nueva; la cobertura real se valida con el planificador.'
   },
   {
     name: 'householdPlanWriteSchema',
