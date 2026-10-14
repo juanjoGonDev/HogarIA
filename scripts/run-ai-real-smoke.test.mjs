@@ -95,7 +95,7 @@ test('long-ticket-only coordinator budgets and validates exactly one safe receip
         cleanup: async () => {}
       }),
       createAiLiveProxy: async (input) => {
-        assert.equal(input.maxCalls, 2);
+        assert.equal(input.maxCalls, 1);
         assert.equal(input.maxRequestBytes, AI_LIVE_RECEIPT_SMOKE_MAX_REQUEST_BYTES);
         assert.equal(input.requireReceiptAttachments, true);
         return {

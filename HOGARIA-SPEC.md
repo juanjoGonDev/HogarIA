@@ -5150,6 +5150,17 @@ deduplicación, y no se guardó nada en el inventario real (DB E2E temporal limp
 queda abierta; no reenviar hasta que la sesión WebAPI indique autenticada, y después enviar solo los
 grupos sin respuesta válida.
 
+**Ajuste de no repetición (2026-10-14):** la selección antigua `unsubmitted-only` también incluía la
+JPEG individual cuya petición acabó sin respuesta válida pero pudo alcanzar al proveedor; no es segura
+para la continuación actual. El único grupo aún no enviado se ejecutará exclusivamente con
+`long-ticket-only`: el plan lee las otras tres JPEG, forma un único PDF de tres páginas e ignora la
+JPEG ambigua y los dos PDF ya completados. Su presupuesto del proxy queda limitado a **una completion**,
+sin fallback/reintento. Las pruebas sintéticas verifican la selección (no leen los otros tres archivos)
+y el límite: `run-ai-real-smoke.test.mjs`, `ai-live-receipt-inputs.test.mjs` y
+`ai-live-smoke-safety.test.mjs`, **51/51**. El preflight actual sigue mostrando `/health` y
+`/health/ready` 200 pero sesión `needs_login`; no se hizo llamada, no se subieron archivos y no se cambió
+ninguna base de datos. El smoke real sigue abierto hasta autenticar WebAPI y validar una respuesta única.
+
 ### QA-HOUSEHOLD.SHOPPING.OFFLINE-QUEUE-SCOPE.1 — cola ligada a su hogar de origen
 
 - [x] Cada escritura optimista que entra en la cola captura el hogar activo de origen; la clave de deduplicación también incluye ese ámbito.
