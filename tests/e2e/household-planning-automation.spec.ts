@@ -1,6 +1,8 @@
-import { access, mkdir } from 'node:fs/promises';
+import { access, mkdir, readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { resolve } from 'node:path';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { join, resolve } from 'node:path';
 import { expect, test } from './fixtures';
 import { registerWithHousehold } from './helpers/auth';
 
@@ -19,6 +21,19 @@ interface AutomationSnapshot {
     timeZone: string;
     utcInstant: string;
   } | null;
+  lastRun: {
+    targetWeekStart: string;
+    status: string;
+    failureCode: string | null;
+  } | null;
+}
+
+interface SyntheticChatCompletionRequest {
+  messages?: Array<{ role?: string; content?: unknown }>;
+  response_format?: {
+    type?: string;
+    json_schema?: { name?: string; strict?: boolean };
+  };
 }
 
 const screenshotsDirectory = resolve('.e2e-screenshots/household-planning-automation');
@@ -46,6 +61,30 @@ function madridScheduleDay(offsetDays: number): { weekday: number; date: string 
   };
 }
 
+function dueMadridSchedule(): { weekday: number; date: string; localTime: string } {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Madrid',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23'
+  })
+    .formatToParts(new Date(Date.now() + 4 * 24 * 60 * 60 * 1_000))
+    .reduce<Record<string, string>>((values, part) => {
+      if (part.type !== 'literal') values[part.type] = part.value;
+      return values;
+    }, {});
+  const date = `${parts.year}-${parts.month}-${parts.day}`;
+  const day = new Date(`${date}T00:00:00.000Z`).getUTCDay();
+  return {
+    weekday: day === 0 ? 7 : day,
+    date,
+    localTime: `${parts.hour}:${parts.minute}`
+  };
+}
+
 async function readAutomation(
   page: Parameters<typeof registerWithHousehold>[0],
   householdId: string,
@@ -61,6 +100,44 @@ async function readAutomation(
   expect(response.status(), responseText).toBe(200);
   const body = JSON.parse(responseText) as { data: AutomationSnapshot };
   return body.data;
+}
+
+async function readSchedulerPollCount(): Promise<number> {
+  const runDir = process.env.E2E_RUN_DIR;
+  if (!runDir) return 0;
+  try {
+    const contents = await readFile(join(runDir, 'planning-automation-polls.log'), 'utf8');
+    return contents.split(/\r?\n/).filter(Boolean).length;
+  } catch {
+    return 0;
+  }
+}
+
+async function pauseAutomationForCleanup(
+  page: Parameters<typeof registerWithHousehold>[0],
+  householdId: string,
+  token: string
+): Promise<void> {
+  const headers = { authorization: `Bearer ${token}`, 'x-household-id': householdId };
+  const snapshot = await readAutomation(page, householdId, token);
+  if (snapshot.enabled) {
+    const response = await page.request.patch('/api/household/planning-automation', {
+      headers,
+      data: { expectedVersion: snapshot.version, enabled: false }
+    });
+    const responseText = await response.text();
+    expect(response.status(), responseText).toBe(200);
+  }
+
+  await expect
+    .poll(async () => (await readAutomation(page, householdId, token)).enabled)
+    .toBe(false);
+  await expect
+    .poll(async () => (await readAutomation(page, householdId, token)).lastRun?.status, {
+      timeout: 30_000,
+      intervals: [100, 250, 500, 1_000]
+    })
+    .not.toBe('in_progress');
 }
 
 async function expectNoHorizontalOverflow(
@@ -363,4 +440,207 @@ test('configura la planificación automática con API real y controles accesible
   // The scheduled occurrence is at least four days out, and this E2E never calls generation/retry APIs.
   expect(patchBodies.some((body) => JSON.parse(body).enabled === true)).toBe(true);
   expect(patchBodies.some((body) => JSON.parse(body).enabled === false)).toBe(true);
+});
+
+test('publica una propuesta desde el editor pasando por el scheduler y worker reales', async ({
+  page
+}) => {
+  test.skip(
+    process.env.HOGARIA_E2E_AUTOMATION_CLOCK_OFFSET_DAYS !== '4' ||
+      process.env.HOGARIA_E2E_AUTOMATION_POLL_INTERVAL_MS !== '1000',
+    'requires the isolated scheduler clock enabled by its dedicated E2E command'
+  );
+  test.setTimeout(90_000);
+
+  const providerRequests: SyntheticChatCompletionRequest[] = [];
+  const provider = createServer((request, response) => {
+    let body = '';
+    request.setEncoding('utf8');
+    request.on('data', (chunk: string) => (body += chunk));
+    request.on('end', () => {
+      const payload = JSON.parse(body) as SyntheticChatCompletionRequest;
+      providerRequests.push(payload);
+      const userMessage = payload.messages?.find((message) => message.role === 'user')?.content;
+      const weekStart =
+        typeof userMessage === 'string'
+          ? userMessage.match(/"weekStart":"(\d{4}-\d{2}-\d{2})"/)?.[1]
+          : undefined;
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  tasks: weekStart
+                    ? [{ title: 'Revisar la cocina', scheduledDate: weekStart, spaceId: null }]
+                    : []
+                })
+              }
+            }
+          ]
+        })
+      );
+    });
+  });
+  await new Promise<void>((resolveListen) => provider.listen(0, '127.0.0.1', resolveListen));
+  let automationContext: { householdId: string; token: string } | null = null;
+
+  try {
+    await registerWithHousehold(
+      page,
+      '/household?tab=tasks&planning=settings',
+      'Automatización scheduler sintética'
+    );
+    const token = await page.evaluate(() => localStorage.getItem('hogar:v1:auth_token'));
+    expect(token).toBeTruthy();
+    const authHeaders = { authorization: `Bearer ${token}` };
+    const householdResponse = await page.request.get('/api/household', { headers: authHeaders });
+    const householdText = await householdResponse.text();
+    expect(householdResponse.status(), householdText).toBe(200);
+    const householdBody = JSON.parse(householdText) as {
+      data: { id: string; members: Array<{ userId: string; isActive: boolean }> };
+    };
+    const householdId = householdBody.data.id;
+    automationContext = { householdId, token: token! };
+    const ownerId = householdBody.data.members.find((member) => member.isActive)?.userId;
+    expect(ownerId).toBeTruthy();
+
+    const providerPort = (provider.address() as AddressInfo).port;
+    const configResponse = await page.request.post('/api/ai/configs', {
+      headers: { ...authHeaders, 'x-household-id': householdId },
+      data: {
+        name: 'Proveedor local de planificación automática',
+        provider: 'custom',
+        baseUrl: `http://127.0.0.1:${providerPort}/v1`,
+        apiKey: 'synthetic-e2e-only',
+        model: 'synthetic-task-planner',
+        retryAttempts: 0,
+        concurrency: 1
+      }
+    });
+    expect(configResponse.status(), await configResponse.text()).toBe(201);
+
+    const panel = page.locator('[data-test="planning-automation-settings"]');
+    await expect(panel).toBeVisible();
+    const generate = panel.locator('[data-test="planning-automation-mode-generate"]');
+    await generate.check();
+    await panel.locator('[data-test="planning-automation-scope-tasks"]').check();
+
+    const target = dueMadridSchedule();
+    const weekdayPicker = panel.locator('[data-test="planning-automation-weekday"] button');
+    await weekdayPicker.focus();
+    await page.keyboard.press('ArrowDown');
+    const weekdayList = panel.getByRole('listbox', { name: 'Día de la semana' });
+    await expect(weekdayList).toBeVisible();
+    for (let index = 0; index < target.weekday - 1; index += 1) {
+      await page.keyboard.press('ArrowDown');
+    }
+    await page.keyboard.press('Enter');
+    await panel.locator('[data-test="planning-automation-local-time"]').fill(target.localTime);
+    await panel.locator('[data-test="planning-automation-time-zone"]').fill('Europe/Madrid');
+
+    const save = panel.locator('[data-test="planning-automation-save"] button');
+    const saveResponse = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'PATCH' &&
+        response.url().includes('/api/household/planning-automation')
+    );
+    await save.click();
+    expect((await saveResponse).status()).toBe(200);
+    await expect(
+      panel.getByRole('status').filter({ hasText: 'Configuración guardada' })
+    ).toBeVisible();
+
+    await page.getByRole('button', { name: 'Reanudar planificación automática' }).click();
+    await expect
+      .poll(async () => (await readAutomation(page, householdId, token!)).enabled)
+      .toBe(true);
+    await expect
+      .poll(async () => (await readAutomation(page, householdId, token!)).lastRun?.status, {
+        timeout: 30_000,
+        intervals: [100, 250, 500, 1_000]
+      })
+      .toBe('completed');
+
+    const targetWeekDate = new Date(`${target.date}T00:00:00.000Z`);
+    const daysUntilFollowingMonday = 8 - (targetWeekDate.getUTCDay() || 7);
+    targetWeekDate.setUTCDate(targetWeekDate.getUTCDate() + daysUntilFollowingMonday);
+    const targetWeekStart = targetWeekDate.toISOString().slice(0, 10);
+    const completed = await readAutomation(page, householdId, token!);
+    expect(completed.lastRun).toMatchObject({
+      targetWeekStart,
+      status: 'completed',
+      failureCode: null
+    });
+    expect(completed.enabled).toBe(true);
+
+    const headers = { ...authHeaders, 'x-household-id': householdId };
+    const taskResponse = await page.request.get(
+      `/api/household/tasks?weekStart=${targetWeekStart}`,
+      { headers }
+    );
+    const taskText = await taskResponse.text();
+    expect(taskResponse.status(), taskText).toBe(200);
+    const taskWeek = JSON.parse(taskText) as {
+      data: {
+        weekStart: string;
+        version: number;
+        tasks: Array<{
+          title: string;
+          scheduledDate: string;
+          assignedMemberId: string | null;
+          spaceId: string | null;
+        }>;
+      };
+    };
+    expect(taskWeek.data).toMatchObject({
+      weekStart: targetWeekStart,
+      version: 1,
+      tasks: [
+        {
+          title: 'Revisar la cocina',
+          scheduledDate: targetWeekStart,
+          assignedMemberId: ownerId,
+          spaceId: null
+        }
+      ]
+    });
+    expect(providerRequests).toHaveLength(1);
+    expect(providerRequests[0]).toMatchObject({
+      model: 'synthetic-task-planner',
+      response_format: {
+        type: 'json_schema',
+        json_schema: { name: 'household_task_proposal', strict: true }
+      }
+    });
+
+    const pollCountAfterPublication = await readSchedulerPollCount();
+    expect(pollCountAfterPublication).toBeGreaterThan(0);
+    await expect
+      .poll(readSchedulerPollCount, { timeout: 5_000, intervals: [100, 250, 500] })
+      .toBeGreaterThanOrEqual(pollCountAfterPublication + 2);
+    const repeatedPollTaskResponse = await page.request.get(
+      `/api/household/tasks?weekStart=${targetWeekStart}`,
+      { headers }
+    );
+    const repeatedPollTaskWeek = (await repeatedPollTaskResponse.json()) as typeof taskWeek;
+    expect(repeatedPollTaskWeek.data.version).toBe(1);
+    expect(repeatedPollTaskWeek.data.tasks).toHaveLength(1);
+    expect(providerRequests).toHaveLength(1);
+  } finally {
+    try {
+      if (automationContext) {
+        await pauseAutomationForCleanup(
+          page,
+          automationContext.householdId,
+          automationContext.token
+        );
+      }
+    } finally {
+      await new Promise<void>((resolveClose, rejectClose) =>
+        provider.close((error) => (error ? rejectClose(error) : resolveClose()))
+      );
+    }
+  }
 });

@@ -9,6 +9,7 @@ import { installConsoleCapture } from './utils/log-store.js';
 import { uploadsRoot } from './utils/uploads.js';
 import { ensureWorker } from './utils/ticket-queue.js';
 import { startHouseholdPlanningAutomationScheduler } from './utils/household-planning-automation.scheduler.js';
+import { isolatedHouseholdPlanningSchedulerOptions } from './utils/household-planning-automation.scheduler.runtime.js';
 import { createApp, rateLimitFromEnv, resolveStaticDir } from './app.js';
 
 // Install console capture BEFORE anything else so that startup messages
@@ -29,7 +30,10 @@ async function startServer() {
     await initializeDatabase();
     console.log('[SERVER] ✓ Database initialized');
 
-    const planningAutomation = startHouseholdPlanningAutomationScheduler(getDatabase());
+    const planningAutomation = startHouseholdPlanningAutomationScheduler(
+      getDatabase(),
+      isolatedHouseholdPlanningSchedulerOptions(process.env)
+    );
     stopPlanningAutomation = planningAutomation.stop;
     console.log('[SERVER] ✓ Household planning automation scheduler started');
 

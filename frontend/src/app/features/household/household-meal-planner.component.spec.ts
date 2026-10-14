@@ -346,8 +346,7 @@ describe('HouseholdMealPlannerComponent', () => {
 
   it('opens a separate read-only shopping review with required items selected and optionals excluded', () => {
     const preview: HouseholdMealShoppingPreview = {
-      startDate: '2026-10-13',
-      endDate: '2026-11-12',
+      ...currentShoppingPreview(),
       previewId: 'a'.repeat(64),
       sharedPantry: true,
       plannedMealCount: 3,
@@ -429,8 +428,7 @@ describe('HouseholdMealPlannerComponent', () => {
 
   it('approves only the checked editable quantities after an explicit confirmation action', () => {
     const preview: HouseholdMealShoppingPreview = {
-      startDate: '2026-10-13',
-      endDate: '2026-11-12',
+      ...currentShoppingPreview(),
       previewId: 'c'.repeat(64),
       sharedPantry: true,
       plannedMealCount: 1,
@@ -490,8 +488,7 @@ describe('HouseholdMealPlannerComponent', () => {
 
   it('leaves the preview without writing and rejects invalid edited quantities locally', () => {
     const preview: HouseholdMealShoppingPreview = {
-      startDate: '2026-10-13',
-      endDate: '2026-11-12',
+      ...currentShoppingPreview(),
       previewId: 'd'.repeat(64),
       sharedPantry: false,
       plannedMealCount: 1,

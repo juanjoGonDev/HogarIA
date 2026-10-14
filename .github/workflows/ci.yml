@@ -372,8 +372,27 @@ jobs:
         env:
           CI: 'true'
 
+      - name: Verify automatic task publication through the real scheduler
+        id: automation_e2e
+        if: matrix.shard == 1
+        run: >-
+          node scripts/run-isolated-playwright.mjs
+          tests/e2e/household-planning-automation.spec.ts
+          --grep 'publica una propuesta'
+          --project=chromium --project=mobile-chrome --workers=1 --forbid-only
+        env:
+          CI: 'true'
+          HOGARIA_E2E_AUTOMATION_CLOCK_OFFSET_DAYS: '4'
+          HOGARIA_E2E_AUTOMATION_POLL_INTERVAL_MS: '1000'
+
+      - name: Publish scheduler E2E failures as annotations
+        if: failure() && steps.automation_e2e.outcome == 'failure'
+        run: node scripts/ci-e2e-summary.mjs
+        env:
+          E2E_RESULTS_FILE: ${{ steps.automation_e2e.outputs.e2e_results_file }}
+
       - name: Publish E2E failures as annotations
-        if: failure()
+        if: failure() && steps.e2e.outcome == 'failure'
         run: node scripts/ci-e2e-summary.mjs
         env:
           E2E_RESULTS_FILE: ${{ steps.e2e.outputs.e2e_results_file }}
@@ -386,6 +405,15 @@ jobs:
           path: ${{ steps.e2e.outputs.e2e_report_dir }}/
           retention-days: 7
 
+      - name: Upload scheduler E2E report
+        if: always() && steps.automation_e2e.outputs.e2e_report_dir != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: scheduler-e2e-report-${{ matrix.shard }}
+          path: ${{ steps.automation_e2e.outputs.e2e_report_dir }}/
+          retention-days: 7
+          if-no-files-found: ignore
+
       # El trace y el `error-context.md` (snapshot del DOM en el momento del fallo)
       # son la unica forma de saber QUE se veia cuando un gesto no cuajo: sin esto,
       # diagnosticar un test de arrastre desde CI es adivinar.
@@ -395,6 +423,15 @@ jobs:
         with:
           name: test-results-${{ matrix.shard }}
           path: ${{ steps.e2e.outputs.e2e_output_dir }}/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Upload scheduler E2E results (trace + DOM snapshot)
+        if: failure() && steps.automation_e2e.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: scheduler-e2e-results-${{ matrix.shard }}
+          path: ${{ steps.automation_e2e.outputs.e2e_output_dir }}/
           retention-days: 7
           if-no-files-found: ignore
 

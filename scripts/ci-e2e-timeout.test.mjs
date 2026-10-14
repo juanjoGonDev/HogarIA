@@ -26,3 +26,13 @@ test('CI E2E shards have at least 16 minutes for tests and cleanup', () => {
     `e2e shard timeout is ${timeout}m; it must cover the slowest observed run plus artifact cleanup`
   );
 });
+
+test('the dedicated scheduler E2E publishes diagnostics from its own isolated run', () => {
+  assert.match(workflow, /id: automation_e2e/);
+  assert.match(
+    workflow,
+    /E2E_RESULTS_FILE: \$\{\{ steps\.automation_e2e\.outputs\.e2e_results_file \}\}/
+  );
+  assert.match(workflow, /path: \$\{\{ steps\.automation_e2e\.outputs\.e2e_report_dir \}\}/);
+  assert.match(workflow, /path: \$\{\{ steps\.automation_e2e\.outputs\.e2e_output_dir \}\}/);
+});

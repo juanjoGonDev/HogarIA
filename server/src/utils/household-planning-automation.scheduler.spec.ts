@@ -319,28 +319,36 @@ describe('household planning automation scheduler', () => {
       if (dependencies?.signal) runSignals.push(dependencies.signal);
       return runCount === 1 ? firstRun : Promise.resolve({ outcome: 'completed', run: null });
     });
+    const onPoll = vi.fn(() => {
+      if (onPoll.mock.calls.length === 1) throw new Error('Synthetic diagnostic failure.');
+    });
     const started = scheduler.startHouseholdPlanningAutomationScheduler(db, {
       workerId: 'scheduler-test',
       intervalMs: 30_000,
       clock: () => new Date('2026-10-12T07:31:00.000Z'),
-      runOccurrence
+      runOccurrence,
+      onPoll
     });
 
     const inFlightPoll = started.pollOnce();
     expect(runOccurrence).toHaveBeenCalledTimes(1);
+    expect(onPoll).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(30_000);
     expect(runOccurrence).toHaveBeenCalledTimes(1);
+    expect(onPoll).toHaveBeenCalledTimes(1);
 
     finishFirstRun?.({ outcome: 'completed', run: null });
     await inFlightPoll;
     await vi.advanceTimersByTimeAsync(30_000);
     expect(runOccurrence).toHaveBeenCalledTimes(2);
+    expect(onPoll).toHaveBeenCalledTimes(2);
 
     const stopping = started.stop();
     expect(runSignals[0]?.aborted).toBe(true);
     await stopping;
     await vi.advanceTimersByTimeAsync(60_000);
     expect(runOccurrence).toHaveBeenCalledTimes(2);
+    expect(onPoll).toHaveBeenCalledTimes(2);
   });
 });
 

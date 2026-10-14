@@ -27,6 +27,7 @@ export interface HouseholdPlanningAutomationSchedulerOptions {
   runOccurrence?: typeof runHouseholdPlanningAutomationOccurrence;
   workerDependencies?: HouseholdPlanningAutomationWorkerDependencies;
   onError?: (code: typeof RUNNER_FAILURE) => void;
+  onPoll?: () => void;
 }
 
 export interface HouseholdPlanningAutomationScheduler {
@@ -147,6 +148,11 @@ export function startHouseholdPlanningAutomationScheduler(
   const pollOnce = (): Promise<HouseholdPlanningAutomationPollReport> => {
     if (stopped) return Promise.resolve(emptyReport());
     if (activePoll) return activePoll;
+    try {
+      options.onPoll?.();
+    } catch {
+      // Diagnostic hooks must never prevent scheduled processing.
+    }
     const now = options.clock?.() ?? new Date();
     const polling = pollHouseholdPlanningAutomations(db, now, {
       workerId,

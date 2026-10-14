@@ -2614,21 +2614,27 @@ consecutivos, preservación de asignaciones manuales durante propuesta/uso expl�
 Guardar. Comando, capturas sintéticas, límites y resultado reproducible constan en
 `HOGARIA-HOUSEHOLD-PLAN-SPEC.md`, «Estado de implementación y evidencia».
 
-**Actualización de automatización (2026-10-14):** ahora hay configuración/ledger SQLite por hogar,
-poller único, worker con fence de versión, modos generar/repetir, publicación transaccional, pausa y retry
-explícito. Para «Generar» tareas el usuario eligió una propuesta nueva con IA, usando las zonas vigentes y
-la última semana confirmada solo como contexto; el servidor asigna localmente y publica únicamente tras
-validar ámbitos y comprobar que el destino no contiene cambios/conflictos manuales. «Repetir» copia la
-última semana confirmada sin IA. Scheduler **6/6**, worker **14/14**, configuración/rutas **55/55** con
-SQLite en memoria; E2E aislada de configuración **2/2 PC/móvil** cubre guardar/reanudar/pausar/cambiar
-modo/guardar y la versión vigente tras acciones del aviso. No se envió proveedor real ni se ejecutó una
-planificación desde este E2E. Una nueva prueba de scheduler ejecuta el worker completo con proveedor
-sintético, vuelve a sondear la misma ocurrencia y comprueba un solo envío/publicación; no se llamó al
-proveedor real. Otra regresión configura vía PATCH y procesa el nextRun devuelto por HTTP con poller y
-worker, verificando ledger y semana publicada una sola vez. No sustituye aún un E2E único que empiece en
-la UI. La aceptación global sigue abierta por escenarios restantes y gates/matriz; evidencia,
-comandos y capturas sintéticas en
-`HOGARIA-HOUSEHOLD-PLAN-SPEC.md`.
+**Actualización de automatización (2026-10-14):** hay configuración/ledger SQLite por hogar, poller
+único, worker con fence de versión, modos generar/repetir, publicación transaccional, pausa y retry
+explícito. «Generar» tareas crea propuesta con IA a partir de zonas vigentes y semana confirmada; el
+servidor asigna localmente y publica solo tras validar ámbitos y conflictos. «Repetir» copia la última
+semana confirmada sin IA. Scheduler **6/6**, worker **14/14**, configuración/rutas **55/55** con SQLite
+en memoria; E2E de configuración **2/2 PC/móvil**.
+
+La E2E aislada adicional `publica una propuesta desde el editor pasando por el scheduler y worker
+reales` pasa **2/2 Chromium/Mobile Chrome** y enlaza editor → PATCH → timer/poller → worker → transporte
+OpenAI-compatible local → ledger completado → semana publicada. Valida `response_format` JSON Schema
+estricto y verifica al menos dos ticks del scheduler después de publicar, sin una segunda llamada ni
+versión duplicada. `finally` pausa la automatización y espera que termine un worker activo antes de cerrar
+el proveedor local, evitando contaminar reintentos. Utiliza SQLite temporal y proveedor sintético; no llama
+al proveedor real ni modifica inventario/Compra. Los controles de reloj offset **+4 días**, poller **1 s**
+y traza sin datos personales se habilitan solo con los marcadores del runner aislado y una base SQLite
+normal verificada bajo su directorio temporal; producción/full-stack mantienen reloj real y cadencia
+normal. Prueba runtime **11/11**, cobertura del helper **92,1/95,45/100/94,11 %**, suite enfocada de
+automatización **114/114**, `typecheck:e2e`, build server y `test:config` **13/13** pasan. CI ejecuta este
+recorrido dedicado en el shard 1 y conserva sus propios informes/traces. Comandos, límites y rollback en
+`HOGARIA-HOUSEHOLD-PLAN-SPEC.md`. La aceptación global y el smoke semántico real de comidas siguen
+abiertos; no se marcaron completos por esta validación sintética.
 
 **Validación integrada de planificación (14-10-2026):** E2E aislada multi-miembro confirma que comidas
 individuales y compartidas aparecen por API a ambos miembros, que ambos calendarios semanales muestran
