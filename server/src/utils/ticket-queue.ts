@@ -52,11 +52,14 @@ import { ticketAnswerSchema } from '../schemas/receipts.schema.js';
 import { RECEIPT_RESPONSE_FORMAT } from '../schemas/ai-generated-output.schema.js';
 import { leerTicket } from './ticket-files.js';
 
-const TICK_MS = 100;
+// The queue is local to this process/database. Jobs wake it directly; the slow
+// interval is only a recovery sweep for durable rows changed outside the API.
+const QUEUE_RECONCILIATION_INTERVAL_MS = 30_000;
 const LEASE_SEGUNDOS = 300;
 
 type Trabajador = {
   temporizador: NodeJS.Timeout;
+  despertador: NodeJS.Timeout | null;
   corriendo: Set<string>;
   señales: Map<string, AbortController>;
 };
@@ -103,6 +106,18 @@ const trabajosEnMemoria = new Map<string, AiRuntime<any>>();
 const BYTES_MAXIMOS_POR_USUARIO = 32 * 1024 * 1024;
 const TRABAJOS_MAXIMOS_POR_USUARIO = 100;
 const VENTANA_REINTENTO_MANUAL_MS = 5 * 60 * 1000;
+
+/** Coalesces local queue changes without polling SQLite on every short interval. */
+function despertarWorker(): void {
+  const estado = trabajador;
+  if (!estado || estado.despertador) return;
+  estado.despertador = setTimeout(() => {
+    if (trabajador !== estado) return;
+    estado.despertador = null;
+    paso();
+  }, 0);
+  estado.despertador.unref?.();
+}
 
 function resolver<T>(runtime: AiRuntime<T>, value: T): void {
   if (runtime.settled) return;
@@ -207,6 +222,7 @@ export function submitAiTask<T>(input: SubmitAiTask<T>): AiJobHandle<T> {
         input.externalSignal?.removeEventListener('abort', cancelar);
     }
   }
+  despertarWorker();
   return { id, result };
 }
 
@@ -311,6 +327,7 @@ export function encolarTicket(db: SqlDb, userId: string, receiptId: string): str
     siguienteOrden(db, configId)
   );
   ensureWorker();
+  despertarWorker();
   return id;
 }
 
@@ -319,20 +336,25 @@ export function ensureWorker(): Trabajador {
   if (trabajador) return trabajador;
   barrerArranque();
   const estado: Trabajador = {
-    temporizador: setInterval(paso, TICK_MS),
+    temporizador: setInterval(paso, QUEUE_RECONCILIATION_INTERVAL_MS),
+    despertador: null,
     corriendo: new Set(),
     señales: new Map()
   };
   estado.temporizador.unref?.();
   trabajador = estado;
+  // Recover durable receipt jobs on startup without waiting for the safety sweep.
+  despertarWorker();
   return estado;
 }
 
 /** Stop the local worker (test/process teardown); active requests are aborted, never detached. */
 export function stopWorker(): void {
   if (!trabajador) return;
-  clearInterval(trabajador.temporizador);
-  for (const controller of trabajador.señales.values()) controller.abort();
+  const estado = trabajador;
+  clearInterval(estado.temporizador);
+  if (estado.despertador) clearTimeout(estado.despertador);
+  for (const controller of estado.señales.values()) controller.abort();
   for (const runtime of trabajosEnMemoria.values()) {
     rechazar(runtime, new AiCallError('PROVIDER', 'Queue worker stopped', 'CANCELLED'));
     clearTimeout(runtime.retryWindowTimer);
@@ -581,6 +603,7 @@ function lanzar(jobId: string, userId: string, claimGeneration: number): void {
   void correr(jobId, userId, señal, claimGeneration).finally(() => {
     estado.corriendo.delete(jobId);
     estado.señales.delete(jobId);
+    if (trabajador === estado) despertarWorker();
   });
 }
 
@@ -1298,6 +1321,7 @@ export function reintentarTrabajo(
     runtime.retryFallbackSet = false;
   }
   ensureWorker();
+  despertarWorker();
   return 'queued';
 }
 
@@ -1344,6 +1368,7 @@ export function reencolar(jobId: string): boolean {
     ).run(row.receipt_id);
   }
   ensureWorker();
+  despertarWorker();
   return true;
 }
 

@@ -95,6 +95,52 @@ beforeEach(async () => {
 });
 
 describe('AI provider queue dispatcher', () => {
+  it('does not poll the idle database more than once in a short interval', async () => {
+    const { ensureWorker, stopWorker } = await import('./ticket-queue.js');
+    const prepare = vi.spyOn(db, 'prepare');
+    const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
+
+    try {
+      ensureWorker();
+      expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 30_000);
+      await new Promise((resolve) => setTimeout(resolve, 250));
+
+      const idlePolls = prepare.mock.calls.filter(([sql]) =>
+        String(sql).includes("SELECT DISTINCT config_id FROM ai_jobs WHERE status = 'queued'")
+      );
+      expect(idlePolls).toHaveLength(1);
+    } finally {
+      prepare.mockRestore();
+      setIntervalSpy.mockRestore();
+      stopWorker();
+    }
+  });
+
+  it('clears the startup wake and reconciliation timer when stopping', async () => {
+    const { ensureWorker, stopWorker } = await import('./ticket-queue.js');
+    const prepare = vi.spyOn(db, 'prepare');
+    const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
+    const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
+
+    try {
+      ensureWorker();
+      stopWorker();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const idlePolls = prepare.mock.calls.filter(([sql]) =>
+        String(sql).includes("SELECT DISTINCT config_id FROM ai_jobs WHERE status = 'queued'")
+      );
+      expect(idlePolls).toHaveLength(0);
+      expect(clearIntervalSpy).toHaveBeenCalledTimes(1);
+      expect(clearTimeoutSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      prepare.mockRestore();
+      clearIntervalSpy.mockRestore();
+      clearTimeoutSpy.mockRestore();
+      stopWorker();
+    }
+  });
+
   it('seeds default pantry categories before snapshotting a new receipt inventory', async () => {
     const { inventarioDeLaCasa } = await import('./ticket-queue.js');
     const { DEFAULT_PANTRY_CATEGORIES } = await import('./pantry-categories.js');

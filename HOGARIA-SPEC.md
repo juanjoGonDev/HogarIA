@@ -5891,16 +5891,32 @@ de RAM sin esa evidencia.
       catálogos de hogar); una migración repetible reemplaza el índice antiguo sin descartar filas. Crear
       o unirse a un hogar funciona aunque esa persona conserve claves iguales en otro hogar; duplicar una
       clave en el mismo ámbito sigue rechazándose.
-- [ ] Cola: al iniciar, encolar/reintentar un job y liberar concurrencia se despierta el worker sin esperar
+- [x] Cola: al iniciar, encolar/reintentar un job y liberar concurrencia se despierta el worker sin esperar
       el sondeo de seguridad. En reposo, el poller reconcilia como máximo cada 30 s, no cada 100 ms; parar
       el worker limpia ambos temporizadores y no duplica ejecuciones.
-- [ ] TDD/aislamiento: ruta de alta y unión de hogar con categorías ya existentes, migración de índice,
+- [x] TDD/aislamiento: ruta de alta y unión de hogar con categorías ya existentes, migración de índice,
       reintento/cola y cadencia en reposo reproducibles con SQLite temporal; comprobar consultas por ventana
       de tiempo, typecheck y coverage local sin tocar datos ni procesos de uso normal.
-- [ ] Registrar evidencia, límite del análisis de memoria (sin Raspberry disponible) y efecto en el log de
+- [x] Registrar evidencia, límite del análisis de memoria (sin Raspberry disponible) y efecto en el log de
       desarrollo; no desactivar el SQL trace explícito para ocultar consultas.
 
 **Evidencia TDD de categorías (2026-10-14):** la prueba de creación devolvía primero **500** al reutilizar
 una clave presente en otro hogar. `household.routes.spec.ts -t 'another household'` pasa **2/2**;
 `database.spec.ts -t 'migra la unicidad'` pasa **1/1**. La migración conserva la categoría heredada y tras
 reiniciar permite la misma clave en otro hogar, mientras rechaza el duplicado dentro del mismo ámbito.
+
+**Evidencia de cola y cierre (2026-10-14):** con el worker original, la prueba veía **2 sondeos/250 ms**;
+ahora la reconciliación es a **30 s**, pero inicio, encolado/reintento y fin de trabajo la despiertan y
+coalescen los despertares. `ai-queue.spec.ts` valida intervalo, carga inmediata y cancelación de ambos
+temporizadores. La suite del servidor con DB aislada pasa **98 archivos, 1736 tests y 1 omitido**;
+coverage **90,34/82,62/96,18/93,31 %** (statements/ramas/funciones/líneas), y
+`tsc --noEmit -p tsconfig.json` pasa. La E2E aislada del diálogo de creación/reintento pasa **2/2**
+Chromium/Mobile Chrome y confirma el éxito contra la API temporal; el runner confirma la limpieza de DB,
+procesos y artefactos. `git diff --check` pasa. No se cambia la configuración de logging.
+
+El ritmo del SQL trace compartido fue **177/19,13 s (~9,25 consultas/s)**; el worker idle ahora ejecuta
+como máximo **1/30 s** (~99,64 % menos sondeos idle, aparte de despertares por trabajos). Una consulta vacía
+solo crea resultados transitorios; esto no demuestra saturación de RAM y no se tuvo acceso a la Raspberry
+para medirla. No hubo cambios de UI ni llamadas a proveedores. El lint del servidor no arranca porque su
+script pasa `--ext` a ESLint con flat config (`Invalid option '--ext'`); no se modificaron tooling ni
+dependencias.
