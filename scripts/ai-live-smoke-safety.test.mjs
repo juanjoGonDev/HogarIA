@@ -87,8 +87,13 @@ test('household meal smoke succeeds only for one validated strict-schema provide
     schemaName: 'weekly_meal_proposal',
     requestContract: {
       strictJsonSchema: true,
-      noFileOrImageAttachments: true,
-      requiredPromptTermsPresent: true,
+      contextJsonAttachmentCount: 1,
+      contextJsonAttachmentValid: true,
+      memberProfilesValid: true,
+      planningInputsValid: true,
+      previousPlanValid: true,
+      nonEmptyEventsSchemaValid: true,
+      forbiddenIdentityTermsAbsent: true,
       forbiddenPromptTermsAbsent: true
     },
     responseFormat: {
@@ -117,6 +122,18 @@ test('household meal smoke succeeds only for one validated strict-schema provide
   assert.equal(
     isSuccessfulAiLiveHouseholdMealSmokeResult({
       ...input,
+      calls: [
+        {
+          ...call,
+          requestContract: { ...call.requestContract, nonEmptyEventsSchemaValid: false }
+        }
+      ]
+    }),
+    false
+  );
+  assert.equal(
+    isSuccessfulAiLiveHouseholdMealSmokeResult({
+      ...input,
       proxyMetrics: { ...proxyMetrics, requestAttempts: 2, rejectedRequests: 1, failed: true }
     }),
     false
@@ -131,7 +148,7 @@ test('household meal smoke succeeds only for one validated strict-schema provide
       calls: [
         {
           ...call,
-          requestContract: { strictJsonSchema: true, noFileOrImageAttachments: true }
+          requestContract: { strictJsonSchema: true, contextJsonAttachmentCount: 1 }
         }
       ]
     }),
@@ -1111,12 +1128,147 @@ const SYNTHETIC_MEAL_RESPONSE_FORMAT = {
   ...SYNTHETIC_STRICT_RESPONSE_FORMAT,
   json_schema: {
     ...SYNTHETIC_STRICT_RESPONSE_FORMAT.json_schema,
-    name: 'weekly_meal_proposal'
+    name: 'weekly_meal_proposal',
+    schema: {
+      type: 'object',
+      properties: {
+        events: {
+          type: 'array',
+          minItems: 1,
+          items: {
+            type: 'object',
+            properties: { alias: { type: 'string' } },
+            required: ['alias'],
+            additionalProperties: false
+          }
+        }
+      },
+      required: ['events'],
+      additionalProperties: false
+    }
   }
 };
 
-test('meal proxy forwards one text-only completion with its required schema and rejects duplicates', async () => {
+function syntheticMealContext(overrides = {}) {
+  const dates = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(Date.UTC(2026, 9, 19 + index));
+    return date.toISOString().slice(0, 10);
+  });
+  return {
+    version: 1,
+    targetWeek: { startDate: dates[0], endDate: dates.at(-1) },
+    household: {
+      objective: { goals: ['balanced'], notes: 'Comidas equilibradas.' },
+      schedule: { mealTypes: { lunch: true }, mealTimes: { lunch: '13:00' } }
+    },
+    participants: [
+      {
+        alias: 'P1',
+        preferences: { strictAllergies: [], likes: ['tofu'], dislikes: ['pollo'] },
+        effectiveObjective: {
+          source: 'household',
+          goals: ['balanced'],
+          notes: 'Comidas equilibradas.'
+        },
+        effectiveSchedule: {
+          source: 'household',
+          mealTypes: { lunch: true },
+          mealTimes: { lunch: '13:00' }
+        }
+      },
+      {
+        alias: 'P2',
+        preferences: { strictAllergies: [], likes: ['pollo'], dislikes: ['tofu'] },
+        effectiveObjective: {
+          source: 'household',
+          goals: ['balanced'],
+          notes: 'Comidas equilibradas.'
+        },
+        effectiveSchedule: {
+          source: 'household',
+          mealTypes: { lunch: true },
+          mealTimes: { lunch: '13:00' }
+        }
+      }
+    ],
+    requiredTurns: dates.map((date) => ({
+      date,
+      mealType: 'lunch',
+      time: '13:00',
+      eligibleParticipants: ['P1', 'P2']
+    })),
+    pantry: [{ name: 'SMOKE_PANTRY_RICE', quantity: 2, unit: 'kg', expirationDate: null }],
+    utensils: [{ name: 'SMOKE_UTENSIL_POT', category: 'cooking' }],
+    recipes: [
+      {
+        name: 'SMOKE_RECIPE_TEST',
+        description: 'Receta sintética de prueba.',
+        ingredients: [{ name: 'SMOKE_PANTRY_RICE', quantity: 1, unit: 'kg' }]
+      }
+    ],
+    previousConfirmedPlan: {
+      weekStart: '2026-10-12',
+      weekEnd: '2026-10-18',
+      events: [
+        {
+          date: '2026-10-12',
+          mealType: 'lunch',
+          time: '13:00',
+          servings: 2,
+          participants: ['P1', 'P2'],
+          recipe: {
+            name: 'SMOKE_PREVIOUS_MEAL',
+            description: 'Comida previa sintética.',
+            ingredients: []
+          }
+        }
+      ]
+    },
+    ...overrides
+  };
+}
+
+function mealContextAttachment(context, options = {}) {
+  const serialized = typeof context === 'string' ? context : JSON.stringify(context);
+  const mime = options.mime ?? 'application/json';
+  const filename = options.filename ?? 'meal-planning-context.json';
+  return {
+    type: 'file',
+    file: {
+      filename,
+      file_data: `data:${mime};base64,${Buffer.from(serialized, 'utf8').toString('base64')}`
+    }
+  };
+}
+
+function mealPayload({
+  context = syntheticMealContext(),
+  prompt = 'Read meal-planning-context.json and create the proposal.',
+  responseFormat = SYNTHETIC_MEAL_RESPONSE_FORMAT,
+  includeAttachment = true,
+  attachmentOptions,
+  extraAttachment
+} = {}) {
+  return {
+    model: 'gpt-5',
+    messages: [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: prompt },
+          ...(includeAttachment ? [mealContextAttachment(context, attachmentOptions)] : []),
+          ...(extraAttachment ? [extraAttachment] : [])
+        ]
+      }
+    ],
+    response_format: responseFormat
+  };
+}
+
+test('meal proxy forwards one strict-schema completion with its verified JSON context and rejects duplicates', async () => {
   const upstreamRequests = [];
+  const completionEvents = [];
+  const providerResponseSentinel = 'SMOKE_PRIVATE_RESPONSE_BODY';
   const upstream = createServer(async (request, response) => {
     const chunks = [];
     for await (const chunk of request) chunks.push(chunk);
@@ -1124,7 +1276,12 @@ test('meal proxy forwards one text-only completion with its required schema and 
     response.writeHead(200, { 'content-type': 'application/json' });
     response.end(
       JSON.stringify({
-        choices: [{ message: { content: '{"events":[]}' }, finish_reason: 'stop' }]
+        choices: [
+          {
+            message: { content: JSON.stringify({ events: [], marker: providerResponseSentinel }) },
+            finish_reason: 'stop'
+          }
+        ]
       })
     );
   });
@@ -1135,14 +1292,25 @@ test('meal proxy forwards one text-only completion with its required schema and 
     targetOrigin: `http://127.0.0.1:${upstreamPort}`,
     maxCalls: 1,
     expectedSchemaName: 'weekly_meal_proposal',
-    requiredPromptTerms: ['shared soft-preference profile'],
-    forbiddenPromptTerms: ['Synthetic Household Member']
+    forbiddenPromptTerms: [
+      'HogarIA miembro QA uno',
+      'HogarIA miembro QA dos',
+      'HogarIA smoke hogar'
+    ],
+    onCompletion: (event) => completionEvents.push(event)
   });
+  const context = syntheticMealContext();
+  const contextData = JSON.stringify(context);
+  const mealContextFile = mealContextAttachment(contextData);
+  const promptSentinel = 'Read meal-planning-context.json and create the proposal.';
   const request = () =>
     postJson(`${proxy.baseUrl}/chat/completions`, proxy.clientToken, {
       model: 'gpt-5',
       messages: [
-        { role: 'user', content: 'synthetic meal prompt: shared soft-preference profile' }
+        {
+          role: 'user',
+          content: [{ type: 'text', text: promptSentinel }, mealContextFile]
+        }
       ],
       response_format: SYNTHETIC_MEAL_RESPONSE_FORMAT
     });
@@ -1152,14 +1320,32 @@ test('meal proxy forwards one text-only completion with its required schema and 
     assert.equal(first.status, 200);
     assert.equal(upstreamRequests.length, 1);
     assert.equal(proxy.metrics.calls.length, 1);
+    const sentPayload = JSON.parse(upstreamRequests[0]);
+    assert.deepEqual(sentPayload.response_format, SYNTHETIC_MEAL_RESPONSE_FORMAT);
+    const sentFile = sentPayload.messages[0].content.find((part) => part.type === 'file');
+    assert.equal(sentFile.file.filename, 'meal-planning-context.json');
+    assert.equal(
+      Buffer.from(sentFile.file.file_data.split(',')[1], 'base64').toString('utf8'),
+      contextData
+    );
     assert.deepEqual(proxy.metrics.calls[0].requestContract, {
       strictJsonSchema: true,
-      noFileOrImageAttachments: true,
-      requiredPromptTermsPresent: true,
+      contextJsonAttachmentCount: 1,
+      contextJsonAttachmentValid: true,
+      memberProfilesValid: true,
+      planningInputsValid: true,
+      previousPlanValid: true,
+      nonEmptyEventsSchemaValid: true,
+      forbiddenIdentityTermsAbsent: true,
       forbiddenPromptTermsAbsent: true
     });
     assert.equal(proxy.metrics.calls[0].schemaName, 'weekly_meal_proposal');
-    assert.equal(JSON.stringify(proxy.metrics).includes('synthetic meal prompt'), false);
+    assert.equal(JSON.stringify(proxy.metrics).includes(promptSentinel), false);
+    assert.equal(JSON.stringify(proxy.metrics).includes(contextData), false);
+    assert.equal(JSON.stringify(proxy.metrics).includes('SMOKE_PANTRY_RICE'), false);
+    assert.equal(JSON.stringify(proxy.metrics).includes(providerResponseSentinel), false);
+    assert.equal(JSON.stringify(completionEvents).includes(providerResponseSentinel), false);
+    assert.equal(JSON.stringify(completionEvents).includes(contextData), false);
 
     assert.equal((await request()).status, 429);
     assert.equal(upstreamRequests.length, 1);
@@ -1180,7 +1366,7 @@ test('meal proxy forwards one text-only completion with its required schema and 
   }
 });
 
-test('meal proxy rejects missing profile inputs and identity disclosure before provider forwarding', async () => {
+test('meal proxy rejects context profile or identity disclosure before provider forwarding', async () => {
   let upstreamCalls = 0;
   const upstream = createServer((_request, response) => {
     upstreamCalls += 1;
@@ -1188,35 +1374,51 @@ test('meal proxy rejects missing profile inputs and identity disclosure before p
     response.end('{"choices":[]}');
   });
   const upstreamPort = await listen(upstream);
-  const attempt = async (content) => {
+  const attempt = async (payload) => {
     const proxy = await createAiLiveProxy({
       token: 'synthetic-provider-token',
       model: 'gpt-5',
       targetOrigin: `http://127.0.0.1:${upstreamPort}`,
       maxCalls: 1,
       expectedSchemaName: 'weekly_meal_proposal',
-      requiredPromptTerms: ['"likes":["lentils"]', '"dislikes":["chicken"]'],
-      forbiddenPromptTerms: ['Synthetic Household Member']
+      forbiddenPromptTerms: ['HogarIA miembro QA uno', 'HogarIA miembro QA dos']
     });
     try {
-      const response = await postJson(`${proxy.baseUrl}/chat/completions`, proxy.clientToken, {
-        model: 'gpt-5',
-        messages: [{ role: 'user', content }],
-        response_format: SYNTHETIC_MEAL_RESPONSE_FORMAT
-      });
+      const response = await postJson(
+        `${proxy.baseUrl}/chat/completions`,
+        proxy.clientToken,
+        payload
+      );
       assert.equal(response.status, 400);
       assert.equal(proxy.metrics.rejectedRequests, 1);
       assert.equal(proxy.metrics.failed, true);
-      assert.equal(JSON.stringify(proxy.metrics).includes('Synthetic Household Member'), false);
-      assert.equal(JSON.stringify(proxy.metrics).includes('lentils'), false);
+      assert.equal(JSON.stringify(proxy.metrics).includes('HogarIA miembro QA uno'), false);
     } finally {
       await proxy.close();
     }
   };
 
   try {
-    await attempt('A synthetic household member likes lentils.');
-    await attempt('"likes":["lentils"] "dislikes":["chicken"] Synthetic Household Member');
+    await attempt(
+      mealPayload({
+        context: syntheticMealContext({
+          participants: syntheticMealContext().participants.map((participant, index) =>
+            index === 0
+              ? { ...participant, preferences: { strictAllergies: [], likes: [], dislikes: [] } }
+              : participant
+          )
+        })
+      })
+    );
+    await attempt(
+      mealPayload({
+        context: syntheticMealContext(),
+        prompt: 'HogarIA miembro QA uno es el primer participante.'
+      })
+    );
+    const unsafeContext = syntheticMealContext();
+    unsafeContext.participants[0].alias = 'HogarIA miembro QA uno';
+    await attempt(mealPayload({ context: unsafeContext }));
     assert.equal(upstreamCalls, 0);
   } finally {
     await new Promise((resolve, reject) =>
@@ -1225,7 +1427,7 @@ test('meal proxy rejects missing profile inputs and identity disclosure before p
   }
 });
 
-test('meal proxy rejects wrong schema and attachment content before forwarding', async () => {
+test('meal proxy rejects wrong schema, missing attachment, unrelated attachments, and invalid context before forwarding', async () => {
   let upstreamCalls = 0;
   const upstream = createServer((_request, response) => {
     upstreamCalls += 1;
@@ -1233,40 +1435,98 @@ test('meal proxy rejects wrong schema and attachment content before forwarding',
     response.end('{"choices":[]}');
   });
   const upstreamPort = await listen(upstream);
-  const proxy = await createAiLiveProxy({
-    token: 'synthetic-provider-token',
-    model: 'gpt-5',
-    targetOrigin: `http://127.0.0.1:${upstreamPort}`,
-    maxCalls: 1,
-    expectedSchemaName: 'weekly_meal_proposal'
-  });
+  const assertRejected = async (payload) => {
+    const proxy = await createAiLiveProxy({
+      token: 'synthetic-provider-token',
+      model: 'gpt-5',
+      targetOrigin: `http://127.0.0.1:${upstreamPort}`,
+      maxCalls: 1,
+      expectedSchemaName: 'weekly_meal_proposal'
+    });
+    try {
+      const response = await postJson(
+        `${proxy.baseUrl}/chat/completions`,
+        proxy.clientToken,
+        payload
+      );
+      assert.equal(response.status, 400);
+      assert.equal(proxy.metrics.calls.length, 0);
+      assert.equal(proxy.metrics.rejectedRequests, 1);
+      assert.equal(proxy.metrics.failed, true);
+    } finally {
+      await proxy.close();
+    }
+  };
 
   try {
-    const wrongSchema = await postJson(`${proxy.baseUrl}/chat/completions`, proxy.clientToken, {
+    await assertRejected({
       model: 'gpt-5',
       messages: [{ role: 'user', content: 'synthetic' }],
       response_format: SYNTHETIC_STRICT_RESPONSE_FORMAT
     });
-    assert.equal(wrongSchema.status, 400);
-    assert.equal(upstreamCalls, 0);
 
-    const imagePrompt = await postJson(`${proxy.baseUrl}/chat/completions`, proxy.clientToken, {
-      model: 'gpt-5',
-      messages: [
-        {
-          role: 'user',
-          content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,AA==' } }]
+    const invalidInputs = [
+      mealPayload({ context: syntheticMealContext(), includeAttachment: false }),
+      mealPayload({
+        responseFormat: {
+          ...SYNTHETIC_MEAL_RESPONSE_FORMAT,
+          json_schema: {
+            ...SYNTHETIC_MEAL_RESPONSE_FORMAT.json_schema,
+            schema: {
+              ...SYNTHETIC_MEAL_RESPONSE_FORMAT.json_schema.schema,
+              properties: {
+                ...SYNTHETIC_MEAL_RESPONSE_FORMAT.json_schema.schema.properties,
+                events: {
+                  ...SYNTHETIC_MEAL_RESPONSE_FORMAT.json_schema.schema.properties.events,
+                  minItems: 0
+                }
+              }
+            }
+          }
         }
-      ],
-      response_format: SYNTHETIC_MEAL_RESPONSE_FORMAT
-    });
-    assert.equal(imagePrompt.status, 409);
+      }),
+      mealPayload({
+        context: syntheticMealContext(),
+        extraAttachment: {
+          type: 'file',
+          file: { filename: 'extra.json', file_data: 'data:application/json;base64,e30=' }
+        }
+      }),
+      mealPayload({
+        context: syntheticMealContext(),
+        extraAttachment: {
+          type: 'image_url',
+          image_url: { url: 'data:image/jpeg;base64,MQ==' }
+        }
+      }),
+      mealPayload({ context: { version: 1 } }),
+      mealPayload({ context: '{not-json' }),
+      mealPayload({ context: syntheticMealContext({ pantry: [] }) }),
+      mealPayload({ context: syntheticMealContext({ utensils: [] }) }),
+      mealPayload({ context: syntheticMealContext({ recipes: [] }) }),
+      mealPayload({ context: syntheticMealContext({ previousConfirmedPlan: null }) }),
+      mealPayload({
+        context: syntheticMealContext({
+          pantry: [
+            {
+              ...syntheticMealContext().pantry[0],
+              owner_user_id: 'synthetic-private-id'
+            }
+          ]
+        })
+      }),
+      mealPayload({
+        context: syntheticMealContext(),
+        attachmentOptions: { filename: 'other.json' }
+      }),
+      mealPayload({
+        context: syntheticMealContext(),
+        attachmentOptions: { mime: 'application/octet-stream' }
+      })
+    ];
+    for (const payload of invalidInputs) await assertRejected(payload);
     assert.equal(upstreamCalls, 0);
-    assert.equal(proxy.metrics.calls.length, 0);
-    assert.equal(proxy.metrics.rejectedRequests, 2);
-    assert.equal(proxy.metrics.failed, true);
   } finally {
-    await proxy.close();
     await new Promise((resolve, reject) =>
       upstream.close((error) => (error ? reject(error) : resolve()))
     );

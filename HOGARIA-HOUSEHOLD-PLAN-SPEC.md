@@ -1494,7 +1494,7 @@ también las condiciones que aún están abiertas.
       overrides apagados; hogar nuevo inicializado idempotentemente desde valores existentes; unirse
       no modifica valores comunes; un override activo sin valor explícito válido bloquea antes de IA;
       ningún dato ajeno/no seleccionado llega al planificador. Evidencia: tests del store (`seeds new household defaults once`, `does not seed over existing`, `marks enabled overrides incomplete`, `persists partial home defaults`), rutas/settings/propuesta (override incompleto bloquea antes de IA y miembros no seleccionados quedan fuera), settings E2E 2/2 y recorrido integrado 3/3 Chromium/Mobile Chrome/Mobile Safari con dos miembros. Suite global pasa; cobertura focal >70 % en sentencias/ramas/funciones/líneas. Sin proveedor real.
-- [ ] **QA-HOME-MEALS.PLAN.1** — subtabs `Comidas`, `Tareas` y `Ajustes`; solo el panel seleccionado
+- [x] **QA-HOME-MEALS.PLAN.1** — subtabs `Comidas`, `Tareas` y `Ajustes`; solo el panel seleccionado
       es visible, con navegación accesible por teclado y contexto/URL conservados en escritorio y
       móvil; cada `aria-controls` apunta a un tabpanel existente. Componentes inactivos se montan bajo
       demanda, pero una propuesta aún no confirmada conserva selección, paso y día al cambiar de subtab;
@@ -1512,8 +1512,7 @@ también las condiciones que aún están abiertas.
       Contrato soft cerrado en § «Resolución de diferencias entre miembros»: gustos distintos no son
       incompatibilidad automática; se prioriza un compromiso compartido seguro y compatible con objetivos,
       y un dislike no se trata como alergia. El prompt ordenado y una regresión sintética comprueban esa
-      instrucción con dos perfiles de gustos distintos y un evento compartido, pero no prueban la decisión
-      semántica de un proveedor real. **Smoke opt-in dedicado implementado, validación semántica aún pendiente:**
+      instrucción con dos perfiles de gustos distintos y un evento compartido. **Smoke opt-in dedicado:**
       el comando `pnpm run smoke:ai:household-meal` selecciona solo
       `playwright.ai-household-meal-real-smoke.config.ts` y
       `tests/e2e/household-meal-planning-live-smoke.spec.ts`; usa dos perfiles sintéticos con preferencias
@@ -1562,6 +1561,23 @@ también las condiciones que aún están abiertas.
       un motivo/fase que permita distinguir entre error de aserción, salida del proceso o limpieza, así
       que esa limitación queda registrada y no se atribuye el fallo a la IA ni a la aplicación.
       No se repitió la petición ni se tocaron tickets, inventario, calendario real o ajustes de WebAPI.
+      Revalidación tras adjuntar el contexto (14-10-2026): una primera ejecución aislada terminó con
+      `0 completion(s)` y `1 intento`; no apareció sesión nueva ni registro reciente de
+      `/v1/chat/completions` en WebAPI. Se mantuvo sin reintento automático y se mejoró el diagnóstico
+      local para distinguir rechazo del proxy de respuesta del proveedor. Después, una única ejecución
+      completa de `pnpm run smoke:ai:household-meal` pasó el preflight con sesión WebAPI `ready`, envió
+      exactamente una propuesta sintética a `gpt-5` y recibió HTTP 200 / objeto JSON válido. El proxy
+      verificó `response_format.strict`, `events.minItems >= 1`, un único adjunto JSON versionado
+      `meal-planning-context.json`, los perfiles/horarios/turnos seleccionados, despensa, utensilios,
+      recetas, plan confirmado anterior y exclusión de nombres/IDs. La E2E comprobó cobertura de los siete
+      días para ambos participantes, no duplicación por turno, un plato compartido y calendario objetivo
+      vacío antes/después; no confirmó ni persistió el nuevo plan. DB/servidor temporales y token propio
+      limpios al terminar; no se enviaron tickets ni se modificó inventario/calendario real. Resultado:
+      **1 completion / validado**. La E2E sintética de Comidas también se actualizó para leer el adjunto
+      nuevo (en lugar del prompt antiguo) y pasó **1/1** en Chromium.
+      Revalidación final: servidor **1712 passed / 1 skipped**, `test:config` **71/71**, typecheck servidor
+      y E2E, Prettier; cobertura ruta/planificador **90,89/78,36/100/94,87 %** y schema
+      **100/100/100/100 %** (sentencias/ramas/funciones/líneas).
 
 - **Hallazgo posterior (14-10-2026):** el registro de WebAPI compartido por la persona usuaria
   muestra que la completion terminó con éxito y devolvió `{"events":[]}`. Es éxito de
@@ -1573,14 +1589,16 @@ también las condiciones que aún están abiertas.
   arriba y una prueba debe decodificar y verificar el contenido real de la petición sin registrar
   datos privados.
 
-- [ ] **QA-HOME-MEALS.OUTPUT.1** — `events` tiene al menos un elemento tanto en el JSON Schema estricto
+- [x] **QA-HOME-MEALS.OUTPUT.1** — `events` tiene al menos un elemento tanto en el JSON Schema estricto
       del proveedor como en la validación local. Un resultado vacío se rechaza antes de cualquier escritura;
       cada turno esperado debe quedar cubierto exactamente una vez o explícitamente `unresolved`. Si todos
       los turnos carecen de participantes aptos para IA, el servidor genera localmente sus eventos
       `unresolved` sin llamar al proveedor ni pasar por un array vacío; las restricciones no se relajan para
-      admitir `events: []`. Evidencia pendiente: regresiones del schema de proveedor/Zod, cobertura incompleta,
-      caso sin participantes aptos y rutas sin escrituras al fallar.
-- [ ] **QA-HOME-MEALS.CONTEXT.1** — cada generación envía, junto al mensaje de texto y `response_format`
+      admitir `events: []`. Evidencia: schema de proveedor/Zod, cobertura incompleta, caso sin participantes
+      aptos y rutas sin escrituras al fallar; suite focal **55/55**, servidor **1712 passed / 1 skipped**,
+      cobertura ruta/planificador **90,89/78,36/100/94,87 %** y schema **100/100/100/100 %**. Smoke real
+      opt-in: un único HTTP 200 y E2E completa validada.
+- [x] **QA-HOME-MEALS.CONTEXT.1** — cada generación envía, junto al mensaje de texto y `response_format`
       estricto, exactamente un adjunto JSON versionado con datos acotados al hogar, semana y miembros
       seleccionados: alias opacos, preferencias, restricciones estrictas, objetivo y horario efectivos con
       su fuente (persona/hogar), turnos requeridos, existencias positivas visibles, utensilios disponibles
@@ -1589,7 +1607,11 @@ también las condiciones que aún están abiertas.
       que solo se usan para filtrar la salida. Las cadenas libres se tratan como datos no confiables. Pruebas
       de ruta decodifican `file_data` y verifican nombre, MIME, estructura, datos presentes, permisos,
       exclusiones, cotas y coexistencia con `response_format`; no vuelcan el contexto a logs. El proxy opt-in
-      inspecciona el adjunto sintético en memoria y solo guarda telemetría no sensible.
+      inspecciona el adjunto sintético en memoria y solo guarda telemetría no sensible. Evidencia: prueba de
+      ruta decodifica `file_data` y comprueba preferencias, horarios efectivos/fuente, existencias, utensilios,
+      recetas y semana previa; prueba permisos/identidades/cotas y fecha de caducidad inválida oversized
+      normalizada a `null`. El proxy de smoke verifica el mismo contrato en memoria y la llamada real pasó
+      con fixtures sintéticos, sin persistir propuesta ni mostrar contexto en logs.
 
 - [x] **QA-HOME-MEALS.CALENDAR.1** — persistencia idempotente tras confirmar, calendario actual,
       evento compartido visible una vez a todos los miembros activos con `calendar.view` aunque la comida

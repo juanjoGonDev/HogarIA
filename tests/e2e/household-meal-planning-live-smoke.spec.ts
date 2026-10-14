@@ -107,6 +107,116 @@ async function readCalendarMeals(
   return ((await response.json()) as CalendarRange).data.meals;
 }
 
+function addDays(date: string, days: number): string {
+  return new Date(Date.parse(`${date}T00:00:00.000Z`) + days * 86_400_000)
+    .toISOString()
+    .slice(0, 10);
+}
+
+/**
+ * Seeds only through existing APIs against the runner's isolated server/database. The prior
+ * calendar is confirmed through the non-AI confirmation endpoint; no proposal/provider request is
+ * made here. Confirmation requires complete eligible-slot coverage, so all seven prior-week
+ * lunches are synthetic and explicitly assigned to P1/P2.
+ */
+async function seedSmokePlanningContext(
+  page: import('@playwright/test').Page,
+  ownerHeaders: Record<string, string>,
+  householdHeaders: Record<string, string>,
+  activeMembers: ActiveMember[],
+  targetWeekStart: string
+): Promise<{ previousWeekStart: string; previousWeekEnd: string }> {
+  const pantry = await page.request.post('/api/pantry/ingredients', {
+    headers: ownerHeaders,
+    data: {
+      name: 'SMOKE_PANTRY_RICE',
+      category: 'other',
+      quantity: 500,
+      unit: 'g',
+      location: 'pantry'
+    }
+  });
+  expect(pantry.status(), await pantry.text()).toBe(201);
+
+  const utensil = await page.request.post('/api/pantry/utensils', {
+    headers: ownerHeaders,
+    data: { name: 'SMOKE_UTENSIL_POT', category: 'cookware', available: true }
+  });
+  expect(utensil.status(), await utensil.text()).toBe(201);
+
+  const recipe = await page.request.post('/api/recipes', {
+    headers: ownerHeaders,
+    data: {
+      name: 'SMOKE_RECIPE_TEST',
+      description: 'Receta sintética accesible para el smoke de planificación.',
+      difficulty: 'easy',
+      totalTime: 15,
+      prepTime: 5,
+      cookTime: 10,
+      servings: 2,
+      ingredients: [{ name: 'SMOKE_PANTRY_RICE', quantity: 80, unit: 'g' }],
+      utensils: ['SMOKE_UTENSIL_POT'],
+      steps: [{ stepNumber: 1, instruction: 'Cocer el arroz sintético.' }]
+    }
+  });
+  expect(recipe.status(), await recipe.text()).toBe(201);
+
+  const previousWeekStart = addDays(targetWeekStart, -7);
+  const previousWeekEnd = addDays(previousWeekStart, 6);
+  expect(previousWeekEnd).toBe(addDays(targetWeekStart, -1));
+  expect(activeMembers).toHaveLength(2);
+  const events = Array.from({ length: 7 }, (_, day) => ({
+    id: `smoke-previous-meal-${day + 1}`,
+    date: addDays(previousWeekStart, day),
+    mealType: 'lunch',
+    time: '13:00',
+    recipe: {
+      name: 'SMOKE_PREVIOUS_MEAL',
+      description: 'Comida sintética de la semana anterior.',
+      baseServings: 1,
+      prepTimeMinutes: 5,
+      cookTimeMinutes: 10,
+      ingredients: [
+        {
+          name: 'SMOKE_PANTRY_RICE',
+          quantity: 80,
+          unit: 'g',
+          preparation: null,
+          isOptional: false,
+          notes: null
+        }
+      ],
+      instructions: ['Cocer arroz sintético.']
+    },
+    participantAliases: ['P1', 'P2'],
+    servings: activeMembers.length,
+    objectiveSummary: 'Comida equilibrada.',
+    status: 'scheduled',
+    reason: null
+  }));
+  const confirmation = await page.request.post('/api/household/meal-planning/confirm', {
+    headers: { ...householdHeaders, 'content-type': 'application/json' },
+    data: {
+      proposalId: 'smoke-previous-plan',
+      weekStart: previousWeekStart,
+      householdMemberIds: activeMembers.map((member) => member.id),
+      events
+    }
+  });
+  expect(confirmation.status(), await confirmation.text()).toBe(200);
+  const confirmed = (await confirmation.json()) as {
+    success: boolean;
+    data: { weekStart: string; idempotent: boolean; events: unknown[] };
+  };
+  expect(confirmed).toMatchObject({
+    success: true,
+    data: { weekStart: previousWeekStart, idempotent: false }
+  });
+  expect(confirmed.data.events).toHaveLength(7);
+
+  return { previousWeekStart, previousWeekEnd };
+}
+
 test('envía una propuesta semanal compartida al proveedor y no la persiste antes de confirmar', async ({
   page,
   browser
@@ -206,9 +316,15 @@ test('envía una propuesta semanal compartida al proveedor y no la persiste ante
     expect(activeMembers).toHaveLength(2);
     const householdHeaders = { ...ownerHeaders, 'x-household-id': householdId };
     const start = weekStartMonday();
-    const end = new Date(Date.parse(`${start}T00:00:00.000Z`) + 6 * 86_400_000)
-      .toISOString()
-      .slice(0, 10);
+    const end = addDays(start, 6);
+    const previousPlan = await seedSmokePlanningContext(
+      page,
+      ownerHeaders,
+      householdHeaders,
+      activeMembers,
+      start
+    );
+    expect(previousPlan.previousWeekEnd).toBe(addDays(start, -1));
     expect(await readCalendarMeals(page, householdHeaders, start, end)).toHaveLength(0);
     phase('calendar-empty');
 

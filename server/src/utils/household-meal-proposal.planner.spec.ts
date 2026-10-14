@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildExpectedMealSlots,
+  buildUnresolvedMealProposal,
   normalizeMealProposal,
   type MealProposalMemberContext
 } from './household-meal-proposal.planner.js';
@@ -268,5 +269,28 @@ describe('household meal proposal planner', () => {
     expect(slots[0]?.participantAliases).toEqual(['P1', 'P2']);
     expect(slots[0]?.aiParticipantAliases).toEqual(['P2']);
     expect(slots[0]?.unresolvedAliases).toEqual(['P1']);
+  });
+
+  it('rejects an empty provider result as incomplete coverage', () => {
+    const members = [member('P1')];
+    const slots = buildExpectedMealSlots('2026-10-12', members);
+
+    expect(() => normalizeMealProposal({ events: [] }, slots, members)).toThrow(
+      'MEAL_PROPOSAL_SLOT_COVERAGE_INVALID'
+    );
+  });
+
+  it('builds non-empty unresolved events locally when no participant is eligible for AI', () => {
+    const members = [
+      member('P1', { unsupportedRestrictions: ['restricción estricta no catalogada'] })
+    ];
+    const slots = buildExpectedMealSlots('2026-10-12', members);
+
+    const result = buildUnresolvedMealProposal(slots);
+
+    expect(result.events).toHaveLength(7);
+    expect(result.events.every((event) => event.status === 'unresolved')).toBe(true);
+    expect(result.events.every((event) => event.participantAliases.length === 1)).toBe(true);
+    expect(() => normalizeMealProposal({ events: [] }, slots, members)).not.toThrow();
   });
 });

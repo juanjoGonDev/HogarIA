@@ -5851,12 +5851,22 @@ hasta confirmación y calcula tareas/compras a partir de los datos reales confir
 recurrencia general del calendario de §12at.
 
 **Estado revalidado (2026-10-14):** UI, propuesta simulada, resolución de gustos blandos, controles de
-alergias, asignaciones, calendario, consumo y compra tienen evidencia sintética en la spec enfocada.
-Se añadió `pnpm run smoke:ai:household-meal`: una ejecución aislada y de solo comidas con dos perfiles
-sintéticos, `weekly_meal_proposal` estricto, una sola completion, contrato de prompt validado sin guardar
-texto y sin confirmar/persistir el calendario. `pnpm run test:config` pasa **70/70**, `pnpm run
-typecheck:e2e` pasa y la E2E sintética existente del planificador pasa **1/1** con SQLite temporal.
-El intento del smoke real se detuvo en el preflight porque WebAPI devolvió readiness **200** pero sesión
-`needs_login`; Playwright no arrancó y no se envió ninguna solicitud al proveedor. La decisión semántica
-del modelo real permanece sin validar. `QA-HOME-MEALS.PLAN.1` sigue abierto hasta que ese único smoke
-termine correctamente; el procedimiento y limitaciones completos constan en la spec enfocada.
+alergias, asignaciones, calendario, consumo y compra tienen evidencia en la spec enfocada. El schema
+estricto de la propuesta exige `events.minItems >= 1` tanto localmente como para el proveedor; cada
+generación adjunta exactamente un `meal-planning-context.json` versionado con perfiles efectivos,
+horarios/turnos, existencias visibles, utensilios disponibles, recetas reutilizables y el último plan
+confirmado anterior. El contexto se limita por hogar/miembros seleccionados, se valida en memoria y no se
+vuelca a logs.
+
+El smoke opt-in `pnpm run smoke:ai:household-meal` pasó tras la reautenticación de WebAPI: una sola
+completion `gpt-5`, HTTP **200** y JSON válido; el proxy verificó el schema no vacío y todo el adjunto
+sintético (dos perfiles, horarios/turnos, despensa, utensilios, receta y plan anterior), sin identidades.
+La E2E aislada probó siete fechas con cobertura de ambos participantes, sin duplicados, al menos un plato
+compartido y calendario objetivo vacío antes/después; no confirmó ni persistió la nueva propuesta. El runner,
+SQLite temporal y token propio quedaron limpios. La E2E sintética de interfaz se adaptó al nuevo adjunto y
+pasa **1/1** en Chromium. Servidor: **1712 passed / 1 skipped**; `test:config` **71/71**; server/E2E
+typecheck, Prettier y `git diff --check` pasan. Cobertura focal de ruta/planificador
+**90,89/78,36/100/94,87 %** y schema **100/100/100/100 %** (sentencias/ramas/funciones/líneas).
+La semántica real solo quedó validada para este caso sintético; no garantiza resultados universales. La
+spec enfocada conserva el procedimiento, evidencia y límites, y sigue siendo la fuente detallada para los
+criterios de HogarIA que aún estén abiertos.

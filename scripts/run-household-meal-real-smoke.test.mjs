@@ -30,8 +30,13 @@ function successfulCall() {
     elapsedMs: 12,
     requestContract: {
       strictJsonSchema: true,
-      noFileOrImageAttachments: true,
-      requiredPromptTermsPresent: true,
+      contextJsonAttachmentCount: 1,
+      contextJsonAttachmentValid: true,
+      memberProfilesValid: true,
+      planningInputsValid: true,
+      previousPlanValid: true,
+      nonEmptyEventsSchemaValid: true,
+      forbiddenIdentityTermsAbsent: true,
       forbiddenPromptTermsAbsent: true
     },
     responseFormat: {
@@ -98,12 +103,9 @@ test('meal-only coordinator spends one strict-schema call, cleans up and reports
       calls.push('proxy');
       assert.equal(input.maxCalls, 1);
       assert.equal(input.expectedSchemaName, AI_LIVE_HOUSEHOLD_MEAL_SCHEMA_NAME);
-      assert.deepEqual(
-        {
-          requiredPromptTerms: input.requiredPromptTerms,
-          forbiddenPromptTerms: input.forbiddenPromptTerms
-        },
-        AI_LIVE_HOUSEHOLD_MEAL_PROMPT_CONTRACT
+      assert.equal(
+        JSON.stringify({ forbiddenPromptTerms: input.forbiddenPromptTerms }),
+        JSON.stringify(AI_LIVE_HOUSEHOLD_MEAL_PROMPT_CONTRACT)
       );
       assert.equal(input.requireReceiptAttachments, undefined);
       return {
@@ -154,8 +156,12 @@ test('meal-only coordinator spends one strict-schema call, cleans up and reports
     scenario: 'household-meal-proposal',
     completions: 1,
     verifiedStrictSchema: true,
-    verifiedTextOnlyPrompt: true,
-    verifiedSoftPreferenceProfiles: true,
+    verifiedNonEmptyEventsSchema: true,
+    verifiedMealContextJson: true,
+    verifiedMemberProfiles: true,
+    verifiedSchedulesAndTurns: true,
+    verifiedPantryUtensilsRecipes: true,
+    verifiedPreviousPlan: true,
     verifiedSyntheticNamesExcluded: true,
     elapsedMs: [12],
     usage: { promptTokens: 40, completionTokens: 80, totalTokens: 120 }
@@ -185,6 +191,43 @@ test('session preflight failure never starts the proxy or isolated application',
   assert.equal(result, 1);
   assert.deepEqual(calls, ['session']);
   assert.match(errors.join('\n'), /WebAPI.*inicies sesión/i);
+});
+
+test('distinguishes a local proxy contract rejection from a provider completion', async () => {
+  const errors = [];
+  const result = await runHouseholdMealRealSmoke({
+    env: { [AI_LIVE_SMOKE_ENV.optIn]: '1', CI: '' },
+    dependencies: {
+      isSuccessfulAiLiveHouseholdMealSmokeResult,
+      prepareExistingAiLiveSmokeSession: async () => ({
+        origin: 'http://127.0.0.1:3001',
+        token: 'synthetic-existing-webapi-token',
+        model: 'gpt-5',
+        cleanup: async () => {}
+      }),
+      createAiLiveProxy: async () => ({
+        clientToken: 'synthetic-local-proxy-token',
+        baseUrl: 'http://127.0.0.1:43210/v1',
+        metrics: { calls: [], requestAttempts: 1, rejectedRequests: 1, failed: true },
+        close: async () => {}
+      }),
+      createAiLiveSmokeRunnerEnvironment: () => ({}),
+      runAiLiveSmokeRunner: async () => ({
+        code: 1,
+        cancelled: false,
+        timedOut: false,
+        runnerCleaned: true
+      })
+    },
+    writeError: (message) => errors.push(message),
+    writeProgress: () => {},
+    writeSuccess: () => assert.fail('A rejected proxy request cannot pass the smoke.')
+  });
+
+  assert.equal(result, 1);
+  assert.match(errors.join('\n'), /rechazó la petición antes de contactar WebAPI/i);
+  assert.match(errors.join('\n'), /ninguna completion/i);
+  assert.equal(errors.join('\n').includes('synthetic-local-proxy-token'), false);
 });
 
 test('a completion that may have succeeded is never accepted after runner or cleanup failure', async () => {

@@ -100,7 +100,7 @@ export const mealProposalEventSchema = z
 /** Structural contract sent to Structured Outputs; cross-event rules are checked locally below. */
 export const mealProposalObjectSchema = z
   .object({
-    events: z.array(mealProposalEventSchema).max(MEAL_PROPOSAL_LIMITS.maxEvents)
+    events: z.array(mealProposalEventSchema).min(1).max(MEAL_PROPOSAL_LIMITS.maxEvents)
   })
   .strict();
 

@@ -95,6 +95,16 @@ describe('meal proposal schema', () => {
     });
   });
 
+  it('rejects an empty proposal in both local validation and the provider contract', () => {
+    expect(mealProposalSchema.safeParse({ events: [] }).success).toBe(false);
+
+    const responseFormat = createMealProposalResponseFormat();
+    const root = responseFormat.json_schema.schema as {
+      properties: { events: Record<string, unknown> };
+    };
+    expect(root.properties.events).toMatchObject({ type: 'array', minItems: 1 });
+  });
+
   it('requires a real ISO calendar date, meal type, and a valid 24-hour HH:mm time or null', () => {
     const validEvent = makeScheduledEvent();
     expect(
@@ -289,6 +299,7 @@ describe('meal proposal schema', () => {
     const root = format.json_schema.schema as { properties: Record<string, unknown> };
     expect(root.properties.events).toMatchObject({
       type: 'array',
+      minItems: 1,
       maxItems: MEAL_PROPOSAL_LIMITS.maxEvents
     });
     const eventProperties = (

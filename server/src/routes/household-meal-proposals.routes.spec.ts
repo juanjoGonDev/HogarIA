@@ -3,6 +3,7 @@ import { ReadableStream } from 'node:stream/web';
 import { Hono } from 'hono';
 import jwt from 'jsonwebtoken';
 import { createMealProposalResponseFormat } from '../schemas/household-meal-proposal.schema.js';
+import { HOUSEHOLD_MEAL_PLANNING_CONTEXT_FILENAME } from '../utils/household-meal-planning-context-attachment.js';
 import type { HouseholdMealProposalProvider } from './household-meal-proposals.routes.js';
 
 process.env.DATABASE_PATH = ':memory:';
@@ -106,6 +107,7 @@ describe('household meal proposal preview route', () => {
     db.prepare('DELETE FROM meals').run();
     db.prepare('DELETE FROM weekly_calendars').run();
     db.prepare('DELETE FROM ingredients').run();
+    db.prepare('DELETE FROM utensils').run();
     db.prepare('DELETE FROM recipes').run();
     db.prepare('UPDATE users SET household_id = NULL').run();
     db.prepare('DELETE FROM household_members').run();
@@ -194,6 +196,20 @@ describe('household meal proposal preview route', () => {
     ).run(id, ownerId, householdId, name, quantity);
   }
 
+  function addUtensil(
+    id: string,
+    ownerId: string,
+    name: string,
+    category: string,
+    householdId: string | null = null,
+    available = true
+  ) {
+    db.prepare(
+      `INSERT INTO utensils (id, user_id, household_id, name, category, available)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(id, ownerId, householdId, name, category, available ? 1 : 0);
+  }
+
   function addRecipe(
     id: string,
     authorId: string,
@@ -257,6 +273,24 @@ describe('household meal proposal preview route', () => {
 
   async function read(response: Response): Promise<ApiResponse> {
     return (await response.json()) as ApiResponse;
+  }
+
+  function readProviderMealContext(providerBody: any): Record<string, any> {
+    const content = providerBody.messages[1].content;
+    expect(Array.isArray(content)).toBe(true);
+    const fileParts = content.filter((part: any) => part.type === 'file');
+    expect(fileParts).toHaveLength(1);
+    expect(fileParts[0].file.filename).toBe(HOUSEHOLD_MEAL_PLANNING_CONTEXT_FILENAME);
+    expect(fileParts[0].file.file_data.startsWith('data:application/json;base64,')).toBe(true);
+    const base64 = fileParts[0].file.file_data.slice('data:application/json;base64,'.length);
+    return JSON.parse(Buffer.from(base64, 'base64').toString('utf8')) as Record<string, any>;
+  }
+
+  function readProviderPrompt(providerBody: any): string {
+    return providerBody.messages[1].content
+      .filter((part: any) => part.type === 'text')
+      .map((part: any) => part.text)
+      .join('\n');
   }
 
   it('returns a private, validated preview with strict JSON schema and no calendar writes', async () => {
@@ -329,7 +363,7 @@ describe('household meal proposal preview route', () => {
     });
     expect(provider).toHaveBeenCalledTimes(1);
     expect(providerBody.response_format).toEqual(createMealProposalResponseFormat());
-    expect(providerBody.messages[1].content).toContain('calabacín');
+    expect(JSON.stringify(readProviderMealContext(providerBody))).toContain('calabacín');
     expect(serializedProviderRequest).not.toContain(planner.membershipId);
     expect(serializedProviderRequest).not.toContain(second.membershipId);
     expect(serializedProviderRequest).not.toContain(excluded.membershipId);
@@ -514,7 +548,8 @@ describe('household meal proposal preview route', () => {
       householdMemberIds: [planner.membershipId, second.membershipId]
     });
     const json = await read(response);
-    const prompt = String(providerBody.messages[1].content);
+    const prompt = readProviderPrompt(providerBody);
+    const context = readProviderMealContext(providerBody);
 
     expect(response.status).toBe(200);
     expect(json.success).toBe(true);
@@ -532,11 +567,16 @@ describe('household meal proposal preview route', () => {
     expect(providerBody.response_format).toEqual(createMealProposalResponseFormat());
     expect(prompt).toContain('Busca primero un plato compartido');
     expect(prompt).not.toContain(promptMarker);
-    expect(prompt.match(/"objectiveSource":"member"/g)).toHaveLength(2);
-    expect(prompt).toContain('PERSONAL_WEIGHT_GOAL_992');
-    expect(prompt).toContain('PERSONAL_MUSCLE_GOAL_992');
-    expect(prompt).toContain('PREFER_LEGUMES_992');
-    expect(prompt).toContain('AVOID_LEGUMES_992');
+    expect(context.household.objective).toBeNull();
+    expect(context.participants).toHaveLength(2);
+    expect(context.participants.map((member: any) => member.effectiveObjective.source)).toEqual([
+      'member',
+      'member'
+    ]);
+    expect(JSON.stringify(context)).toContain('PERSONAL_WEIGHT_GOAL_992');
+    expect(JSON.stringify(context)).toContain('PERSONAL_MUSCLE_GOAL_992');
+    expect(JSON.stringify(context)).toContain('PREFER_LEGUMES_992');
+    expect(JSON.stringify(context)).toContain('AVOID_LEGUMES_992');
     expect(JSON.stringify(json)).not.toContain('HOUSEHOLD_GOAL_ONLY_FOR_NON_OVERRIDES_992');
     expect(db.prepare('SELECT COUNT(*) AS count FROM meals').get()).toEqual({ count: 0 });
   });
@@ -600,11 +640,9 @@ describe('household meal proposal preview route', () => {
       householdMemberIds: [planner.membershipId, inheriting.membershipId]
     });
     const json = await read(response);
-    const prompt = String(providerBody.messages[1].content);
+    const prompt = readProviderPrompt(providerBody);
+    const context = readProviderMealContext(providerBody);
     const serializedProviderRequest = JSON.stringify(providerBody);
-    const participantsJson = prompt
-      .split('Participantes seleccionados (usa únicamente los alias opacos):\n')[1]
-      ?.split('\n\nTurnos que deben quedar resueltos exactamente una vez por participante:')[0];
 
     expect(response.status).toBe(200);
     expect(json.success).toBe(true);
@@ -617,21 +655,20 @@ describe('household meal proposal preview route', () => {
       'una diferencia de gustos entre personas no significa por sí sola que sean incompatibles'
     );
     expect(prompt).toContain('Un disgusto no equivale a alergia/intolerancia');
-    expect(participantsJson).toBeDefined();
-    expect(JSON.parse(participantsJson!)).toMatchObject([
+    expect(context.participants).toMatchObject([
       {
-        participant: 'P1',
-        objectiveSource: 'member',
+        alias: 'P1',
         effectiveObjective: {
+          source: 'member',
           goals: ['weight-loss'],
           notes: 'PERSONAL_OVERRIDE_GOAL_621'
         },
         preferences: { likes: ['PREFER_LEGUMES_621'] }
       },
       {
-        participant: 'P2',
-        objectiveSource: 'household',
+        alias: 'P2',
         effectiveObjective: {
+          source: 'household',
           goals: ['variety'],
           notes: 'SHARED_HOUSEHOLD_GOAL_621'
         },
@@ -717,25 +754,23 @@ describe('household meal proposal preview route', () => {
     });
     const json = await read(response);
     const serializedProviderRequest = JSON.stringify(providerBody);
-    const prompt = String(providerBody.messages[1].content);
-    const participantsJson = prompt
-      .split('Participantes seleccionados (usa únicamente los alias opacos):\n')[1]
-      ?.split('\n\nTurnos que deben quedar resueltos exactamente una vez por participante:')[0];
+    const context = readProviderMealContext(providerBody);
 
     expect(response.status).toBe(200);
     expect(json.success).toBe(true);
-    expect(participantsJson).toBeDefined();
-    expect(JSON.parse(participantsJson!)).toMatchObject([
+    expect(context.participants).toMatchObject([
       {
-        participant: 'P1',
-        schedule: {
+        alias: 'P1',
+        effectiveSchedule: {
+          source: 'member',
           mealTypes: { breakfast: false, lunch: false, snack: false, dinner: true },
           mealTimes: { dinner: '19:30' }
         }
       },
       {
-        participant: 'P2',
-        schedule: {
+        alias: 'P2',
+        effectiveSchedule: {
+          source: 'household',
           mealTypes: { breakfast: false, lunch: true, snack: false, dinner: false },
           mealTimes: { lunch: '13:00' }
         }
@@ -746,7 +781,7 @@ describe('household meal proposal preview route', () => {
     expect(serializedProviderRequest).not.toContain('Private name excluded');
     expect(serializedProviderRequest).not.toContain(excluded.id);
     expect(serializedProviderRequest).not.toContain(excluded.membershipId);
-    expect(serializedProviderRequest).toContain('SHARED_HOUSEHOLD_GOAL_833');
+    expect(context.household.objective.notes).toBe('SHARED_HOUSEHOLD_GOAL_833');
   });
 
   it('uses only the pantry and recipes accessible to the household planner', async () => {
@@ -780,17 +815,376 @@ describe('household meal proposal preview route', () => {
       weekStart: WEEK_START,
       householdMemberIds: [planner.membershipId, second.membershipId]
     });
-    const prompt = String(providerBody.messages[1].content);
+    const context = readProviderMealContext(providerBody);
 
     expect(response.status).toBe(200);
-    expect(prompt).toContain('SHARED_HOME_ITEM');
-    expect(prompt).toContain('PLANNER_PRIVATE_ITEM');
-    expect(prompt).not.toContain('SECOND_PRIVATE_ITEM');
-    expect(prompt).not.toContain('EMPTY_ITEM');
-    expect(prompt).toContain('PLANNER_RECIPE');
-    expect(prompt).toContain('PUBLIC_RECIPE');
-    expect(prompt).not.toContain('SECOND_PRIVATE_RECIPE');
-    expect(prompt).not.toContain('BROKEN_INGREDIENTS_RECIPE');
+    expect(context.pantry.map((item: any) => item.name)).toEqual(
+      expect.arrayContaining(['SHARED_HOME_ITEM', 'PLANNER_PRIVATE_ITEM'])
+    );
+    expect(context.pantry.map((item: any) => item.name)).not.toEqual(
+      expect.arrayContaining(['SECOND_PRIVATE_ITEM', 'EMPTY_ITEM'])
+    );
+    expect(context.recipes.map((recipe: any) => recipe.name)).toEqual(
+      expect.arrayContaining(['PLANNER_RECIPE', 'PUBLIC_RECIPE'])
+    );
+    expect(context.recipes.map((recipe: any) => recipe.name)).not.toEqual(
+      expect.arrayContaining(['SECOND_PRIVATE_RECIPE', 'BROKEN_INGREDIENTS_RECIPE'])
+    );
+  });
+
+  it('bounds every collection and free-text field in the attached context snapshot', async () => {
+    addHousehold('home', true);
+    const planner = addUser('planner', 'home');
+    addAiConfig(planner.id, 'home');
+    const profile = JSON.parse(
+      (
+        db.prepare('SELECT preferences FROM users WHERE id = ?').get(planner.id) as {
+          preferences: string;
+        }
+      ).preferences
+    );
+    profile.taste.likes = Array.from({ length: 65 }, (_, index) => `LIKE_${index}`);
+    db.prepare('UPDATE users SET preferences = ? WHERE id = ?').run(
+      JSON.stringify(profile),
+      planner.id
+    );
+
+    for (let index = 0; index < 101; index += 1) {
+      addIngredient(`ingredient-${index}`, planner.id, `PANTRY_${index}_${'x'.repeat(130)}`);
+      addUtensil(
+        `utensil-${index}`,
+        planner.id,
+        `UTENSIL_${index}_${'y'.repeat(130)}`,
+        'z'.repeat(80)
+      );
+    }
+    db.prepare('UPDATE ingredients SET expiration_date = ? WHERE id = ?').run(
+      `2026-10-14${' '.repeat(1_000_000)}`,
+      'ingredient-0'
+    );
+    addRecipe('long-recipe', planner.id, 'A'.repeat(250), [
+      ...Array.from({ length: 40 }, (_, index) => ({
+        name: `INGREDIENT_${index}_${'z'.repeat(130)}`,
+        quantity: 1,
+        unit: 'g'
+      })),
+      { name: 'invalid quantity', quantity: -1, unit: 'g' }
+    ]);
+    for (let index = 0; index < 30; index += 1) {
+      addRecipe(`recipe-${index}`, planner.id, `RECIPE_${index}`, ['arroz']);
+    }
+
+    let providerBody: any;
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      providerBody = JSON.parse(String(init.body));
+      return new Response(
+        JSON.stringify({
+          choices: [
+            { finish_reason: 'stop', message: { content: JSON.stringify(validProposal(['P1'])) } }
+          ]
+        }),
+        { status: 200 }
+      );
+    });
+
+    const response = await call(planner, {
+      weekStart: WEEK_START,
+      householdMemberIds: [planner.membershipId]
+    });
+    const context = readProviderMealContext(providerBody);
+
+    expect(response.status).toBe(200);
+    expect(context.participants[0].preferences.likes).toHaveLength(60);
+    expect(context.pantry).toHaveLength(100);
+    expect(
+      context.pantry.every((item: any) => item.name.length <= 120 && item.unit.length <= 30)
+    ).toBe(true);
+    expect(
+      context.pantry.find((item: any) => item.name.startsWith('PANTRY_0'))?.expirationDate
+    ).toBeNull();
+    expect(JSON.stringify(context)).not.toContain(' '.repeat(1_000));
+    expect(context.utensils).toHaveLength(100);
+    expect(
+      context.utensils.every((item: any) => item.name.length <= 120 && item.category.length <= 60)
+    ).toBe(true);
+    expect(context.recipes).toHaveLength(30);
+    const boundedRecipe = context.recipes.find((recipe: any) => recipe.name.startsWith('A'));
+    expect(boundedRecipe.name).toHaveLength(200);
+    expect(boundedRecipe.ingredients).toHaveLength(40);
+    expect(boundedRecipe.ingredients.every((item: any) => item.name.length <= 120)).toBe(true);
+    expect(boundedRecipe.ingredients.some((item: any) => item.name === 'invalid quantity')).toBe(
+      false
+    );
+  });
+
+  it('attaches a bounded JSON snapshot of effective household context without private identities', async () => {
+    addHousehold('home', true);
+    const planner = addUser(
+      'planner',
+      'home',
+      { calendar: { edit: true, view: true } },
+      {
+        goals: ['balanced'],
+        goalNotes: '',
+        allergies: ['cacahuete'],
+        likes: ['P1_LIKE'],
+        dislikes: ['P1_DISLIKE']
+      }
+    );
+    const second = addUser(
+      'second',
+      'home',
+      { calendar: { edit: false, view: true } },
+      {
+        goals: ['variety'],
+        goalNotes: 'P2_PERSONAL_OBJECTIVE',
+        allergies: [],
+        likes: ['P2_LIKE'],
+        dislikes: ['P2_DISLIKE']
+      }
+    );
+    const excluded = addUser('excluded', 'home', undefined, {
+      goals: ['weight-gain'],
+      goalNotes: 'EXCLUDED_OBJECTIVE_SECRET',
+      allergies: ['EXCLUDED_ALLERGY_SECRET'],
+      likes: ['EXCLUDED_LIKE_SECRET'],
+      dislikes: []
+    });
+    addAiConfig(planner.id, 'home');
+
+    const householdPreferences = JSON.parse(
+      (
+        db.prepare('SELECT meal_planning_preferences FROM households WHERE id = ?').get('home') as {
+          meal_planning_preferences: string;
+        }
+      ).meal_planning_preferences
+    );
+    householdPreferences.objective = { goals: ['balanced'], notes: 'HOME_OBJECTIVE_CONTEXT' };
+    householdPreferences.mealTypes = {
+      breakfast: false,
+      lunch: true,
+      snack: false,
+      dinner: false
+    };
+    householdPreferences.mealTimes.lunch = '13:00';
+    db.prepare('UPDATE households SET meal_planning_preferences = ? WHERE id = ?').run(
+      JSON.stringify(householdPreferences),
+      'home'
+    );
+    db.prepare('UPDATE household_members SET meal_planning_preferences = ? WHERE id = ?').run(
+      JSON.stringify({
+        goalOverrideEnabled: true,
+        scheduleOverrideEnabled: true,
+        schedule: {
+          mealTypes: { breakfast: false, lunch: true, snack: false, dinner: false },
+          mealTimes: { breakfast: '08:00', lunch: '13:00', snack: '17:00', dinner: '20:00' }
+        }
+      }),
+      second.membershipId
+    );
+
+    addIngredient('shared-item', second.id, 'SHARED_PANTRY_CONTEXT', 'home', 400);
+    addIngredient('private-item', planner.id, 'PLANNER_PRIVATE_PANTRY', null, 2);
+    addIngredient('other-private-item', second.id, 'SECOND_PRIVATE_PANTRY');
+    addIngredient('empty-item', planner.id, 'ZERO_STOCK_CONTEXT', null, 0);
+    addUtensil('shared-utensil', second.id, 'SHARED_POT_CONTEXT', 'cooking', 'home');
+    addUtensil('private-utensil', planner.id, 'PLANNER_PRIVATE_POT', 'cooking');
+    addUtensil('other-private-utensil', second.id, 'SECOND_PRIVATE_POT', 'cooking');
+    addUtensil('unavailable-utensil', second.id, 'UNAVAILABLE_POT', 'cooking', 'home', false);
+    addRecipe('planner-recipe', planner.id, 'PLANNER_RECIPE_CONTEXT', [
+      { name: 'rice', quantity: 80, unit: 'g' }
+    ]);
+    addRecipe(
+      'public-recipe',
+      second.id,
+      'PUBLIC_RECIPE_CONTEXT',
+      [{ name: 'tomato', quantity: 1, unit: 'piece' }],
+      true
+    );
+    addRecipe('private-recipe', second.id, 'SECOND_PRIVATE_RECIPE', ['leche']);
+
+    const previousWeekStart = addDays(WEEK_START, -7);
+    const previousWeekEnd = addDays(previousWeekStart, 6);
+    db.prepare(
+      `INSERT INTO weekly_calendars (id, household_id, user_id, week_start, week_end)
+       VALUES (?, ?, ?, ?, ?)`
+    ).run('previous-calendar', 'home', planner.id, previousWeekStart, previousWeekEnd);
+    db.prepare(
+      `INSERT INTO meals
+        (id, calendar_id, date, meal_type, custom_meal, time, servings,
+         source_proposal_id, proposal_id, recipe_snapshot)
+       VALUES (?, ?, ?, 'lunch', ?, '13:00', ?, ?, ?, ?)`
+    ).run(
+      'previous-meal',
+      'previous-calendar',
+      addDays(previousWeekStart, 2),
+      'SMOKE_PREVIOUS_MEAL',
+      2,
+      'previous-proposal:previous-meal',
+      'previous-proposal',
+      JSON.stringify({
+        name: 'SMOKE_PREVIOUS_MEAL',
+        description: 'Una receta anterior.',
+        baseServings: 1,
+        times: { prepTimeMinutes: 10, cookTimeMinutes: 20 },
+        ingredients: [{ name: 'garbanzos', quantity: 80, unit: 'g' }],
+        instructions: ['Cocer.']
+      })
+    );
+    db.prepare('INSERT INTO meal_participants (meal_id, user_id) VALUES (?, ?)').run(
+      'previous-meal',
+      planner.id
+    );
+    db.prepare('INSERT INTO meal_participants (meal_id, user_id) VALUES (?, ?)').run(
+      'previous-meal',
+      excluded.id
+    );
+    db.prepare(
+      `INSERT INTO meals
+        (id, calendar_id, date, meal_type, custom_meal, time, servings,
+         source_proposal_id, proposal_id, recipe_snapshot)
+       VALUES (?, ?, ?, 'dinner', ?, '20:00', 1, ?, ?, ?)`
+    ).run(
+      'excluded-previous-meal',
+      'previous-calendar',
+      addDays(previousWeekStart, 2),
+      'EXCLUDED_PREVIOUS_MEAL_SECRET',
+      'previous-proposal:excluded-meal',
+      'previous-proposal',
+      JSON.stringify({ name: 'EXCLUDED_PREVIOUS_MEAL_SECRET', ingredients: [] })
+    );
+    db.prepare('INSERT INTO meal_participants (meal_id, user_id) VALUES (?, ?)').run(
+      'excluded-previous-meal',
+      excluded.id
+    );
+
+    let providerBody: any;
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      providerBody = JSON.parse(String(init.body));
+      return new Response(
+        JSON.stringify({
+          choices: [
+            { finish_reason: 'stop', message: { content: JSON.stringify(validProposal()) } }
+          ]
+        }),
+        { status: 200 }
+      );
+    });
+
+    const response = await call(planner, {
+      weekStart: WEEK_START,
+      householdMemberIds: [planner.membershipId, second.membershipId]
+    });
+    const json = await read(response);
+    expect(providerBody, JSON.stringify(json)).toBeDefined();
+    const context = readProviderMealContext(providerBody);
+    const serializedContext = JSON.stringify(context);
+    const textParts = providerBody.messages[1].content.filter((part: any) => part.type === 'text');
+
+    expect(response.status).toBe(200);
+    expect(providerBody.response_format).toEqual(createMealProposalResponseFormat());
+    expect(providerBody.response_format.json_schema.schema.properties.events.minItems).toBe(1);
+    expect(textParts).toHaveLength(1);
+    expect(textParts[0].text).toContain('meal-planning-context.json');
+    expect(context).toMatchObject({
+      version: 1,
+      targetWeek: { startDate: WEEK_START, endDate: addDays(WEEK_START, 6) },
+      household: {
+        objective: { goals: ['balanced'], notes: 'HOME_OBJECTIVE_CONTEXT' },
+        schedule: {
+          mealTypes: { breakfast: false, lunch: true, snack: false, dinner: false },
+          mealTimes: { breakfast: '08:00', lunch: '13:00', snack: '17:00', dinner: '20:00' }
+        }
+      },
+      participants: [
+        {
+          alias: 'P1',
+          preferences: {
+            strictAllergies: ['cacahuete'],
+            likes: ['P1_LIKE'],
+            dislikes: ['P1_DISLIKE']
+          },
+          effectiveObjective: { source: 'household', goals: ['balanced'] },
+          effectiveSchedule: { source: 'household' }
+        },
+        {
+          alias: 'P2',
+          preferences: { likes: ['P2_LIKE'], dislikes: ['P2_DISLIKE'] },
+          effectiveObjective: {
+            source: 'member',
+            goals: ['variety'],
+            notes: 'P2_PERSONAL_OBJECTIVE'
+          },
+          effectiveSchedule: { source: 'member' }
+        }
+      ],
+      previousConfirmedPlan: expect.objectContaining({
+        weekStart: previousWeekStart,
+        weekEnd: previousWeekEnd
+      })
+    });
+    expect(context.participants).toHaveLength(2);
+    expect(context.requiredTurns).toHaveLength(7);
+    expect(context.requiredTurns).toContainEqual({
+      date: WEEK_START,
+      mealType: 'lunch',
+      time: '13:00',
+      eligibleParticipants: ['P1', 'P2']
+    });
+    expect(context.pantry).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'SHARED_PANTRY_CONTEXT', quantity: 400 }),
+        expect.objectContaining({ name: 'PLANNER_PRIVATE_PANTRY', quantity: 2 })
+      ])
+    );
+    expect(context.utensils).toEqual(
+      expect.arrayContaining([
+        { name: 'SHARED_POT_CONTEXT', category: 'cooking' },
+        { name: 'PLANNER_PRIVATE_POT', category: 'cooking' }
+      ])
+    );
+    expect(context.recipes.map((recipe: any) => recipe.name)).toEqual(
+      expect.arrayContaining(['PLANNER_RECIPE_CONTEXT', 'PUBLIC_RECIPE_CONTEXT'])
+    );
+    expect(context.previousConfirmedPlan.events).toContainEqual(
+      expect.objectContaining({
+        date: addDays(previousWeekStart, 2),
+        mealType: 'lunch',
+        time: '13:00',
+        servings: 2,
+        participants: ['P1'],
+        recipe: expect.objectContaining({
+          name: 'SMOKE_PREVIOUS_MEAL',
+          ingredients: [{ name: 'garbanzos', quantity: 80, unit: 'g' }]
+        })
+      })
+    );
+    expect(serializedContext).not.toContain('EXCLUDED_PREVIOUS_MEAL_SECRET');
+    expect(context.pantry.map((item: any) => item.name)).not.toEqual(
+      expect.arrayContaining(['SECOND_PRIVATE_PANTRY', 'ZERO_STOCK_CONTEXT'])
+    );
+    expect(context.utensils.map((item: any) => item.name)).not.toEqual(
+      expect.arrayContaining(['SECOND_PRIVATE_POT', 'UNAVAILABLE_POT'])
+    );
+    expect(context.recipes.map((item: any) => item.name)).not.toEqual(
+      expect.arrayContaining(['SECOND_PRIVATE_RECIPE'])
+    );
+    for (const privateIdentity of [
+      planner.id,
+      planner.membershipId,
+      second.id,
+      second.membershipId,
+      excluded.id,
+      excluded.membershipId,
+      'Private name',
+      '@hogaria.test',
+      'EXCLUDED_OBJECTIVE_SECRET',
+      'EXCLUDED_ALLERGY_SECRET',
+      'EXCLUDED_LIKE_SECRET'
+    ]) {
+      expect(serializedContext).not.toContain(privateIdentity);
+    }
+    expect(json.success).toBe(true);
   });
 
   it('rejects stale household context and missing edit permission before provider access', async () => {

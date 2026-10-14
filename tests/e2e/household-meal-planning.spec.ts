@@ -7,8 +7,24 @@ import { expect, test } from './fixtures';
 import { createHousehold } from './helpers/auth';
 
 interface ProviderRequest {
-  messages?: Array<{ role?: string; content?: string }>;
-  response_format?: { type?: string; json_schema?: { name?: string; strict?: boolean } };
+  messages?: Array<{
+    role?: string;
+    content?:
+      | string
+      | Array<{
+          type?: string;
+          text?: string;
+          file?: { filename?: string; file_data?: string };
+        }>;
+  }>;
+  response_format?: {
+    type?: string;
+    json_schema?: {
+      name?: string;
+      strict?: boolean;
+      schema?: { properties?: { events?: { minItems?: number } } };
+    };
+  };
 }
 
 interface ExpectedSlot {
@@ -16,6 +32,33 @@ interface ExpectedSlot {
   mealType: 'breakfast' | 'lunch' | 'snack' | 'dinner';
   time: string;
   eligibleParticipants: string[];
+}
+
+interface ProviderMealContext {
+  version: number;
+  participants: Array<{ alias: string; preferences: unknown }>;
+  requiredTurns: ExpectedSlot[];
+  pantry: Array<{ name: string; quantity: number; unit: string }>;
+  utensils: Array<{ name: string; category: string | null }>;
+  recipes: Array<{ name: string }>;
+  previousConfirmedPlan: unknown;
+}
+
+function readProviderMealContext(request: ProviderRequest): ProviderMealContext | null {
+  const userMessage = request.messages?.find((message) => message.role === 'user');
+  if (!Array.isArray(userMessage?.content)) return null;
+  const files = userMessage.content.filter((part) => part.type === 'file');
+  if (files.length !== 1 || files[0]?.file?.filename !== 'meal-planning-context.json') return null;
+  const fileData = files[0].file?.file_data;
+  const prefix = 'data:application/json;base64,';
+  if (typeof fileData !== 'string' || !fileData.startsWith(prefix)) return null;
+  try {
+    return JSON.parse(
+      Buffer.from(fileData.slice(prefix.length), 'base64').toString('utf8')
+    ) as ProviderMealContext | null;
+  } catch {
+    return null;
+  }
 }
 
 interface CalendarMealProjection {
@@ -95,14 +138,7 @@ test('genera, revisa y confirma comidas con navegación de planificación en esc
     request.on('end', () => {
       const payload = JSON.parse(body) as ProviderRequest;
       providerRequests.push(payload);
-      const prompt = payload.messages?.find((message) => message.role === 'user')?.content ?? '';
-      const marker = 'Turnos que deben quedar resueltos exactamente una vez por participante:\n';
-      const start = prompt.indexOf(marker);
-      const end = prompt.indexOf('\n\nObjetivo común del hogar', start + marker.length);
-      const slots =
-        start >= 0 && end > start
-          ? (JSON.parse(prompt.slice(start + marker.length, end)) as ExpectedSlot[])
-          : [];
+      const slots = readProviderMealContext(payload)?.requiredTurns ?? [];
       const events = slots.flatMap((slot, slotIndex) => {
         const groups =
           slotIndex % 2 === 0
@@ -375,11 +411,31 @@ test('genera, revisa y confirma comidas con navegación de planificación en esc
     expect(providerRequests).toHaveLength(1);
     expect(providerRequests[0]?.response_format).toMatchObject({
       type: 'json_schema',
-      json_schema: { name: 'weekly_meal_proposal', strict: true }
+      json_schema: {
+        name: 'weekly_meal_proposal',
+        strict: true,
+        schema: { properties: { events: { minItems: 1 } } }
+      }
     });
-    const prompt =
-      providerRequests[0]?.messages?.map((message) => message.content ?? '').join('\n') ?? '';
-    expect(prompt).toContain('Turnos que deben quedar resueltos exactamente una vez');
+    const userMessage = providerRequests[0]?.messages?.find((message) => message.role === 'user');
+    const contentParts = Array.isArray(userMessage?.content) ? userMessage.content : [];
+    const textPrompt = contentParts
+      .filter((part) => part.type === 'text')
+      .map((part) => part.text ?? '')
+      .join('\n');
+    const context = readProviderMealContext(providerRequests[0]!);
+    expect(context).not.toBeNull();
+    expect(context).toMatchObject({
+      version: 1,
+      participants: [{ alias: 'P1' }, { alias: 'P2' }],
+      pantry: expect.any(Array),
+      utensils: expect.any(Array),
+      recipes: expect.any(Array)
+    });
+    expect(context?.requiredTurns).toHaveLength(7);
+    expect(context?.requiredTurns.every((slot) => slot.eligibleParticipants.length > 0)).toBe(true);
+    expect(textPrompt).toContain('meal-planning-context.json');
+    const prompt = `${textPrompt}\n${JSON.stringify(context)}`;
     for (const member of activeMembers) {
       expect(prompt).not.toContain(member.name);
       expect(prompt).not.toContain(member.userId);

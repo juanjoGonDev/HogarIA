@@ -140,8 +140,13 @@ export async function runHouseholdMealRealSmoke({
   if (!successful) {
     if (cleanupFailed)
       safeFailure = 'No se pudo verificar la limpieza de los recursos propios del smoke.';
-    else if (calls.length || proxy?.metrics.requestAttempts) {
-      safeFailure = `Smoke no validado tras ${calls.length} completion(s) y ${proxy.metrics.requestAttempts} intento(s); no se reintentará automáticamente para evitar un coste duplicado.`;
+    else if (proxy?.metrics.rejectedRequests > 0 && calls.length === 0) {
+      safeFailure = `El proxy local rechazó la petición antes de contactar WebAPI (${proxy.metrics.rejectedRequests} rechazo(s)); no se registró ninguna completion.`;
+    } else if (calls.length || proxy?.metrics.requestAttempts) {
+      const statuses = calls
+        .map((call) => (Number.isInteger(call.status) ? call.status : 'sin estado'))
+        .join(',');
+      safeFailure = `Smoke no validado tras ${calls.length} completion(s) y ${proxy.metrics.requestAttempts} intento(s) (rechazos locales: ${proxy.metrics.rejectedRequests ?? 0}; HTTP: ${statuses || 'sin respuesta'}); no se reintentará automáticamente para evitar un coste duplicado.`;
     }
     writeError(safeFailure);
     return 1;
@@ -156,8 +161,12 @@ export async function runHouseholdMealRealSmoke({
       scenario: 'household-meal-proposal',
       completions: AI_LIVE_HOUSEHOLD_MEAL_SMOKE_COMPLETION_BUDGET,
       verifiedStrictSchema: true,
-      verifiedTextOnlyPrompt: true,
-      verifiedSoftPreferenceProfiles: true,
+      verifiedNonEmptyEventsSchema: true,
+      verifiedMealContextJson: true,
+      verifiedMemberProfiles: true,
+      verifiedSchedulesAndTurns: true,
+      verifiedPantryUtensilsRecipes: true,
+      verifiedPreviousPlan: true,
       verifiedSyntheticNamesExcluded: true,
       elapsedMs: calls.map((call) => call.elapsedMs),
       ...(usage ? { usage } : {})

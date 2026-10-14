@@ -13,7 +13,7 @@ export interface MealProposalMemberContext {
   alias: string;
   householdMemberId: string;
   userId: string;
-  schedule: MealPlanningSchedule;
+  schedule: MealPlanningSchedule & { source?: 'household' | 'member' };
   goal: MealPlanningObjective;
   goalOverrideEnabled: boolean;
   strictRestrictions: string[];
@@ -199,12 +199,62 @@ export function buildExpectedMealSlots(
   return [...grouped.values()];
 }
 
+/** Build review placeholders locally when every scheduled participant must stay out of AI. */
+export function buildUnresolvedMealProposal(
+  expectedSlots: readonly ExpectedMealSlot[]
+): MealProposal {
+  if (
+    !expectedSlots.length ||
+    expectedSlots.some(
+      (slot) =>
+        slot.aiParticipantAliases.length > 0 ||
+        slot.participantAliases.length === 0 ||
+        slot.unresolvedAliases.length !== slot.participantAliases.length ||
+        slot.participantAliases.some((alias) => !slot.unresolvedAliases.includes(alias))
+    )
+  ) {
+    throw new MealProposalValidationError('MEAL_PROPOSAL_SLOT_ASSIGNMENT_INVALID');
+  }
+
+  const result = mealProposalSchema.safeParse({
+    events: expectedSlots.map((slot) => ({
+      date: slot.date,
+      mealType: slot.mealType,
+      time: slot.time,
+      recipe: null,
+      participantAliases: slot.unresolvedAliases,
+      servings: 0,
+      objectiveSummary: UNRESOLVED_SUMMARY,
+      status: 'unresolved',
+      reason: UNSAFE_REASON
+    }))
+  });
+  if (!result.success) {
+    throw new MealProposalValidationError('MEAL_PROPOSAL_SLOT_ASSIGNMENT_INVALID');
+  }
+  return result.data;
+}
+
 /** Validate the provider's schedule against the resolved household inputs and fail closed. */
 export function normalizeMealProposal(
   value: unknown,
   expectedSlots: readonly ExpectedMealSlot[],
   members: readonly MealProposalMemberContext[]
 ): MealProposal {
+  if (
+    value !== null &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    'events' in value &&
+    Array.isArray(value.events) &&
+    value.events.length === 0
+  ) {
+    if (expectedSlots.some((slot) => slot.aiParticipantAliases.length > 0)) {
+      throw new MealProposalValidationError('MEAL_PROPOSAL_SLOT_COVERAGE_INVALID');
+    }
+    return buildUnresolvedMealProposal(expectedSlots);
+  }
+
   const parsed = mealProposalSchema.safeParse(value);
   if (!parsed.success)
     throw new MealProposalValidationError('MEAL_PROPOSAL_SLOT_ASSIGNMENT_INVALID');
