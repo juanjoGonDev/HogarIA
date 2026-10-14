@@ -5490,6 +5490,14 @@ La edición permite corregir los datos existentes completos sin regenerar ni dup
 
 **Límites/decisiones:** Commons es la única fuente inicial de fotos/vídeos por atribución/licencia. La IA solo genera la propuesta culinaria mediante el contrato estricto compartido; no se inventa ni se genera media con el endpoint de texto. Búsqueda de medios y aplicación de propuesta son independientes de Guardar; nadie pierde el borrador si el proveedor externo falla.
 
+### QA-SHELL.MOBILE-SIDEBAR-ONLY.1 — navegación móvil con menú lateral
+
+**Decisión de producto revalidada (2026-10-14):** el usuario pidió retirar la barra inferior en todas las vistas para ganar espacio y dejar solo el menú lateral. La sesión actual en móvil aún muestra esa barra (observado en `/recipes?recipe=recipe-catalog-es-tortilla-patatas`, viewport 384×844); no está resuelto. En móvil, el encabezado mantiene el botón de menú y abre el mismo menú lateral compartido; el menú inferior no se renderiza en ninguna ruta. En escritorio se conserva la barra lateral permanente.
+
+- [ ] Retirar la navegación inferior global en móvil sin reducir accesibilidad ni dejar rutas principales ocultas; el menú lateral abre/cierra por teclado/tacto, expone ruta activa, cierra tras navegar y devuelve foco al botón al cerrarse. Desktop/sidebar no cambia.
+- [ ] Revisar todas las familias de rutas afectadas por el shell compartido (inicio, inventario, recetas, calendario, compra, tickets, hogar y ajustes) en móvil estrecho/normal y horizontal; validar safe-area, scroll, foco/teclado y que ningún CTA persistente queda oculto/solapado.
+- [ ] Playwright con datos sintéticos valida menú lateral y ausencia de barra inferior en la matriz de rutas; guardar capturas comparables PC/móvil y medir geometría de elementos equivalentes a tolerancia ≤1 CSS px. a11y/i18n, check-ui, builds y coverage focal ≥70 % S/B/F/L; no rebajar gates.
+
 ### QA-PRODUCT.IMAGES.1
 
 - [x] Al agregar un producto al inventario (alta directa, catálogo, confirmación de ticket y completar compra), iniciar búsqueda de imagen en segundo plano sin bloquear la operación y respetando la cola/concurrencia del proveedor compartido.
