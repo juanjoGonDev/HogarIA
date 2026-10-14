@@ -96,6 +96,25 @@ describe('RecipeEditComponent', () => {
     }).compileComponents();
   });
 
+  it('does not cap recipe name, description or cuisine by character count', async () => {
+    routeParams.next(convertToParamMap({}));
+    const fixture = TestBed.createComponent(RecipeEditComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const name = fixture.nativeElement.querySelector('#editor-name') as HTMLInputElement;
+    const description = fixture.nativeElement.querySelector(
+      '#editor-description'
+    ) as HTMLTextAreaElement;
+    const cuisine = fixture.nativeElement.querySelector('#editor-cuisine') as HTMLInputElement;
+    for (const field of [name, description, cuisine]) {
+      expect(field.getAttribute('maxlength')).toBeNull();
+    }
+
+    fixture.destroy();
+  });
+
   it('opens a blank create draft without fetching or creating until explicit save', async () => {
     routeParams.next(convertToParamMap({}));
     const fixture = TestBed.createComponent(RecipeEditComponent);

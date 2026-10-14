@@ -100,7 +100,7 @@ describe('generatedRecipeCandidateSchema', () => {
     ).toBe(true);
   });
 
-  it('requires an explicit nullable batch-cooking decision with bounded text', () => {
+  it('requires an explicit nullable batch-cooking decision without a character cap', () => {
     const { batchCookingWarning: _warning, ...guidanceWithoutWarning } = validCandidate.guidance;
     expect(
       generatedRecipeCandidateSchema.safeParse({
@@ -117,9 +117,9 @@ describe('generatedRecipeCandidateSchema', () => {
     expect(
       generatedRecipeCandidateSchema.safeParse({
         ...validCandidate,
-        guidance: { ...validCandidate.guidance, batchCookingWarning: 't'.repeat(501) }
+        guidance: { ...validCandidate.guidance, batchCookingWarning: 't'.repeat(2_001) }
       }).success
-    ).toBe(false);
+    ).toBe(true);
     expect(
       generatedRecipeCandidateSchema.parse({
         ...validCandidate,
@@ -129,6 +129,54 @@ describe('generatedRecipeCandidateSchema', () => {
         }
       }).guidance.batchCookingWarning
     ).toBe('Dora en tandas pequeñas.');
+  });
+
+  it('accepts long text throughout the canonical AI recipe output', () => {
+    const longText = 'x'.repeat(2_501);
+    const longCandidate = {
+      ...validCandidate,
+      name: longText,
+      description: longText,
+      cuisine: longText,
+      ingredients: [
+        {
+          ...validCandidate.ingredients[0],
+          name: longText,
+          preparation: longText,
+          substitutes: [longText],
+          notes: longText
+        }
+      ],
+      utensils: [longText],
+      guidance: {
+        appliances: [longText],
+        parallelTasks: [longText],
+        tipsAndVariations: [longText],
+        batchCookingWarning: longText
+      },
+      instructionsByLevel: Object.fromEntries(
+        Object.entries(validCandidate.instructionsByLevel).map(([level, steps]) => [
+          level,
+          steps.map((step) => ({
+            ...step,
+            instruction: longText,
+            tips: longText,
+            warning: longText
+          }))
+        ])
+      ),
+      storage: {
+        method: longText,
+        duration: longText,
+        reheatingInstructions: longText,
+        container: longText,
+        freezingPossible: true,
+        freezingDuration: longText
+      },
+      tags: [longText]
+    };
+
+    expect(generatedRecipeCandidateSchema.safeParse(longCandidate).success).toBe(true);
   });
 
   it('exige illustration null y rechaza recursos visuales devueltos por el modelo', () => {

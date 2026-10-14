@@ -2,6 +2,7 @@ import { Hono, type Context } from 'hono';
 import { nanoid } from 'nanoid';
 import { getDatabase } from '../config/database.js';
 import { authMiddleware } from '../middleware/auth.middleware.js';
+import { recipeContentBodyLimit } from '../middleware/recipe-content-body-limit.middleware.js';
 import {
   createAiConfigSchema,
   updateAiConfigSchema,
@@ -856,7 +857,7 @@ aiRoutes.post('/generate-recipe', async (c) => {
 });
 
 // POST /api/ai/improve-recipe. Returns a proposal only; recipe edits are never persisted here.
-aiRoutes.post('/improve-recipe', async (c) => {
+aiRoutes.post('/improve-recipe', recipeContentBodyLimit(), async (c) => {
   const userId = c.get('userId');
   const body = await c.req.json();
   const input = improveRecipeRequestSchema.parse(body);

@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { createHash } from 'node:crypto';
 import { ReadableStream } from 'node:stream/web';
 import { recipeStepVideoProvider } from '../utils/recipe-step-videos.js';
+import { MAX_RECIPE_CONTENT_REQUEST_BYTES } from '../middleware/recipe-content-body-limit.middleware.js';
 
 process.env.DATABASE_PATH = ':memory:';
 process.env.NODE_ENV = 'test';
@@ -102,6 +103,75 @@ beforeEach(() => {
 afterAll(() => closeDatabase?.());
 
 describe('POST /api/recipes recipe instruction storage', () => {
+  it('bounds total JSON bytes on recipe creation and editing', async () => {
+    const longBody = 'x'.repeat(MAX_RECIPE_CONTENT_REQUEST_BYTES + 1);
+    const [created, edited] = await Promise.all([
+      call('POST', '', { name: longBody }),
+      call('PATCH', '/missing-recipe', { description: longBody })
+    ]);
+
+    expect([created.status, edited.status]).toEqual([413, 413]);
+    expect(created.payload.code).toBe('RECIPE_CONTENT_BODY_TOO_LARGE');
+    expect(edited.payload.code).toBe('RECIPE_CONTENT_BODY_TOO_LARGE');
+  });
+
+  it('persists and reloads recipe content longer than the former character caps', async () => {
+    const longText = 'x'.repeat(2_501);
+    const created = await call('POST', '', {
+      name: longText,
+      description: longText,
+      cuisine: longText,
+      ingredients: [
+        {
+          name: longText,
+          quantity: 1,
+          unit: 'g',
+          preparation: longText,
+          substitutes: [longText],
+          notes: longText
+        }
+      ],
+      steps: [{ stepNumber: 1, instruction: longText, tips: longText, warning: longText }],
+      guidance: {
+        appliances: [longText],
+        parallelTasks: [longText],
+        tipsAndVariations: [longText],
+        batchCookingWarning: longText
+      },
+      storage: {
+        method: longText,
+        duration: longText,
+        reheatingInstructions: longText,
+        container: longText,
+        freezingPossible: true,
+        freezingDuration: longText
+      },
+      tags: [longText]
+    });
+    const recipeId = created.payload.data.id as string;
+    const loaded = await call('GET', `/${recipeId}`);
+
+    expect(created.status).toBe(201);
+    expect(loaded.status).toBe(200);
+    expect(loaded.payload.data).toMatchObject({
+      name: longText,
+      description: longText,
+      cuisine: longText,
+      ingredients: [
+        {
+          name: longText,
+          preparation: longText,
+          substitutes: [longText],
+          notes: longText
+        }
+      ],
+      steps: [{ instruction: longText, tips: longText, warning: longText }],
+      guidance: { batchCookingWarning: longText },
+      storage: { method: longText, reheatingInstructions: longText },
+      tags: [longText]
+    });
+  });
+
   it('searches without a draft recipe id, persists only a validated video id and plays after cache loss', async () => {
     const mediaUrl =
       'https://upload.wikimedia.org/wikipedia/commons/transcoded/a/ab/Chop.webm/Chop.webm.360p.vp9.webm';

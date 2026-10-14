@@ -48,6 +48,62 @@ describe('createRecipeSchema instrucciones', () => {
   });
 });
 
+describe('textos largos de receta', () => {
+  it('acepta contenido superior a los antiguos límites durante alta y edición', () => {
+    const longText = 'x'.repeat(2_501);
+    const longStep = { stepNumber: 1, instruction: longText, tips: longText, warning: longText };
+    const longGuidance = {
+      appliances: [longText],
+      parallelTasks: [longText],
+      tipsAndVariations: [longText],
+      batchCookingWarning: longText
+    };
+    const longStorage = {
+      method: longText,
+      duration: longText,
+      reheatingInstructions: longText,
+      container: longText,
+      freezingPossible: true,
+      freezingDuration: longText
+    };
+    const longRecipe = {
+      ...baseRecipe,
+      name: longText,
+      description: longText,
+      cuisine: longText,
+      ingredients: [
+        {
+          name: longText,
+          quantity: 1,
+          unit: 'g',
+          preparation: longText,
+          substitutes: [longText],
+          notes: longText
+        }
+      ],
+      utensils: [longText],
+      steps: [longStep],
+      guidance: longGuidance,
+      storage: longStorage,
+      tags: [longText]
+    };
+
+    expect(createRecipeSchema.safeParse(longRecipe).success).toBe(true);
+    expect(
+      updateRecipeSchema.safeParse({
+        name: longText,
+        description: longText,
+        cuisine: longText,
+        ingredients: longRecipe.ingredients,
+        steps: [longStep],
+        guidance: longGuidance,
+        storage: longStorage,
+        tags: [longText]
+      }).success
+    ).toBe(true);
+  });
+});
+
 describe('updateRecipeSchema para el editor dedicado', () => {
   it('admite actualizar parcialmente los campos editables y cualquiera de las dos formas de pasos', () => {
     expect(updateRecipeSchema.safeParse({ description: 'Descripción nueva' }).success).toBe(true);

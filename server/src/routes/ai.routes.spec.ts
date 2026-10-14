@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Hono } from 'hono';
 import jwt from 'jsonwebtoken';
+import { MAX_RECIPE_CONTENT_REQUEST_BYTES } from '../middleware/recipe-content-body-limit.middleware.js';
 
 /**
  * Las rutas de configuracion de IA (revision de la ## 8f a peticion del usuario): la prueba de
@@ -2109,6 +2110,99 @@ describe('POST /recommendations y /plan-week', () => {
   });
 
   describe('POST /improve-recipe', () => {
+    it('enforces a byte ceiling without invoking the provider', async () => {
+      await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
+      const requests = stubRecipeProvider();
+      const response = await call(alice, 'POST', '/improve-recipe', {
+        recipe: { description: 'x'.repeat(MAX_RECIPE_CONTENT_REQUEST_BYTES + 1) },
+        scopes: ['details']
+      });
+
+      expect(response.status).toBe(413);
+      expect(await json(response)).toMatchObject({
+        success: false,
+        code: 'RECIPE_CONTENT_BODY_TOO_LARGE'
+      });
+      expect(requests).toHaveLength(0);
+    });
+
+    it('accepts long recipe input and validates equally long canonical AI output', async () => {
+      await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
+      const longText = 'x'.repeat(2_501);
+      const longRecipe = {
+        ...recetaGenerada,
+        name: longText,
+        description: longText,
+        cuisine: longText,
+        ingredients: [
+          {
+            ...recetaGenerada.ingredients[0],
+            name: longText,
+            preparation: longText,
+            substitutes: [longText],
+            notes: longText
+          }
+        ],
+        utensils: [longText],
+        guidance: {
+          appliances: [longText],
+          parallelTasks: [longText],
+          tipsAndVariations: [longText],
+          batchCookingWarning: longText
+        },
+        instructionsByLevel: Object.fromEntries(
+          Object.entries(recetaGenerada.instructionsByLevel).map(([level, steps]) => [
+            level,
+            steps.map((step) => ({
+              ...step,
+              instruction: longText,
+              tips: longText,
+              warning: longText
+            }))
+          ])
+        ),
+        storage: {
+          method: longText,
+          duration: longText,
+          reheatingInstructions: longText,
+          container: longText,
+          freezingPossible: true,
+          freezingDuration: longText
+        },
+        tags: [longText]
+      };
+      const requests = stubRecipeProvider(
+        () =>
+          new Response(
+            JSON.stringify({ choices: [{ message: { content: JSON.stringify(longRecipe) } }] }),
+            { status: 200 }
+          )
+      );
+
+      const response = await call(alice, 'POST', '/improve-recipe', {
+        recipe: longRecipe,
+        scopes: ['details']
+      });
+      const result = await json(response);
+      const providerBody = JSON.parse(requests[0].body);
+
+      expect(response.status).toBe(200);
+      expect(providerBody.response_format).toEqual(
+        (await import('../schemas/ai-generated-output.schema.js')).RECIPE_RESPONSE_FORMAT
+      );
+      expect(providerBody.messages[1].content).toContain(longText);
+      expect(result.data.proposal).toMatchObject({
+        name: longText,
+        description: longText,
+        ingredients: [{ name: longText, preparation: longText }],
+        instructionsByLevel: { basic: [{ instruction: longText, tips: longText }] },
+        guidance: { batchCookingWarning: longText },
+        storage: { reheatingInstructions: longText },
+        tags: [longText]
+      });
+      expect(recipeCount()).toBe(0);
+    });
+
     it('usa contrato estricto y devuelve patch solo con ámbitos pedidos', async () => {
       await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
       const proposal = {

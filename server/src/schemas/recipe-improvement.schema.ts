@@ -14,13 +14,13 @@ export type RecipeImproveScope = z.infer<typeof recipeImproveScopeSchema>;
 
 const ingredientSchema = z
   .object({
-    name: z.string().trim().min(1).max(120),
+    name: z.string().trim().min(1),
     quantity: z.number().finite().positive().max(1_000_000),
     unit: z.enum(['g', 'kg', 'ml', 'l', 'cup', 'tbsp', 'tsp', 'unit', 'bunch', 'slice', 'piece']),
-    preparation: z.string().trim().max(500).nullable().optional(),
+    preparation: z.string().trim().nullable().optional(),
     isOptional: z.boolean().optional(),
-    substitutes: z.array(z.string().trim().min(1).max(200)).max(10).optional(),
-    notes: z.string().trim().max(500).nullable().optional()
+    substitutes: z.array(z.string().trim().min(1)).max(10).optional(),
+    notes: z.string().trim().nullable().optional()
   })
   .strict();
 
@@ -28,7 +28,7 @@ const ingredientSchema = z
 const editableStepSchema = z
   .object({
     stepNumber: z.number().int().positive(),
-    instruction: z.string().trim().min(1).max(2_000),
+    instruction: z.string().trim().min(1),
     duration: z.number().int().positive().max(1_440).nullable().optional(),
     temperature: z
       .object({ value: z.number().finite(), unit: z.enum(['C', 'F']) })
@@ -37,8 +37,8 @@ const editableStepSchema = z
       .optional(),
     timerRequired: z.boolean().optional(),
     timerDuration: z.number().int().positive().max(1_440).nullable().optional(),
-    tips: z.string().trim().max(500).nullable().optional(),
-    warning: z.string().trim().max(500).nullable().optional(),
+    tips: z.string().trim().nullable().optional(),
+    warning: z.string().trim().nullable().optional(),
     // The shared recipe contract requires null here; URLs and other media stay forbidden.
     illustration: z.null().optional()
   })
@@ -46,10 +46,10 @@ const editableStepSchema = z
 
 const editableGuidanceSchema = z
   .object({
-    appliances: z.array(z.string().trim().min(1).max(120)).max(10),
-    parallelTasks: z.array(z.string().trim().min(1).max(500)).max(10),
-    tipsAndVariations: z.array(z.string().trim().min(1).max(500)).max(10),
-    batchCookingWarning: z.string().trim().min(1).max(500).nullable()
+    appliances: z.array(z.string().trim().min(1)).max(10),
+    parallelTasks: z.array(z.string().trim().min(1)).max(10),
+    tipsAndVariations: z.array(z.string().trim().min(1)).max(10),
+    batchCookingWarning: z.string().trim().min(1).nullable()
   })
   .strict();
 
@@ -68,22 +68,22 @@ const editableNutritionSchema = z
 
 const editableStorageSchema = z
   .object({
-    method: z.string().trim().min(1).max(200),
-    duration: z.string().trim().min(1).max(100),
-    reheatingInstructions: z.string().trim().max(500).nullable(),
-    container: z.string().trim().max(200).nullable(),
+    method: z.string().trim().min(1),
+    duration: z.string().trim().min(1),
+    reheatingInstructions: z.string().trim().nullable(),
+    container: z.string().trim().nullable(),
     freezingPossible: z.boolean(),
-    freezingDuration: z.string().trim().max(100).nullable()
+    freezingDuration: z.string().trim().nullable()
   })
   .strict()
   .nullable();
 
 const editableRecipeBaseSchema = z
   .object({
-    name: z.string().trim().min(1).max(200),
-    description: z.string().trim().max(1_000).nullable().optional(),
+    name: z.string().trim().min(1),
+    description: z.string().trim().nullable().optional(),
     difficulty: z.enum(['easy', 'medium', 'hard']),
-    cuisine: z.string().trim().max(50).nullable().optional(),
+    cuisine: z.string().trim().nullable().optional(),
     totalTime: z.number().int().positive().max(1_440).optional(),
     prepTime: z.number().int().positive().max(1_440).optional(),
     cookTime: z.number().int().nonnegative().max(1_440).optional(),
@@ -93,11 +93,11 @@ const editableRecipeBaseSchema = z
     baseServings: z.literal(1).optional(),
     calories: z.number().positive().nullable().optional(),
     ingredients: z.array(ingredientSchema).min(1).max(80),
-    utensils: z.array(z.string().trim().min(1).max(120)).max(30).optional(),
+    utensils: z.array(z.string().trim().min(1)).max(30).optional(),
     guidance: editableGuidanceSchema.nullable().optional(),
     nutrition: editableNutritionSchema.optional(),
     storage: editableStorageSchema.optional(),
-    tags: z.array(z.string().trim().min(1).max(50)).max(30).optional()
+    tags: z.array(z.string().trim().min(1)).max(30).optional()
   })
   .strict();
 

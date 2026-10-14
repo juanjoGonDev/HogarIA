@@ -116,7 +116,7 @@ const recipeGuidanceSchema = z
     parallelTasks: z.array(z.string().trim().min(1)).max(10),
     tipsAndVariations: z.array(z.string().trim().min(1)).max(10),
     /** Optional for older saved guidance JSON; generated recipes always provide the explicit decision. */
-    batchCookingWarning: formField(z.string().trim().min(1).max(500))
+    batchCookingWarning: formField(z.string().trim().min(1))
   })
   .strict();
 
@@ -129,10 +129,10 @@ const instructionsByLevelSchema = z
   .strict();
 
 const createRecipeFieldsSchema = z.object({
-  name: z.string().min(1, 'Name is required').max(200),
-  description: formField(z.string().max(1000)),
+  name: z.string().min(1, 'Name is required'),
+  description: formField(z.string()),
   difficulty: formDefault(difficultyEnum, 'medium'),
-  cuisine: formField(z.string().max(50)),
+  cuisine: formField(z.string()),
   countryCode: formField(countryCodeSchema),
   mealType: formDefault(z.array(mealTypeEnum), []),
   totalTime: formField(z.number().int().positive()),

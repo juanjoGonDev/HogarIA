@@ -206,7 +206,6 @@ type RecipeEditorTab =
                 name="name"
                 [(ngModel)]="form.name"
                 required
-                maxlength="120"
               />
             </div>
             <div class="editor-field editor-field--wide">
@@ -217,7 +216,6 @@ type RecipeEditorTab =
                 name="description"
                 [(ngModel)]="form.description"
                 rows="3"
-                maxlength="2000"
               ></textarea>
             </div>
             <div class="editor-field">
@@ -237,7 +235,6 @@ type RecipeEditorTab =
                 class="form-input"
                 name="cuisine"
                 [(ngModel)]="form.cuisine"
-                maxlength="80"
               />
             </div>
             <div class="editor-field">
@@ -1413,8 +1410,15 @@ type RecipeEditorTab =
         font-size: var(--text-sm);
       }
       .recipe-editor__heading .recipe-editor__recipe-name {
+        display: -webkit-box;
+        min-width: 0;
+        max-width: 100%;
+        overflow: hidden;
+        overflow-wrap: anywhere;
         color: var(--text-primary);
         font-weight: var(--font-medium);
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
       }
       .recipe-editor__tabs,
       .recipe-editor__level-tabs {

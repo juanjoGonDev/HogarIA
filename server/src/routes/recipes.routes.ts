@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { nanoid } from 'nanoid';
 import { getDatabase } from '../config/database.js';
 import { authMiddleware } from '../middleware/auth.middleware.js';
+import { recipeContentBodyLimit } from '../middleware/recipe-content-body-limit.middleware.js';
 import { ensureRecipeBookCatalog } from '../utils/recipe-book-seed.js';
 import {
   createRecipeSchema,
@@ -594,7 +595,7 @@ recipeRoutes.get('/:id', async (c) => {
 });
 
 // POST /api/recipes
-recipeRoutes.post('/', async (c) => {
+recipeRoutes.post('/', recipeContentBodyLimit(), async (c) => {
   const userId = c.get('userId');
   const body = await c.req.json();
   const input = createRecipeSchema.parse(body);
@@ -677,7 +678,7 @@ recipeRoutes.post('/', async (c) => {
 });
 
 // PATCH /api/recipes/:id
-recipeRoutes.patch('/:id', async (c) => {
+recipeRoutes.patch('/:id', recipeContentBodyLimit(), async (c) => {
   const id = c.req.param('id');
   const userId = c.get('userId');
   const body = await c.req.json();

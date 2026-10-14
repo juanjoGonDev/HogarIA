@@ -245,6 +245,63 @@ test('la vista dedicada edita todos los campos, conserva el estado personal y no
   }
 });
 
+test('edita y guarda textos de receta largos en escritorio y móvil', async ({ page }, testInfo) => {
+  const isDesktop = testInfo.project.name === 'chromium';
+  const mobileViewports = [
+    { width: 393, height: 852 },
+    { width: 320, height: 700 }
+  ];
+  await page.setViewportSize(isDesktop ? { width: 1440, height: 1000 } : mobileViewports[0]);
+  await stubAutomaticStepPhotos(page);
+  await registerWithHousehold(page, '/recipes', 'recipe-editor-unbounded-text');
+  const recipe = await createSyntheticRecipe(page, detailedFixture);
+  const longText = 'x'.repeat(2_501);
+
+  try {
+    await openEditor(page, recipe.id);
+    await selectEditorTab(page, 'Datos');
+    await page.locator('#editor-name').fill(longText);
+    await page.locator('#editor-description').fill(longText);
+    await page.locator('#editor-cuisine').fill(longText);
+    await page.getByRole('checkbox', { name: 'Almuerzo' }).check();
+
+    for (const field of ['#editor-name', '#editor-description', '#editor-cuisine']) {
+      expect(await page.locator(field).getAttribute('maxlength')).toBeNull();
+    }
+
+    const viewports = isDesktop ? [{ width: 1440, height: 1000 }] : mobileViewports;
+    for (const viewport of viewports) {
+      await page.setViewportSize(viewport);
+      const geometry = await page.evaluate(() => ({
+        viewportWidth: visualViewport?.width ?? innerWidth,
+        documentWidth: document.documentElement.scrollWidth
+      }));
+      expect(geometry.documentWidth).toBeLessThanOrEqual(geometry.viewportWidth);
+
+      if (viewport.width === (isDesktop ? 1440 : 393)) {
+        await page.locator('#recipe-editor-title').scrollIntoViewIfNeeded();
+        const directory = resolve(process.cwd(), '.e2e-screenshots/recipe-editor');
+        mkdirSync(directory, { recursive: true });
+        await page.screenshot({
+          path: resolve(directory, `unbounded-text-${isDesktop ? 'desktop' : 'mobile'}.png`),
+          animations: 'disabled'
+        });
+      }
+    }
+
+    await page.locator('[data-test="recipe-editor-save"] button').click();
+    await expect(page.locator('[data-test="recipe-detail-page"]')).toBeVisible();
+    const response = await page.request.get(`/api/recipes/${recipe.id}`, {
+      headers: { authorization: `Bearer ${recipe.token}` }
+    });
+    expect(response.ok()).toBe(true);
+    const saved = ((await response.json()) as { data: Record<string, unknown> }).data;
+    expect(saved).toMatchObject({ name: longText, description: longText, cuisine: longText });
+  } finally {
+    await deleteSyntheticRecipe(page, recipe);
+  }
+});
+
 test('pide confirmación al abandonar cambios y conserva el borrador cuando falla el guardado', async ({
   page
 }) => {

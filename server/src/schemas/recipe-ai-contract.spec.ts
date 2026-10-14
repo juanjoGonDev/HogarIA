@@ -23,4 +23,13 @@ describe('shared AI recipe output contract', () => {
 
     expect(proposalFormat.properties.newRecipes.items.properties.recipe).toEqual(recipeFormat);
   });
+
+  it('does not publish arbitrary maxLength caps for recipe text in strict provider schemas', () => {
+    expect(JSON.stringify(RECIPE_RESPONSE_FORMAT.json_schema.schema)).not.toContain('"maxLength"');
+    const weeklySchema = createMealProposalResponseFormat().json_schema.schema as {
+      properties: { newRecipes: { items: { properties: { recipe: unknown } } } };
+    };
+    const weeklyRecipeSchema = weeklySchema.properties.newRecipes.items.properties.recipe;
+    expect(JSON.stringify(weeklyRecipeSchema)).not.toContain('"maxLength"');
+  });
 });
