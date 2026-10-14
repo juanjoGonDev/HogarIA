@@ -616,29 +616,50 @@ type RecipeEditorTab =
                     [(ngModel)]="step.durationText"
                   />
                 </div>
-                <div class="editor-field">
-                  <label [for]="'step-temperature-' + group + '-' + index">{{
-                    'recipes.editor.step_temperature' | t
-                  }}</label>
-                  <div class="editor-inline-inputs">
-                    <input
-                      [id]="'step-temperature-' + group + '-' + index"
-                      class="form-input"
-                      type="number"
-                      step="any"
-                      [name]="'step-temperature-' + group + '-' + index"
-                      [(ngModel)]="step.temperatureText"
-                    />
-                    <app-picker
-                      class="editor-unit"
-                      [options]="temperatureUnitOptions"
-                      [value]="step.temperatureUnit"
-                      [label]="
-                        ('recipes.editor.step_temperature' | t) + ' ' + group + ' ' + (index + 1)
-                      "
-                      (valueChange)="setTemperatureUnit(step, $event)"
-                    />
-                  </div>
+                <div class="editor-field editor-field--wide editor-temperature-field">
+                  <ng-container *ngIf="step.temperatureEnabled; else addTemperature">
+                    <label [for]="'step-temperature-' + group + '-' + index">{{
+                      'recipes.editor.step_temperature' | t
+                    }}</label>
+                    <div class="editor-inline-inputs">
+                      <input
+                        [id]="'step-temperature-' + group + '-' + index"
+                        class="form-input"
+                        type="number"
+                        step="any"
+                        [name]="'step-temperature-' + group + '-' + index"
+                        [(ngModel)]="step.temperatureText"
+                      />
+                      <app-picker
+                        class="editor-unit"
+                        [options]="temperatureUnitOptions"
+                        [value]="step.temperatureUnit"
+                        [label]="
+                          ('recipes.editor.step_temperature' | t) + ' ' + group + ' ' + (index + 1)
+                        "
+                        (valueChange)="setTemperatureUnit(step, $event)"
+                      />
+                      <button
+                        type="button"
+                        class="editor-icon-button"
+                        [attr.data-test]="'step-temperature-remove-' + group + '-' + index"
+                        [attr.aria-label]="'recipes.editor.remove_temperature' | t"
+                        (click)="removeTemperature(step)"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  </ng-container>
+                  <ng-template #addTemperature>
+                    <button
+                      type="button"
+                      class="editor-text-button editor-temperature-add"
+                      [attr.data-test]="'step-temperature-add-' + group + '-' + index"
+                      (click)="enableTemperature(step)"
+                    >
+                      + {{ 'recipes.editor.add_temperature' | t }}
+                    </button>
+                  </ng-template>
                 </div>
                 <label class="editor-check editor-field--wide">
                   <input
@@ -1845,12 +1866,25 @@ type RecipeEditorTab =
       }
       .editor-inline-inputs {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) 72px;
+        grid-template-columns: minmax(0, 1fr) 88px 44px;
         gap: var(--space-2);
       }
       .editor-unit {
         width: 88px;
-        flex: 0 0 88px;
+        min-width: 0;
+      }
+      .editor-temperature-add {
+        justify-self: start;
+        min-height: 44px;
+        padding-inline: var(--space-2);
+      }
+      .editor-temperature-add:hover:not(:disabled) {
+        text-decoration-thickness: 2px;
+      }
+      .editor-temperature-add:focus-visible {
+        border-radius: var(--radius-sm);
+        outline: 2px solid var(--primary);
+        outline-offset: 2px;
       }
       .recipe-editor__actions {
         position: sticky;
@@ -2540,6 +2574,7 @@ export class RecipeEditComponent implements OnInit, OnDestroy {
       durationText: '',
       temperatureText: '',
       temperatureUnit: 'C',
+      temperatureEnabled: false,
       timerRequired: false,
       timerDurationText: '',
       tips: '',
@@ -2605,6 +2640,16 @@ export class RecipeEditComponent implements OnInit, OnDestroy {
 
   setTemperatureUnit(step: RecipeEditorStep, value: string | null): void {
     if (value === 'C' || value === 'F') step.temperatureUnit = value;
+  }
+
+  enableTemperature(step: RecipeEditorStep): void {
+    step.temperatureEnabled = true;
+  }
+
+  removeTemperature(step: RecipeEditorStep): void {
+    step.temperatureEnabled = false;
+    step.temperatureText = '';
+    step.temperatureUnit = 'C';
   }
 
   mealTypeLabel(meal: MealType): string {

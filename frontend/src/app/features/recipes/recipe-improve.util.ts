@@ -428,6 +428,7 @@ export function applyRecipeImprovement(
             durationText: step.duration ?? '',
             temperatureText: step.temperature?.value ?? '',
             temperatureUnit: step.temperature?.unit ?? 'C',
+            temperatureEnabled: step.temperature != null,
             timerRequired: step.timerRequired,
             timerDurationText: step.timerDuration ?? '',
             tips: step.tips ?? '',

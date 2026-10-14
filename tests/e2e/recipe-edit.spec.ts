@@ -1119,6 +1119,68 @@ test('edita una receta histórica sin inventarle niveles de preparación', async
   }
 });
 
+test('el calor es opcional y quitarlo deja el paso guardado sin temperatura', async ({
+  page
+}, testInfo) => {
+  await page.setViewportSize(
+    testInfo.project.name === 'chromium'
+      ? { width: 1440, height: 1000 }
+      : { width: 393, height: 852 }
+  );
+  await registerWithHousehold(page, '/recipes', 'recipe-editor-optional-temperature');
+  const recipe = await createSyntheticRecipe(page, {
+    ...detailedFixture,
+    name: `Receta sin calor QA ${Date.now()}`,
+    instructionsByLevel: {
+      basic: [{ stepNumber: 1, instruction: 'Mezcla y sirve frío.' }],
+      intermediate: [{ stepNumber: 1, instruction: 'Integra los ingredientes y sirve.' }],
+      expert: [{ stepNumber: 1, instruction: 'Combina y presenta al momento.' }]
+    }
+  });
+  const headers = { authorization: `Bearer ${recipe.token}` };
+
+  try {
+    await openEditor(page, recipe.id);
+    await selectEditorTab(page, 'Preparación');
+    await selectInstructionLevel(page, 'Básico');
+    await expect(page.locator('#step-temperature-basic-0')).toHaveCount(0);
+    const addTemperature = page.getByRole('button', { name: /Añadir temperatura/ });
+    await addTemperature.focus();
+    await expect(addTemperature).toBeFocused();
+    await page.keyboard.press('Enter');
+    await page.locator('#step-temperature-basic-0').fill('5');
+    const removeTemperature = page.getByRole('button', {
+      name: 'Quitar temperatura',
+      exact: true
+    });
+    await removeTemperature.focus();
+    await expect(removeTemperature).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('#step-temperature-basic-0')).toHaveCount(0);
+    const screenshotDirectory = resolve(process.cwd(), '.e2e-screenshots/recipe-editor');
+    mkdirSync(screenshotDirectory, { recursive: true });
+    const device = testInfo.project.name === 'chromium' ? 'desktop' : 'mobile';
+    await page
+      .locator('.editor-item.editor-step')
+      .first()
+      .screenshot({
+        path: resolve(screenshotDirectory, `optional-temperature-${device}.png`),
+        animations: 'disabled'
+      });
+    await selectEditorTab(page, 'Datos');
+    await page.getByRole('checkbox', { name: 'Almuerzo' }).check();
+    await page.locator('[data-test="recipe-editor-save"] button').click();
+    await expect(page.locator('[data-test="recipe-detail-page"]')).toBeVisible();
+
+    const response = await page.request.get(`/api/recipes/${recipe.id}`, { headers });
+    const saved = (await response.json()) as { data: Record<string, any> };
+    expect(response.ok()).toBeTruthy();
+    expect(saved.data.instructionsByLevel.basic[0].temperature).toBeUndefined();
+  } finally {
+    await deleteSyntheticRecipe(page, recipe);
+  }
+});
+
 test('the direct editor route preserves shared content geometry at phone and landscape widths', async ({
   page
 }) => {
@@ -1126,18 +1188,54 @@ test('the direct editor route preserves shared content geometry at phone and lan
   await registerWithHousehold(page, '/recipes', 'recipe-editor-responsive');
   const recipe = await createSyntheticRecipe(page, detailedFixture);
   try {
-    await page.goto(`/recipes/${recipe.id}/edit`);
-    await expect(page.locator('[data-test="recipe-editor-form"]')).toBeVisible();
-    for (const [index, viewport] of [
+    for (const viewport of [
       { width: 320, height: 700 },
       { width: 393, height: 852 },
-      { width: 568, height: 320 }
-    ].entries()) {
+      { width: 568, height: 320 },
+      { width: 1440, height: 900 }
+    ]) {
       await page.setViewportSize(viewport);
+      await page.goto(`/recipes/${recipe.id}/edit`);
       await expect(page.locator('[data-test="recipe-editor-form"]')).toBeVisible();
+      await selectEditorTab(page, 'Preparación');
+      await page.getByRole('tab', { name: 'Básico', exact: true }).click();
       const widths = await page.evaluate(() => ({
         body: document.documentElement.clientWidth,
         scroll: document.documentElement.scrollWidth,
+        overflowing: Array.from(document.querySelectorAll<HTMLElement>('body *'))
+          .map((element) => ({
+            tag: element.tagName.toLowerCase(),
+            className: typeof element.className === 'string' ? element.className : '',
+            right: Math.round(element.getBoundingClientRect().right * 100) / 100,
+            left: Math.round(element.getBoundingClientRect().left * 100) / 100
+          }))
+          .filter((element) => element.right > window.innerWidth + 1)
+          .sort((left, right) => right.right - left.right)
+          .slice(0, 12),
+        scrollOverflow: Array.from(document.querySelectorAll<HTMLElement>('body *'))
+          .filter((element) => element.scrollWidth > element.clientWidth + 1)
+          .map((element) => ({
+            tag: element.tagName.toLowerCase(),
+            className: typeof element.className === 'string' ? element.className : '',
+            clientWidth: element.clientWidth,
+            scrollWidth: element.scrollWidth
+          }))
+          .sort(
+            (left, right) =>
+              right.scrollWidth - right.clientWidth - (left.scrollWidth - left.clientWidth)
+          )
+          .slice(0, 12),
+        inlineControls: Array.from(document.querySelectorAll<HTMLElement>('.editor-inline-inputs'))
+          .filter((container) => container.getClientRects().length > 0)
+          .map((container) => {
+            const containerRight = container.getBoundingClientRect().right;
+            return Array.from(container.children).map((child) => ({
+              tag: child.tagName.toLowerCase(),
+              right: child.getBoundingClientRect().right,
+              containerRight
+            }));
+          })
+          .flat(),
         editor: (() => {
           const rect = document.querySelector('.recipe-editor')!.getBoundingClientRect();
           return { left: rect.left, width: rect.width };
@@ -1145,9 +1243,15 @@ test('the direct editor route preserves shared content geometry at phone and lan
       }));
       expect(
         widths.scroll,
-        `sin overflow en ${viewport.width}x${viewport.height}`
+        `sin overflow en ${viewport.width}x${viewport.height}; elementos=${JSON.stringify(widths.scrollOverflow)}`
       ).toBeLessThanOrEqual(widths.body);
       expect(widths.editor.width).toBeLessThanOrEqual(widths.body);
+      for (const control of widths.inlineControls) {
+        expect(
+          control.right,
+          `${control.tag} queda dentro de su fila en ${viewport.width}×${viewport.height}`
+        ).toBeLessThanOrEqual(control.containerRight + 1);
+      }
 
       await page.goto('/recipes');
       await expect(page.locator('[data-test="recipe-list-view"]')).toBeVisible();
@@ -1163,11 +1267,6 @@ test('the direct editor route preserves shared content geometry at phone and lan
         Math.abs(widths.editor.width - list.width),
         `ancho de contenido coherente en ${viewport.width}px`
       ).toBeLessThanOrEqual(1);
-
-      if (index < 2) {
-        await page.goto(`/recipes/${recipe.id}/edit`);
-        await expect(page.locator('[data-test="recipe-editor-form"]')).toBeVisible();
-      }
     }
   } finally {
     await deleteSyntheticRecipe(page, recipe);

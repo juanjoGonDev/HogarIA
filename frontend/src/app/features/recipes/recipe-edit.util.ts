@@ -34,6 +34,7 @@ export interface RecipeEditorStep {
   durationText: string | number;
   temperatureText: string | number;
   temperatureUnit: 'C' | 'F';
+  temperatureEnabled: boolean;
   timerRequired: boolean;
   timerDurationText: string | number;
   tips: string;
@@ -109,6 +110,7 @@ function emptyEditorStep(stepNumber = 1): RecipeEditorStep {
     durationText: '',
     temperatureText: '',
     temperatureUnit: 'C',
+    temperatureEnabled: false,
     timerRequired: false,
     timerDurationText: '',
     tips: '',
@@ -189,6 +191,7 @@ function toEditorStep(step: EditableRecipeStepInput): RecipeEditorStep {
     durationText: optionalNumberText(step.duration),
     temperatureText: optionalNumberText(step.temperature?.value),
     temperatureUnit: step.temperature?.unit ?? 'C',
+    temperatureEnabled: step.temperature != null,
     timerRequired: step.timerRequired ?? false,
     timerDurationText: optionalNumberText(step.timerDuration),
     tips: optionalText(step.tips),

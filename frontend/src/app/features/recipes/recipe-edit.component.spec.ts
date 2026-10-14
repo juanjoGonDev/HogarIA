@@ -121,6 +121,40 @@ describe('RecipeEditComponent', () => {
     fixture.destroy();
   });
 
+  it('omits temperature controls for a step until heat is explicitly added', async () => {
+    routeParams.next(convertToParamMap({}));
+    const fixture = TestBed.createComponent(RecipeEditComponent);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    fixture.componentInstance.setActiveTab('instructions');
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('#step-temperature-basic-0')).toBeNull();
+    const add = fixture.nativeElement.querySelector(
+      '[data-test="step-temperature-add-basic-0"]'
+    ) as HTMLButtonElement;
+    expect(add).not.toBeNull();
+    add.click();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('#step-temperature-basic-0')).not.toBeNull();
+    expect(fixture.componentInstance.draft?.instructionsByLevel?.basic[0].temperatureEnabled).toBe(
+      true
+    );
+
+    const remove = fixture.nativeElement.querySelector(
+      '[data-test="step-temperature-remove-basic-0"]'
+    ) as HTMLButtonElement;
+    remove.click();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('#step-temperature-basic-0')).toBeNull();
+    expect(
+      fixture.componentInstance.draft?.instructionsByLevel?.basic[0].temperatureEnabled
+    ).toBeFalse();
+
+    fixture.destroy();
+  });
+
   it('deduplicates create submits while in flight and keeps creation explicit', async () => {
     routeParams.next(convertToParamMap({}));
     const pending = new Subject<Recipe | null>();
