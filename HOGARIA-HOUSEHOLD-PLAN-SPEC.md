@@ -1532,6 +1532,13 @@ también las condiciones que aún están abiertas.
       autenticada y el único smoke complete. La protección hard (alergia → grupo seguro + unresolved sin
       revelar la causa) sí tiene pruebas. Cobertura actual: planificador **90,48/81,08/92,55/96,2 %** y
       servicio **100/100/100/100 %** (sentencias/ramas/funciones/líneas); el gate por archivo está satisfecho.
+      Revalidación tras el aviso de reautenticación (14-10-2026, UTC): `/health/ready` respondió HTTP 200
+      (`ready=true`, `storage=ready`); la sesión comenzó en `not_checked`. El endpoint
+      `POST /admin/api/chatgpt/session/check` devolvió `needs_login` a las 07:11:51Z: ChatGPT seguía en la
+      ruta de inicio de sesión. `runtime-controls` mostró el navegador manual `stopped` y
+      `authenticationState=unknown`. El control solo comprobó autenticación; no envió una completion. No se
+      inició el smoke, no se creó token y no se enviaron tickets ni perfiles sintéticos; sigue pendiente que
+      el perfil de WebAPI quede autenticado y el único smoke dedicado complete.
 
 - [x] **QA-HOME-MEALS.CALENDAR.1** — persistencia idempotente tras confirmar, calendario actual,
       evento compartido visible una vez a todos los miembros activos con `calendar.view` aunque la comida
