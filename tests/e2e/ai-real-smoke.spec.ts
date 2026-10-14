@@ -47,6 +47,7 @@ const LIVE_TEST_TIMEOUT_MS = smokeLimit('HOGARIA_AI_REAL_SMOKE_TEST_TIMEOUT_MS',
 const LIVE_SMOKE_ENABLED =
   process.env.HOGARIA_AI_REAL_SMOKE === '1' && process.env.HOGARIA_AI_REAL_SMOKE_RUNNER === '1';
 const LIVE_RECEIPTS_ONLY = process.env.HOGARIA_AI_REAL_SMOKE_RECEIPTS_ONLY === '1';
+const LIVE_RECIPE_ONLY = process.env.HOGARIA_AI_REAL_SMOKE_RECIPE_ONLY === '1';
 const LIVE_RECEIPT_SELECTION = process.env.HOGARIA_AI_REAL_SMOKE_RECEIPT_SELECTION;
 const LIVE_SMOKE_PHASE_FILE = process.env.E2E_RUN_DIR
   ? join(process.env.E2E_RUN_DIR, 'ai-live-smoke-phase')
@@ -684,8 +685,8 @@ test('procesa solo los tickets reales seleccionados y verifica la revisión sin 
 
 test('recorre los ocho AiJobKind con WebAPI real y ticket sintético editable', async ({ page }) => {
   test.skip(
-    !LIVE_SMOKE_ENABLED || LIVE_RECEIPTS_ONLY,
-    'El flujo general no corre en el smoke de tickets.'
+    !LIVE_SMOKE_ENABLED || LIVE_RECEIPTS_ONLY || LIVE_RECIPE_ONLY,
+    'El flujo general no corre en los smoke específicos de tickets o receta.'
   );
   test.setTimeout(LIVE_TEST_TIMEOUT_MS);
   page.setDefaultTimeout(LIVE_REQUEST_TIMEOUT_MS);
@@ -1305,6 +1306,71 @@ test('recorre los ocho AiJobKind con WebAPI real y ticket sintético editable', 
       .toMatch(/^review:[1-9]\d*$/);
     reportLiveSmokePhase('real-receipt-extracted');
   }
+});
+
+test('valida una receta sintética con texto sin topes mediante una única petición real', async ({
+  page
+}) => {
+  test.skip(
+    !LIVE_SMOKE_ENABLED || !LIVE_RECIPE_ONLY,
+    'La validación real de receta requiere su opt-in aislado.'
+  );
+  test.setTimeout(LIVE_TEST_TIMEOUT_MS);
+  page.setDefaultTimeout(LIVE_REQUEST_TIMEOUT_MS);
+  reportLiveSmokePhase('recipe-only-register-start');
+  await registerWithHousehold(page, '/recipes', 'ai-live-recipe-only');
+  reportLiveSmokePhase('recipe-only-registered');
+  const token = await authToken(page);
+  await saveLiveAiConfig(page, token);
+
+  reportLiveSmokePhase('recipe-only-request-start');
+  const response = await page.request.post('/api/ai/generate-recipe', {
+    headers: { authorization: `Bearer ${token}` },
+    data: {
+      ingredients: [
+        {
+          id: 'qa-unbounded-recipe-20261014',
+          name: 'Mijo perlado de prueba QA 2026-10-14',
+          quantity: 160,
+          unit: 'g'
+        }
+      ],
+      utensils: [],
+      servings: 2,
+      difficulty: 'easy',
+      detailLevel: 'basic',
+      preferences: ['Petición sintética aislada de validación del contrato de receta.']
+    },
+    timeout: LIVE_REQUEST_TIMEOUT_MS
+  });
+  reportLiveSmokePhase(
+    response.status() === 200
+      ? 'recipe-only-response-ok'
+      : response.status() >= 500
+        ? 'recipe-only-response-server-error'
+        : 'recipe-only-response-other-error'
+  );
+  expect(response.status()).toBe(200);
+  const envelope = (await response.json()) as {
+    success: boolean;
+    data: SmokeRecipe & { selectedDetailLevel: string };
+  };
+  expect(envelope.success).toBe(true);
+  const recipe = envelope.data;
+  expect(recipe.name.trim()).not.toBe('');
+  expect(recipe.description.trim()).not.toBe('');
+  expect(recipe.baseServings).toBe(1);
+  expect(recipe.selectedDetailLevel).toBe('basic');
+  expect(recipe.ingredients.length).toBeGreaterThan(0);
+  expect(recipe.instructionsByLevel.basic.length).toBeGreaterThan(0);
+  expect(recipe.instructionsByLevel.intermediate.length).toBeGreaterThan(0);
+  expect(recipe.instructionsByLevel.expert.length).toBeGreaterThan(0);
+  for (const level of RECIPE_DETAIL_LEVELS) {
+    for (const step of recipe.instructionsByLevel[level]) {
+      expect(step.instruction.trim()).not.toBe('');
+    }
+  }
+  reportLiveSmokePhase('recipe-only-response-validated');
 });
 
 test('cubre los ocho AiJobKind con fixtures de proveedor loopback', async ({ page }) => {

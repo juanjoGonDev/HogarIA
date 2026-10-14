@@ -4,10 +4,13 @@ import {
   AI_LIVE_RECEIPT_SMOKE_TICKET_COUNT,
   AI_LIVE_SMOKE_ENV,
   AI_LIVE_SMOKE_COMPLETION_BUDGET,
+  AI_LIVE_RECIPE_SMOKE_COMPLETION_BUDGET,
+  AI_LIVE_RECIPE_SCHEMA_NAME,
   createAiLiveSmokeRunnerEnvironment,
   createAiLiveProxy,
   isSuccessfulAiLiveSmokeResult,
   validateAiLiveReceiptSmokeRequest,
+  validateAiLiveRecipeSmokeRequest,
   validateAiLiveSmokeOptIn
 } from './ai-live-smoke-safety.mjs';
 import {
@@ -60,6 +63,7 @@ export async function runAiLiveSmoke({
 } = {}) {
   validateAiLiveSmokeOptIn(env);
   const receiptsOnly = validateAiLiveReceiptSmokeRequest(env);
+  const recipeOnly = validateAiLiveRecipeSmokeRequest(env);
   const longTicketOnly =
     env[AI_LIVE_SMOKE_ENV.receiptSelection] === AI_LIVE_RECEIPT_LONG_TICKET_ONLY_SELECTION;
   const preferredJpegOnly =
@@ -77,7 +81,9 @@ export async function runAiLiveSmoke({
       : preferredJpegOnly
         ? AI_LIVE_RECEIPT_PREFERRED_JPEG_ONLY_COMPLETION_BUDGET
         : AI_LIVE_RECEIPT_SMOKE_REQUEST_BUDGET
-    : AI_LIVE_SMOKE_COMPLETION_BUDGET;
+    : recipeOnly
+      ? AI_LIVE_RECIPE_SMOKE_COMPLETION_BUDGET
+      : AI_LIVE_SMOKE_COMPLETION_BUDGET;
   assertAiLiveSmokeDeadlineContract();
   signal?.throwIfAborted();
 
@@ -96,6 +102,7 @@ export async function runAiLiveSmoke({
       targetOrigin: session.origin,
       maxCalls: requestBudget,
       requireReceiptAttachments: receiptsOnly,
+      ...(recipeOnly ? { expectedSchemaName: AI_LIVE_RECIPE_SCHEMA_NAME } : {}),
       ...(receiptsOnly ? { maxRequestBytes: AI_LIVE_RECEIPT_SMOKE_MAX_REQUEST_BYTES } : {}),
       timeoutMs: AI_LIVE_SMOKE_DEADLINES.proxyMs,
       onRequest: ({ ordinal }) => {
@@ -141,7 +148,8 @@ export async function runAiLiveSmoke({
       proxyToken: proxy.clientToken,
       proxyUrl: proxy.baseUrl,
       model: session.model,
-      deadlines: AI_LIVE_SMOKE_DEADLINES
+      deadlines: AI_LIVE_SMOKE_DEADLINES,
+      recipeOnly
     });
     writeProgress('Iniciando los escenarios contra la aplicación aislada.');
     runnerExit = await dependencies.runAiLiveSmokeRunner({
@@ -176,7 +184,9 @@ export async function runAiLiveSmoke({
     cleanupFailed,
     calls,
     receiptsOnly,
-    expectedReceiptTicketCount
+    expectedReceiptTicketCount,
+    recipeOnly,
+    proxyMetrics: proxy?.metrics
   });
   if (!liveSuccess) {
     writeError(
@@ -186,12 +196,29 @@ export async function runAiLiveSmoke({
           ? 'Smoke real cancelado; se intentó cerrar el runner y limpiar los recursos propios.'
           : runnerExit.timedOut
             ? 'Smoke real fallido: se agotó el límite de tiempo; se intentó cerrar y limpiar.'
-            : `Smoke real fallido: resultado del runner=${runnerExit.code}, peticiones=${calls.length}/${requestBudget} (mínimo permitido ${expectedReceiptTicketCount ?? 9}).`
+            : `Smoke real fallido: resultado del runner=${runnerExit.code}, peticiones=${calls.length}/${requestBudget} (mínimo permitido ${recipeOnly ? 1 : (expectedReceiptTicketCount ?? 9)}).`
     );
     return 1;
   }
 
   const usage = safeMetrics(calls);
+  if (recipeOnly) {
+    const call = calls[0];
+    writeSuccess(
+      JSON.stringify({
+        result: 'passed',
+        provider: 'local WebAPI :3001',
+        model: session.model,
+        completions: 1,
+        verifiedStrictJsonSchema: true,
+        verifiedUnboundedRecipeText: true,
+        verifiedValidatedJsonResponse: true,
+        elapsedMs: call.elapsedMs,
+        ...(usage ? { usage } : {})
+      })
+    );
+    return 0;
+  }
   if (receiptsOnly) {
     writeSuccess(
       JSON.stringify({

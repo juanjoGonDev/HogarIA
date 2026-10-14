@@ -31,7 +31,8 @@ export const AI_LIVE_SMOKE_ENV = Object.freeze({
   receiptSelection: 'HOGARIA_AI_REAL_SMOKE_RECEIPT_SELECTION',
   receiptDirectory: 'HOGARIA_AI_REAL_SMOKE_RECEIPT_DIRECTORY',
   preferredJpegOrdinal: 'HOGARIA_AI_REAL_SMOKE_PREFERRED_JPEG_ORDINAL',
-  householdMealOnly: 'HOGARIA_AI_REAL_SMOKE_HOUSEHOLD_MEAL_ONLY'
+  householdMealOnly: 'HOGARIA_AI_REAL_SMOKE_HOUSEHOLD_MEAL_ONLY',
+  recipeOnly: 'HOGARIA_AI_REAL_SMOKE_RECIPE_ONLY'
 });
 
 export const AI_LIVE_SMOKE_KEY_MARKER = '__HOGARIA_AI_REAL_SMOKE_PROVIDER_KEY__';
@@ -43,6 +44,8 @@ export const AI_LIVE_RECEIPT_SMOKE_TICKET_COUNT = AI_LIVE_RECEIPT_UNSUBMITTED_TI
 export const AI_LIVE_RECEIPT_SMOKE_MAX_REQUEST_BYTES = 15 * 1024 * 1024;
 export const AI_LIVE_HOUSEHOLD_MEAL_SMOKE_COMPLETION_BUDGET = 1;
 export const AI_LIVE_HOUSEHOLD_MEAL_SCHEMA_NAME = 'weekly_meal_proposal';
+export const AI_LIVE_RECIPE_SMOKE_COMPLETION_BUDGET = 1;
+export const AI_LIVE_RECIPE_SCHEMA_NAME = 'generated_recipe';
 export const AI_LIVE_HOUSEHOLD_MEAL_CONTEXT_FILENAME = 'meal-planning-context.json';
 export const AI_LIVE_HOUSEHOLD_MEAL_RECIPE_CATALOG_FILENAME = 'household-recipes-catalog.json';
 export const AI_LIVE_HOUSEHOLD_MEAL_PROMPT_CONTRACT = Object.freeze({
@@ -69,6 +72,19 @@ export function validateAiLiveHouseholdMealSmokeRequest(env = process.env) {
   }
   if (RECEIPT_SMOKE_INPUT_KEYS.some((key) => env[key] !== undefined)) {
     throw new Error('Household meal smoke cannot include receipt inputs.');
+  }
+  return true;
+}
+
+export function validateAiLiveRecipeSmokeRequest(env = process.env) {
+  const requested = env[AI_LIVE_SMOKE_ENV.recipeOnly];
+  if (requested === undefined || requested === '0' || requested === '') return false;
+  if (requested !== '1') throw new Error('Recipe-only smoke requires the exact opt-in value.');
+  if (
+    RECEIPT_SMOKE_INPUT_KEYS.some((key) => env[key] !== undefined) ||
+    env[AI_LIVE_SMOKE_ENV.householdMealOnly] === '1'
+  ) {
+    throw new Error('Recipe-only smoke cannot combine with other smoke inputs.');
   }
   return true;
 }
@@ -133,6 +149,10 @@ export function validateAiLiveSmokeRunner(env, args) {
   validateAiLiveSmokeOptIn(env);
   const householdMealOnly = validateAiLiveHouseholdMealSmokeRequest(env);
   validateAiLiveReceiptSmokeRequest(env);
+  const recipeOnly = validateAiLiveRecipeSmokeRequest(env);
+  if (recipeOnly && householdMealOnly) {
+    throw new Error('Recipe-only smoke cannot combine with other smoke inputs.');
+  }
   if (env[AI_LIVE_SMOKE_ENV.providerToken]) {
     throw new Error('The WebAPI bearer must remain in the smoke coordinator process memory.');
   }
@@ -225,6 +245,12 @@ function validStrictResponseFormat(value) {
     strictJsonSchemaNode(format.schema) &&
     format.schema.type === 'object'
   );
+}
+
+function schemaHasMaxLength(value) {
+  if (value === null || typeof value !== 'object') return false;
+  if (Array.isArray(value)) return value.some(schemaHasMaxLength);
+  return Object.hasOwn(value, 'maxLength') || Object.values(value).some(schemaHasMaxLength);
 }
 
 function validMealRecipeAliasSchema(schema) {
@@ -558,6 +584,8 @@ export function isolatedProcessEnvironments(env) {
   delete playwright[AI_LIVE_SMOKE_ENV.providerToken];
   delete server[AI_LIVE_SMOKE_ENV.householdMealOnly];
   delete browser[AI_LIVE_SMOKE_ENV.householdMealOnly];
+  delete server[AI_LIVE_SMOKE_ENV.recipeOnly];
+  delete browser[AI_LIVE_SMOKE_ENV.recipeOnly];
   delete server[AI_LIVE_SMOKE_ENV.receiptPath];
   delete browser[AI_LIVE_SMOKE_ENV.receiptPath];
   for (const key of [
@@ -576,7 +604,14 @@ export function isolatedProcessEnvironments(env) {
 
 export function createAiLiveSmokeRunnerEnvironment(
   parentEnv,
-  { proxyToken, proxyUrl, model, deadlines = AI_LIVE_SMOKE_DEADLINES, householdMealOnly = false }
+  {
+    proxyToken,
+    proxyUrl,
+    model,
+    deadlines = AI_LIVE_SMOKE_DEADLINES,
+    householdMealOnly = false,
+    recipeOnly = false
+  }
 ) {
   assertAiLiveSmokeDeadlineContract(deadlines);
   const allowedInherited = [
@@ -602,7 +637,7 @@ export function createAiLiveSmokeRunnerEnvironment(
   const receiptInputs = new Set(RECEIPT_SMOKE_INPUT_KEYS);
   const env = Object.fromEntries(
     allowedInherited
-      .filter((key) => !householdMealOnly || !receiptInputs.has(key))
+      .filter((key) => !(householdMealOnly || recipeOnly) || !receiptInputs.has(key))
       .filter((key) => typeof parentEnv[key] === 'string')
       .map((key) => [key, parentEnv[key]])
   );
@@ -620,6 +655,7 @@ export function createAiLiveSmokeRunnerEnvironment(
     [AI_LIVE_SMOKE_ENV.testTimeoutMs]: String(deadlines.testMs),
     [AI_LIVE_SMOKE_ENV.globalTimeoutMs]: String(deadlines.globalMs),
     ...(householdMealOnly ? { [AI_LIVE_SMOKE_ENV.householdMealOnly]: '1' } : {}),
+    ...(recipeOnly ? { [AI_LIVE_SMOKE_ENV.recipeOnly]: '1' } : {}),
     E2E_RATE_LIMIT: 'off'
   };
 }
@@ -629,8 +665,13 @@ export function isSuccessfulAiLiveSmokeResult({
   cleanupFailed,
   calls,
   receiptsOnly = false,
-  expectedReceiptTicketCount = AI_LIVE_RECEIPT_SMOKE_TICKET_COUNT
+  expectedReceiptTicketCount = AI_LIVE_RECEIPT_SMOKE_TICKET_COUNT,
+  recipeOnly = false,
+  proxyMetrics
 }) {
+  if (recipeOnly) {
+    return isSuccessfulAiLiveRecipeSmokeResult({ runnerExit, cleanupFailed, calls, proxyMetrics });
+  }
   if (receiptsOnly) {
     const validReceiptRun = isSuccessfulReceiptOnlyRun(calls, expectedReceiptTicketCount);
     return (
@@ -674,6 +715,34 @@ export function isSuccessfulAiLiveSmokeResult({
     calls.length >= AI_LIVE_SMOKE_MIN_COMPLETIONS &&
     calls.length <= AI_LIVE_SMOKE_COMPLETION_BUDGET &&
     (unsuccessfulIndexes.length === 0 || onlySuccessfulReceiptFallbackFailed)
+  );
+}
+
+export function isSuccessfulAiLiveRecipeSmokeResult({
+  runnerExit,
+  cleanupFailed,
+  calls,
+  proxyMetrics
+}) {
+  const call = Array.isArray(calls) && calls.length === 1 ? calls[0] : undefined;
+  return (
+    runnerExit?.code === 0 &&
+    runnerExit.cancelled !== true &&
+    runnerExit.timedOut !== true &&
+    runnerExit.runnerCleaned === true &&
+    cleanupFailed !== true &&
+    call?.status >= 200 &&
+    call?.status < 300 &&
+    call?.schemaName === AI_LIVE_RECIPE_SCHEMA_NAME &&
+    call?.requestContract?.strictJsonSchema === true &&
+    call.requestContract.recipeTextUnbounded === true &&
+    call?.responseFormat?.hasChoices === true &&
+    call.responseFormat.messageContentType === 'text' &&
+    call.responseFormat.isJsonObject === true &&
+    call.responseFormat.finishReason === 'stop' &&
+    proxyMetrics?.requestAttempts === 1 &&
+    proxyMetrics.rejectedRequests === 0 &&
+    proxyMetrics.failed !== true
   );
 }
 
@@ -1631,18 +1700,21 @@ async function handleProxyRequest(request, response, state) {
     state.expectedSchemaName === AI_LIVE_HOUSEHOLD_MEAL_SCHEMA_NAME
       ? mealContextContract(payload.messages, state)
       : undefined;
-  if (
-    state.expectedSchemaName &&
-    (requestSchemaName !== state.expectedSchemaName ||
-      !nonEmptyEventsSchemaValid ||
-      !mealRecipeAliasSchemaValid ||
-      !contextContract)
-  ) {
+  const recipeTextUnbounded =
+    requestSchemaName !== AI_LIVE_RECIPE_SCHEMA_NAME ||
+    !schemaHasMaxLength(payload.response_format.json_schema.schema);
+  const expectedSchemaValid =
+    !state.expectedSchemaName ||
+    (requestSchemaName === state.expectedSchemaName &&
+      (state.expectedSchemaName !== AI_LIVE_HOUSEHOLD_MEAL_SCHEMA_NAME ||
+        (nonEmptyEventsSchemaValid && mealRecipeAliasSchemaValid && contextContract)) &&
+      (state.expectedSchemaName !== AI_LIVE_RECIPE_SCHEMA_NAME || recipeTextUnbounded));
+  if (!expectedSchemaValid) {
     rejectLiveProxyRequest(
       response,
       state,
       400,
-      'Live meal smoke requires its expected schema and verified JSON context attachment.'
+      'Live AI smoke request does not match its expected JSON Schema contract.'
     );
     return;
   }
@@ -1712,6 +1784,7 @@ async function handleProxyRequest(request, response, state) {
       schemaName: requestSchemaName,
       requestContract: {
         strictJsonSchema: true,
+        ...(requestSchemaName === AI_LIVE_RECIPE_SCHEMA_NAME ? { recipeTextUnbounded } : {}),
         ...(state.requireReceiptAttachments
           ? { inventoryJsonAttachmentCount: 1, receiptAttachmentCount: 1 }
           : {}),
@@ -1853,7 +1926,7 @@ export async function createAiLiveProxy({
     throw new Error('Live AI smoke expected schema name is invalid.');
   }
   if (expectedSchemaName && requireReceiptAttachments) {
-    throw new Error('Live AI smoke cannot combine a meal schema with receipt-only mode.');
+    throw new Error('Live AI smoke cannot combine a JSON Schema with receipt-only mode.');
   }
   if (
     (requiredPromptTerms !== undefined || forbiddenPromptTerms !== undefined) &&

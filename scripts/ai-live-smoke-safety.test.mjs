@@ -9,10 +9,12 @@ import {
   prepareAiLiveSmokeSession,
   createAiLiveProxy,
   isSuccessfulAiLiveSmokeResult,
+  isSuccessfulAiLiveRecipeSmokeResult,
   isSuccessfulAiLiveHouseholdMealSmokeResult,
   isolatedProcessEnvironments,
   selectAiLiveModel,
   validateAiLiveSmokeOptIn,
+  validateAiLiveRecipeSmokeRequest,
   validateAiLiveHouseholdMealSmokeRequest,
   validateAiLiveSmokeRunner
 } from './ai-live-smoke-safety.mjs';
@@ -22,6 +24,85 @@ test('requires explicit opt-in and rejects CI before any live setup', () => {
   assert.throws(() => validateAiLiveSmokeOptIn({}), /explicit opt-in/i);
   assert.throws(() => validateAiLiveSmokeOptIn({ HOGARIA_AI_REAL_SMOKE: '1', CI: 'true' }), /CI/i);
   assert.doesNotThrow(() => validateAiLiveSmokeOptIn({ HOGARIA_AI_REAL_SMOKE: '1', CI: '' }));
+});
+
+test('recipe-only mode permits one isolated generation and rejects other smoke inputs', () => {
+  const args = ['--config=playwright.ai-real-smoke.config.ts', 'tests/e2e/ai-real-smoke.spec.ts'];
+  const env = {
+    HOGARIA_AI_REAL_SMOKE: '1',
+    HOGARIA_AI_REAL_SMOKE_RUNNER: '1',
+    HOGARIA_AI_REAL_SMOKE_RECIPE_ONLY: '1',
+    HOGARIA_AI_REAL_SMOKE_PROXY_TOKEN: 'synthetic-local-proxy-token',
+    HOGARIA_AI_REAL_SMOKE_PROXY_URL: 'http://127.0.0.1:41000/v1',
+    HOGARIA_AI_REAL_SMOKE_MODEL: 'gpt-5',
+    CI: ''
+  };
+
+  assert.equal(validateAiLiveRecipeSmokeRequest(env), true);
+  assert.equal(validateAiLiveSmokeRunner(env, args), true);
+  assert.throws(
+    () => validateAiLiveRecipeSmokeRequest({ ...env, HOGARIA_AI_REAL_SMOKE_RECIPE_ONLY: 'true' }),
+    /exact opt-in/i
+  );
+  assert.throws(
+    () => validateAiLiveRecipeSmokeRequest({ ...env, HOGARIA_AI_REAL_SMOKE_RECEIPTS_ONLY: '1' }),
+    /cannot combine/i
+  );
+  assert.throws(
+    () =>
+      validateAiLiveRecipeSmokeRequest({ ...env, HOGARIA_AI_REAL_SMOKE_HOUSEHOLD_MEAL_ONLY: '1' }),
+    /cannot combine/i
+  );
+  assert.throws(
+    () =>
+      validateAiLiveSmokeRunner(env, [
+        '--config=playwright.config.ts',
+        'tests/e2e/ai-real-smoke.spec.ts'
+      ]),
+    /only accepts/i
+  );
+});
+
+test('recipe-only success requires one unbounded strict recipe schema and one complete JSON response', () => {
+  const runnerExit = { code: 0, timedOut: false, cancelled: false, runnerCleaned: true };
+  const call = {
+    status: 200,
+    schemaName: 'generated_recipe',
+    requestContract: { strictJsonSchema: true, recipeTextUnbounded: true },
+    responseFormat: {
+      hasChoices: true,
+      messageContentType: 'text',
+      isJsonObject: true,
+      finishReason: 'stop'
+    }
+  };
+  const proxyMetrics = { requestAttempts: 1, rejectedRequests: 0, failed: false };
+  const input = { runnerExit, cleanupFailed: false, calls: [call], proxyMetrics };
+
+  assert.equal(isSuccessfulAiLiveRecipeSmokeResult(input), true);
+  assert.equal(isSuccessfulAiLiveRecipeSmokeResult({ ...input, calls: [] }), false);
+  assert.equal(isSuccessfulAiLiveRecipeSmokeResult({ ...input, calls: [call, call] }), false);
+  assert.equal(
+    isSuccessfulAiLiveRecipeSmokeResult({
+      ...input,
+      calls: [{ ...call, requestContract: { strictJsonSchema: true, recipeTextUnbounded: false } }]
+    }),
+    false
+  );
+  assert.equal(
+    isSuccessfulAiLiveRecipeSmokeResult({
+      ...input,
+      calls: [{ ...call, responseFormat: { ...call.responseFormat, finishReason: 'length' } }]
+    }),
+    false
+  );
+  assert.equal(
+    isSuccessfulAiLiveRecipeSmokeResult({
+      ...input,
+      proxyMetrics: { ...proxyMetrics, requestAttempts: 2 }
+    }),
+    false
+  );
 });
 
 test('household meal mode is opt-in, rejects all receipt inputs and uses only its exact isolated test', () => {
@@ -838,6 +919,43 @@ test('meal-only runner environment drops receipt inputs and keeps mode only in P
   assert.equal(isolated.playwright.HOGARIA_AI_REAL_SMOKE_HOUSEHOLD_MEAL_ONLY, '1');
 });
 
+test('recipe-only runner environment strips receipt inputs and exposes mode only to Playwright', () => {
+  const env = createAiLiveSmokeRunnerEnvironment(
+    {
+      PATH: 'C:/Windows/System32',
+      HOGARIA_AI_REAL_SMOKE_RECEIPT_PATH: 'C:/private/ticket.pdf',
+      HOGARIA_AI_REAL_SMOKE_RECEIPTS_ONLY: '1',
+      HOGARIA_AI_REAL_SMOKE_RECEIPT_SELECTION: 'unsubmitted-only',
+      HOGARIA_AI_REAL_SMOKE_RECEIPT_DIRECTORY: 'C:/private/tickets',
+      HOGARIA_AI_REAL_SMOKE_PREFERRED_JPEG_ORDINAL: '2'
+    },
+    {
+      proxyToken: 'synthetic-local-proxy-token',
+      proxyUrl: 'http://127.0.0.1:41000/v1',
+      model: 'gpt-5',
+      recipeOnly: true
+    }
+  );
+  const isolated = isolatedProcessEnvironments(env);
+
+  assert.equal(env.HOGARIA_AI_REAL_SMOKE_RECIPE_ONLY, '1');
+  for (const key of [
+    'HOGARIA_AI_REAL_SMOKE_RECEIPT_PATH',
+    'HOGARIA_AI_REAL_SMOKE_RECEIPTS_ONLY',
+    'HOGARIA_AI_REAL_SMOKE_RECEIPT_SELECTION',
+    'HOGARIA_AI_REAL_SMOKE_RECEIPT_DIRECTORY',
+    'HOGARIA_AI_REAL_SMOKE_PREFERRED_JPEG_ORDINAL'
+  ]) {
+    assert.equal(Object.hasOwn(env, key), false);
+    assert.equal(Object.hasOwn(isolated.server, key), false);
+    assert.equal(Object.hasOwn(isolated.browser, key), false);
+    assert.equal(Object.hasOwn(isolated.playwright, key), false);
+  }
+  assert.equal(Object.hasOwn(isolated.server, 'HOGARIA_AI_REAL_SMOKE_RECIPE_ONLY'), false);
+  assert.equal(Object.hasOwn(isolated.browser, 'HOGARIA_AI_REAL_SMOKE_RECIPE_ONLY'), false);
+  assert.equal(isolated.playwright.HOGARIA_AI_REAL_SMOKE_RECIPE_ONLY, '1');
+});
+
 test('accepts only a fully successful run with nine or ten live completions', () => {
   const calls = (count) => Array.from({ length: count }, () => ({ status: 200 }));
   const runnerExit = { code: 0, timedOut: false, cancelled: false, runnerCleaned: true };
@@ -1408,6 +1526,84 @@ function mealPayload({
     response_format: responseFormat
   };
 }
+
+test('recipe proxy admits one generated_recipe schema only when recipe text has no maxLength', async () => {
+  const forwarded = [];
+  const upstream = createServer(async (request, response) => {
+    const chunks = [];
+    for await (const chunk of request) chunks.push(chunk);
+    forwarded.push(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(
+      JSON.stringify({
+        choices: [{ message: { content: '{"name":"Synthetic recipe"}' }, finish_reason: 'stop' }]
+      })
+    );
+  });
+  const upstreamPort = await listen(upstream);
+  const recipeSchema = (maxLength) => ({
+    type: 'json_schema',
+    json_schema: {
+      name: 'generated_recipe',
+      strict: true,
+      schema: {
+        type: 'object',
+        properties: { name: { type: 'string', ...(maxLength ? { maxLength: 200 } : {}) } },
+        required: ['name'],
+        additionalProperties: false
+      }
+    }
+  });
+  const payload = (maxLength = false) => ({
+    model: 'gpt-5',
+    messages: [{ role: 'user', content: 'Unique synthetic recipe request.' }],
+    response_format: recipeSchema(maxLength)
+  });
+
+  const validProxy = await createAiLiveProxy({
+    token: 'synthetic-provider-token',
+    model: 'gpt-5',
+    targetOrigin: `http://127.0.0.1:${upstreamPort}`,
+    maxCalls: 1,
+    expectedSchemaName: 'generated_recipe'
+  });
+  try {
+    const response = await postJson(
+      `${validProxy.baseUrl}/chat/completions`,
+      validProxy.clientToken,
+      payload()
+    );
+    assert.equal(response.status, 200);
+    assert.equal(forwarded.length, 1);
+    assert.equal(validProxy.metrics.calls[0].requestContract.recipeTextUnbounded, true);
+  } finally {
+    await validProxy.close();
+  }
+
+  const cappedProxy = await createAiLiveProxy({
+    token: 'synthetic-provider-token',
+    model: 'gpt-5',
+    targetOrigin: `http://127.0.0.1:${upstreamPort}`,
+    maxCalls: 1,
+    expectedSchemaName: 'generated_recipe'
+  });
+  try {
+    const response = await postJson(
+      `${cappedProxy.baseUrl}/chat/completions`,
+      cappedProxy.clientToken,
+      payload(true)
+    );
+    assert.equal(response.status, 400);
+    assert.equal(forwarded.length, 1);
+    assert.equal(cappedProxy.metrics.rejectedRequests, 1);
+    assert.equal(cappedProxy.metrics.failed, true);
+  } finally {
+    await cappedProxy.close();
+    await new Promise((resolve, reject) =>
+      upstream.close((error) => (error ? reject(error) : resolve()))
+    );
+  }
+});
 
 test('meal proxy forwards one strict-schema completion with its verified JSON context and rejects duplicates', async () => {
   const upstreamRequests = [];
