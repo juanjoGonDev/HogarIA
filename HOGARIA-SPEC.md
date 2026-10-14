@@ -5291,6 +5291,18 @@ respuesta anterior después; pasa **2/2** en Chromium escritorio y Mobile Chrome
 pasa. El gate global de Karma se revalidó sin alterar sus umbrales. El contrato mayor §12ap permanece
 abierto para los demás servicios/rutas y su recorrido integrado.
 
+### QA-HOUSEHOLD.CROSS-SERVICE.ACTIVE-CONTEXT.1 — recorrido integrado de cambio de hogar
+
+- [x] En una misma sesión autenticada y con SQLite temporal, crear dos hogares sintéticos y datos
+      diferenciables en despensa, tickets, calendario y compra; cambiar de hogar desde el selector y
+      comprobar que cada servicio muestra solo los datos de la casa activa, y que volver restaura los
+      datos originales. No usar IA ni datos personales.
+- [x] Retener una respuesta de bandeja de compra ya iniciada en A, cambiar a B, confirmar que B carga
+      sus listas y liberar la respuesta de A; la respuesta tardía no repinta ni mezcla la interfaz.
+- [x] Ejecutar Playwright en escritorio y móvil; capturar e inspeccionar estados sintéticos comparables.
+- Evidencia: `pnpm run test:e2e -- --project=chromium --project=mobile-chrome tests/e2e/household-cross-service-context.spec.ts --reporter=line` — 2/2 pasaron con SQLite/artefactos temporales; las capturas PC/móvil están en `.e2e-screenshots/household-cross-service-context/`. Los tickets sintéticos terminaron `NO_CONFIG`; no llamaron al proveedor.
+- Este recorrido no cierra el contrato mayor de §12ap para servicios, cachés y colas fuera de estos cuatro flujos.
+
 ## 12aq — Mejoras solicitadas: planificación, objetivos y contenido multimedia
 
 Estas mejoras se desarrollan en subunidades separadas después de estabilizar el contexto multi-hogar; los detalles de proveedor se resuelven inspeccionando las integraciones existentes antes de cada subunidad, sin inventar capacidades ni guardar secretos en fixtures.
