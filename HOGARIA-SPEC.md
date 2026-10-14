@@ -5873,3 +5873,29 @@ plataformas. Revalidación: servidor **1731 tests / 1 omitido** (cobertura 90,32
 cliente **1533/1533**; `test:config` **73/73**; build, typecheck server/E2E,
 `check:ui` y `git diff --check` pasan. La semántica real solo se observó para esta propuesta sintética;
 no es una garantía universal. Esta spec enfocada conserva el procedimiento, evidencia y límites detallados.
+
+## 12aw — Alta de hogar con catálogo previo y consumo en reposo de la cola IA
+
+**Hallazgo revalidado (2026-10-14):** al crear un hogar el servidor responde `500` con `UNIQUE constraint
+failed: pantry_categories.user_id, pantry_categories.key`. El índice actual impide reutilizar las mismas
+claves de categoría de una persona en dos hogares distintos, aunque la consulta del catálogo está
+delimitada por el hogar activo. El log de `pnpm dev` contiene 177 repeticiones de
+`SELECT DISTINCT config_id FROM ai_jobs WHERE status = 'queued'` en unos 19 segundos (aprox. 9,3/s),
+procedentes de `ticket-queue.ts` (`TICK_MS = 100`) y el `verbose: console.log` de SQLite en desarrollo.
+La lectura sin filas no retiene una cola grande en RAM: el coste directo de memoria es transitorio y
+pequeño; el sondeo continuo sí añade despertares/consultas y el SQL trace puede acumular salida en
+terminales o supervisores. No se dispone de una medición de RAM de la Raspberry; no atribuirle saturación
+de RAM sin esa evidencia.
+
+- [ ] Categorías: la unicidad refleja el ámbito (persona para despensa personal; persona + hogar para
+      catálogos de hogar); una migración repetible reemplaza el índice antiguo sin descartar filas. Crear
+      o unirse a un hogar funciona aunque esa persona conserve claves iguales en otro hogar; duplicar una
+      clave en el mismo ámbito sigue rechazándose.
+- [ ] Cola: al iniciar, encolar/reintentar un job y liberar concurrencia se despierta el worker sin esperar
+      el sondeo de seguridad. En reposo, el poller reconcilia como máximo cada 30 s, no cada 100 ms; parar
+      el worker limpia ambos temporizadores y no duplica ejecuciones.
+- [ ] TDD/aislamiento: ruta de alta y unión de hogar con categorías ya existentes, migración de índice,
+      reintento/cola y cadencia en reposo reproducibles con SQLite temporal; comprobar consultas por ventana
+      de tiempo, typecheck y coverage local sin tocar datos ni procesos de uso normal.
+- [ ] Registrar evidencia, límite del análisis de memoria (sin Raspberry disponible) y efecto en el log de
+      desarrollo; no desactivar el SQL trace explícito para ocultar consultas.
