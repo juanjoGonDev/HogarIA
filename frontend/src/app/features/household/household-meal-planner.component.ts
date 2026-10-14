@@ -21,7 +21,11 @@ import { HouseholdMealProposalService } from '../../core/services/household-meal
 import type {
   HouseholdMealProposal,
   HouseholdMealProposalEvent,
-  HouseholdMealProposalIngredient
+  HouseholdMealProposalIngredient,
+  HouseholdMealProposalRecipe,
+  HouseholdMealProposalRecipeReference,
+  HouseholdMealRecipeInstructionLevel,
+  HouseholdMealRecipeInstructionStep
 } from '../../core/services/household-meal-proposal.service';
 import { HouseholdMealShoppingService } from '../../core/services/household-meal-shopping.service';
 import type {
@@ -69,6 +73,15 @@ const SHOPPING_STATUS_LABELS: Record<HouseholdMealShoppingStockStatus, Translati
   pantry_not_shared: 'household.meal_shopping_pantry_not_shared'
 };
 
+const RECIPE_INSTRUCTION_LEVELS: Array<{
+  value: HouseholdMealRecipeInstructionLevel;
+  label: TranslationKey;
+}> = [
+  { value: 'basic', label: 'household.meal_proposal_level_basic' },
+  { value: 'intermediate', label: 'household.meal_proposal_level_intermediate' },
+  { value: 'expert', label: 'household.meal_proposal_level_expert' }
+];
+
 @Component({
   selector: 'app-household-meal-planner',
   standalone: true,
@@ -109,6 +122,7 @@ export class HouseholdMealPlannerComponent implements OnChanges, OnDestroy {
   readonly selectedMemberIds = signal<string[]>([]);
   readonly weekStart = signal(mondayIsoDate(new Date()));
   readonly proposal = signal<HouseholdMealProposal | null>(null);
+  readonly recipeLevelByEvent = signal<Record<string, HouseholdMealRecipeInstructionLevel>>({});
   readonly proposalContext = signal<ProposalContext | null>(null);
   readonly generating = signal(false);
   readonly confirming = signal(false);
@@ -150,6 +164,9 @@ export class HouseholdMealPlannerComponent implements OnChanges, OnDestroy {
   readonly hasConfirmableMeals = computed(
     () => this.proposal()?.events.some((event) => event.status === 'scheduled') ?? false
   );
+  readonly proposalRecipesByAlias = computed(
+    () => new Map((this.proposal()?.recipes ?? []).map((reference) => [reference.alias, reference]))
+  );
 
   readonly proposalIsCurrent = computed(() => {
     const proposal = this.proposal();
@@ -185,6 +202,7 @@ export class HouseholdMealPlannerComponent implements OnChanges, OnDestroy {
   readonly trackIngredient = (_index: number, ingredient: HouseholdMealProposalIngredient) =>
     `${ingredient.name}-${_index}`;
   readonly trackIndex = (index: number) => index;
+  readonly recipeInstructionLevels = RECIPE_INSTRUCTION_LEVELS;
   readonly proposalDays = computed(() => {
     const proposal = this.proposal();
     if (!proposal) return [];
@@ -268,6 +286,7 @@ export class HouseholdMealPlannerComponent implements OnChanges, OnDestroy {
     const requestId = ++this.generation;
     this.request?.unsubscribe();
     this.proposal.set(null);
+    this.recipeLevelByEvent.set({});
     this.proposalContext.set(null);
     this.confirmed.set(false);
     this.errorKey.set(null);
@@ -325,6 +344,7 @@ export class HouseholdMealPlannerComponent implements OnChanges, OnDestroy {
         proposalId: proposal.proposalId,
         weekStart: context.weekStart,
         householdMemberIds: [...context.memberIds],
+        recipes: proposal.recipes,
         events: proposal.events
       })
       .pipe(
@@ -533,7 +553,7 @@ export class HouseholdMealPlannerComponent implements OnChanges, OnDestroy {
       this.confirming() ||
       this.confirmed() ||
       event.status !== 'scheduled' ||
-      !event.recipe ||
+      !this.recipeForEvent(event) ||
       !Number.isInteger(nextServings) ||
       nextServings < 1 ||
       nextServings > 100
@@ -546,7 +566,7 @@ export class HouseholdMealPlannerComponent implements OnChanges, OnDestroy {
       if (!current) return current;
       let found = false;
       const events = current.events.map((item) => {
-        if (item.id !== event.id || item.status !== 'scheduled' || !item.recipe) return item;
+        if (item.id !== event.id || item.status !== 'scheduled' || !item.recipeAlias) return item;
         found = true;
         return { ...item, servings: nextServings };
       });
@@ -558,12 +578,112 @@ export class HouseholdMealPlannerComponent implements OnChanges, OnDestroy {
     ingredient: HouseholdMealProposalIngredient,
     event: HouseholdMealProposalEvent
   ): number {
-    const baseServings = event.recipe?.baseServings;
+    const baseServings = this.recipeForEvent(event)?.baseServings;
     if (!baseServings || event.status !== 'scheduled' || event.servings < 1) {
       return ingredient.quantity;
     }
     const scaled = (ingredient.quantity * event.servings) / baseServings;
     return Number.isFinite(scaled) ? scaled : ingredient.quantity;
+  }
+
+  recipeReferenceForEvent(
+    event: HouseholdMealProposalEvent
+  ): HouseholdMealProposalRecipeReference | null {
+    return event.recipeAlias
+      ? (this.proposalRecipesByAlias().get(event.recipeAlias) ?? null)
+      : null;
+  }
+
+  recipeForEvent(event: HouseholdMealProposalEvent): HouseholdMealProposalRecipe | null {
+    return this.recipeReferenceForEvent(event)?.recipe ?? null;
+  }
+
+  hasRecipeGuidance(guidance: HouseholdMealProposalRecipe['guidance']): boolean {
+    return (
+      guidance.appliances.length > 0 ||
+      guidance.parallelTasks.length > 0 ||
+      guidance.tipsAndVariations.length > 0 ||
+      Boolean(guidance.batchCookingWarning?.trim())
+    );
+  }
+
+  recipeOriginLabel(event: HouseholdMealProposalEvent): TranslationKey {
+    return this.recipeReferenceForEvent(event)?.source === 'catalog'
+      ? 'household.meal_proposal_recipe_saved'
+      : 'household.meal_proposal_recipe_new';
+  }
+
+  recipeDifficultyLabel(difficulty: HouseholdMealProposalRecipe['difficulty']): TranslationKey {
+    const labels: Record<HouseholdMealProposalRecipe['difficulty'], TranslationKey> = {
+      easy: 'household.meal_proposal_difficulty_easy',
+      medium: 'household.meal_proposal_difficulty_medium',
+      hard: 'household.meal_proposal_difficulty_hard'
+    };
+    return labels[difficulty];
+  }
+
+  selectedRecipeLevel(eventId: string): HouseholdMealRecipeInstructionLevel {
+    return this.recipeLevelByEvent()[eventId] ?? 'basic';
+  }
+
+  selectRecipeLevel(eventId: string, level: HouseholdMealRecipeInstructionLevel): void {
+    this.recipeLevelByEvent.update((current) => ({ ...current, [eventId]: level }));
+  }
+
+  recipeInstructionSteps(
+    event: HouseholdMealProposalEvent,
+    recipe: HouseholdMealProposalRecipe
+  ): HouseholdMealRecipeInstructionStep[] {
+    if (recipe.instructionsByLevel) {
+      return recipe.instructionsByLevel[this.selectedRecipeLevel(event.id)];
+    }
+    return recipe.steps ?? [];
+  }
+
+  recipeStepTimerMinutes(step: HouseholdMealRecipeInstructionStep): number | null {
+    if (!step.timerRequired) return null;
+    if (step.timerDuration !== undefined) return step.timerDuration;
+    return step.duration ?? null;
+  }
+
+  onRecipeLevelKeydown(event: KeyboardEvent, eventId: string): void {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    const currentTab = event.currentTarget as HTMLButtonElement | null;
+    const tabList = currentTab?.parentElement;
+    if (!currentTab || !tabList) return;
+    const tabs = Array.from(tabList.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
+    const currentIndex = tabs.indexOf(currentTab);
+    if (currentIndex < 0 || tabs.length === 0) return;
+    event.preventDefault();
+    const nextIndex =
+      event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? tabs.length - 1
+          : (currentIndex + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+    const nextTab = tabs[nextIndex];
+    const level = nextTab.dataset['level'] as HouseholdMealRecipeInstructionLevel | undefined;
+    if (!level) return;
+    this.selectRecipeLevel(eventId, level);
+    nextTab.focus();
+  }
+
+  recipeLevelTabId(eventId: string, level: HouseholdMealRecipeInstructionLevel): string {
+    return `meal-recipe-${encodeURIComponent(eventId)}-${level}-tab`;
+  }
+
+  recipeLevelPanelId(eventId: string): string {
+    return `meal-recipe-${encodeURIComponent(eventId)}-instructions`;
+  }
+
+  recipeTimeBreakdown(
+    recipe: HouseholdMealProposalRecipe
+  ): Array<{ label: TranslationKey; minutes: number | null }> {
+    return [
+      { label: 'household.meal_proposal_prep_time', minutes: recipe.prepTime },
+      { label: 'household.meal_proposal_cook_time', minutes: recipe.cookTime },
+      { label: 'household.meal_proposal_rest_time', minutes: recipe.restTime }
+    ];
   }
 
   isShared(event: HouseholdMealProposalEvent): boolean {
@@ -603,6 +723,7 @@ export class HouseholdMealPlannerComponent implements OnChanges, OnDestroy {
     this.shoppingRequest = undefined;
     this.proposal.set(null);
     this.proposalContext.set(null);
+    this.recipeLevelByEvent.set({});
     this.confirmed.set(false);
     this.generating.set(false);
     this.confirming.set(false);
@@ -661,6 +782,8 @@ export class HouseholdMealPlannerComponent implements OnChanges, OnDestroy {
       }
       case 'MEAL_PLAN_NO_SAFE_MEALS':
         return 'household.meal_proposal_no_safe_meals';
+      case 'MEAL_PROPOSAL_RECIPE_CHANGED':
+        return 'household.meal_proposal_recipe_changed';
       case 'MEAL_PROPOSAL_SLOT_COVERAGE_INVALID':
       case 'MEAL_PROPOSAL_SLOT_ASSIGNMENT_INVALID':
       case 'INVALID_MEAL_PROPOSAL_CONFIRMATION':

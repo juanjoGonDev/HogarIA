@@ -244,7 +244,7 @@
             <app-picker
               [label]="'household.meal_proposal_review_day' | t"
               [options]="proposalDayOptions()"
-              [value]="selectedProposalDay()?.date ?? null"
+              [value]="selectedProposalDay().date"
               [filterFrom]="8"
               [floatingPanel]="true"
               (valueChange)="selectProposalDate($event ?? '')"
@@ -286,7 +286,16 @@
               </header>
 
               <ng-container *ngIf="event.status === 'scheduled'; else unresolvedEvent">
-                <h5>{{ event.recipe?.name }}</h5>
+                <h5>{{ recipeForEvent(event)?.name }}</h5>
+                <span
+                  *ngIf="recipeForEvent(event)"
+                  class="meal-planner__recipe-origin"
+                  [class.meal-planner__recipe-origin--catalog]="
+                    recipeReferenceForEvent(event)?.source === 'catalog'
+                  "
+                >
+                  {{ recipeOriginLabel(event) | t }}
+                </span>
                 <p class="meal-planner__summary">{{ event.objectiveSummary }}</p>
                 <div class="meal-planner__event-meta">
                   <label class="meal-planner__servings-control">
@@ -300,19 +309,20 @@
                       [value]="event.servings"
                       [disabled]="!canEdit || confirming() || confirmed()"
                       [attr.aria-label]="
-                        'household.meal_proposal_servings_for' | t: { meal: event.recipe?.name }
+                        'household.meal_proposal_servings_for'
+                          | t: { meal: recipeForEvent(event)?.name }
                       "
                       aria-describedby="meal-proposal-servings-help"
                       [attr.data-test]="'meal-proposal-servings-' + event.id"
                       (change)="updateEventServings(event, $any($event.target))"
                     />
                   </label>
-                  <span *ngIf="event.recipe as recipe">
+                  <span *ngIf="recipeForEvent(event) as recipe">
                     {{
                       'household.meal_proposal_total_time'
                         | t
                           : {
-                              minutes: recipe.prepTimeMinutes + recipe.cookTimeMinutes
+                              minutes: recipe.totalTime
                             }
                     }}
                   </span>
@@ -325,9 +335,49 @@
                     {{ memberName(userId) }}
                   </li>
                 </ul>
-                <details class="meal-planner__recipe-details" *ngIf="event.recipe as recipe">
+                <details
+                  class="meal-planner__recipe-details"
+                  *ngIf="recipeForEvent(event) as recipe"
+                  [attr.data-test]="'meal-proposal-recipe-details-' + event.id"
+                >
                   <summary>{{ 'household.meal_proposal_recipe_details' | t }}</summary>
                   <p>{{ recipe.description }}</p>
+                  <dl class="meal-planner__recipe-facts">
+                    <div>
+                      <dt>{{ 'household.meal_proposal_difficulty' | t }}</dt>
+                      <dd>{{ recipeDifficultyLabel(recipe.difficulty) | t }}</dd>
+                    </div>
+                    <div *ngIf="recipe.cuisine">
+                      <dt>{{ 'household.meal_proposal_cuisine' | t }}</dt>
+                      <dd>{{ recipe.cuisine }}</dd>
+                    </div>
+                    <div *ngIf="recipe.calories !== null">
+                      <dt>{{ 'household.meal_proposal_calories' | t }}</dt>
+                      <dd>{{ recipe.calories | number: '1.0-0' }} kcal</dd>
+                    </div>
+                    <div>
+                      <dt>{{ 'household.meal_proposal_base_servings' | t }}</dt>
+                      <dd>{{ recipe.baseServings }}</dd>
+                    </div>
+                  </dl>
+                  <dl class="meal-planner__recipe-times">
+                    <div>
+                      <dt>{{ 'household.meal_proposal_total_time_label' | t }}</dt>
+                      <dd>
+                        {{
+                          'household.meal_proposal_total_time' | t: { minutes: recipe.totalTime }
+                        }}
+                      </dd>
+                    </div>
+                    <div *ngFor="let time of recipeTimeBreakdown(recipe)">
+                      <ng-container *ngIf="time.minutes !== null">
+                        <dt>{{ time.label | t }}</dt>
+                        <dd>
+                          {{ 'household.meal_proposal_total_time' | t: { minutes: time.minutes } }}
+                        </dd>
+                      </ng-container>
+                    </div>
+                  </dl>
                   <h6>
                     {{ 'household.meal_proposal_ingredients' | t: { count: event.servings } }}
                   </h6>
@@ -348,14 +398,173 @@
                       <span *ngIf="ingredient.isOptional">
                         · {{ 'household.meal_proposal_optional' | t }}</span
                       >
+                      <span *ngIf="ingredient.notes"> · {{ ingredient.notes }}</span>
+                      <span *ngIf="ingredient.substitutes.length">
+                        · {{ 'household.meal_proposal_substitutes' | t }}:
+                        {{ ingredient.substitutes.join(', ') }}
+                      </span>
                     </li>
                   </ul>
-                  <h6>{{ 'household.meal_proposal_steps' | t }}</h6>
-                  <ol>
-                    <li *ngFor="let instruction of recipe.instructions; trackBy: trackIndex">
-                      {{ instruction }}
-                    </li>
-                  </ol>
+
+                  <ng-container *ngIf="recipe.utensils.length">
+                    <h6>{{ 'household.meal_proposal_utensils' | t }}</h6>
+                    <ul>
+                      <li *ngFor="let utensil of recipe.utensils; trackBy: trackIndex">
+                        {{ utensil }}
+                      </li>
+                    </ul>
+                  </ng-container>
+
+                  <ng-container *ngIf="recipe.guidance as guidance">
+                    <ng-container *ngIf="hasRecipeGuidance(guidance)">
+                      <h6>{{ 'household.meal_proposal_guidance' | t }}</h6>
+                      <dl class="meal-planner__recipe-guidance">
+                        <div *ngIf="guidance.appliances.length">
+                          <dt>{{ 'household.meal_proposal_appliances' | t }}</dt>
+                          <dd>{{ guidance.appliances.join(', ') }}</dd>
+                        </div>
+                        <div *ngIf="guidance.parallelTasks.length">
+                          <dt>{{ 'household.meal_proposal_parallel_tasks' | t }}</dt>
+                          <dd>{{ guidance.parallelTasks.join(' · ') }}</dd>
+                        </div>
+                        <div *ngIf="guidance.tipsAndVariations.length">
+                          <dt>{{ 'household.meal_proposal_tips_variations' | t }}</dt>
+                          <dd>{{ guidance.tipsAndVariations.join(' · ') }}</dd>
+                        </div>
+                        <div *ngIf="guidance.batchCookingWarning">
+                          <dt>{{ 'household.meal_proposal_batch_cooking' | t }}</dt>
+                          <dd>{{ guidance.batchCookingWarning }}</dd>
+                        </div>
+                      </dl>
+                    </ng-container>
+                  </ng-container>
+
+                  <ng-container *ngIf="recipe.instructionsByLevel">
+                    <div
+                      class="meal-planner__recipe-level-tabs"
+                      role="tablist"
+                      [attr.aria-label]="'household.meal_proposal_instruction_levels' | t"
+                    >
+                      <button
+                        *ngFor="let level of recipeInstructionLevels; trackBy: trackIndex"
+                        type="button"
+                        role="tab"
+                        [id]="recipeLevelTabId(event.id, level.value)"
+                        [attr.data-test]="'meal-proposal-recipe-level-' + level.value"
+                        [attr.data-level]="level.value"
+                        [attr.aria-selected]="selectedRecipeLevel(event.id) === level.value"
+                        [attr.aria-controls]="recipeLevelPanelId(event.id)"
+                        [attr.tabindex]="selectedRecipeLevel(event.id) === level.value ? 0 : -1"
+                        (click)="selectRecipeLevel(event.id, level.value)"
+                        (keydown)="onRecipeLevelKeydown($event, event.id)"
+                      >
+                        {{ level.label | t }}
+                      </button>
+                    </div>
+                    <section
+                      class="meal-planner__recipe-instructions"
+                      role="tabpanel"
+                      [id]="recipeLevelPanelId(event.id)"
+                      [attr.aria-labelledby]="
+                        recipeLevelTabId(event.id, selectedRecipeLevel(event.id))
+                      "
+                    >
+                      <h6>{{ 'household.meal_proposal_steps' | t }}</h6>
+                      <ol>
+                        <li
+                          *ngFor="
+                            let instructionStep of recipeInstructionSteps(event, recipe);
+                            trackBy: trackIndex
+                          "
+                        >
+                          <p>{{ instructionStep.instruction }}</p>
+                          <p
+                            *ngIf="
+                              instructionStep.duration !== null &&
+                              instructionStep.duration !== undefined
+                            "
+                          >
+                            {{
+                              'household.meal_proposal_step_duration'
+                                | t: { minutes: instructionStep.duration }
+                            }}
+                          </p>
+                          <p *ngIf="instructionStep.temperature as temperature">
+                            {{ 'household.meal_proposal_temperature' | t }}:
+                            {{ temperature.value }} °{{ temperature.unit }}
+                          </p>
+                          <p *ngIf="recipeStepTimerMinutes(instructionStep) as timerMinutes">
+                            {{ 'household.meal_proposal_timer' | t: { minutes: timerMinutes } }}
+                          </p>
+                          <p *ngIf="instructionStep.tips">{{ instructionStep.tips }}</p>
+                          <p *ngIf="instructionStep.warning" class="meal-planner__recipe-warning">
+                            <strong>{{ 'household.meal_proposal_recipe_warning' | t }}:</strong>
+                            {{ instructionStep.warning }}
+                          </p>
+                        </li>
+                      </ol>
+                    </section>
+                  </ng-container>
+
+                  <ng-container *ngIf="recipe.steps as legacySteps">
+                    <h6>{{ 'household.meal_proposal_steps' | t }}</h6>
+                    <ol>
+                      <li *ngFor="let instructionStep of legacySteps; trackBy: trackIndex">
+                        <p>{{ instructionStep.instruction }}</p>
+                        <p
+                          *ngIf="
+                            instructionStep.duration !== null &&
+                            instructionStep.duration !== undefined
+                          "
+                        >
+                          {{
+                            'household.meal_proposal_step_duration'
+                              | t: { minutes: instructionStep.duration }
+                          }}
+                        </p>
+                        <p *ngIf="instructionStep.temperature as temperature">
+                          {{ 'household.meal_proposal_temperature' | t }}:
+                          {{ temperature.value }} °{{ temperature.unit }}
+                        </p>
+                        <p *ngIf="recipeStepTimerMinutes(instructionStep) as timerMinutes">
+                          {{ 'household.meal_proposal_timer' | t: { minutes: timerMinutes } }}
+                        </p>
+                        <p *ngIf="instructionStep.tips">{{ instructionStep.tips }}</p>
+                        <p *ngIf="instructionStep.warning" class="meal-planner__recipe-warning">
+                          <strong>{{ 'household.meal_proposal_recipe_warning' | t }}:</strong>
+                          {{ instructionStep.warning }}
+                        </p>
+                      </li>
+                    </ol>
+                  </ng-container>
+
+                  <ng-container *ngIf="recipe.nutrition as nutrition">
+                    <h6>{{ 'household.meal_proposal_nutrition' | t }}</h6>
+                    <p>
+                      {{ 'household.meal_proposal_nutrition_summary' | t: nutrition }}
+                    </p>
+                  </ng-container>
+
+                  <ng-container *ngIf="recipe.storage as storage">
+                    <h6>{{ 'household.meal_proposal_storage' | t }}</h6>
+                    <p>
+                      {{ storage.method }} · {{ storage.duration }}
+                      <span *ngIf="storage.reheatingInstructions">
+                        · {{ storage.reheatingInstructions }}</span
+                      >
+                      <span *ngIf="storage.container"> · {{ storage.container }}</span>
+                      <span *ngIf="storage.freezingPossible">
+                        · {{ 'household.meal_proposal_freezing' | t }}
+                        <span *ngIf="storage.freezingDuration"
+                          >({{ storage.freezingDuration }})</span
+                        >
+                      </span>
+                    </p>
+                  </ng-container>
+
+                  <p *ngIf="recipe.tags.length" class="meal-planner__recipe-tags">
+                    {{ 'household.meal_proposal_tags' | t }}: {{ recipe.tags.join(', ') }}
+                  </p>
                 </details>
               </ng-container>
               <ng-template #unresolvedEvent>

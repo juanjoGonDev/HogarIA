@@ -22,7 +22,18 @@ interface ProviderRequest {
     json_schema?: {
       name?: string;
       strict?: boolean;
-      schema?: { properties?: { events?: { minItems?: number } } };
+      schema?: {
+        properties?: {
+          events?: {
+            minItems?: number;
+            items?: { properties?: { recipeAlias?: unknown } };
+          };
+          newRecipes?: {
+            type?: string;
+            items?: { properties?: { alias?: unknown; recipe?: unknown } };
+          };
+        };
+      };
     };
   };
 }
@@ -40,25 +51,230 @@ interface ProviderMealContext {
   requiredTurns: ExpectedSlot[];
   pantry: Array<{ name: string; quantity: number; unit: string }>;
   utensils: Array<{ name: string; category: string | null }>;
-  recipes: Array<{ name: string }>;
   previousConfirmedPlan: unknown;
 }
 
-function readProviderMealContext(request: ProviderRequest): ProviderMealContext | null {
-  const userMessage = request.messages?.find((message) => message.role === 'user');
-  if (!Array.isArray(userMessage?.content)) return null;
-  const files = userMessage.content.filter((part) => part.type === 'file');
-  if (files.length !== 1 || files[0]?.file?.filename !== 'meal-planning-context.json') return null;
-  const fileData = files[0].file?.file_data;
+interface CompleteRecipeFixture {
+  name: string;
+  description: string;
+  difficulty: 'easy' | 'medium' | 'hard';
+  cuisine: string | null;
+  totalTime: number;
+  prepTime: number;
+  cookTime: number;
+  restTime: number | null;
+  baseServings: 1;
+  calories: number | null;
+  ingredients: Array<{
+    name: string;
+    quantity: number;
+    unit: string;
+    preparation: string | null;
+    isOptional: boolean;
+    substitutes: string[];
+    notes: string | null;
+  }>;
+  utensils: string[];
+  guidance: {
+    appliances: string[];
+    parallelTasks: string[];
+    tipsAndVariations: string[];
+    batchCookingWarning: string | null;
+  };
+  instructionsByLevel: Record<
+    'basic' | 'intermediate' | 'expert',
+    Array<{
+      stepNumber: number;
+      instruction: string;
+      duration: number | null;
+      temperature: { value: number; unit: 'C' | 'F' } | null;
+      timerRequired: boolean;
+      timerDuration: number | null;
+      tips: string | null;
+      warning: string | null;
+      illustration: null;
+    }>
+  >;
+  nutrition: {
+    calories: number;
+    protein: number;
+    carbs: number;
+    fat: number;
+    fiber: number | null;
+  } | null;
+  storage: {
+    method: string;
+    duration: string;
+    reheatingInstructions: string | null;
+    container: string | null;
+    freezingPossible: boolean;
+    freezingDuration: string | null;
+  } | null;
+  tags: string[];
+}
+
+interface ProviderCatalog {
+  version: number;
+  recipes: Array<{ alias: string; recipeId?: string | null; recipe: CompleteRecipeFixture }>;
+}
+
+interface ProviderMealInputs {
+  context: ProviderMealContext;
+  catalog: ProviderCatalog;
+}
+
+const recipeDetailFixture = (name: string, ingredientName: string): CompleteRecipeFixture => ({
+  name,
+  description: `Receta completa sintética: ${name}.`,
+  difficulty: 'easy',
+  cuisine: 'mediterránea',
+  totalTime: 30,
+  prepTime: 10,
+  cookTime: 20,
+  restTime: null,
+  baseServings: 1,
+  calories: 420,
+  ingredients: [
+    {
+      name: ingredientName,
+      quantity: 100,
+      unit: 'g',
+      preparation: null,
+      isOptional: false,
+      substitutes: [],
+      notes: null
+    }
+  ],
+  utensils: ['cacerola'],
+  guidance: {
+    appliances: [],
+    parallelTasks: [],
+    tipsAndVariations: [],
+    batchCookingWarning: null
+  },
+  instructionsByLevel: {
+    basic: [
+      {
+        stepNumber: 1,
+        instruction: `${name}: paso básico sintético.`,
+        duration: 20,
+        temperature: null,
+        timerRequired: false,
+        timerDuration: null,
+        tips: null,
+        warning: null,
+        illustration: null
+      }
+    ],
+    intermediate: [
+      {
+        stepNumber: 1,
+        instruction: `${name}: paso intermedio sintético.`,
+        duration: 20,
+        temperature: null,
+        timerRequired: false,
+        timerDuration: null,
+        tips: 'Remueve de forma regular.',
+        warning: null,
+        illustration: null
+      }
+    ],
+    expert: [
+      {
+        stepNumber: 1,
+        instruction: `${name}: paso experto sintético.`,
+        duration: 20,
+        temperature: { value: 95, unit: 'C' },
+        timerRequired: true,
+        timerDuration: 20,
+        tips: 'Ajusta el punto de cocción.',
+        warning: null,
+        illustration: null
+      }
+    ]
+  },
+  nutrition: { calories: 420, protein: 22, carbs: 48, fat: 12, fiber: 9 },
+  storage: {
+    method: 'Refrigerar en recipiente cerrado.',
+    duration: '2 días',
+    reheatingInstructions: 'Calentar hasta que esté bien caliente.',
+    container: 'Recipiente hermético',
+    freezingPossible: true,
+    freezingDuration: '1 mes'
+  },
+  tags: ['sintética']
+});
+
+function decodeJsonAttachment(
+  content: Array<{ type?: string; file?: { filename?: string; file_data?: string } }>,
+  filename: string
+): unknown | null {
+  const files = content.filter((part) => part.type === 'file');
+  const matchingFiles = files.filter((part) => part.file?.filename === filename);
+  if (files.length !== 2 || matchingFiles.length !== 1) return null;
+  const fileData = matchingFiles[0]?.file?.file_data;
   const prefix = 'data:application/json;base64,';
   if (typeof fileData !== 'string' || !fileData.startsWith(prefix)) return null;
   try {
     return JSON.parse(
       Buffer.from(fileData.slice(prefix.length), 'base64').toString('utf8')
-    ) as ProviderMealContext | null;
+    ) as unknown;
   } catch {
     return null;
   }
+}
+
+function readProviderMealInputs(request: ProviderRequest): ProviderMealInputs | null {
+  const userMessage = request.messages?.find((message) => message.role === 'user');
+  if (!Array.isArray(userMessage?.content)) return null;
+  const context = decodeJsonAttachment(
+    userMessage.content,
+    'meal-planning-context.json'
+  ) as ProviderMealContext | null;
+  const catalog = decodeJsonAttachment(
+    userMessage.content,
+    'household-recipes-catalog.json'
+  ) as ProviderCatalog | null;
+  if (!context || !catalog) return null;
+  return { context, catalog };
+}
+
+function catalogRecipeApiInput(recipe: CompleteRecipeFixture) {
+  const step = (instructions: CompleteRecipeFixture['instructionsByLevel']['basic']) =>
+    instructions.map((instruction) => ({ ...instruction }));
+  return {
+    name: recipe.name,
+    description: recipe.description,
+    difficulty: recipe.difficulty,
+    cuisine: recipe.cuisine,
+    totalTime: recipe.totalTime,
+    prepTime: recipe.prepTime,
+    cookTime: recipe.cookTime,
+    restTime: recipe.restTime,
+    servings: recipe.baseServings,
+    calories: recipe.calories,
+    ingredients: recipe.ingredients,
+    utensils: recipe.utensils,
+    guidance: recipe.guidance,
+    instructionsByLevel: {
+      basic: step(recipe.instructionsByLevel.basic),
+      intermediate: step(recipe.instructionsByLevel.intermediate),
+      expert: step(recipe.instructionsByLevel.expert)
+    },
+    nutrition: { ...recipe.nutrition, sugar: 0, sodium: 0 },
+    storage: recipe.storage
+      ? {
+          method: recipe.storage.method,
+          duration: recipe.storage.duration,
+          reheatingInstructions: recipe.storage.reheatingInstructions,
+          container: recipe.storage.container,
+          freezingPossible: recipe.storage.freezingPossible,
+          freezingDuration: recipe.storage.freezingDuration
+        }
+      : null,
+    tags: recipe.tags,
+    isPublic: false
+  };
 }
 
 interface CalendarMealProjection {
@@ -138,37 +354,31 @@ test('genera, revisa y confirma comidas con navegación de planificación en esc
     request.on('end', () => {
       const payload = JSON.parse(body) as ProviderRequest;
       providerRequests.push(payload);
-      const slots = readProviderMealContext(payload)?.requiredTurns ?? [];
+      const inputs = readProviderMealInputs(payload);
+      const slots = inputs?.context.requiredTurns ?? [];
+      const catalogRecipe = inputs?.catalog.recipes.find(
+        (entry) => entry.recipe.name === 'SMOKE_E2E_CATALOG'
+      );
+      const catalogAlias = catalogRecipe?.alias ?? 'UNRESOLVED_CATALOG_ALIAS';
+      const newRecipeAlias = 'N1';
+      const newRecipe = recipeDetailFixture('Guiso sintético nuevo', 'garbanzos');
+      const { baseServings, ...newRecipeWithoutBaseServings } = newRecipe;
+      const newRecipes = [
+        {
+          alias: newRecipeAlias,
+          recipe: { ...newRecipeWithoutBaseServings, baseServings }
+        }
+      ];
       const events = slots.flatMap((slot, slotIndex) => {
         const groups =
           slotIndex % 2 === 0
             ? [slot.eligibleParticipants]
             : slot.eligibleParticipants.map((alias) => [alias]);
-        return groups.map((participantAliases) => ({
+        return groups.map((participantAliases, groupIndex) => ({
           date: slot.date,
           mealType: slot.mealType,
           time: slot.time,
-          recipe: {
-            name:
-              participantAliases.length > 1
-                ? 'Lentejas sintéticas compartidas'
-                : 'Almuerzo sintético individual',
-            description: 'Receta sintética para validar la vista de planificación.',
-            baseServings: 1,
-            prepTimeMinutes: 10,
-            cookTimeMinutes: 20,
-            ingredients: [
-              {
-                name: 'lentejas',
-                quantity: 100,
-                unit: 'g',
-                preparation: null,
-                isOptional: false,
-                notes: null
-              }
-            ],
-            instructions: ['Cocina las lentejas sintéticas hasta que estén tiernas.']
-          },
+          recipeAlias: (slotIndex + groupIndex) % 2 === 0 ? newRecipeAlias : catalogAlias,
           participantAliases,
           servings: participantAliases.length,
           objectiveSummary: 'Almuerzo equilibrado.',
@@ -182,7 +392,7 @@ test('genera, revisa y confirma comidas con navegación de planificación en esc
           choices: [
             {
               finish_reason: 'stop',
-              message: { content: JSON.stringify({ events }) }
+              message: { content: JSON.stringify({ newRecipes, events }) }
             }
           ]
         })
@@ -198,6 +408,18 @@ test('genera, revisa y confirma comidas con navegación de planificación en esc
     const firstToken = await page.evaluate(() => localStorage.getItem('hogar:v1:auth_token'));
     expect(firstToken).toBeTruthy();
     const firstHeaders = { authorization: `Bearer ${firstToken}` };
+
+    const savedCatalogRecipe = recipeDetailFixture('SMOKE_E2E_CATALOG', 'arroz');
+    const savedCatalogRecipeResponse = await page.request.post('/api/recipes', {
+      headers: firstHeaders,
+      data: catalogRecipeApiInput(savedCatalogRecipe)
+    });
+    expect(savedCatalogRecipeResponse.status(), await savedCatalogRecipeResponse.text()).toBe(201);
+    const savedCatalogRecipeBody = (await savedCatalogRecipeResponse.json()) as {
+      data: { id: string };
+    };
+    const savedCatalogRecipeId = savedCatalogRecipeBody.data.id;
+    expect(savedCatalogRecipeId).toBeTruthy();
 
     await registerWithoutAssumingOnboarding(secondPage, 'Planificador sintético dos');
     await createHousehold(secondPage, 'Hogar proveedor sintético');
@@ -331,6 +553,33 @@ test('genera, revisa y confirma comidas con navegación de planificación en esc
     expect(generatedRequest.householdMemberIds).toEqual(activeMembers.map((member) => member.id));
     const generatedResponse = await proposalResponse;
     expect(generatedResponse.status(), await generatedResponse.text()).toBe(200);
+    const generatedProposal = (await generatedResponse.json()) as {
+      data: {
+        recipes: Array<{
+          alias: string;
+          source: 'new' | 'catalog';
+          recipeId: string | null;
+          recipe: CompleteRecipeFixture;
+        }>;
+        events: Array<{ recipeAlias: string; status: string; servings: number }>;
+      };
+    };
+    expect(generatedProposal.data.recipes).toHaveLength(2);
+    expect(generatedProposal.data.recipes.map((recipe) => recipe.source).sort()).toEqual([
+      'catalog',
+      'new'
+    ]);
+    expect(generatedProposal.data.recipes.map((recipe) => recipe.alias)).toContain('N1');
+    const generatedCatalogRecipe = generatedProposal.data.recipes.find(
+      (recipe) => recipe.source === 'catalog'
+    );
+    expect(generatedCatalogRecipe?.recipeId).toBe(savedCatalogRecipeId);
+    expect(generatedProposal.data.events.some((event) => event.recipeAlias === 'N1')).toBe(true);
+    expect(
+      generatedProposal.data.events.some(
+        (event) => event.recipeAlias === generatedCatalogRecipe?.alias
+      )
+    ).toBe(true);
     const review = page.locator('[data-test="meal-proposal-review"]');
     await expect(review).toBeVisible();
     await expect(page.locator('[data-test="meal-proposal-step-tab-review"]')).toHaveAttribute(
@@ -358,10 +607,38 @@ test('genera, revisa y confirma comidas con navegación de planificación en esc
     const reviewDay = page.locator('[data-test="meal-proposal-review-day"]');
     await expect(reviewDay).toBeVisible();
     await expect(page.locator('[data-test^="meal-proposal-event-"]')).toHaveCount(1);
+    const sharedProposalEvent = page.locator('[data-test^="meal-proposal-event-"]').first();
+    await expect(sharedProposalEvent).toContainText('Guiso sintético nuevo');
+    const sharedRecipeDetails = sharedProposalEvent.locator('details.meal-planner__recipe-details');
+    await sharedRecipeDetails.locator('summary').click();
+    await expect(sharedRecipeDetails).toContainText('200 g');
+    for (const level of ['basic', 'intermediate', 'expert'] as const) {
+      const levelSelector = sharedRecipeDetails.locator(
+        `[data-test="meal-proposal-recipe-level-${level}"]`
+      );
+      await expect(levelSelector).toBeVisible();
+      await levelSelector.click();
+      const visibleLevel = { basic: 'básico', intermediate: 'intermedio', expert: 'experto' }[
+        level
+      ];
+      await expect(sharedRecipeDetails).toContainText(`paso ${visibleLevel} sintético`);
+    }
+    await sharedRecipeDetails.scrollIntoViewIfNeeded();
+    await mkdir(screenshotDirectory, { recursive: true });
+    await page.screenshot({
+      path: resolve(screenshotDirectory, `${testInfo.project.name}-recipe-details.png`),
+      fullPage: false,
+      animations: 'disabled'
+    });
     await reviewDay.locator('button[aria-haspopup="listbox"]').click();
     await page.getByRole('option').nth(1).click();
     await expect(page.locator('[data-test^="meal-proposal-event-"]')).toHaveCount(2);
     await expect(review).toContainText('Individual');
+    const catalogRecipeEvent = page
+      .locator('[data-test^="meal-proposal-event-"]')
+      .filter({ hasText: 'SMOKE_E2E_CATALOG' });
+    await expect(catalogRecipeEvent).toHaveCount(1);
+    await expect(catalogRecipeEvent).toContainText('100 g');
     await reviewDay.locator('button[aria-haspopup="listbox"]').click();
     await page.getByRole('option').nth(0).click();
     const selectedProposalDay = await reviewDay.locator('.picker__trigger').innerText();
@@ -414,27 +691,63 @@ test('genera, revisa y confirma comidas con navegación de planificación en esc
       json_schema: {
         name: 'weekly_meal_proposal',
         strict: true,
-        schema: { properties: { events: { minItems: 1 } } }
+        schema: {
+          properties: {
+            events: { minItems: 1 },
+            newRecipes: { type: 'array' }
+          }
+        }
       }
     });
+    expect(
+      providerRequests[0]?.response_format?.json_schema?.schema?.properties?.events?.items
+        ?.properties?.recipeAlias
+    ).toBeDefined();
     const userMessage = providerRequests[0]?.messages?.find((message) => message.role === 'user');
     const contentParts = Array.isArray(userMessage?.content) ? userMessage.content : [];
+    const attachedJsonFiles = contentParts.filter((part) => part.type === 'file');
+    expect(attachedJsonFiles.map((part) => part.file?.filename).sort()).toEqual([
+      'household-recipes-catalog.json',
+      'meal-planning-context.json'
+    ]);
+    expect(
+      attachedJsonFiles.every((part) =>
+        part.file?.file_data?.startsWith('data:application/json;base64,')
+      )
+    ).toBe(true);
     const textPrompt = contentParts
       .filter((part) => part.type === 'text')
       .map((part) => part.text ?? '')
       .join('\n');
-    const context = readProviderMealContext(providerRequests[0]!);
-    expect(context).not.toBeNull();
+    const providerInputs = readProviderMealInputs(providerRequests[0]!);
+    expect(providerInputs).not.toBeNull();
+    const context = providerInputs?.context;
+    const catalog = providerInputs?.catalog;
+    expect(context).not.toHaveProperty('recipes');
     expect(context).toMatchObject({
-      version: 1,
+      version: 2,
       participants: [{ alias: 'P1' }, { alias: 'P2' }],
       pantry: expect.any(Array),
-      utensils: expect.any(Array),
-      recipes: expect.any(Array)
+      utensils: expect.any(Array)
     });
     expect(context?.requiredTurns).toHaveLength(7);
     expect(context?.requiredTurns.every((slot) => slot.eligibleParticipants.length > 0)).toBe(true);
     expect(textPrompt).toContain('meal-planning-context.json');
+    expect(textPrompt).toContain('household-recipes-catalog.json');
+    expect(catalog?.version).toBe(1);
+    expect(
+      catalog?.recipes.some(
+        (recipe) =>
+          recipe.alias === generatedCatalogRecipe?.alias &&
+          recipe.recipe.name === 'SMOKE_E2E_CATALOG'
+      )
+    ).toBe(true);
+    const catalogFixture = catalog?.recipes.find(
+      (recipe) => recipe.recipe.name === 'SMOKE_E2E_CATALOG'
+    );
+    expect(catalogFixture).toBeTruthy();
+    expect(catalogFixture).not.toHaveProperty('id');
+    expect(catalogFixture).not.toHaveProperty('recipeId');
     const prompt = `${textPrompt}\n${JSON.stringify(context)}`;
     for (const member of activeMembers) {
       expect(prompt).not.toContain(member.name);
@@ -516,12 +829,18 @@ test('genera, revisa y confirma comidas con navegación de planificación en esc
       proposalId: string;
       weekStart: string;
       householdMemberIds: string[];
+      recipes: Array<{
+        alias: string;
+        source: 'new' | 'catalog';
+        recipeId: string | null;
+        recipe: CompleteRecipeFixture;
+      }>;
       events: Array<{
         id: string;
         date: string;
         mealType: string;
         time: string | null;
-        recipe: { name: string } | null;
+        recipeAlias: string;
         participantAliases: string[];
         participantIds: string[];
         servings: number;
@@ -530,14 +849,46 @@ test('genera, revisa y confirma comidas con navegación de planificación en esc
     expect(submitted.proposalId).toBeTruthy();
     expect(submitted.weekStart).toBe(generatedRequest.weekStart);
     expect(submitted.householdMemberIds).toEqual(generatedRequest.householdMemberIds);
+    expect(submitted.recipes).toHaveLength(2);
+    expect(new Set(submitted.recipes.map((recipe) => recipe.alias)).size).toBe(2);
+    expect(submitted.recipes.map((recipe) => recipe.source).sort()).toEqual(['catalog', 'new']);
+    expect(submitted.recipes.find((recipe) => recipe.source === 'catalog')?.recipeId).toBe(
+      savedCatalogRecipeId
+    );
+    expect(submitted.recipes.find((recipe) => recipe.source === 'new')?.recipeId).toBeNull();
     expect(submitted.events.length).toBeGreaterThan(0);
+    expect(
+      submitted.events.every(
+        (event) =>
+          typeof event.recipeAlias === 'string' &&
+          submitted.recipes.some((recipe) => recipe.alias === event.recipeAlias) &&
+          !('recipe' in event)
+      )
+    ).toBe(true);
     expect(submitted.events.some((event) => event.participantIds.length === 2)).toBe(true);
     expect(submitted.events.some((event) => event.participantIds.length === 1)).toBe(true);
+    expect(submitted.events.some((event) => event.servings === 2)).toBe(true);
     const confirmation = await confirmResponse;
     const confirmationText = await confirmation.text();
     expect(confirmation.status(), confirmationText).toBe(200);
     await expect(page.getByText(/comidas añadidas al calendario/i)).toBeVisible();
     expect(confirmCalls).toBe(1);
+    const savedGeneratedRecipesResponse = await page.request.get('/api/recipes', {
+      headers: firstHeaders,
+      params: { search: 'Guiso sintético nuevo' }
+    });
+    expect(
+      savedGeneratedRecipesResponse.ok(),
+      await savedGeneratedRecipesResponse.text()
+    ).toBeTruthy();
+    const savedGeneratedRecipes = (await savedGeneratedRecipesResponse.json()) as {
+      data: { recipes: Array<{ name: string; isPublic?: boolean }> };
+    };
+    const matchingGeneratedRecipes = savedGeneratedRecipes.data.recipes.filter(
+      (recipe) => recipe.name === 'Guiso sintético nuevo'
+    );
+    expect(matchingGeneratedRecipes).toHaveLength(1);
+    expect(matchingGeneratedRecipes[0]?.isPublic).toBe(false);
 
     const weekEnd = new Date(
       new Date(`${generatedRequest.weekStart}T00:00:00.000Z`).getTime() + 6 * 86400000
@@ -563,16 +914,19 @@ test('genera, revisa y confirma comidas con navegación de planificación en esc
     };
 
     const expectedMealKeys = submitted.events
-      .map((event) =>
-        JSON.stringify([
+      .map((event) => {
+        const recipeName = submitted.recipes.find((recipe) => recipe.alias === event.recipeAlias)
+          ?.recipe.name;
+        expect(recipeName).toBeTruthy();
+        return JSON.stringify([
           event.date,
           event.mealType,
           event.time,
-          event.recipe?.name,
+          recipeName,
           event.servings,
           [...event.participantIds].sort()
-        ])
-      )
+        ]);
+      })
       .sort();
     const calendarMealKeys = (meals: CalendarMealProjection[]) =>
       meals

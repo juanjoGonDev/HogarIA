@@ -334,6 +334,22 @@
   overflow-wrap: anywhere;
 }
 
+.meal-planner__recipe-origin {
+  display: inline-block;
+  margin-top: var(--space-1);
+  padding: 2px var(--space-2);
+  border: 1px solid var(--color-warning-100);
+  border-radius: var(--radius-sm);
+  color: var(--color-warning-700);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+.meal-planner__recipe-origin--catalog {
+  border-color: var(--color-success-100);
+  color: var(--color-success-700);
+}
+
 .meal-planner__summary {
   margin-top: var(--space-1);
 }
@@ -393,6 +409,99 @@
   margin: var(--space-3) 0 0;
   font-size: var(--text-sm);
   font-weight: var(--font-semibold);
+}
+
+.meal-planner__recipe-facts,
+.meal-planner__recipe-times,
+.meal-planner__recipe-guidance {
+  display: grid;
+  gap: var(--space-2) var(--space-4);
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+}
+
+.meal-planner__recipe-times {
+  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+}
+
+.meal-planner__recipe-facts {
+  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+}
+
+.meal-planner__recipe-times > div,
+.meal-planner__recipe-guidance > div {
+  min-width: 0;
+}
+
+.meal-planner__recipe-facts dt,
+.meal-planner__recipe-times dt,
+.meal-planner__recipe-guidance dt {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+.meal-planner__recipe-facts dd,
+.meal-planner__recipe-times dd,
+.meal-planner__recipe-guidance dd {
+  margin: 0;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.meal-planner__recipe-level-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-1);
+  margin-top: var(--space-3);
+  border-bottom: 1px solid var(--border-default);
+}
+
+.meal-planner__recipe-level-tabs button {
+  min-width: 0;
+  min-height: 44px;
+  padding: var(--space-2);
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.meal-planner__recipe-level-tabs button[aria-selected='true'] {
+  border-bottom-color: var(--primary);
+  color: var(--text-primary);
+  font-weight: var(--font-semibold);
+}
+
+.meal-planner__recipe-level-tabs button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+
+.meal-planner__recipe-instructions ol {
+  padding-inline-start: var(--space-5);
+}
+
+.meal-planner__recipe-instructions li + li {
+  margin-top: var(--space-2);
+}
+
+.meal-planner__recipe-instructions li p + p {
+  margin-top: var(--space-1);
+}
+
+.meal-planner__recipe-warning {
+  color: var(--color-warning-700) !important;
+  font-weight: var(--font-medium);
+}
+
+.meal-planner__recipe-tags {
+  margin-top: var(--space-3) !important;
+  font-size: var(--text-xs) !important;
 }
 
 .meal-planner__review-footer {

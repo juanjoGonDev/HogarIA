@@ -52,24 +52,7 @@ function event(
     date: '2026-10-12',
     mealType,
     time: mealType === 'lunch' ? '14:00' : '20:30',
-    recipe: {
-      name: id === 'shared-lunch' ? 'Lentejas para compartir' : 'Tortilla individual',
-      description: 'Receta sintética de prueba.',
-      baseServings: 1,
-      prepTimeMinutes: 10,
-      cookTimeMinutes: 20,
-      ingredients: [
-        {
-          name: 'Patata',
-          quantity: 100,
-          unit: 'g',
-          preparation: null,
-          isOptional: false,
-          notes: null
-        }
-      ],
-      instructions: ['Cocinar con el resto de ingredientes.']
-    },
+    recipeAlias: `R-${id}`,
     participantAliases: aliases,
     participantIds,
     servings,
@@ -80,6 +63,11 @@ function event(
 }
 
 function proposal(): HouseholdMealProposal {
+  const events = [
+    event('shared-lunch', 'lunch', ['P1', 'P2'], ['user-1', 'user-2'], 2),
+    event('solo-dinner-one', 'dinner', ['P1'], ['user-1'], 1),
+    event('solo-dinner-two', 'dinner', ['P2'], ['user-2'], 1)
+  ];
   return {
     proposalId: 'proposal-synthetic',
     weekStart: '2026-10-12',
@@ -87,11 +75,86 @@ function proposal(): HouseholdMealProposal {
       { alias: 'P1', householdMemberId: 'member-1' },
       { alias: 'P2', householdMemberId: 'member-2' }
     ],
-    events: [
-      event('shared-lunch', 'lunch', ['P1', 'P2'], ['user-1', 'user-2'], 2),
-      event('solo-dinner-one', 'dinner', ['P1'], ['user-1'], 1),
-      event('solo-dinner-two', 'dinner', ['P2'], ['user-2'], 1)
-    ]
+    recipes: events.map((mealEvent, index) => ({
+      alias: mealEvent.recipeAlias!,
+      source: index === 0 ? 'catalog' : 'new',
+      recipeId: index === 0 ? 'recipe-shared' : null,
+      recipe: {
+        name: mealEvent.id === 'shared-lunch' ? 'Lentejas para compartir' : 'Tortilla individual',
+        description: 'Receta sintética de prueba.',
+        baseServings: 2,
+        difficulty: 'easy',
+        cuisine: 'Española',
+        totalTime: 30,
+        prepTime: 10,
+        cookTime: 20,
+        restTime: null,
+        calories: 250,
+        ingredients: [
+          {
+            name: 'Patata',
+            quantity: 100,
+            unit: 'g',
+            preparation: null,
+            isOptional: false,
+            substitutes: [],
+            notes: null
+          }
+        ],
+        utensils: ['Olla'],
+        guidance: {
+          appliances: [],
+          parallelTasks: [],
+          tipsAndVariations: ['Añade perejil al final.'],
+          batchCookingWarning: null
+        },
+        instructionsByLevel: {
+          basic: [
+            {
+              stepNumber: 1,
+              instruction: 'Cocinar con el resto de ingredientes.',
+              temperature: null,
+              timerRequired: true,
+              timerDuration: 8,
+              duration: 10,
+              tips: null,
+              warning: null,
+              illustration: null
+            }
+          ],
+          intermediate: [
+            {
+              stepNumber: 1,
+              instruction: 'Sofríe y añade los ingredientes.',
+              temperature: { value: 180, unit: 'C' },
+              timerRequired: true,
+              timerDuration: 10,
+              duration: 10,
+              tips: 'Mantén el fuego medio.',
+              warning: null,
+              illustration: null
+            }
+          ],
+          expert: [
+            {
+              stepNumber: 1,
+              instruction: 'Controla el punto del sofrito y ajusta la cocción.',
+              temperature: { value: 356, unit: 'F' },
+              timerRequired: true,
+              timerDuration: 3,
+              duration: 10,
+              tips: null,
+              warning: null,
+              illustration: null
+            }
+          ]
+        },
+        nutrition: { calories: 250, protein: 12, carbs: 30, fat: 8, fiber: 5 },
+        storage: null,
+        tags: ['sintética']
+      }
+    })),
+    events
   };
 }
 
@@ -177,9 +240,104 @@ describe('HouseholdMealPlannerComponent', () => {
     expect(fixture.nativeElement.textContent).toContain('household.meal_proposal_shared');
     expect(fixture.nativeElement.textContent).toContain('household.meal_proposal_individual');
     expect(fixture.nativeElement.textContent).toContain('Ingredientes para 2 raciones');
+    expect(fixture.nativeElement.textContent).toContain('household.meal_proposal_recipe_saved');
+    expect(fixture.nativeElement.textContent).toContain('household.meal_proposal_recipe_new');
     expect(fixture.nativeElement.textContent).toContain('Alicia');
     expect(fixture.nativeElement.textContent).toContain('Bruno');
     expect(component.canConfirm()).toBeTrue();
+  });
+
+  it('resolves recipe aliases and exposes one accessible instruction level at a time', () => {
+    service.createProposal.and.returnValue(of(proposal()));
+    component.generateProposal();
+    fixture.detectChanges();
+
+    const details = fixture.nativeElement.querySelector(
+      '[data-test="meal-proposal-recipe-details-shared-lunch"]'
+    ) as HTMLDetailsElement;
+    details.open = true;
+    fixture.detectChanges();
+
+    const levelTabs = Array.from(
+      fixture.nativeElement.querySelectorAll('[data-test="meal-proposal-recipe-level-basic"]')
+    ) as HTMLButtonElement[];
+    expect(levelTabs.length).toBe(3);
+    const basicTab = levelTabs[0];
+    expect(basicTab.getAttribute('role')).toBe('tab');
+    expect(basicTab.getAttribute('aria-selected')).toBe('true');
+    const intermediateTab = basicTab.parentElement?.querySelector(
+      '[data-test="meal-proposal-recipe-level-intermediate"]'
+    ) as HTMLButtonElement;
+    expect(intermediateTab).not.toBeNull();
+
+    basicTab.focus();
+    basicTab.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+    fixture.detectChanges();
+
+    const expertTab = basicTab.parentElement?.querySelector(
+      '[data-test="meal-proposal-recipe-level-expert"]'
+    ) as HTMLButtonElement;
+    expect(expertTab.getAttribute('aria-selected')).toBe('true');
+    expect(document.activeElement).toBe(expertTab);
+    expect(details.textContent).toContain('Controla el punto del sofrito');
+    expect(details.textContent).toContain('household.meal_proposal_utensils');
+    expect(details.textContent).toContain('Olla');
+    expect(details.textContent).toContain('household.meal_proposal_cook_time');
+    expect(details.textContent).toContain('household.meal_proposal_temperature');
+    expect(details.textContent).toContain('356 °F');
+    expect(details.textContent).toContain('household.meal_proposal_timer');
+  });
+
+  it('does not render an empty recipe guidance section', () => {
+    const preview = proposal();
+    for (const reference of preview.recipes) {
+      reference.recipe.guidance = {
+        appliances: [],
+        parallelTasks: [],
+        tipsAndVariations: [],
+        batchCookingWarning: null
+      };
+    }
+    service.createProposal.and.returnValue(of(preview));
+    component.generateProposal();
+    fixture.detectChanges();
+
+    const details = fixture.nativeElement.querySelector(
+      '[data-test="meal-proposal-recipe-details-shared-lunch"]'
+    ) as HTMLDetailsElement;
+    details.open = true;
+    fixture.detectChanges();
+
+    expect(details.querySelector('.meal-planner__recipe-guidance')).toBeNull();
+  });
+
+  it('uses explicit timer duration and does not turn a null timer into a step-duration timer', () => {
+    expect(
+      component.recipeStepTimerMinutes({
+        stepNumber: 1,
+        instruction: 'Remover',
+        timerRequired: true,
+        timerDuration: 3,
+        duration: 12
+      })
+    ).toBe(3);
+    expect(
+      component.recipeStepTimerMinutes({
+        stepNumber: 1,
+        instruction: 'Remover',
+        timerRequired: true,
+        timerDuration: null,
+        duration: 12
+      })
+    ).toBeNull();
+    expect(
+      component.recipeStepTimerMinutes({
+        stepNumber: 1,
+        instruction: 'Remover',
+        timerRequired: true,
+        duration: 12
+      })
+    ).toBe(12);
   });
 
   it('scales displayed ingredients locally and confirms servings without changing the base recipe', () => {
@@ -210,22 +368,23 @@ describe('HouseholdMealPlannerComponent', () => {
     const ingredient = fixture.nativeElement.querySelector(
       '[data-test="meal-proposal-ingredient-shared-lunch-0"]'
     ) as HTMLElement;
-    expect(ingredient.textContent).toContain('200 g');
+    expect(ingredient.textContent).toContain('100 g');
 
     servingsInput.value = '3';
     servingsInput.dispatchEvent(new Event('change'));
     fixture.detectChanges();
 
-    expect(ingredient.textContent).toContain('300 g');
+    expect(ingredient.textContent).toContain('150 g');
     expect(service.createProposal).toHaveBeenCalledTimes(1);
     expect(preview.events[0].servings).toBe(2);
-    expect(preview.events[0].recipe?.ingredients[0].quantity).toBe(100);
+    expect(preview.recipes[0].recipe.ingredients[0].quantity).toBe(100);
 
     component.confirmProposal();
     const request = service.confirmProposal.calls.mostRecent().args[1];
     const submittedEvent = request.events.find((item) => item.id === 'shared-lunch');
     expect(submittedEvent?.servings).toBe(3);
-    expect(submittedEvent?.recipe?.ingredients[0].quantity).toBe(100);
+    expect(submittedEvent?.recipeAlias).toBe('R-shared-lunch');
+    expect(request.recipes).toEqual(preview.recipes);
   });
 
   it('rejects serving counts outside the supported integer range and restores the last valid value', () => {
@@ -246,7 +405,7 @@ describe('HouseholdMealPlannerComponent', () => {
       fixture.detectChanges();
 
       expect(servingsInput.value).toBe('2');
-      expect(ingredient.textContent).toContain('200 g');
+      expect(ingredient.textContent).toContain('100 g');
     }
     expect(service.createProposal).toHaveBeenCalledTimes(1);
   });
@@ -266,12 +425,12 @@ describe('HouseholdMealPlannerComponent', () => {
     servingsInput.value = '1';
     servingsInput.dispatchEvent(new Event('change'));
     fixture.detectChanges();
-    expect(ingredient.textContent).toContain('100 g');
+    expect(ingredient.textContent).toContain('50 g');
 
     servingsInput.value = '100';
     servingsInput.dispatchEvent(new Event('change'));
     fixture.detectChanges();
-    expect(ingredient.textContent?.replace(/[\s,]/g, '')).toContain('10000g');
+    expect(ingredient.textContent?.replace(/[\s,]/g, '')).toContain('5000g');
     expect(service.createProposal).toHaveBeenCalledTimes(1);
   });
 
@@ -337,6 +496,7 @@ describe('HouseholdMealPlannerComponent', () => {
       proposalId: preview.proposalId,
       weekStart: preview.weekStart,
       householdMemberIds: ['member-1', 'member-2'],
+      recipes: preview.recipes,
       events: preview.events
     });
     expect(component.confirmed()).toBeTrue();
@@ -585,7 +745,7 @@ describe('HouseholdMealPlannerComponent', () => {
     const reviewOnly = proposal();
     reviewOnly.events = reviewOnly.events.map((item) => ({
       ...item,
-      recipe: null,
+      recipeAlias: null,
       servings: 0,
       status: 'unresolved',
       reason: 'Revisión sintética requerida.'
@@ -687,6 +847,18 @@ describe('HouseholdMealPlannerComponent', () => {
     service.confirmProposal.and.returnValue(throwError(() => new Error('network unavailable')));
     component.confirmProposal();
     expect(component.errorKey()).toBe('household.meal_proposal_confirm_error');
+
+    service.confirmProposal.and.returnValue(
+      throwError(
+        () =>
+          new HttpErrorResponse({
+            status: 409,
+            error: { code: 'MEAL_PROPOSAL_RECIPE_CHANGED' }
+          })
+      )
+    );
+    component.confirmProposal();
+    expect(component.errorKey()).toBe('household.meal_proposal_recipe_changed');
 
     service.confirmProposal.and.returnValue(
       of({
