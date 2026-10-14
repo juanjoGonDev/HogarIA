@@ -30,7 +30,8 @@ export const AI_LIVE_SMOKE_ENV = Object.freeze({
   receiptsOnly: 'HOGARIA_AI_REAL_SMOKE_RECEIPTS_ONLY',
   receiptSelection: 'HOGARIA_AI_REAL_SMOKE_RECEIPT_SELECTION',
   receiptDirectory: 'HOGARIA_AI_REAL_SMOKE_RECEIPT_DIRECTORY',
-  preferredJpegOrdinal: 'HOGARIA_AI_REAL_SMOKE_PREFERRED_JPEG_ORDINAL'
+  preferredJpegOrdinal: 'HOGARIA_AI_REAL_SMOKE_PREFERRED_JPEG_ORDINAL',
+  householdMealOnly: 'HOGARIA_AI_REAL_SMOKE_HOUSEHOLD_MEAL_ONLY'
 });
 
 export const AI_LIVE_SMOKE_KEY_MARKER = '__HOGARIA_AI_REAL_SMOKE_PROVIDER_KEY__';
@@ -40,6 +41,37 @@ export const AI_LIVE_SMOKE_COMPLETION_BUDGET = 10;
 export const AI_LIVE_RECEIPT_SMOKE_REQUEST_BUDGET = AI_LIVE_RECEIPT_UNSUBMITTED_COMPLETION_BUDGET;
 export const AI_LIVE_RECEIPT_SMOKE_TICKET_COUNT = AI_LIVE_RECEIPT_UNSUBMITTED_TICKET_COUNT;
 export const AI_LIVE_RECEIPT_SMOKE_MAX_REQUEST_BYTES = 15 * 1024 * 1024;
+export const AI_LIVE_HOUSEHOLD_MEAL_SMOKE_COMPLETION_BUDGET = 1;
+export const AI_LIVE_HOUSEHOLD_MEAL_SCHEMA_NAME = 'weekly_meal_proposal';
+export const AI_LIVE_HOUSEHOLD_MEAL_PROMPT_CONTRACT = Object.freeze({
+  requiredPromptTerms: Object.freeze([
+    '"likes":["tofu"]',
+    '"dislikes":["pollo"]',
+    '"likes":["pollo"]',
+    '"dislikes":["tofu"]'
+  ]),
+  forbiddenPromptTerms: Object.freeze(['HogarIA miembro QA uno', 'HogarIA miembro QA dos'])
+});
+
+const RECEIPT_SMOKE_INPUT_KEYS = Object.freeze([
+  AI_LIVE_SMOKE_ENV.receiptPath,
+  AI_LIVE_SMOKE_ENV.receiptsOnly,
+  AI_LIVE_SMOKE_ENV.receiptSelection,
+  AI_LIVE_SMOKE_ENV.receiptDirectory,
+  AI_LIVE_SMOKE_ENV.preferredJpegOrdinal
+]);
+
+export function validateAiLiveHouseholdMealSmokeRequest(env = process.env) {
+  const requested = env[AI_LIVE_SMOKE_ENV.householdMealOnly];
+  if (requested === undefined || requested === '0' || requested === '') return false;
+  if (requested !== '1') {
+    throw new Error('Household meal smoke requires the exact opt-in value.');
+  }
+  if (RECEIPT_SMOKE_INPUT_KEYS.some((key) => env[key] !== undefined)) {
+    throw new Error('Household meal smoke cannot include receipt inputs.');
+  }
+  return true;
+}
 
 export function validateAiLiveReceiptSmokeRequest(env = process.env) {
   const requested = env[AI_LIVE_SMOKE_ENV.receiptsOnly];
@@ -99,6 +131,7 @@ export function validateAiLiveSmokeRunner(env, args) {
     return false;
   }
   validateAiLiveSmokeOptIn(env);
+  const householdMealOnly = validateAiLiveHouseholdMealSmokeRequest(env);
   validateAiLiveReceiptSmokeRequest(env);
   if (env[AI_LIVE_SMOKE_ENV.providerToken]) {
     throw new Error('The WebAPI bearer must remain in the smoke coordinator process memory.');
@@ -129,10 +162,12 @@ export function validateAiLiveSmokeRunner(env, args) {
   if (typeof env[AI_LIVE_SMOKE_ENV.model] !== 'string' || !env[AI_LIVE_SMOKE_ENV.model]) {
     throw new Error('The dedicated AI smoke runner has no selected model.');
   }
-  const expectedArgs = [
-    '--config=playwright.ai-real-smoke.config.ts',
-    'tests/e2e/ai-real-smoke.spec.ts'
-  ];
+  const expectedArgs = householdMealOnly
+    ? [
+        '--config=playwright.ai-household-meal-real-smoke.config.ts',
+        'tests/e2e/household-meal-planning-live-smoke.spec.ts'
+      ]
+    : ['--config=playwright.ai-real-smoke.config.ts', 'tests/e2e/ai-real-smoke.spec.ts'];
   if (args.length !== expectedArgs.length || expectedArgs.some((arg) => !args.includes(arg))) {
     throw new Error('The dedicated AI smoke runner only accepts its isolated config and test.');
   }
@@ -492,6 +527,8 @@ export function isolatedProcessEnvironments(env) {
   delete server[AI_LIVE_SMOKE_ENV.providerToken];
   delete browser[AI_LIVE_SMOKE_ENV.providerToken];
   delete playwright[AI_LIVE_SMOKE_ENV.providerToken];
+  delete server[AI_LIVE_SMOKE_ENV.householdMealOnly];
+  delete browser[AI_LIVE_SMOKE_ENV.householdMealOnly];
   delete server[AI_LIVE_SMOKE_ENV.receiptPath];
   delete browser[AI_LIVE_SMOKE_ENV.receiptPath];
   for (const key of [
@@ -510,7 +547,7 @@ export function isolatedProcessEnvironments(env) {
 
 export function createAiLiveSmokeRunnerEnvironment(
   parentEnv,
-  { proxyToken, proxyUrl, model, deadlines = AI_LIVE_SMOKE_DEADLINES }
+  { proxyToken, proxyUrl, model, deadlines = AI_LIVE_SMOKE_DEADLINES, householdMealOnly = false }
 ) {
   assertAiLiveSmokeDeadlineContract(deadlines);
   const allowedInherited = [
@@ -533,8 +570,10 @@ export function createAiLiveSmokeRunnerEnvironment(
     AI_LIVE_SMOKE_ENV.receiptDirectory,
     AI_LIVE_SMOKE_ENV.preferredJpegOrdinal
   ];
+  const receiptInputs = new Set(RECEIPT_SMOKE_INPUT_KEYS);
   const env = Object.fromEntries(
     allowedInherited
+      .filter((key) => !householdMealOnly || !receiptInputs.has(key))
       .filter((key) => typeof parentEnv[key] === 'string')
       .map((key) => [key, parentEnv[key]])
   );
@@ -551,6 +590,7 @@ export function createAiLiveSmokeRunnerEnvironment(
     [AI_LIVE_SMOKE_ENV.requestTimeoutMs]: String(deadlines.requestMs),
     [AI_LIVE_SMOKE_ENV.testTimeoutMs]: String(deadlines.testMs),
     [AI_LIVE_SMOKE_ENV.globalTimeoutMs]: String(deadlines.globalMs),
+    ...(householdMealOnly ? { [AI_LIVE_SMOKE_ENV.householdMealOnly]: '1' } : {}),
     E2E_RATE_LIMIT: 'off'
   };
 }
@@ -605,6 +645,36 @@ export function isSuccessfulAiLiveSmokeResult({
     calls.length >= AI_LIVE_SMOKE_MIN_COMPLETIONS &&
     calls.length <= AI_LIVE_SMOKE_COMPLETION_BUDGET &&
     (unsuccessfulIndexes.length === 0 || onlySuccessfulReceiptFallbackFailed)
+  );
+}
+
+export function isSuccessfulAiLiveHouseholdMealSmokeResult({
+  runnerExit,
+  cleanupFailed,
+  calls,
+  proxyMetrics
+}) {
+  const call = Array.isArray(calls) && calls.length === 1 ? calls[0] : undefined;
+  return (
+    runnerExit?.code === 0 &&
+    runnerExit.cancelled !== true &&
+    runnerExit.timedOut !== true &&
+    runnerExit.runnerCleaned === true &&
+    cleanupFailed !== true &&
+    call?.status >= 200 &&
+    call?.status < 300 &&
+    call?.schemaName === AI_LIVE_HOUSEHOLD_MEAL_SCHEMA_NAME &&
+    call?.requestContract?.strictJsonSchema === true &&
+    call.requestContract.noFileOrImageAttachments === true &&
+    call.requestContract.requiredPromptTermsPresent === true &&
+    call.requestContract.forbiddenPromptTermsAbsent === true &&
+    call?.responseFormat?.hasChoices === true &&
+    call.responseFormat.messageContentType === 'text' &&
+    call.responseFormat.isJsonObject === true &&
+    call.responseFormat.finishReason === 'stop' &&
+    proxyMetrics?.requestAttempts === 1 &&
+    proxyMetrics.rejectedRequests === 0 &&
+    proxyMetrics.failed !== true
   );
 }
 
@@ -832,14 +902,63 @@ function collectRequestBody(request, maxBytes) {
   });
 }
 
+function rejectLiveProxyRequest(response, state, status, message) {
+  if (state.expectedSchemaName || state.requireReceiptAttachments) state.failed = true;
+  if (state.expectedSchemaName) {
+    state.metrics.failed = true;
+    state.metrics.rejectedRequests += 1;
+  }
+  sendJson(response, status, message);
+}
+
+function hasOnlyTextMessages(messages) {
+  return (
+    Array.isArray(messages) &&
+    messages.length > 0 &&
+    messages.every((message) => typeof message?.content === 'string')
+  );
+}
+
+function validatePromptTermList(value, name) {
+  if (value === undefined) return undefined;
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    value.length > 16 ||
+    value.some((term) => typeof term !== 'string' || term.trim().length === 0 || term.length > 256)
+  ) {
+    throw new Error(`Live AI smoke ${name} are invalid.`);
+  }
+  return value.map((term) => term.toLowerCase());
+}
+
+function promptTermContract(messages, state) {
+  const prompt = messages
+    .map((message) => message.content)
+    .join('\n')
+    .toLowerCase();
+  const requiredPromptTermsPresent =
+    state.requiredPromptTerms === undefined ||
+    state.requiredPromptTerms.every((term) => prompt.includes(term));
+  const forbiddenPromptTermsAbsent =
+    state.forbiddenPromptTerms === undefined ||
+    state.forbiddenPromptTerms.every((term) => !prompt.includes(term));
+  return { requiredPromptTermsPresent, forbiddenPromptTermsAbsent };
+}
+
 async function handleProxyRequest(request, response, state) {
+  state.metrics.requestAttempts += 1;
   const path = new URL(request.url ?? '/', 'http://127.0.0.1').pathname;
   if (request.method !== 'POST' || path !== '/v1/chat/completions' || request.url !== path) {
-    sendJson(response, 404, 'Live AI smoke route not found.');
+    rejectLiveProxyRequest(response, state, 404, 'Live AI smoke route not found.');
     return;
   }
   if (request.headers.authorization !== `Bearer ${state.clientToken}`) {
-    sendJson(response, 401, 'Live AI smoke authorization rejected.');
+    rejectLiveProxyRequest(response, state, 401, 'Live AI smoke authorization rejected.');
+    return;
+  }
+  if (state.expectedSchemaName && state.failed) {
+    rejectLiveProxyRequest(response, state, 409, 'Live AI smoke stopped after a rejected request.');
     return;
   }
   if (state.requireReceiptAttachments && state.failed) {
@@ -852,8 +971,7 @@ async function handleProxyRequest(request, response, state) {
     return;
   }
   if (!String(request.headers['content-type'] ?? '').includes('application/json')) {
-    if (state.requireReceiptAttachments) state.failed = true;
-    sendJson(response, 415, 'Live AI smoke accepts JSON requests only.');
+    rejectLiveProxyRequest(response, state, 415, 'Live AI smoke accepts JSON requests only.');
     return;
   }
 
@@ -861,10 +979,10 @@ async function handleProxyRequest(request, response, state) {
   try {
     body = await collectRequestBody(request, state.maxRequestBytes);
   } catch (error) {
-    if (state.requireReceiptAttachments) state.failed = true;
     if (!response.destroyed && !response.headersSent) {
-      sendJson(
+      rejectLiveProxyRequest(
         response,
+        state,
         error instanceof Error && error.message === 'request-too-large' ? 413 : 400,
         'Live AI smoke request rejected.'
       );
@@ -875,8 +993,7 @@ async function handleProxyRequest(request, response, state) {
   try {
     payload = JSON.parse(body.toString('utf8'));
   } catch {
-    if (state.requireReceiptAttachments) state.failed = true;
-    sendJson(response, 400, 'Live AI smoke request is malformed.');
+    rejectLiveProxyRequest(response, state, 400, 'Live AI smoke request is malformed.');
     return;
   }
   if (
@@ -884,13 +1001,21 @@ async function handleProxyRequest(request, response, state) {
     !Array.isArray(payload.messages) ||
     payload.messages.length === 0
   ) {
-    if (state.requireReceiptAttachments) state.failed = true;
-    sendJson(response, 400, 'Live AI smoke request is outside its model/fixture contract.');
+    rejectLiveProxyRequest(
+      response,
+      state,
+      400,
+      'Live AI smoke request is outside its model/fixture contract.'
+    );
     return;
   }
   if (!validStrictResponseFormat(payload.response_format)) {
-    if (state.requireReceiptAttachments) state.failed = true;
-    sendJson(response, 400, 'Live AI smoke requires a strict JSON Schema response format.');
+    rejectLiveProxyRequest(
+      response,
+      state,
+      400,
+      'Live AI smoke requires a strict JSON Schema response format.'
+    );
     return;
   }
   const requestStream = payload.stream === true;
@@ -899,15 +1024,44 @@ async function handleProxyRequest(request, response, state) {
     state.requireReceiptAttachments &&
     (requestSchemaName !== 'receipt' || !hasExactReceiptAttachments(payload.messages))
   ) {
-    state.failed = true;
-    sendJson(response, 400, 'Live receipt smoke requires one ticket and the inventory JSON file.');
+    rejectLiveProxyRequest(
+      response,
+      state,
+      400,
+      'Live receipt smoke requires one ticket and the inventory JSON file.'
+    );
+    return;
+  }
+  if (
+    state.expectedSchemaName &&
+    (requestSchemaName !== state.expectedSchemaName || !hasOnlyTextMessages(payload.messages))
+  ) {
+    rejectLiveProxyRequest(
+      response,
+      state,
+      400,
+      'Live meal smoke requires its expected schema and text-only prompt.'
+    );
+    return;
+  }
+  const promptContract =
+    state.requiredPromptTerms || state.forbiddenPromptTerms
+      ? promptTermContract(payload.messages, state)
+      : { requiredPromptTermsPresent: true, forbiddenPromptTermsAbsent: true };
+  if (!promptContract.requiredPromptTermsPresent || !promptContract.forbiddenPromptTermsAbsent) {
+    rejectLiveProxyRequest(
+      response,
+      state,
+      400,
+      'Live household meal prompt is outside its synthetic profile contract.'
+    );
     return;
   }
   const expectedStreaming = !state.fallbackPending;
   if (state.requireReceiptAttachments && requestStream !== expectedStreaming) {
-    state.failed = true;
-    sendJson(
+    rejectLiveProxyRequest(
       response,
+      state,
       409,
       state.fallbackPending
         ? 'Live receipt fallback must be non-streaming after HTTP 400.'
@@ -916,8 +1070,7 @@ async function handleProxyRequest(request, response, state) {
     return;
   }
   if (state.acceptedCalls >= state.maxCalls) {
-    if (state.requireReceiptAttachments) state.failed = true;
-    sendJson(response, 429, 'Live AI smoke completion budget exhausted.');
+    rejectLiveProxyRequest(response, state, 429, 'Live AI smoke completion budget exhausted.');
     return;
   }
   state.acceptedCalls += 1;
@@ -937,6 +1090,10 @@ async function handleProxyRequest(request, response, state) {
       else if (status === 400 && requestStream) state.fallbackPending = true;
       else state.failed = true;
     }
+    if (state.expectedSchemaName && (status < 200 || status >= 300)) {
+      state.failed = true;
+      state.metrics.failed = true;
+    }
     state.metrics.calls.push({
       model: state.model,
       status,
@@ -946,6 +1103,13 @@ async function handleProxyRequest(request, response, state) {
         strictJsonSchema: true,
         ...(state.requireReceiptAttachments
           ? { inventoryJsonAttachmentCount: 1, receiptAttachmentCount: 1 }
+          : {}),
+        ...(state.expectedSchemaName ? { noFileOrImageAttachments: true } : {}),
+        ...(state.requiredPromptTerms
+          ? { requiredPromptTermsPresent: promptContract.requiredPromptTermsPresent }
+          : {}),
+        ...(state.forbiddenPromptTerms
+          ? { forbiddenPromptTermsAbsent: promptContract.forbiddenPromptTermsAbsent }
           : {})
       },
       elapsedMs,
@@ -1043,6 +1207,9 @@ export async function createAiLiveProxy({
   maxRequestBytes = 6 * 1024 * 1024,
   maxResponseBytes = 4 * 1024 * 1024,
   requireReceiptAttachments = false,
+  expectedSchemaName,
+  requiredPromptTerms,
+  forbiddenPromptTerms,
   onRequest,
   onCompletion
 }) {
@@ -1058,6 +1225,29 @@ export async function createAiLiveProxy({
   if (!Number.isInteger(maxCalls) || maxCalls < 1 || maxCalls > AI_LIVE_SMOKE_COMPLETION_BUDGET) {
     throw new Error('Live AI smoke completion budget exceeds its hard cap.');
   }
+  if (
+    expectedSchemaName !== undefined &&
+    (typeof expectedSchemaName !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(expectedSchemaName))
+  ) {
+    throw new Error('Live AI smoke expected schema name is invalid.');
+  }
+  if (expectedSchemaName && requireReceiptAttachments) {
+    throw new Error('Live AI smoke cannot combine a meal schema with receipt-only mode.');
+  }
+  if (
+    (requiredPromptTerms !== undefined || forbiddenPromptTerms !== undefined) &&
+    !expectedSchemaName
+  ) {
+    throw new Error('Live AI smoke prompt markers require an expected JSON Schema.');
+  }
+  const validatedRequiredPromptTerms = validatePromptTermList(
+    requiredPromptTerms,
+    'required prompt markers'
+  );
+  const validatedForbiddenPromptTerms = validatePromptTermList(
+    forbiddenPromptTerms,
+    'forbidden prompt markers'
+  );
   const target = validateLoopbackOrigin(targetOrigin);
   const state = {
     token,
@@ -1072,10 +1262,13 @@ export async function createAiLiveProxy({
     maxRequestBytes,
     maxResponseBytes,
     requireReceiptAttachments,
+    expectedSchemaName,
+    requiredPromptTerms: validatedRequiredPromptTerms,
+    forbiddenPromptTerms: validatedForbiddenPromptTerms,
     onRequest,
     onCompletion,
     upstreamRequests: new Set(),
-    metrics: { calls: [] }
+    metrics: { calls: [], requestAttempts: 0, rejectedRequests: 0, failed: false }
   };
   let closePromise;
   const server = createServer((request, response) => {

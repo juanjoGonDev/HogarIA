@@ -4,11 +4,14 @@ import { AI_LIVE_SMOKE_DEADLINES } from './ai-live-smoke-contract.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const runner = fileURLToPath(new URL('./run-isolated-playwright.mjs', import.meta.url));
-const runnerArgs = [
-  runner,
-  '--config=playwright.ai-real-smoke.config.ts',
-  'tests/e2e/ai-real-smoke.spec.ts'
-];
+const runnerArgs = (env) =>
+  env?.HOGARIA_AI_REAL_SMOKE_HOUSEHOLD_MEAL_ONLY === '1'
+    ? [
+        runner,
+        '--config=playwright.ai-household-meal-real-smoke.config.ts',
+        'tests/e2e/household-meal-planning-live-smoke.spec.ts'
+      ]
+    : [runner, '--config=playwright.ai-real-smoke.config.ts', 'tests/e2e/ai-real-smoke.spec.ts'];
 export const AI_LIVE_SMOKE_RUNNER_WATCHDOG_MS = AI_LIVE_SMOKE_DEADLINES.watchdogMs;
 export const AI_LIVE_SMOKE_RUNNER_SHUTDOWN_MESSAGE = 'ai-live-smoke-shutdown';
 export const AI_LIVE_SMOKE_RUNNER_COMPLETE_MESSAGE = 'ai-live-smoke-runner-complete';
@@ -23,6 +26,12 @@ const SAFE_RUNNER_PROGRESS = Object.freeze({
   'playwright-failed': 'Los escenarios de Chrome fallaron; cerrando el entorno aislado.',
   'test-phase:register-start': 'Último hito E2E: comenzando el registro sintético.',
   'test-phase:registered': 'Último hito E2E: registro sintético completado.',
+  'test-phase:household-start': 'Último hito E2E: creando los dos perfiles sintéticos.',
+  'test-phase:household-ready': 'Último hito E2E: hogar sintético con dos miembros preparado.',
+  'test-phase:profiles-ready': 'Último hito E2E: preferencias blandas sintéticas configuradas.',
+  'test-phase:calendar-empty': 'Último hito E2E: calendario aislado vacío antes de proponer.',
+  'test-phase:proposal-returned': 'Último hito E2E: la API validó una propuesta semanal.',
+  'test-phase:calendar-still-empty': 'Último hito E2E: propuesta sin escritura en calendario.',
   'test-phase:config-start': 'Último hito E2E: guardando configuración IA de prueba.',
   'test-phase:configured': 'Último hito E2E: configuración IA de prueba guardada.',
   'test-phase:ingredients-created': 'Último hito E2E: ingredientes sintéticos preparados.',
@@ -240,7 +249,7 @@ export function runAiLiveSmokeRunner({
     };
 
     try {
-      child = spawnImpl(process.execPath, runnerArgs, {
+      child = spawnImpl(process.execPath, runnerArgs(env), {
         cwd: root,
         env,
         stdio: ['ignore', 'ignore', 'ignore', 'ipc'],

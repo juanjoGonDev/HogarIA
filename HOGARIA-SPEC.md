@@ -5841,3 +5841,22 @@ preferencia guardada, con español como fallback. Tickets guardan solo el locale
 ESLint no pudo arrancar: el repositorio no proporciona la configuración `eslint.config.js` que exige ESLint 9.
 No se hizo una llamada de humo a un proveedor externo en esta unidad; estas pruebas verifican el contrato del
 prompt y el transporte, no que un modelo externo obedezca siempre.
+
+## 12av — Planificación semanal por hogar: tareas y comidas
+
+El contrato funcional, las decisiones y el checklist reproducible de plano, tareas y planificación de
+comidas viven en `HOGARIA-HOUSEHOLD-PLAN-SPEC.md`; esa es la fuente activa y detallada de aceptación.
+La extensión integra las comidas del hogar en el calendario existente, mantiene la propuesta sin guardar
+hasta confirmación y calcula tareas/compras a partir de los datos reales confirmados. No modifica la
+recurrencia general del calendario de §12at.
+
+**Estado revalidado (2026-10-14):** UI, propuesta simulada, resolución de gustos blandos, controles de
+alergias, asignaciones, calendario, consumo y compra tienen evidencia sintética en la spec enfocada.
+Se añadió `pnpm run smoke:ai:household-meal`: una ejecución aislada y de solo comidas con dos perfiles
+sintéticos, `weekly_meal_proposal` estricto, una sola completion, contrato de prompt validado sin guardar
+texto y sin confirmar/persistir el calendario. `pnpm run test:config` pasa **70/70**, `pnpm run
+typecheck:e2e` pasa y la E2E sintética existente del planificador pasa **1/1** con SQLite temporal.
+El intento del smoke real se detuvo en el preflight porque WebAPI devolvió readiness **200** pero sesión
+`needs_login`; Playwright no arrancó y no se envió ninguna solicitud al proveedor. La decisión semántica
+del modelo real permanece sin validar. `QA-HOME-MEALS.PLAN.1` sigue abierto hasta que ese único smoke
+termine correctamente; el procedimiento y limitaciones completos constan en la spec enfocada.

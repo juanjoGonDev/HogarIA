@@ -25,6 +25,7 @@ function createWebApi({
   },
   sessionRecording = false,
   diagnosticHtml = false,
+  sessionState = 'ready',
   models = [
     {
       id: 'gpt-5',
@@ -52,6 +53,9 @@ function createWebApi({
         name: 'web-api',
         routes: ['/health/ready', '/v1/models', '/v1/responses', '/admin']
       });
+    }
+    if (method === 'GET' && url.pathname === '/admin/api/chatgpt/session') {
+      return jsonResponse({ state: sessionState });
     }
     if (method === 'GET' && url.pathname === '/admin/api/runtime-controls') {
       return jsonResponse({
@@ -133,6 +137,23 @@ test('fails before token creation or model calls when capture settings are unsaf
     calls.some((call) => new URL(call.url).pathname === '/v1/models'),
     false
   );
+});
+
+test('fails before token creation when the WebAPI ChatGPT session needs login', async () => {
+  const { calls, fetchImpl } = createWebApi({ sessionState: 'needs_login' });
+
+  await assert.rejects(
+    prepareExistingAiLiveSmokeSession({ env: {}, fetchImpl }),
+    /provider session is not ready/
+  );
+
+  const paths = calls.map((call) => new URL(call.url).pathname);
+  assert.equal(paths.includes('/admin/api/chatgpt/session'), true);
+  assert.equal(
+    calls.some((call) => call.method === 'POST'),
+    false
+  );
+  assert.equal(paths.includes('/v1/models'), false);
 });
 
 test('allows sanitized local request logging only with the explicit diagnostic opt-in', async () => {

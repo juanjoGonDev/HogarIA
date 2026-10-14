@@ -22,6 +22,34 @@ function createRunnerChild() {
   return child;
 }
 
+test('household meal smoke launches only its dedicated isolated Playwright spec', async () => {
+  const child = createRunnerChild();
+  const running = runAiLiveSmokeRunner({
+    env: { HOGARIA_AI_REAL_SMOKE_HOUSEHOLD_MEAL_ONLY: '1' },
+    watchdogMs: 60_000,
+    spawnImpl: (_command, args) => {
+      assert.deepEqual(args.slice(1), [
+        '--config=playwright.ai-household-meal-real-smoke.config.ts',
+        'tests/e2e/household-meal-planning-live-smoke.spec.ts'
+      ]);
+      return child;
+    }
+  });
+
+  child.emit('spawn');
+  child.emit('message', { type: AI_LIVE_SMOKE_RUNNER_COMPLETE_MESSAGE, cleaned: true });
+  child.exitCode = 0;
+  child.connected = false;
+  child.emit('exit', 0, null);
+
+  assert.deepEqual(await running, {
+    code: 0,
+    cancelled: false,
+    timedOut: false,
+    runnerCleaned: true
+  });
+});
+
 test('cancellation asks the owned E2E runner to shut down and waits for cleanup confirmation', async () => {
   const controller = new AbortController();
   const child = createRunnerChild();

@@ -153,10 +153,11 @@ export async function prepareExistingAiLiveSmokeSession({
 }
 
 async function verifyExistingWebApi(json, { allowRedactedRequestLogs = false } = {}) {
-  const [ready, identity, controls, sessionRecording, diagnosticHtml] = await Promise.all([
+  const [ready, identity, controls, session, sessionRecording, diagnosticHtml] = await Promise.all([
     json('/health/ready'),
     json('/'),
     json('/admin/api/runtime-controls'),
+    json('/admin/api/chatgpt/session'),
     json('/admin/api/settings/session-recording'),
     json('/admin/api/settings/diagnostic-html')
   ]);
@@ -168,6 +169,9 @@ async function verifyExistingWebApi(json, { allowRedactedRequestLogs = false } =
     !identity.routes.includes('/v1/models')
   ) {
     throw new Error('The existing WebAPI service identity or readiness is invalid.');
+  }
+  if (session?.state !== 'ready') {
+    throw new Error('The configured WebAPI provider session is not ready; complete sign-in first.');
   }
 
   const logging = controls?.requestLogging?.settings;
@@ -303,6 +307,7 @@ async function readLimitedJson(response) {
 const SAFE_ERRORS = new Set([
   'The existing WebAPI smoke was cancelled.',
   'The existing WebAPI service identity or readiness is invalid.',
+  'The configured WebAPI provider session is not ready; complete sign-in first.',
   'The existing WebAPI privacy settings are unsafe for the smoke.',
   'The existing WebAPI did not return the expected smoke token.',
   'The existing WebAPI model gpt-5 must support active text and image input.',

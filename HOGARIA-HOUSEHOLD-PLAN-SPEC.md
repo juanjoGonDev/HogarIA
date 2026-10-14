@@ -1511,14 +1511,28 @@ también las condiciones que aún están abiertas.
       incompatibilidad automática; se prioriza un compromiso compartido seguro y compatible con objetivos,
       y un dislike no se trata como alergia. El prompt ordenado y una regresión sintética comprueban esa
       instrucción con dos perfiles de gustos distintos y un evento compartido, pero no prueban la decisión
-      semántica de un proveedor real. Pendiente: smoke opt-in real con perfiles sintéticos. WebAPI
-      `GET /health/ready` responde **200**, pero `GET /admin/api/chatgpt/session` indica `needs_login`;
-      el smoke aislado de tickets falló con `ChatGptFlowError(authentication_required)` antes de
-      obtener respuesta válida. No se envió una propuesta de comidas y el resultado de tickets no
-      valida la semántica de este planificador. La protección hard (alergia → grupo seguro +
-      unresolved sin revelar la causa) sí tiene pruebas. Cobertura actual: planificador
-      **90,48/81,08/92,55/96,2 %** y servicio **100/100/100/100 %** (sentencias/ramas/funciones/líneas);
-      el gate por archivo está satisfecho; la llamada real fallida no devuelve completions semánticas.
+      semántica de un proveedor real. **Smoke opt-in dedicado implementado, validación semántica aún pendiente:**
+      el comando `pnpm run smoke:ai:household-meal` selecciona solo
+      `playwright.ai-household-meal-real-smoke.config.ts` y
+      `tests/e2e/household-meal-planning-live-smoke.spec.ts`; usa dos perfiles sintéticos con preferencias
+      blandas opuestas (tofu/pollo), configuración/reintentos limitados y SQLite temporal. Antes de reenviar,
+      el proxy local exige un único `weekly_meal_proposal` con JSON Schema estricto, texto sin adjuntos, las
+      cuatro preferencias efectivas en el prompt y ausencia de los nombres sintéticos; solo conserva
+      booleanos/telemetría segura, nunca prompt ni respuesta. La E2E valida cobertura única de ambos
+      participantes los siete días, al menos un turno compartido y calendario vacío antes y después; no
+      confirma ni persiste la propuesta. No acepta tickets/configuración de tickets ni repite una llamada que
+      pudo completarse. Evidencia (14-10-2026): `pnpm run test:config` **70/70** y
+      `pnpm run typecheck:e2e` pasan. `prettier --check` pasa para todos los archivos modificados.
+      La E2E sintética existente pasa **1/1** con proveedor
+      local simulado y DB temporal limpiada; se ejecutó con `node scripts/run-isolated-playwright.mjs --project=chromium tests/e2e/household-meal-planning.spec.ts`. Se intentó el comando dedicado: WebAPI
+      `/health/ready` devolvió `ready=true`, pero `/admin/api/chatgpt/session` devolvió `needs_login`; el
+      coordinador terminó antes de arrancar Playwright, crear token o enviar una completion. No se llamó al
+      proveedor, no hubo propuesta que reutilizar y no se cambió el inventario/calendario real. Por tanto, el
+      resultado no valida semántica real y este criterio permanece abierto hasta que la sesión WebAPI esté
+      autenticada y el único smoke complete. La protección hard (alergia → grupo seguro + unresolved sin
+      revelar la causa) sí tiene pruebas. Cobertura actual: planificador **90,48/81,08/92,55/96,2 %** y
+      servicio **100/100/100/100 %** (sentencias/ramas/funciones/líneas); el gate por archivo está satisfecho.
+
 - [x] **QA-HOME-MEALS.CALENDAR.1** — persistencia idempotente tras confirmar, calendario actual,
       evento compartido visible una vez a todos los miembros activos con `calendar.view` aunque la comida
       sea individual, asignaciones correctas, consumo limitado a participantes y ninguna nota/objetivo
@@ -1626,6 +1640,6 @@ pnpm --filter @hogaria/server exec tsc --noEmit -p tsconfig.json
       E2E aislada adicional **1/1** conecta la configuración de automatización desde navegador con scheduler,
       worker, proveedor sintético y publicación idempotente. Usa DB temporal, app/API local y datos
       sintéticos. No valida comportamiento semántico de proveedor real.
-- [x] Actualizar evidencia y límites aquí y en `HOGARIA-SPEC.md` §12t.T. La recurrencia de
-      §12t.R no cambia. No marcar la extensión completa ni la validación IA real sin evidencia
-      reproducible de cada gate.
+- [x] Actualizar evidencia y límites aquí y en `HOGARIA-SPEC.md` §12av. La referencia anterior a
+      §12t.T/§12t.R no existe en la fuente actual; la recurrencia del calendario no cambia en esta
+      extensión. No marcarla completa ni validar IA real sin evidencia reproducible de cada gate.
