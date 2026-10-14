@@ -1309,6 +1309,51 @@ describe('POST /replace-meal', () => {
     expect(savedMeal?.custom_meal).toBe('Pasta con salsa');
   });
 
+  it('accepts AI replacement text longer than the former character caps', async () => {
+    const longText = 'x'.repeat(2_501);
+    await crearConfig(alice, 'Proveedor de reemplazo', 'http://ai.test/v1', 0);
+    createMealForReplacement(alice.id, 'replace-meal-long-text');
+    const requests = stubRecipeProvider(
+      () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    safe: true,
+                    name: longText,
+                    description: longText,
+                    ingredients: [longText],
+                    estimatedTime: 30,
+                    servings: 2
+                  })
+                }
+              }
+            ]
+          }),
+          { status: 200 }
+        )
+    );
+
+    const response = await call(alice, 'POST', '/replace-meal', {
+      mealId: 'replace-meal-long-text'
+    });
+    const result = await json(response);
+    const body = JSON.parse(requests[0].body);
+
+    expect(response.status).toBe(200);
+    expect(result.data).toMatchObject({
+      name: longText,
+      description: longText,
+      ingredients: [longText]
+    });
+    expect(JSON.stringify(body.response_format.json_schema.schema)).not.toContain('"maxLength"');
+    expect(
+      db.prepare('SELECT custom_meal FROM meals WHERE id = ?').get('replace-meal-long-text')
+    ).toMatchObject({ custom_meal: 'Pasta con salsa' });
+  });
+
   it('rejects an incomplete AI alternative and leaves the existing meal unchanged', async () => {
     await crearConfig(alice, 'Proveedor de reemplazo', 'http://ai.test/v1', 0);
     createMealForReplacement(alice.id, 'replace-meal-incomplete');

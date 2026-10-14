@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createAiConfigSchema,
   generateRecipeSchema,
+  mealReplacementCandidateSchema,
   replaceMealSchema,
   AI_CONFIG_DEFAULT_MAX_TOKENS,
   AI_CONFIG_MAX_TIMEOUT_MS
@@ -65,9 +66,9 @@ describe('generateRecipeSchema servings', () => {
     expect(
       generateRecipeSchema.safeParse({ ...base, guests: [{ name: 'Invitada' }] }).success
     ).toBe(false);
-    expect(
-      generateRecipeSchema.safeParse({ ...base, guests: Array(9).fill({}) }).success
-    ).toBe(false);
+    expect(generateRecipeSchema.safeParse({ ...base, guests: Array(9).fill({}) }).success).toBe(
+      false
+    );
   });
 });
 
@@ -128,9 +129,14 @@ describe('replaceMealSchema guests', () => {
   });
 
   it('bounds guest count and free-text fields', () => {
-    expect(replaceMealSchema.safeParse({ mealId: 'meal-1', guests: Array(9).fill(guest) }).success).toBe(false);
     expect(
-      replaceMealSchema.safeParse({ mealId: 'meal-1', guests: [{ ...guest, notes: 'x'.repeat(301) }] }).success
+      replaceMealSchema.safeParse({ mealId: 'meal-1', guests: Array(9).fill(guest) }).success
+    ).toBe(false);
+    expect(
+      replaceMealSchema.safeParse({
+        mealId: 'meal-1',
+        guests: [{ ...guest, notes: 'x'.repeat(301) }]
+      }).success
     ).toBe(false);
   });
 
@@ -163,5 +169,23 @@ describe('replaceMealSchema guests', () => {
     expect(
       replaceMealSchema.safeParse({ mealId: 'meal-1', goals: { types: ['custom'] } }).success
     ).toBe(false);
+  });
+});
+
+describe('mealReplacementCandidateSchema output text', () => {
+  it('accepts long recipe names, descriptions and ingredient strings from AI', () => {
+    const longText = 'x'.repeat(2_501);
+    const parsed = mealReplacementCandidateSchema.parse({
+      safe: true,
+      name: longText,
+      description: longText,
+      ingredients: [longText],
+      estimatedTime: 30,
+      servings: 2
+    });
+
+    expect(parsed.name).toBe(longText);
+    expect(parsed.description).toBe(longText);
+    expect(parsed.ingredients).toEqual([longText]);
   });
 });

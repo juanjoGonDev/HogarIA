@@ -139,6 +139,19 @@ describe('meal proposal schema', () => {
     });
   });
 
+  it('accepts long generated event summaries and reasons without character caps', () => {
+    const longText = 'x'.repeat(2_501);
+    const parsed = mealProposalSchema.parse(
+      proposal([
+        makeScheduledEvent({ objectiveSummary: longText }),
+        makeUnresolvedEvent({ date: '2026-10-14', mealType: 'lunch', reason: longText })
+      ])
+    );
+
+    expect(parsed.events[0].objectiveSummary).toBe(longText);
+    expect(parsed.events[1].reason).toBe(longText);
+  });
+
   it('rejects empty event arrays and requires complete instructions at all three levels', () => {
     expect(mealProposalSchema.safeParse({ newRecipes: [], events: [] }).success).toBe(false);
     const incomplete = recipe() as unknown as Record<string, unknown>;

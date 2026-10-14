@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { RECIPE_RESPONSE_FORMAT } from './ai-generated-output.schema.js';
+import {
+  MEAL_REPLACEMENT_RESPONSE_FORMAT,
+  RECIPE_RESPONSE_FORMAT
+} from './ai-generated-output.schema.js';
 import { createMealProposalResponseFormat } from './household-meal-proposal.schema.js';
 import { generatedRecipeCandidateSchema } from './generated-recipe.schema.js';
 import { householdMealRecipeCandidateSchema } from './household-meal-proposal.schema.js';
@@ -24,12 +27,18 @@ describe('shared AI recipe output contract', () => {
     expect(proposalFormat.properties.newRecipes.items.properties.recipe).toEqual(recipeFormat);
   });
 
-  it('does not publish arbitrary maxLength caps for recipe text in strict provider schemas', () => {
+  it('does not publish arbitrary maxLength caps in culinary provider response schemas', () => {
     expect(JSON.stringify(RECIPE_RESPONSE_FORMAT.json_schema.schema)).not.toContain('"maxLength"');
     const weeklySchema = createMealProposalResponseFormat().json_schema.schema as {
       properties: { newRecipes: { items: { properties: { recipe: unknown } } } };
     };
     const weeklyRecipeSchema = weeklySchema.properties.newRecipes.items.properties.recipe;
     expect(JSON.stringify(weeklyRecipeSchema)).not.toContain('"maxLength"');
+    expect(JSON.stringify(createMealProposalResponseFormat().json_schema.schema)).not.toContain(
+      '"maxLength"'
+    );
+    expect(JSON.stringify(MEAL_REPLACEMENT_RESPONSE_FORMAT.json_schema.schema)).not.toContain(
+      '"maxLength"'
+    );
   });
 });

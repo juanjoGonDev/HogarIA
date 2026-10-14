@@ -72,9 +72,9 @@ export const replaceMealSchema = z
 export const mealReplacementCandidateSchema = z
   .object({
     safe: z.literal(true),
-    name: z.string().trim().min(1).max(120),
-    description: z.string().trim().min(1).max(400),
-    ingredients: z.array(z.string().trim().min(1).max(100)).min(1).max(30),
+    name: z.string().trim().min(1),
+    description: z.string().trim().min(1),
+    ingredients: z.array(z.string().trim().min(1)).min(1).max(30),
     estimatedTime: z.number().int().positive().max(360),
     servings: z.number().int().positive()
   })

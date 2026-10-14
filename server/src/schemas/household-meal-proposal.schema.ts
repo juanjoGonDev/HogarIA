@@ -41,7 +41,6 @@ export const mealProposalEventSchema = z
       .string()
       .trim()
       .min(1)
-      .max(240)
       .describe(
         'Short, neutral culinary summary for display. Never reveal allergies, diagnoses, sensitive goals, or private member notes.'
       ),
@@ -50,7 +49,6 @@ export const mealProposalEventSchema = z
       .string()
       .trim()
       .min(1)
-      .max(300)
       .nullable()
       .describe('Clear, neutral explanation when unresolved; null for a scheduled meal.')
   })
