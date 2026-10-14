@@ -5887,10 +5887,22 @@ pequeño; el sondeo continuo sí añade despertares/consultas y el SQL trace pue
 terminales o supervisores. No se dispone de una medición de RAM de la Raspberry; no atribuirle saturación
 de RAM sin esa evidencia.
 
+**Seguimiento del fallo (2026-10-14):** tras aplicar la migración anterior, la captura nueva muestra otro
+`500`: `UNIQUE constraint failed: pantry_categories.id`. La clave ya puede repetirse por ámbito, pero
+`ensureDefaultCategories` aún genera IDs deterministas `pcat-${userId}-${index}` y
+`asegurarPadreAlimentos` genera `pcat-${userId}-alimentos`; ambos omiten `householdId`. Al crear o unirse a
+otro hogar que necesite sembrar el catálogo completo, esos IDs chocan con los del hogar anterior. Las pruebas
+anteriores insertaban una sola categoría manual con ID propio y no cubrían el catálogo sembrado completo;
+la evidencia previa verificaba unicidad de claves, no este camino real.
+
 - [x] Categorías: la unicidad refleja el ámbito (persona para despensa personal; persona + hogar para
       catálogos de hogar); una migración repetible reemplaza el índice antiguo sin descartar filas. Crear
-      o unirse a un hogar funciona aunque esa persona conserve claves iguales en otro hogar; duplicar una
-      clave en el mismo ámbito sigue rechazándose.
+      o unirse a un hogar permite reutilizar claves de otro ámbito; duplicar una clave en el mismo ámbito
+      sigue rechazándose.
+- [ ] Siembra y backfill: las categorías recién generadas tienen IDs únicos entre ámbitos del mismo usuario.
+      Crear y unirse a otro hogar pasan con las 13 categorías por defecto ya sembradas en el hogar anterior;
+      el backfill del padre `alimentos` puede procesar varios ámbitos heredados sin colisión, pérdida de filas
+      ni duplicación al reiniciar.
 - [x] Cola: al iniciar, encolar/reintentar un job y liberar concurrencia se despierta el worker sin esperar
       el sondeo de seguridad. En reposo, el poller reconcilia como máximo cada 30 s, no cada 100 ms; parar
       el worker limpia ambos temporizadores y no duplica ejecuciones.
@@ -5903,7 +5915,14 @@ de RAM sin esa evidencia.
 **Evidencia TDD de categorías (2026-10-14):** la prueba de creación devolvía primero **500** al reutilizar
 una clave presente en otro hogar. `household.routes.spec.ts -t 'another household'` pasa **2/2**;
 `database.spec.ts -t 'migra la unicidad'` pasa **1/1**. La migración conserva la categoría heredada y tras
-reiniciar permite la misma clave en otro hogar, mientras rechaza el duplicado dentro del mismo ámbito.
+reiniciar permite la misma clave en otro hogar, mientras rechaza el duplicado dentro del mismo ámbito. Estas
+pruebas no sembraban el catálogo completo del hogar previo; por eso no detectaron la colisión de `id` que
+muestra la captura posterior.
+
+**Seguimiento TDD pendiente:** añadir primero regresiones con catálogo completo y ámbitos heredados múltiples;
+deben fallar con `UNIQUE constraint failed: pantry_categories.id` antes de corregir la generación de IDs.
+No marcar esta casilla hasta pasar esos casos y verificar creación, unión, backfill repetible y preservación
+de filas con SQLite temporal.
 
 **Evidencia de cola y cierre (2026-10-14):** con el worker original, la prueba veía **2 sondeos/250 ms**;
 ahora la reconciliación es a **30 s**, pero inicio, encolado/reintento y fin de trabajo la despiertan y
