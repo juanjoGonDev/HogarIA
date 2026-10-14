@@ -1518,9 +1518,11 @@ también las condiciones que aún están abiertas.
       `playwright.ai-household-meal-real-smoke.config.ts` y
       `tests/e2e/household-meal-planning-live-smoke.spec.ts`; usa dos perfiles sintéticos con preferencias
       blandas opuestas (tofu/pollo), configuración/reintentos limitados y SQLite temporal. Antes de reenviar,
-      el proxy local exige un único `weekly_meal_proposal` con JSON Schema estricto, texto sin adjuntos, las
-      cuatro preferencias efectivas en el prompt y ausencia de los nombres sintéticos; solo conserva
-      booleanos/telemetría segura, nunca prompt ni respuesta. La E2E valida cobertura única de ambos
+      el proxy local exige un único `weekly_meal_proposal` con JSON Schema estricto y exactamente un adjunto
+      `application/json` (`meal-planning-context.json`); valida en memoria su contexto sintético (alias,
+      preferencias/objetivos/horarios efectivos, turnos, despensa visible, utensilios disponibles, recetas y
+      último plan confirmado) y la ausencia de nombres/IDs reales. Solo conserva booleanos/telemetría segura,
+      nunca prompt, contenido del adjunto ni respuesta. La E2E valida cobertura única de ambos
       participantes los siete días, al menos un turno compartido y calendario vacío antes y después; no
       confirma ni persiste la propuesta. No acepta tickets/configuración de tickets ni repite una llamada que
       pudo completarse. Evidencia (14-10-2026): `pnpm run test:config` **70/70** y
@@ -1560,6 +1562,34 @@ también las condiciones que aún están abiertas.
       un motivo/fase que permita distinguir entre error de aserción, salida del proceso o limpieza, así
       que esa limitación queda registrada y no se atribuye el fallo a la IA ni a la aplicación.
       No se repitió la petición ni se tocaron tickets, inventario, calendario real o ajustes de WebAPI.
+
+- **Hallazgo posterior (14-10-2026):** el registro de WebAPI compartido por la persona usuaria
+  muestra que la completion terminó con éxito y devolvió `{"events":[]}`. Es éxito de
+  transporte/proveedor, no una propuesta aceptable; el esquema enviado no declara `minItems` en
+  `events`, y por eso permite la lista vacía. El texto pegado para esa ejecución deja vacías las
+  secciones de participantes, turnos, objetivo, existencias y recetas. El código local actual
+  construye algunos de esos valores inline, pero esto no demuestra qué contexto recibió el
+  proveedor. Para cerrar esta discrepancia, el contexto debe viajar como el adjunto JSON descrito
+  arriba y una prueba debe decodificar y verificar el contenido real de la petición sin registrar
+  datos privados.
+
+- [ ] **QA-HOME-MEALS.OUTPUT.1** — `events` tiene al menos un elemento tanto en el JSON Schema estricto
+      del proveedor como en la validación local. Un resultado vacío se rechaza antes de cualquier escritura;
+      cada turno esperado debe quedar cubierto exactamente una vez o explícitamente `unresolved`. Si todos
+      los turnos carecen de participantes aptos para IA, el servidor genera localmente sus eventos
+      `unresolved` sin llamar al proveedor ni pasar por un array vacío; las restricciones no se relajan para
+      admitir `events: []`. Evidencia pendiente: regresiones del schema de proveedor/Zod, cobertura incompleta,
+      caso sin participantes aptos y rutas sin escrituras al fallar.
+- [ ] **QA-HOME-MEALS.CONTEXT.1** — cada generación envía, junto al mensaje de texto y `response_format`
+      estricto, exactamente un adjunto JSON versionado con datos acotados al hogar, semana y miembros
+      seleccionados: alias opacos, preferencias, restricciones estrictas, objetivo y horario efectivos con
+      su fuente (persona/hogar), turnos requeridos, existencias positivas visibles, utensilios disponibles
+      accesibles, recetas reutilizables accesibles y el plan confirmado más reciente anterior a la semana
+      solicitada (o `null`). Excluye IDs, nombres, emails, miembros no seleccionados y notas/términos privados
+      que solo se usan para filtrar la salida. Las cadenas libres se tratan como datos no confiables. Pruebas
+      de ruta decodifican `file_data` y verifican nombre, MIME, estructura, datos presentes, permisos,
+      exclusiones, cotas y coexistencia con `response_format`; no vuelcan el contexto a logs. El proxy opt-in
+      inspecciona el adjunto sintético en memoria y solo guarda telemetría no sensible.
 
 - [x] **QA-HOME-MEALS.CALENDAR.1** — persistencia idempotente tras confirmar, calendario actual,
       evento compartido visible una vez a todos los miembros activos con `calendar.view` aunque la comida
