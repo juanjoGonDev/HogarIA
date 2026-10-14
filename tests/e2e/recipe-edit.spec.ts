@@ -1160,13 +1160,11 @@ test('el calor es opcional y quitarlo deja el paso guardado sin temperatura', as
     const screenshotDirectory = resolve(process.cwd(), '.e2e-screenshots/recipe-editor');
     mkdirSync(screenshotDirectory, { recursive: true });
     const device = testInfo.project.name === 'chromium' ? 'desktop' : 'mobile';
-    await page
-      .locator('.editor-item.editor-step')
-      .first()
-      .screenshot({
-        path: resolve(screenshotDirectory, `optional-temperature-${device}.png`),
-        animations: 'disabled'
-      });
+    await page.locator('.editor-item.editor-step').first().scrollIntoViewIfNeeded();
+    await page.screenshot({
+      path: resolve(screenshotDirectory, `optional-temperature-${device}.png`),
+      animations: 'disabled'
+    });
     await selectEditorTab(page, 'Datos');
     await page.getByRole('checkbox', { name: 'Almuerzo' }).check();
     await page.locator('[data-test="recipe-editor-save"] button').click();
