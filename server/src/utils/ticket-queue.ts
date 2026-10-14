@@ -994,16 +994,16 @@ function insertarLinea(
   ).run(
     nanoid(),
     receiptId,
-    nombre.slice(0, 120),
+    nombre,
     Number.isFinite(cantidad) && cantidad > 0 ? cantidad : 1,
-    linea.unit ? String(linea.unit).slice(0, 24) : null,
+    linea.unit ? String(linea.unit) : null,
     linea.category ? String(linea.category).trim().slice(0, 64) || 'other' : 'other',
     Number.isFinite(precio as number) && (precio as number) >= 0
       ? Math.trunc(precio as number)
       : null,
     oferta?.buy ?? null,
     oferta?.take ?? null,
-    linea.note ? String(linea.note).slice(0, 280) : null,
+    linea.note ? String(linea.note) : null,
     Number.isFinite(Number(linea.confidence)) ? Number(linea.confidence) : null,
     posicion
   );

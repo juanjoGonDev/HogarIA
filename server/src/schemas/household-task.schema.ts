@@ -9,13 +9,12 @@ const weekStartSchema = dateSchema.refine(isMonday, 'La semana debe comenzar en 
 
 export const HOUSEHOLD_TASK_LIMITS = {
   maxTasksPerWeek: 200,
-  maxTitleLength: 120,
   maxDetailsLength: 500
 } as const;
 
 export const householdTaskOccurrenceSchema = z.object({
   id: z.string().trim().min(1).max(80),
-  title: z.string().trim().min(1).max(HOUSEHOLD_TASK_LIMITS.maxTitleLength),
+  title: z.string().trim().min(1),
   details: z.string().trim().max(HOUSEHOLD_TASK_LIMITS.maxDetailsLength).nullable(),
   spaceId: z.string().trim().min(1).max(80).nullable(),
   scheduledDate: dateSchema,

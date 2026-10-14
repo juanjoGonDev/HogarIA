@@ -10,6 +10,8 @@ import {
 } from './ai-generated-output.schema.js';
 import { createAiResponseFormat } from './ai-response-format.js';
 import { z } from 'zod';
+import { HOUSEHOLD_PLAN_RESPONSE_FORMAT } from './household-plan.schema.js';
+import { HOUSEHOLD_TASK_PROPOSAL_RESPONSE_FORMAT } from './household-task-proposal.schema.js';
 
 function findObjects(value: unknown): Record<string, unknown>[] {
   if (Array.isArray(value)) return value.flatMap(findObjects);
@@ -31,7 +33,9 @@ const TASK_FORMATS = [
   SHOPPING_PHOTO_RESPONSE_FORMAT,
   EXPIRY_ESTIMATE_RESPONSE_FORMAT,
   createRecommendationsResponseFormat(3),
-  createWeeklyPlanResponseFormat(['breakfast', 'dinner'])
+  createWeeklyPlanResponseFormat(['breakfast', 'dinner']),
+  HOUSEHOLD_PLAN_RESPONSE_FORMAT,
+  HOUSEHOLD_TASK_PROPOSAL_RESPONSE_FORMAT
 ];
 
 describe('createAiResponseFormat', () => {

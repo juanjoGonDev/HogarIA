@@ -22,7 +22,7 @@ const isoDateSchema = z
 const mondaySchema = isoDateSchema.refine(isMonday);
 const contextTaskSchema = z
   .object({
-    title: z.string().trim().min(1).max(HOUSEHOLD_TASK_LIMITS.maxTitleLength),
+    title: z.string().trim().min(1),
     scheduledDate: isoDateSchema,
     spaceId: z.string().trim().min(1).max(80).nullable()
   })
@@ -30,7 +30,7 @@ const contextTaskSchema = z
 const taskZoneSchema = z
   .object({
     id: z.string().trim().min(1).max(80),
-    label: z.string().trim().min(1).max(100)
+    label: z.string().trim().min(1)
   })
   .strict();
 const previousWeekSchema = z

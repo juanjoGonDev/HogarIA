@@ -24,7 +24,11 @@ function sembrarProducto(nombre: string, extra: Record<string, unknown> = {}): s
     `INSERT INTO ingredients (id, user_id, household_id, name, category, quantity, unit, expiration_date, estimated_shelf_days, created_at)
      VALUES (?, ?, NULL, ?, 'other', 1, 'ud', NULL, NULL, ?)`
   ).run(id, alice, nombre, extra['created_at'] ?? '2026-09-01 10:00:00');
-  if (extra['expiration_date'] || extra['estimated_shelf_days'] || extra['quantity'] !== undefined) {
+  if (
+    extra['expiration_date'] ||
+    extra['estimated_shelf_days'] ||
+    extra['quantity'] !== undefined
+  ) {
     const sets: string[] = [];
     const valores: unknown[] = [];
     if (extra['expiration_date'] !== undefined) {
@@ -70,9 +74,9 @@ afterAll(() => closeDatabase?.());
 beforeEach(async () => {
   db.exec('DELETE FROM price_observations; DELETE FROM ingredients; DELETE FROM users;');
   alice = `u-cadu-${Math.random().toString(36).slice(2)}`;
-  db.prepare('INSERT INTO users (id, email, name, password_hash, household_id) VALUES (?, ?, ?, ?, NULL)').run(
-    alice, `${alice}@test.local`, 'Casa', 'hash'
-  );
+  db.prepare(
+    'INSERT INTO users (id, email, name, password_hash, household_id) VALUES (?, ?, ?, ?, NULL)'
+  ).run(alice, `${alice}@test.local`, 'Casa', 'hash');
 });
 
 describe('ritmoDe', () => {
@@ -125,8 +129,15 @@ describe('caducidadesDe', () => {
     expect(porNombre.get('Yogur natural')).toMatchObject({ shelfSource: 'fecha', daysLeft: 1 });
     expect(porNombre.get('Quinoa real')).toMatchObject({ shelfSource: 'ia', estimatedDays: 180 });
     // El pan no tiene ni fecha ni estimacion: el catalogo de bolsillo dice 4 dias desde que se compro.
-    expect(porNombre.get('Pan de barra')).toMatchObject({ shelfSource: 'catalogo', estimatedDays: 4 });
-    expect(porNombre.get('Nada de nada rarisimo')).toMatchObject({ shelfSource: null, daysLeft: null, vence: null });
+    expect(porNombre.get('Pan de barra')).toMatchObject({
+      shelfSource: 'catalogo',
+      estimatedDays: 4
+    });
+    expect(porNombre.get('Nada de nada rarisimo')).toMatchObject({
+      shelfSource: null,
+      daysLeft: null,
+      vence: null
+    });
   });
 
   it('caducado tiene daysLeft negativo, y la lista va por urgencia', async () => {
@@ -145,7 +156,10 @@ describe('caducidadesDe', () => {
     expect(filas[0].name).toBe('Pescado fresco');
     expect(filas[0].daysLeft).toBe(-1);
     // Lo que no sabe cuando vence cierra la lista, no la abre.
-    expect(filas[filas.length - 1]).toMatchObject({ name: 'Bicho de la huerta raro', daysLeft: null });
+    expect(filas[filas.length - 1]).toMatchObject({
+      name: 'Bicho de la huerta raro',
+      daysLeft: null
+    });
   });
 
   it('el ritmo y la duracion del stock salen del historial: 12 uds repuestas cada 7 dias de 6 en 6 duran ~14', async () => {
@@ -155,7 +169,12 @@ describe('caducidadesDe', () => {
     sembrarCompra('Leche entera', '2026-09-08', 6);
 
     const fila = caducidadesDe(db, alice).find((candidata) => candidata.name === 'Leche entera');
-    expect(fila).toMatchObject({ cadaDias: 7, unidadesPorCompra: 6, duraDias: 14, lastBought: '2026-09-08' });
+    expect(fila).toMatchObject({
+      cadaDias: 7,
+      unidadesPorCompra: 6,
+      duraDias: 14,
+      lastBought: '2026-09-08'
+    });
   });
 
   it('la fecha estimada nace de la ultima compra, no del alta del producto', async () => {
@@ -179,8 +198,12 @@ describe('bloqueDeCaducidades (el prompt del planificador)', () => {
   it('nombra lo urgente, marca lo estimado y se calla cuando no hay prisa', async () => {
     const { bloqueDeCaducidades } = await import('./caducidades.js');
     const hoy = new Date().toISOString().slice(0, 10);
-    const enDos = new Date(Date.parse(`${hoy}T00:00:00Z`) + 2 * 86400000).toISOString().slice(0, 10);
-    const enUnMes = new Date(Date.parse(`${hoy}T00:00:00Z`) + 30 * 86400000).toISOString().slice(0, 10);
+    const enDos = new Date(Date.parse(`${hoy}T00:00:00Z`) + 2 * 86400000)
+      .toISOString()
+      .slice(0, 10);
+    const enUnMes = new Date(Date.parse(`${hoy}T00:00:00Z`) + 30 * 86400000)
+      .toISOString()
+      .slice(0, 10);
 
     sembrarProducto('Pescado fresco', { expiration_date: enDos, quantity: 300, unit: 'g' });
     sembrarProducto('Pan de barra', { quantity: 1 });
@@ -219,6 +242,10 @@ describe('buildShelfPrompt y shelfAnswerSchema', () => {
     const { shelfAnswerSchema } = await import('./caducidades.js');
     const valida = shelfAnswerSchema.parse({ products: [{ name: 'Tofu', days: '5' }] });
     expect(valida.products[0].days).toBe(5);
+    expect(
+      shelfAnswerSchema.parse({ products: [{ name: 'Tofu '.repeat(600), days: 5 }] }).products[0]
+        ?.name
+    ).toBe('Tofu '.repeat(600).trim());
     expect(() => shelfAnswerSchema.parse({ products: [{ name: 'Tofu', days: 0 }] })).toThrow();
     expect(() => shelfAnswerSchema.parse({ products: [{ name: 'Tofu', days: 9000 }] })).toThrow();
   });

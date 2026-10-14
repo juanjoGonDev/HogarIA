@@ -277,7 +277,6 @@ interface LineaEnPantalla extends ReceiptItem {
                         [attr.aria-label]="('receipts.nota_linea' | t) + ' ' + linea.name"
                         [value]="linea.note ?? ''"
                         [placeholder]="'receipts.nota_vacia' | t"
-                        maxlength="280"
                         (change)="
                           editarLinea(linea, { note: $any($event.target).value.trim() || null })
                         "

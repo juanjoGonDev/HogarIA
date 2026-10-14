@@ -320,7 +320,6 @@
             <input
               [ngModel]="newTitle()"
               (ngModelChange)="newTitle.set($event)"
-              maxlength="120"
               [placeholder]="'household.tasks_name_placeholder' | t"
               [attr.aria-label]="'household.tasks_name' | t"
             />
@@ -508,7 +507,6 @@
                     <span class="visually-hidden">{{ 'household.tasks_name' | t }}</span>
                     <input
                       [ngModel]="task.title"
-                      maxlength="120"
                       [disabled]="!canEdit || saving()"
                       (ngModelChange)="updateTask(task.id, { title: $event })"
                     />
@@ -537,7 +535,6 @@
                         <span>{{ 'household.tasks_name' | t }}</span>
                         <input
                           [ngModel]="task.title"
-                          maxlength="120"
                           [disabled]="!canEdit || saving()"
                           (ngModelChange)="updateTask(task.id, { title: $event })"
                         />

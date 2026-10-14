@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { createAiResponseFormat } from './ai-response-format.js';
-import { formText } from './form.js';
+import { formField } from './form.js';
 
 export const HOUSEHOLD_AREA_KINDS = [
   'entrance',
@@ -90,7 +90,7 @@ export const PLAN_LIMITS = {
 } as const;
 
 const idSchema = z.string().trim().min(1).max(80);
-const labelSchema = z.string().trim().max(100);
+const labelSchema = z.string().trim();
 const pointSchema = z.object({
   x: z.number().int().min(PLAN_LIMITS.coordinateMin).max(PLAN_LIMITS.coordinateMax),
   y: z.number().int().min(PLAN_LIMITS.coordinateMin).max(PLAN_LIMITS.coordinateMax)
@@ -118,7 +118,7 @@ const spaceSchema = z.object({
 });
 const floorSchema = z.object({
   id: idSchema,
-  name: z.string().trim().min(1).max(80),
+  name: z.string().trim().min(1),
   level: z.number().int().min(PLAN_LIMITS.minLevel).max(PLAN_LIMITS.maxLevel),
   walls: z.array(wallSchema).max(PLAN_LIMITS.maxWallsPerFloor),
   openings: z.array(openingSchema).max(PLAN_LIMITS.maxOpeningsPerFloor),
@@ -129,9 +129,9 @@ const floorSchema = z.object({
 export const householdPlanObjectSchema = z.object({
   schemaVersion: z.literal(1),
   dwellingType: z.enum(DWELLING_TYPES),
-  dwellingTypeLabel: z.string().trim().max(80).nullable(),
-  summary: z.string().max(500),
-  warnings: z.array(z.string().max(300)).max(PLAN_LIMITS.maxWarnings),
+  dwellingTypeLabel: z.string().trim().nullable(),
+  summary: z.string(),
+  warnings: z.array(z.string()).max(PLAN_LIMITS.maxWarnings),
   floors: z.array(floorSchema).min(PLAN_LIMITS.minFloors).max(PLAN_LIMITS.maxFloors)
 });
 
@@ -172,7 +172,7 @@ export const householdPlanWriteSchema = z
 export const householdPlanProposalRequestSchema = z
   .object({
     baseVersion: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
-    prompt: formText(4_000, 'Solicitud'),
+    prompt: formField(z.string().trim()),
     draftPlan: householdPlanSchema.nullish()
   })
   .strict();

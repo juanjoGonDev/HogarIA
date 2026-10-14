@@ -63,7 +63,7 @@ describe('household task AI response contract', () => {
     ).toBe(false);
   });
 
-  it('caps list and field sizes while leaving calendar and zone checks to semantic validation', () => {
+  it('caps weekly task count while leaving calendar and zone checks to semantic validation', () => {
     expect(
       householdTaskProposalObjectSchema.safeParse({
         tasks: Array.from({ length: 201 }, (_, index) => ({
@@ -75,9 +75,9 @@ describe('household task AI response contract', () => {
     ).toBe(false);
     expect(
       householdTaskProposalObjectSchema.safeParse({
-        tasks: [{ title: ' '.repeat(121), scheduledDate: '2026-10-12', spaceId: null }]
+        tasks: [{ title: 'Limpiar '.repeat(400), scheduledDate: '2026-10-12', spaceId: null }]
       }).success
-    ).toBe(false);
+    ).toBe(true);
     expect(
       householdTaskProposalObjectSchema.safeParse({
         tasks: [{ title: 'Task', scheduledDate: '2026-99-99', spaceId: null }]

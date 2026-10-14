@@ -111,7 +111,6 @@
             <input
               [ngModel]="draft().dwellingTypeLabel"
               [disabled]="!canEdit"
-              maxlength="80"
               (ngModelChange)="setDwellingTypeLabel($event)"
             />
           </label>
@@ -123,7 +122,6 @@
             <input
               [ngModel]="floor.name"
               [disabled]="!canEdit"
-              maxlength="80"
               (ngModelChange)="renameFloor($event)"
             />
           </label>
@@ -1475,7 +1473,6 @@
                   ><span>{{ 'household.plan_custom_name' | t }}</span
                   ><input
                     [ngModel]="selectedLabel()"
-                    maxlength="100"
                     [disabled]="!canEdit"
                     (ngModelChange)="selectedLabel.set($event)"
                 /></label>
@@ -1533,7 +1530,6 @@
                       ><span>{{ 'household.plan_area_name' | t }}</span
                       ><input
                         [ngModel]="selectedLabel()"
-                        maxlength="100"
                         [disabled]="!canEdit"
                         (ngModelChange)="updateSelectedLabel($event)"
                     /></label>
@@ -1683,7 +1679,6 @@
               ><span>{{ 'household.plan_chat_prompt' | t }}</span
               ><textarea
                 rows="3"
-                maxlength="4000"
                 [ngModel]="prompt()"
                 [disabled]="!canEdit || proposing()"
                 (ngModelChange)="prompt.set($event)"

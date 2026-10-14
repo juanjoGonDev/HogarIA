@@ -1127,6 +1127,43 @@ describe('entrada por foto (§8f)', () => {
     expect(events[0].description).toContain('foto');
   });
 
+  it('valida, devuelve y persiste texto de foto mayor a 2.500 caracteres sin recortarlo', async () => {
+    giveAi(alice);
+    const name = `Producto ${'artesano '.repeat(300).trim()}`;
+    const unit = `envase/${'unidad/'.repeat(360)}`;
+    const note = `Detalle ${'conservación '.repeat(240).trim()}`;
+    answersWith(
+      JSON.stringify({
+        lines: [
+          {
+            name,
+            quantity: 1,
+            unit,
+            category: 'other',
+            createCategory: false,
+            priceMinor: 125,
+            note
+          }
+        ],
+        warnings: [note]
+      })
+    );
+    const list = await createList(alice);
+
+    const analyzed = await data(
+      await call(alice, 'POST', `/lists/${list.id}/photo/analyze`, { image: IMAGE, mode: 'shelf' })
+    );
+    expect(analyzed.lines[0]).toMatchObject({ name, unit, note });
+    expect(analyzed.warnings).toEqual([note]);
+
+    const applied = await data(
+      await call(alice, 'POST', `/lists/${list.id}/items/apply`, { lines: analyzed.lines })
+    );
+    expect(applied.added[0]).toMatchObject({ name, unit, note });
+    const reloaded = await data(await call(alice, 'GET', `/lists/${list.id}`));
+    expect(reloaded.items[0]).toMatchObject({ name, unit, note });
+  });
+
   it('un descuento por producto solo baja ese producto', async () => {
     const list = await createList(alice);
     const jamon = await data(

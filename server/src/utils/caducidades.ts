@@ -25,7 +25,7 @@ type SqlDb = import('better-sqlite3').Database;
 const CATALOGO_CRUDO: Readonly<Record<string, number>> = {
   'pan de barra': 4,
   'pan de molde': 6,
-  'pan': 4,
+  pan: 4,
   leche: 7,
   'leche entera': 7,
   'leche semidesnatada': 7,
@@ -176,7 +176,10 @@ function sumarDias(dia: string, dias: number): string {
 }
 
 /** La casa de un usuario (su household, si comparte despensa). */
-function casaDe(db: SqlDb, userId: string): {
+function casaDe(
+  db: SqlDb,
+  userId: string
+): {
   userId: string;
   householdId: string | null;
   clause: string;
@@ -191,9 +194,9 @@ function casaDe(db: SqlDb, userId: string): {
       params: [userId]
     };
   }
-  const household = db.prepare('SELECT shared_pantry FROM households WHERE id = ?').get(householdId) as
-    | { shared_pantry: number }
-    | undefined;
+  const household = db
+    .prepare('SELECT shared_pantry FROM households WHERE id = ?')
+    .get(householdId) as { shared_pantry: number } | undefined;
   return household?.shared_pantry
     ? {
         userId,
@@ -204,8 +207,7 @@ function casaDe(db: SqlDb, userId: string): {
     : {
         userId,
         householdId,
-        clause:
-          '((household_id = ? AND user_id = ?) OR (household_id IS NULL AND user_id = ?))',
+        clause: '((household_id = ? AND user_id = ?) OR (household_id IS NULL AND user_id = ?))',
         params: [householdId, userId, userId]
       };
 }
@@ -215,10 +217,7 @@ function casaDe(db: SqlDb, userId: string): {
  * observaciones del mismo dia fundidas en UNA compra —el cierre de una lista y el ticket del
  * mismo dia son la misma compra, y contarla doble doblaria el ritmo—.
  */
-export function comprasDeLaCasa(
-  db: SqlDb,
-  userId: string
-): Map<string, Compra[]> {
+export function comprasDeLaCasa(db: SqlDb, userId: string): Map<string, Compra[]> {
   const casa = casaDe(db, userId);
   const filas = db
     .prepare(
@@ -343,14 +342,20 @@ export function caducidadesDe(db: SqlDb, userId: string): CaducidadRow[] {
  * del pan no es lo mismo que la fecha del yogur—. Vacio si no hay nada urgente.
  */
 export function bloqueDeCaducidades(db: SqlDb, userId: string, maximo = 8): string {
-  const urgentes = caducidadesDe(db, userId).filter((fila) => fila.daysLeft !== null && fila.daysLeft <= 7);
+  const urgentes = caducidadesDe(db, userId).filter(
+    (fila) => fila.daysLeft !== null && fila.daysLeft <= 7
+  );
   if (urgentes.length === 0) return '';
   const linea = urgentes
     .slice(0, maximo)
     .map((fila) => {
       const dias = fila.daysLeft!;
       const cuando =
-        dias < 0 ? `caduco hace ${Math.abs(dias)} dia(s)` : dias === 0 ? 'caduca HOY' : `caduca en ${dias} dia(s)`;
+        dias < 0
+          ? `caduco hace ${Math.abs(dias)} dia(s)`
+          : dias === 0
+            ? 'caduca HOY'
+            : `caduca en ${dias} dia(s)`;
       const estimado = fila.shelfSource !== 'fecha' ? ' (fecha estimada)' : '';
       return `${fila.name} (${cantidadHumana(fila)}${estimado}, ${cuando})`;
     })
@@ -365,7 +370,9 @@ function cantidadHumana(fila: CaducidadRow): string {
 }
 
 /** El prompt de estimacion de vida util para lo que no tiene ni fecha ni catalogo. */
-export function buildShelfPrompt(productos: { name: string; unit: string | null; category: string }[]): {
+export function buildShelfPrompt(
+  productos: { name: string; unit: string | null; category: string }[]
+): {
   system: string;
   user: string;
 } {
@@ -378,7 +385,10 @@ export function buildShelfPrompt(productos: { name: string; unit: string | null;
     '- Si no conoces el producto, dale los dias de lo mas parecido que conozcas.'
   ].join('\n');
   const user = `Estos productos de la despensa no tienen fecha de caducidad registrada. Estima cuantos dias dura cada uno:\n\n${productos
-    .map((producto) => `- ${producto.name}${producto.unit ? ` (${producto.unit})` : ''}${producto.category ? ` [${producto.category}]` : ''}`)
+    .map(
+      (producto) =>
+        `- ${producto.name}${producto.unit ? ` (${producto.unit})` : ''}${producto.category ? ` [${producto.category}]` : ''}`
+    )
     .join('\n')}\n\nResponde SOLO con un JSON valido: {"products": [{"name": "", "days": 0}]}`;
   return { system, user };
 }
@@ -388,7 +398,7 @@ export const shelfAnswerSchema = z.object({
   products: z
     .array(
       z.object({
-        name: z.string().trim().min(1).max(120),
+        name: z.string().trim().min(1),
         days: z.coerce.number().int().min(1).max(730)
       })
     )

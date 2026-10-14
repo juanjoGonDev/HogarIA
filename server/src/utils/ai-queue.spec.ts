@@ -796,7 +796,15 @@ describe('AI provider queue dispatcher', () => {
             confidence: 0.7,
             note: ''
           },
-          { name: 'Pan', category: 'other', createCategory: false, priceMinor: 150 },
+          {
+            name: 'Pan ' + 'artesano '.repeat(300),
+            quantity: 1,
+            unit: 'unidad/'.repeat(320),
+            category: 'other',
+            createCategory: false,
+            priceMinor: 150,
+            note: 'Detalle '.repeat(400)
+          },
           { name: 'Agua mineral', category: 'beverages', createCategory: false, priceMinor: 100 },
           { name: 'AGUA mineral', category: 'beverages', createCategory: false, priceMinor: 100 }
         ],
@@ -900,18 +908,26 @@ describe('AI provider queue dispatcher', () => {
         currency: 'EUR',
         total_minor: 850
       });
-      expect(
-        db
-          .prepare(
-            'SELECT name, quantity, price_minor FROM receipt_items WHERE receipt_id = ? ORDER BY position'
-          )
-          .all(receiptId)
-      ).toEqual([
+      const savedTicketLines = db
+        .prepare(
+          'SELECT name, quantity, price_minor FROM receipt_items WHERE receipt_id = ? ORDER BY position'
+        )
+        .all(receiptId) as { name: string; quantity: number; price_minor: number }[];
+      expect(savedTicketLines).toEqual([
         expect.objectContaining({ name: 'Tomate', quantity: 2, price_minor: 500 }),
-        expect.objectContaining({ name: 'Pan', quantity: 1, price_minor: 150 }),
+        expect.objectContaining({
+          name: 'Pan ' + 'artesano '.repeat(300).trim(),
+          quantity: 1,
+          price_minor: 150
+        }),
         expect.objectContaining({ name: 'Agua mineral', quantity: 1, price_minor: 100 }),
         expect.objectContaining({ name: 'AGUA mineral', quantity: 1, price_minor: 100 })
       ]);
+      expect(
+        db
+          .prepare('SELECT unit, note FROM receipt_items WHERE receipt_id = ? AND name = ?')
+          .get(receiptId, 'Pan ' + 'artesano '.repeat(300).trim())
+      ).toEqual({ unit: 'unidad/'.repeat(320), note: 'Detalle '.repeat(400).trim() });
       expect(db.prepare('SELECT name FROM stores WHERE user_id = ?').get(userId)).toMatchObject({
         name: 'Mercado sintético'
       });

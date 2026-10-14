@@ -46,37 +46,37 @@ export const ticketAnswerSchema = z.object({
     .array(
       z
         .object({
-          name: z.string().trim().min(2).max(120),
+          name: z.string().trim().min(2),
           quantity: formDefault(z.coerce.number().positive().max(10000), 1),
-          unit: formField(z.string().trim().max(24)),
+          unit: formField(z.string().trim()),
           /** La IA clasifica cada línea legible o propone expresamente una categoría nueva. */
           category: z.string().trim().min(1).max(64),
           createCategory: z.boolean(),
           priceMinor: formField(z.coerce.number().int().min(0).max(100_000_000)),
           offer: offerTicket,
           confidence: formDefault(z.coerce.number().min(0).max(1), 0.5),
-          note: formField(z.string().trim().max(280))
+          note: formField(z.string().trim())
         })
         .refine((line) => line.name.trim().length > 1, { message: 'NombreVacio' })
     )
     .max(300),
-  store: formField(z.string().trim().max(80)),
+  store: formField(z.string().trim()),
   // Required key with an explicit null when the ticket has no readable purchase date.
   purchaseDate: purchaseDateSchema,
   currency: formField(z.enum(['EUR', 'eur'])),
   totalMinor: formField(z.coerce.number().int().min(0).max(100_000_000)),
-  warnings: formField(z.array(z.string().trim().max(280)).max(20))
+  warnings: formField(z.array(z.string().trim()).max(20))
 });
 
 /** Una linea escrita o corregida por la persona durante la revision. */
 export const receiptItemInput = z.object({
-  name: z.string().trim().min(2, 'Nombre demasiado corto').max(120),
+  name: z.string().trim().min(2, 'Nombre demasiado corto'),
   quantity: formDefault(z.coerce.number().positive().max(10000), 1),
-  unit: formField(z.string().trim().max(24)),
+  unit: formField(z.string().trim()),
   category: formField(z.string().trim().max(64)),
   priceMinor: formField(z.coerce.number().int().min(0).max(100_000_000)),
   offer: offerTicket,
-  note: formField(z.string().trim().max(280))
+  note: formField(z.string().trim())
 });
 
 export const createReceiptItemSchema = receiptItemInput;
@@ -86,8 +86,8 @@ export const updateReceiptItemSchema = formPartial(receiptItemInput);
 /** El encabezado del ticket, corregible durante la revision. */
 export const updateReceiptSchema = formPartial(
   z.object({
-    store: formField(z.string().trim().max(80)),
+    store: formField(z.string().trim()),
     purchaseDate: purchaseDateSchema,
-    notes: formField(z.string().trim().max(500))
+    notes: formField(z.string().trim())
   })
 );

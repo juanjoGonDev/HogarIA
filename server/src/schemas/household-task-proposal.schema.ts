@@ -7,7 +7,7 @@ const zoneIdSchema = z.string().trim().min(1).max(80);
 
 export const householdTaskProposalTaskObjectSchema = z
   .object({
-    title: z.string().trim().min(1).max(HOUSEHOLD_TASK_LIMITS.maxTitleLength),
+    title: z.string().trim().min(1),
     scheduledDate: proposalDateSchema,
     spaceId: zoneIdSchema.nullable()
   })
