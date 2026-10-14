@@ -6061,3 +6061,22 @@ solo crea resultados transitorios; esto no demuestra saturación de RAM y no se 
 para medirla. No hubo cambios de UI ni llamadas a proveedores. El lint del servidor no arranca porque su
 script pasa `--ext` a ESLint con flat config (`Invalid option '--ext'`); no se modificaron tooling ni
 dependencias.
+
+## QA-AI.UNBOUNDED-PROMPT-TEXT.1 — texto culinario sin topes arbitrarios antes de IA
+
+**Decisión (2026-10-15):** retirar máximos y truncamientos por caracteres del texto natural que la persona
+aporta y que HogarIA valida, persiste o envía en prompts culinarios: preferencias/notas personales y del
+hogar, alergias/gustos escritos, instrucciones libres, perfiles de invitados y notas de sustitución. La
+misma regla cubre textos generados por IA que atraviesan validadores de calendario, compras o persistencia.
+Se mantienen validaciones semánticas, enumeraciones, IDs/claves, límites de cantidad y cardinalidad, limpieza
+de datos identificativos antes de enviar notas al proveedor, límites de bytes del cuerpo y presupuesto de
+tokens del proveedor. El smoke WebAPI anterior falló en composer/renderizador; esta decisión elimina topes
+locales comprobables, pero no atribuye causalidad ni afirma reparar ese fallo remoto.
+
+- [ ] Auditar rutas, schemas, normalizadores, persistencia y UI de todo texto natural incluido en prompts IA;
+      eliminar `.max(n)`, `maxlength` y truncamientos de caracteres que lo rechazan, recortan o alteran.
+- [ ] Conservar redacción de datos personales, límites de request por bytes y topes estructurales; confirmar
+      que textos mayores que cada máximo anterior pasan completos hasta prompt, persistencia y vuelta a leer.
+- [ ] TDD focal con texto sintético >2.500 caracteres, verificar campos de preferencias, metas de hogar,
+      instrucciones de planificación, invitado, y recetas creadas desde propuesta; no llamar proveedor real.
+- [ ] Comprobar typecheck, suites focales y coverage ≥70 % S/B/F/L en el alcance; registrar límites y evidencia.
