@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Hono } from 'hono';
 import jwt from 'jsonwebtoken';
+import { ensureDefaultCategories } from '../utils/pantry-categories.js';
 
 process.env.DATABASE_PATH = ':memory:';
 process.env.NODE_ENV = 'test';
@@ -347,6 +348,34 @@ describe('household create and join transactions', () => {
     ).toEqual({ name: 'Verduras' });
   });
 
+  it('creates another household when the previous household has the fully seeded category catalog', async () => {
+    db.prepare('INSERT INTO households (id, name, invite_code) VALUES (?, ?, ?)').run(
+      'seeded-previous-house',
+      'Hogar anterior',
+      'SEEDED01'
+    );
+    const owner = await makeUser('seeded-returning-owner', 'seeded-previous-house');
+    db.prepare(
+      `INSERT INTO household_members (id, household_id, user_id, role, permissions)
+       VALUES ('seeded-previous-owner', 'seeded-previous-house', ?, 'admin', '{}')`
+    ).run(owner.id);
+    ensureDefaultCategories(db, owner.id, 'seeded-previous-house');
+
+    const response = await call(owner, 'POST', '', { name: 'Segundo hogar' });
+    const result = (await response.json()) as { success: boolean; data?: { id: string } };
+
+    expect(response.status).toBe(201);
+    expect(result.success).toBe(true);
+    const categories = db
+      .prepare('SELECT id, household_id FROM pantry_categories WHERE user_id = ?')
+      .all(owner.id) as { id: string; household_id: string }[];
+    expect(categories).toHaveLength(26);
+    expect(new Set(categories.map((category) => category.id)).size).toBe(26);
+    expect(new Set(categories.map((category) => category.household_id))).toEqual(
+      new Set(['seeded-previous-house', result.data?.id])
+    );
+  });
+
   it('joins another household without colliding with category keys in the current home', async () => {
     const { member } = await createJoinFixture();
     db.prepare(
@@ -370,6 +399,23 @@ describe('household create and join transactions', () => {
         )
         .get(member.id)
     ).toEqual({ name: 'Verduras' });
+  });
+
+  it('joins another household when the member already has a fully seeded catalog in the current home', async () => {
+    const { member } = await createJoinFixture();
+    ensureDefaultCategories(db, member.id, 'old-house');
+
+    const response = await call(member, 'POST', '/join', { inviteCode: 'TARGET01' });
+
+    expect(response.status).toBe(200);
+    const categories = db
+      .prepare('SELECT id, household_id FROM pantry_categories WHERE user_id = ?')
+      .all(member.id) as { id: string; household_id: string }[];
+    expect(categories).toHaveLength(26);
+    expect(new Set(categories.map((category) => category.id)).size).toBe(26);
+    expect(new Set(categories.map((category) => category.household_id))).toEqual(
+      new Set(['old-house', 'target-house'])
+    );
   });
 
   it.each([

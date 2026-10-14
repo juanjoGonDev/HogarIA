@@ -22,12 +22,18 @@
  * en las filas y en el prompt), y la profundidad tiene techo —el conteo de descendientes recorre el arbol, y un
  * ciclo no es un fallo feo: es un bucle que no acaba nunca—.
  */
+import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 
 type Db = Database.Database;
 
 /** Lo que hay en las filas hoy, palabra por palabra: cambiar esto es un contrato, no un capricho. */
-export const DEFAULT_PANTRY_CATEGORIES: readonly { key: string; name: string; color: string; parent?: string }[] = [
+export const DEFAULT_PANTRY_CATEGORIES: readonly {
+  key: string;
+  name: string;
+  color: string;
+  parent?: string;
+}[] = [
   // Desde la ## 12aa las once hojas de comida nacen colgando de `alimentos`: la despensa ya no es la cocina, es
   // el inventario de la casa, y el padre de fabrica es el que da sitio a lo demas (limpieza, higiene…). La
   // reserva `other` se queda arriba, sin padre: ahi cae lo que no encaja, no es una seccion de comida.
@@ -83,14 +89,20 @@ export function scopeClause(scope: Scope): { clause: string; params: unknown[] }
 }
 
 export function normalizeCategoryName(value: unknown): string {
-  const normalized = String(value ?? '').replace(/\s+/g, ' ').trim();
-  if (!normalized || normalized.length > 120) throw new RangeError('El nombre de la categoria tiene que medir entre 1 y 120 caracteres');
+  const normalized = String(value ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!normalized || normalized.length > 120)
+    throw new RangeError('El nombre de la categoria tiene que medir entre 1 y 120 caracteres');
   return normalized;
 }
 
 export function normalizeCategoryColor(value: unknown): string {
-  const normalized = String(value ?? '').trim().toUpperCase();
-  if (!COLOR_PATTERN.test(normalized)) throw new RangeError('El color de la categoria tiene que ser #RRGGBB');
+  const normalized = String(value ?? '')
+    .trim()
+    .toUpperCase();
+  if (!COLOR_PATTERN.test(normalized))
+    throw new RangeError('El color de la categoria tiene que ser #RRGGBB');
   return normalized;
 }
 
@@ -116,7 +128,16 @@ export function pantryCategoryKey(name: string): string {
 
 /** Color determinista para una categoria nueva: el mismo abanico de siempre, elegido por clave. */
 export function colorForNewCategory(seed: string): string {
-  const PALETTE = ['#4CAF50', '#B26A00', '#E05A5A', '#4FA3D1', '#6C8AE4', '#C99A2E', '#8E5AC8', '#2FA79B'];
+  const PALETTE = [
+    '#4CAF50',
+    '#B26A00',
+    '#E05A5A',
+    '#4FA3D1',
+    '#6C8AE4',
+    '#C99A2E',
+    '#8E5AC8',
+    '#2FA79B'
+  ];
   let hash = 0;
   for (const character of seed) hash = (hash * 31 + character.codePointAt(0)!) % 9973;
   return PALETTE[hash % PALETTE.length];
@@ -181,17 +202,19 @@ function map(row: RawRow): PantryCategory {
 function selectAll(db: Db, scope: Scope): PantryCategory[] {
   const { clause, params } = scopeClause(scope);
   return (
-    db
-      // La tabla puede estar medio vacia en una casa antigua: LEFT JOIN no, filtro en memoria —
-      // el arbol se recorre entero para contar, y son decenas de filas, no miles.
-      .prepare(
-        `SELECT id, key, name, color, description, parent_key, position, created_at, updated_at
+    (
+      db
+        // La tabla puede estar medio vacia en una casa antigua: LEFT JOIN no, filtro en memoria —
+        // el arbol se recorre entero para contar, y son decenas de filas, no miles.
+        .prepare(
+          `SELECT id, key, name, color, description, parent_key, position, created_at, updated_at
          FROM pantry_categories
          WHERE ${clause}
          ORDER BY position ASC, name ASC`
-      )
-      .all(...params) as RawRow[]
-  ).map(map);
+        )
+        .all(...params) as RawRow[]
+    ).map(map)
+  );
 }
 
 export function findCategoryByKey(db: Db, scope: Scope, key: string): PantryCategory | undefined {
@@ -256,11 +279,21 @@ function profundidadMaxima(categorias: PantryCategory[]): number {
  * puntilleria: los recuentos de descendientes se pintan en cada fila, y una cadena de veinte niveles es una
  * lista que ya no se puede leer en una pantalla de movil.
  */
-function assertPlacement(categorias: PantryCategory[], clave: string, parentKey: string | null): void {
-  if (parentKey && parentKey === clave) throw new RangeError('Una categoria no puede ser su propia padre');
-  const prospective = [...categorias.filter((row) => row.key !== clave), { key: clave, parentKey } as PantryCategory];
+function assertPlacement(
+  categorias: PantryCategory[],
+  clave: string,
+  parentKey: string | null
+): void {
+  if (parentKey && parentKey === clave)
+    throw new RangeError('Una categoria no puede ser su propia padre');
+  const prospective = [
+    ...categorias.filter((row) => row.key !== clave),
+    { key: clave, parentKey } as PantryCategory
+  ];
   if (profundidadMaxima(prospective) > MAX_PANTRY_DEPTH) {
-    throw new RangeError(`El arbol de categorias no puede pasar de ${MAX_PANTRY_DEPTH} niveles de profundidad`);
+    throw new RangeError(
+      `El arbol de categorias no puede pasar de ${MAX_PANTRY_DEPTH} niveles de profundidad`
+    );
   }
 }
 
@@ -277,7 +310,9 @@ export function listCategories(
   const { clause, params } = scopeClause(scope);
   const porClave = new Map<string, number>();
   for (const fila of db
-    .prepare(`SELECT category AS key, COUNT(*) AS count FROM ingredients WHERE ${clause} GROUP BY category`)
+    .prepare(
+      `SELECT category AS key, COUNT(*) AS count FROM ingredients WHERE ${clause} GROUP BY category`
+    )
     .all(...params) as { key: string; count: number }[]) {
     porClave.set(fila.key, fila.count);
   }
@@ -289,12 +324,17 @@ export function listCategories(
     const directos = todas.filter((otra) => otra.parentKey === category.key).length;
     const nietos = descendantsOf(todas, category.key);
     const products = porClave.get(category.key) ?? 0;
-    const descendantProducts = nietos.reduce((total, hijo) => total + (porClave.get(hijo.key) ?? 0), products);
+    const descendantProducts = nietos.reduce(
+      (total, hijo) => total + (porClave.get(hijo.key) ?? 0),
+      products
+    );
     const counts: CategoryCounts = { products, children: directos, descendantProducts };
     const protegida = category.key === PROTECTED_PANTRY_KEY;
     return {
       ...category,
-      parentName: category.parentKey ? todas.find((otra) => otra.key === category.parentKey)?.name ?? null : null,
+      parentName: category.parentKey
+        ? (todas.find((otra) => otra.key === category.parentKey)?.name ?? null)
+        : null,
       counts,
       protected: protegida,
       canDelete: !protegida && products === 0 && directos === 0
@@ -302,16 +342,21 @@ export function listCategories(
   });
 
   const filtradas = búsqueda
-    ? filas.filter((fila) => pantryCategoryKey(fila.name).includes(búsqueda) || fila.key.includes(búsqueda))
+    ? filas.filter(
+        (fila) => pantryCategoryKey(fila.name).includes(búsqueda) || fila.key.includes(búsqueda)
+      )
     : filas;
-  if (options.view === 'without-products') return filtradas.filter((fila) => fila.counts.products === 0);
+  if (options.view === 'without-products')
+    return filtradas.filter((fila) => fila.counts.products === 0);
   if (options.view === 'with-children') return filtradas.filter((fila) => fila.counts.children > 0);
   return filtradas;
 }
 
 export function ensureDefaultCategories(db: Db, userId: string, householdId: string | null): void {
   const { clause, params } = scopeClause({ userId, householdId });
-  const { count } = db.prepare(`SELECT COUNT(*) AS count FROM pantry_categories WHERE ${clause}`).get(...params) as {
+  const { count } = db
+    .prepare(`SELECT COUNT(*) AS count FROM pantry_categories WHERE ${clause}`)
+    .get(...params) as {
     count: number;
   };
   if (count > 0) return;
@@ -320,7 +365,16 @@ export function ensureDefaultCategories(db: Db, userId: string, householdId: str
      VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)`
   );
   DEFAULT_PANTRY_CATEGORIES.forEach((seed, index) => {
-    insert.run(`pcat-${userId}-${index}`, userId, householdId, seed.key, seed.name, seed.color, seed.parent ?? null, index);
+    insert.run(
+      randomUUID(),
+      userId,
+      householdId,
+      seed.key,
+      seed.name,
+      seed.color,
+      seed.parent ?? null,
+      index
+    );
   });
 }
 
@@ -347,7 +401,7 @@ export function asegurarPadreAlimentos(db: Db, userId: string, householdId: stri
     `INSERT INTO pantry_categories (id, user_id, household_id, key, name, color, description, parent_key, position)
      VALUES (?, ?, ?, 'alimentos', 'Alimentos', '#E67E22', NULL, NULL, ?)`
   );
-  insert.run(`pcat-${userId}-alimentos`, userId, householdId, Math.min(...posiciones) - 1);
+  insert.run(randomUUID(), userId, householdId, Math.min(...posiciones) - 1);
   const reubicar = db.prepare(
     `UPDATE pantry_categories SET parent_key = 'alimentos', updated_at = CURRENT_TIMESTAMP
      WHERE key = ? AND parent_key IS NULL AND name = ? AND ${scopeClause(scope).clause}`
@@ -367,7 +421,6 @@ export function clavesDeSubarbol(db: Db, scope: Scope, clave: string): string[] 
   if (!todas.some((categoria) => categoria.key === clave)) return [clave]; // clave muerta: el IN no encuentra nada y la ruta responde vacio, que es la verdad
   return [clave, ...descendantsOf(todas, clave).map((categoria) => categoria.key)];
 }
-
 
 export function createCategory(
   db: Db,
@@ -393,7 +446,9 @@ export function createCategory(
   assertPlacement(selectAll(db, scope), key, parentKey);
 
   const { max } = db
-    .prepare(`SELECT COALESCE(MAX(position), -1) AS max FROM pantry_categories WHERE ${scopeClause(scope).clause}`)
+    .prepare(
+      `SELECT COALESCE(MAX(position), -1) AS max FROM pantry_categories WHERE ${scopeClause(scope).clause}`
+    )
     .get(...scopeClause(scope).params) as { max: number };
   const id = input.idFactory();
   db.prepare(
@@ -410,7 +465,12 @@ export function updateCategory(
     userId: string;
     householdId: string | null;
     id: string;
-    patch: { name?: string; color?: string | null; description?: string | null; parentKey?: string | null };
+    patch: {
+      name?: string;
+      color?: string | null;
+      description?: string | null;
+      parentKey?: string | null;
+    };
   }
 ): PantryCategory {
   const scope: Scope = { userId: input.userId, householdId: input.householdId };
@@ -418,11 +478,15 @@ export function updateCategory(
   if (!actual) throw new RangeError('La categoria no existe en esta casa');
 
   const cambiaEstructura = input.patch.name !== undefined || 'parentKey' in input.patch;
-  if (actual.key === PROTECTED_PANTRY_KEY && cambiaEstructura) throw new PantryCategoryProtectedError();
+  if (actual.key === PROTECTED_PANTRY_KEY && cambiaEstructura)
+    throw new PantryCategoryProtectedError();
 
-  const nombre = input.patch.name === undefined ? actual.name : normalizeCategoryName(input.patch.name);
+  const nombre =
+    input.patch.name === undefined ? actual.name : normalizeCategoryName(input.patch.name);
   const color =
-    input.patch.color === undefined ? actual.color : normalizeOptionalCategoryColor(input.patch.color) ?? actual.color;
+    input.patch.color === undefined
+      ? actual.color
+      : (normalizeOptionalCategoryColor(input.patch.color) ?? actual.color);
   const descripcion =
     input.patch.description === undefined
       ? actual.description
@@ -437,7 +501,9 @@ export function updateCategory(
       : actual.parentKey;
 
   // El arbol que resulta, no el guardado: es la unica forma de ver el ciclo antes de escribirlo.
-  const categorias = selectAll(db, scope).map((row) => (row.id === actual.id ? { ...row, parentKey } : row));
+  const categorias = selectAll(db, scope).map((row) =>
+    row.id === actual.id ? { ...row, parentKey } : row
+  );
   assertPlacement(categorias, actual.key, parentKey);
 
   db.prepare(

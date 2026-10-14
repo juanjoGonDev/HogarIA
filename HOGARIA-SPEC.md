@@ -5899,7 +5899,7 @@ la evidencia previa verificaba unicidad de claves, no este camino real.
       catálogos de hogar); una migración repetible reemplaza el índice antiguo sin descartar filas. Crear
       o unirse a un hogar permite reutilizar claves de otro ámbito; duplicar una clave en el mismo ámbito
       sigue rechazándose.
-- [ ] Siembra y backfill: las categorías recién generadas tienen IDs únicos entre ámbitos del mismo usuario.
+- [x] Siembra y backfill: las categorías recién generadas tienen IDs únicos entre ámbitos del mismo usuario.
       Crear y unirse a otro hogar pasan con las 13 categorías por defecto ya sembradas en el hogar anterior;
       el backfill del padre `alimentos` puede procesar varios ámbitos heredados sin colisión, pérdida de filas
       ni duplicación al reiniciar.
@@ -5919,10 +5919,14 @@ reiniciar permite la misma clave en otro hogar, mientras rechaza el duplicado de
 pruebas no sembraban el catálogo completo del hogar previo; por eso no detectaron la colisión de `id` que
 muestra la captura posterior.
 
-**Seguimiento TDD pendiente:** añadir primero regresiones con catálogo completo y ámbitos heredados múltiples;
-deben fallar con `UNIQUE constraint failed: pantry_categories.id` antes de corregir la generación de IDs.
-No marcar esta casilla hasta pasar esos casos y verificar creación, unión, backfill repetible y preservación
-de filas con SQLite temporal.
+**Evidencia TDD seguimiento (2026-10-14):** las pruebas fallaron antes del cambio: crear y unirse
+devolvían **500** frente a 201/200, y el backfill
+fallaba con `UNIQUE constraint failed: pantry_categories.id`. `household.routes.spec.ts` ahora pasa ambos
+casos con catálogos completos de 13 categorías; `pantry-categories.spec.ts` pasa el backfill en dos hogares
+heredados repetido, con 26 filas preservadas. `ensureDefaultCategories` y `asegurarPadreAlimentos` asignan
+UUID nuevos solo a filas nuevas; IDs heredados no se reescriben. Suite del servidor: **98 archivos, 1739
+tests, 1 omitido**; coverage **90,34/82,62/96,18/93,31 %** (statements/ramas/funciones/líneas);
+`tsc --noEmit -p tsconfig.json` pasa. Pruebas con SQLite en memoria.
 
 **Evidencia de cola y cierre (2026-10-14):** con el worker original, la prueba veía **2 sondeos/250 ms**;
 ahora la reconciliación es a **30 s**, pero inicio, encolado/reintento y fin de trabajo la despiertan y

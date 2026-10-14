@@ -25,8 +25,12 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
-  db.exec('DELETE FROM pantry_categories; DELETE FROM ingredients; DELETE FROM users;');
-  db.prepare("INSERT INTO users (id, email, name, password_hash) VALUES ('u-a', 'a@t.local', 'Ana', 'hash')").run();
+  db.exec(
+    'DELETE FROM pantry_categories; DELETE FROM ingredients; DELETE FROM users; DELETE FROM households;'
+  );
+  db.prepare(
+    "INSERT INTO users (id, email, name, password_hash) VALUES ('u-a', 'a@t.local', 'Ana', 'hash')"
+  ).run();
 });
 
 type Crear = Parameters<typeof mod.createCategory>[1];
@@ -62,10 +66,22 @@ describe('normalizar lo que entra del formulario', () => {
     // siempre (lo que guarda `ingredients.category` no se toca), y `other` cierra sin padre.
     expect(mod.DEFAULT_PANTRY_CATEGORIES.map((c) => c.key)).toEqual([
       'alimentos',
-      'vegetables', 'fruits', 'meat', 'fish', 'dairy', 'grains',
-      'spices', 'condiments', 'frozen', 'canned', 'beverages', 'other'
+      'vegetables',
+      'fruits',
+      'meat',
+      'fish',
+      'dairy',
+      'grains',
+      'spices',
+      'condiments',
+      'frozen',
+      'canned',
+      'beverages',
+      'other'
     ]);
-    expect(mod.DEFAULT_PANTRY_CATEGORIES.filter((c) => c.parent === 'alimentos').map((c) => c.key)).toHaveLength(11);
+    expect(
+      mod.DEFAULT_PANTRY_CATEGORIES.filter((c) => c.parent === 'alimentos').map((c) => c.key)
+    ).toHaveLength(11);
     expect(mod.PROTECTED_PANTRY_KEY).toBe('other');
   });
 });
@@ -74,7 +90,12 @@ describe('el arbol', () => {
   it('una categoria no puede ser su propio padre', () => {
     const padre = crear({ name: 'Bebidas', key: 'bebidas' });
     expect(() =>
-      mod.updateCategory(db, { userId: 'u-a', householdId: null, id: padre.id, patch: { parentKey: padre.key } })
+      mod.updateCategory(db, {
+        userId: 'u-a',
+        householdId: null,
+        id: padre.id,
+        patch: { parentKey: padre.key }
+      })
     ).toThrow(RangeError);
   });
 
@@ -83,7 +104,12 @@ describe('el arbol', () => {
     const padre = crear({ name: 'Bebidas', key: 'bebidas', parentKey: abuelo.key });
     const hijo = crear({ name: 'Vegetales', key: 'vegetales', parentKey: padre.key });
     expect(() =>
-      mod.updateCategory(db, { userId: 'u-a', householdId: null, id: abuelo.id, patch: { parentKey: hijo.key } })
+      mod.updateCategory(db, {
+        userId: 'u-a',
+        householdId: null,
+        id: abuelo.id,
+        patch: { parentKey: hijo.key }
+      })
     ).toThrow(RangeError);
   });
 
@@ -93,7 +119,9 @@ describe('el arbol', () => {
       const creada = crear({ name: `Nivel ${nivel}`, key: `nivel-${nivel}`, parentKey });
       parentKey = creada.key;
     }
-    expect(() => crear({ name: 'Demasiado abajo', key: 'demasiado', parentKey })).toThrow(/profundidad/i);
+    expect(() => crear({ name: 'Demasiado abajo', key: 'demasiado', parentKey })).toThrow(
+      /profundidad/i
+    );
   });
 
   it('los recuentos suman a los descendientes, que es lo que hace falta para saber si se puede borrar', () => {
@@ -131,7 +159,9 @@ describe('sembrar y borrar', () => {
       'Casa activa',
       'invite-active-home-categories'
     );
-    db.prepare("INSERT INTO users (id, email, name, password_hash) VALUES ('u-b', 'b@t.local', 'Beto', 'hash')").run();
+    db.prepare(
+      "INSERT INTO users (id, email, name, password_hash) VALUES ('u-b', 'b@t.local', 'Beto', 'hash')"
+    ).run();
     db.prepare(
       `INSERT INTO pantry_categories (id, user_id, household_id, key, name, color)
        VALUES ('old-category', 'u-a', 'old-home', 'old-only', 'Solo casa anterior', '#112233')`
@@ -145,12 +175,12 @@ describe('sembrar y borrar', () => {
        VALUES ('personal-category', 'u-a', NULL, 'personal-only', 'Personal', '#334455')`
     ).run();
 
-    const activeKeys = mod.listCategories(db, { userId: 'u-a', householdId: 'active-home' }).map(
-      (category) => category.key
-    );
-    const personalKeys = mod.listCategories(db, { userId: 'u-a', householdId: null }).map(
-      (category) => category.key
-    );
+    const activeKeys = mod
+      .listCategories(db, { userId: 'u-a', householdId: 'active-home' })
+      .map((category) => category.key);
+    const personalKeys = mod
+      .listCategories(db, { userId: 'u-a', householdId: null })
+      .map((category) => category.key);
 
     expect(activeKeys).toContain('active-only');
     expect(activeKeys).not.toContain('old-only');
@@ -160,7 +190,11 @@ describe('sembrar y borrar', () => {
   it('la casa arranca con el padre delante y las doce de siempre detras, y dos veces seguidas no son veintiseis', () => {
     mod.ensureDefaultCategories(db, 'u-a', null);
     mod.ensureDefaultCategories(db, 'u-a', null);
-    const filas = db.prepare("SELECT key, parent_key FROM pantry_categories WHERE user_id = 'u-a' ORDER BY position").all() as {
+    const filas = db
+      .prepare(
+        "SELECT key, parent_key FROM pantry_categories WHERE user_id = 'u-a' ORDER BY position"
+      )
+      .all() as {
       key: string;
       parent_key: string | null;
     }[];
@@ -175,13 +209,27 @@ describe('sembrar y borrar', () => {
 
   it('el nombre sembrado es la etiqueta en castellano que ya pinta la pantalla, palabra por palabra', () => {
     mod.ensureDefaultCategories(db, 'u-a', null);
-    const nombres = (db.prepare("SELECT name FROM pantry_categories WHERE user_id = 'u-a' ORDER BY position").all() as {
-      name: string;
-    }[]).map((f) => f.name);
+    const nombres = (
+      db
+        .prepare("SELECT name FROM pantry_categories WHERE user_id = 'u-a' ORDER BY position")
+        .all() as {
+        name: string;
+      }[]
+    ).map((f) => f.name);
     expect(nombres).toEqual([
       'Alimentos',
-      'Verduras', 'Frutas', 'Carnes', 'Pescados', 'Lácteos', 'Cereales',
-      'Especias', 'Condimentos', 'Congelados', 'Enlatados', 'Bebidas', 'Otros'
+      'Verduras',
+      'Frutas',
+      'Carnes',
+      'Pescados',
+      'Lácteos',
+      'Cereales',
+      'Especias',
+      'Condimentos',
+      'Congelados',
+      'Enlatados',
+      'Bebidas',
+      'Otros'
     ]);
   });
 
@@ -189,14 +237,24 @@ describe('sembrar y borrar', () => {
     const sembrarDocePlanas = () => {
       // Casa anterior a esta tanda: las doce de siempre, todas en fila, sin padre.
       const planas = [
-        ['vegetables', 'Verduras', '#4CAF50'], ['fruits', 'Frutas', '#E05A5A'], ['meat', 'Carnes', '#A6343E'],
-        ['fish', 'Pescados', '#4FA3D1'], ['dairy', 'Lácteos', '#E6C34A'], ['grains', 'Cereales', '#B26A00'],
-        ['spices', 'Especias', '#8E5AC8'], ['condiments', 'Condimentos', '#C99A2E'],
-        ['frozen', 'Congelados', '#6C8AE4'], ['canned', 'Enlatados', '#2FA79B'],
-        ['beverages', 'Bebidas', '#5C6BC0'], ['other', 'Otros', '#8A8F98']
+        ['vegetables', 'Verduras', '#4CAF50'],
+        ['fruits', 'Frutas', '#E05A5A'],
+        ['meat', 'Carnes', '#A6343E'],
+        ['fish', 'Pescados', '#4FA3D1'],
+        ['dairy', 'Lácteos', '#E6C34A'],
+        ['grains', 'Cereales', '#B26A00'],
+        ['spices', 'Especias', '#8E5AC8'],
+        ['condiments', 'Condimentos', '#C99A2E'],
+        ['frozen', 'Congelados', '#6C8AE4'],
+        ['canned', 'Enlatados', '#2FA79B'],
+        ['beverages', 'Bebidas', '#5C6BC0'],
+        ['other', 'Otros', '#8A8F98']
       ] as const;
       planas.forEach(([key, name, color], index) =>
-        db.prepare('INSERT INTO pantry_categories (id, user_id, household_id, key, name, color, position) VALUES (?, ?, NULL, ?, ?, ?, ?)')
+        db
+          .prepare(
+            'INSERT INTO pantry_categories (id, user_id, household_id, key, name, color, position) VALUES (?, ?, NULL, ?, ?, ?, ?)'
+          )
           .run(`old-${index}`, 'u-a', key, name, color, index)
       );
     };
@@ -205,29 +263,106 @@ describe('sembrar y borrar', () => {
       sembrarDocePlanas();
       const reparentadas = mod.asegurarPadreAlimentos(db, 'u-a', null);
       expect(reparentadas).toBe(11);
-      const filas = db.prepare("SELECT key, parent_key FROM pantry_categories WHERE user_id = 'u-a'").all() as {
-        key: string; parent_key: string | null;
+      const filas = db
+        .prepare("SELECT key, parent_key FROM pantry_categories WHERE user_id = 'u-a'")
+        .all() as {
+        key: string;
+        parent_key: string | null;
       }[];
       expect(filas.find((f) => f.key === 'alimentos')?.parent_key).toBeNull();
       expect(filas.find((f) => f.key === 'vegetables')?.parent_key).toBe('alimentos');
       expect(filas.find((f) => f.key === 'other')?.parent_key).toBeNull();
       // Idempotente: una segunda pasada no duplica el padre ni reescribe nada.
       expect(mod.asegurarPadreAlimentos(db, 'u-a', null)).toBe(0);
-      expect((db.prepare("SELECT COUNT(*) AS c FROM pantry_categories WHERE user_id = 'u-a' AND key = 'alimentos'").get() as { c: number }).c).toBe(1);
+      expect(
+        (
+          db
+            .prepare(
+              "SELECT COUNT(*) AS c FROM pantry_categories WHERE user_id = 'u-a' AND key = 'alimentos'"
+            )
+            .get() as { c: number }
+        ).c
+      ).toBe(1);
     });
 
     it('no toca una casa que ya movio o renombro algo: esa casa ya decidio sobre su arbol', () => {
       sembrarDocePlanas();
-      db.prepare("UPDATE pantry_categories SET name = 'Para picar' WHERE user_id = 'u-a' AND key = 'fruits'").run();
+      db.prepare(
+        "UPDATE pantry_categories SET name = 'Para picar' WHERE user_id = 'u-a' AND key = 'fruits'"
+      ).run();
       const reparentadas = mod.asegurarPadreAlimentos(db, 'u-a', null);
       expect(reparentadas).toBe(10); // 'Frutas' renombrada se queda donde su casa la dejo
-      expect(db.prepare("SELECT parent_key FROM pantry_categories WHERE user_id = 'u-a' AND key = 'fruits'").get()).toMatchObject({ parent_key: null });
+      expect(
+        db
+          .prepare(
+            "SELECT parent_key FROM pantry_categories WHERE user_id = 'u-a' AND key = 'fruits'"
+          )
+          .get()
+      ).toMatchObject({ parent_key: null });
     });
 
     it('una casa con su propio `alimentos` no ve nacer otro', () => {
-      db.prepare("INSERT INTO pantry_categories (id, user_id, household_id, key, name, color) VALUES ('x', 'u-a', NULL, 'alimentos', 'Para comer', '#123456')").run();
+      db.prepare(
+        "INSERT INTO pantry_categories (id, user_id, household_id, key, name, color) VALUES ('x', 'u-a', NULL, 'alimentos', 'Para comer', '#123456')"
+      ).run();
       expect(mod.asegurarPadreAlimentos(db, 'u-a', null)).toBe(0);
-      expect(db.prepare("SELECT name FROM pantry_categories WHERE user_id = 'u-a' AND key = 'alimentos'").get()).toMatchObject({ name: 'Para comer' });
+      expect(
+        db
+          .prepare("SELECT name FROM pantry_categories WHERE user_id = 'u-a' AND key = 'alimentos'")
+          .get()
+      ).toMatchObject({ name: 'Para comer' });
+    });
+
+    it('backfills parent IDs independently across legacy scopes of the same user', async () => {
+      db.prepare('INSERT INTO households (id, name, invite_code) VALUES (?, ?, ?)').run(
+        'legacy-category-house-a',
+        'Hogar heredado A',
+        'LEGACY01'
+      );
+      db.prepare('INSERT INTO households (id, name, invite_code) VALUES (?, ?, ?)').run(
+        'legacy-category-house-b',
+        'Hogar heredado B',
+        'LEGACY02'
+      );
+      const defaults = mod.DEFAULT_PANTRY_CATEGORIES.filter(
+        (category) => category.key !== 'alimentos'
+      );
+      for (const [householdId, prefix] of [
+        ['legacy-category-house-a', 'household-a-legacy'],
+        ['legacy-category-house-b', 'household-b-legacy']
+      ] as const) {
+        defaults.forEach((category, index) =>
+          db
+            .prepare(
+              `INSERT INTO pantry_categories (id, user_id, household_id, key, name, color, position)
+             VALUES (?, 'u-a', ?, ?, ?, ?, ?)`
+            )
+            .run(
+              `${prefix}-${index}`,
+              householdId,
+              category.key,
+              category.name,
+              category.color,
+              index
+            )
+        );
+      }
+      const { asegurarPadreAlimentosTodas } = await import('./seed-data.js');
+
+      expect(() => asegurarPadreAlimentosTodas(db)).not.toThrow();
+      expect(() => asegurarPadreAlimentosTodas(db)).not.toThrow();
+      const roots = db
+        .prepare(
+          "SELECT household_id FROM pantry_categories WHERE user_id = 'u-a' AND key = 'alimentos'"
+        )
+        .all() as { household_id: string | null }[];
+      expect(roots).toHaveLength(2);
+      expect(new Set(roots.map((row) => row.household_id))).toEqual(
+        new Set(['legacy-category-house-a', 'legacy-category-house-b'])
+      );
+      expect(
+        db.prepare("SELECT COUNT(*) AS count FROM pantry_categories WHERE user_id = 'u-a'").get()
+      ).toEqual({ count: 26 });
     });
   });
 
@@ -235,7 +370,9 @@ describe('sembrar y borrar', () => {
     it('preguntar por el padre devuelve padre e hijas; por una hoja, solo la hoja', () => {
       mod.ensureDefaultCategories(db, 'u-a', null);
       const scope = { userId: 'u-a', householdId: null };
-      expect(mod.clavesDeSubarbol(db, scope, 'alimentos')).toEqual(expect.arrayContaining(['alimentos', 'vegetables', 'beverages']));
+      expect(mod.clavesDeSubarbol(db, scope, 'alimentos')).toEqual(
+        expect.arrayContaining(['alimentos', 'vegetables', 'beverages'])
+      );
       expect(mod.clavesDeSubarbol(db, scope, 'alimentos')).toHaveLength(12);
       expect(mod.clavesDeSubarbol(db, scope, 'vegetables')).toEqual(['vegetables']);
       // Una clave que la casa no tiene no es un error: es un filtro vacio, que es la verdad.
@@ -252,8 +389,12 @@ describe('sembrar y borrar', () => {
     });
 
     const nueva = crear({ name: 'Frutos secos', key: 'frutos secos' });
-    db.prepare("INSERT INTO ingredients (id, user_id, name, category, quantity, unit) VALUES ('i-1', 'u-a', 'Almendras', 'frutos secos', 1, 'unit')").run();
-    expect(mod.deleteImpact(db, { userId: 'u-a', householdId: null }, nueva.id).canDelete).toBe(false);
+    db.prepare(
+      "INSERT INTO ingredients (id, user_id, name, category, quantity, unit) VALUES ('i-1', 'u-a', 'Almendras', 'frutos secos', 1, 'unit')"
+    ).run();
+    expect(mod.deleteImpact(db, { userId: 'u-a', householdId: null }, nueva.id).canDelete).toBe(
+      false
+    );
 
     db.prepare("DELETE FROM ingredients WHERE id = 'i-1'").run();
     expect(mod.deleteImpact(db, { userId: 'u-a', householdId: null }, nueva.id)).toMatchObject({
@@ -261,9 +402,13 @@ describe('sembrar y borrar', () => {
       canDelete: true
     });
     mod.removeCategory(db, { userId: 'u-a', householdId: null }, nueva.id);
-    expect(mod.findCategoryByKey(db, { userId: 'u-a', householdId: null }, 'frutos secos')).toBeUndefined();
+    expect(
+      mod.findCategoryByKey(db, { userId: 'u-a', householdId: null }, 'frutos secos')
+    ).toBeUndefined();
 
-    expect(() => mod.removeCategory(db, { userId: 'u-a', householdId: null }, otras.id)).toThrow(/protected|reserva/i);
+    expect(() => mod.removeCategory(db, { userId: 'u-a', householdId: null }, otras.id)).toThrow(
+      /protected|reserva/i
+    );
   });
 
   it('sin color en el formulario sale uno del abanico, siempre el mismo para la misma clave', () => {
