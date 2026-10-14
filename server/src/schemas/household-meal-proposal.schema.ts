@@ -178,5 +178,16 @@ export const mealProposalSchema = mealProposalObjectSchema.superRefine((proposal
 });
 
 export function createMealProposalResponseFormat() {
-  return createAiResponseFormat('weekly_meal_proposal', mealProposalObjectSchema);
+  const responseFormat = createAiResponseFormat('weekly_meal_proposal', mealProposalObjectSchema);
+  const schema = responseFormat.json_schema.schema as {
+    properties: {
+      events: {
+        items: { properties: { date: Record<string, unknown> } };
+      };
+    };
+  };
+  // WebAPI rejects JSON Schema's `format` keyword. z.iso.date() also emits an exact calendar
+  // date pattern; keep that provider constraint and continue full local Zod date validation.
+  delete schema.properties.events.items.properties.date.format;
+  return responseFormat;
 }

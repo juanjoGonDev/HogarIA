@@ -1503,7 +1503,9 @@ también las condiciones que aún están abiertas.
       alcanzable sin recorrer toda la semana. Revisión de existencias/compra es un
       paso secuencial que conecta con el módulo Compra existente, no una sección larga con todo mezclado.
       Plan semanal con proveedor simulado, vista previa explícita y
-      `response_format` estricto; plato compartido una vez, raciones por participantes, conflictos
+      `response_format` estricto compatible con el subconjunto de JSON Schema que admite WebAPI;
+      fechas con forma ISO y validez real de calendario comprobadas localmente; plato compartido una vez,
+      raciones por participantes, conflictos
       soft/hard, alergia estricta, todos con overrides, turnos personales, sin receta segura,
       respuesta inválida/IDs foráneos/duplicados/error sin escrituras; cantidades de receta por ración
       y cambio local de raciones sin llamada IA ni mutación de la receta base.
@@ -1539,6 +1541,25 @@ también las condiciones que aún están abiertas.
       `authenticationState=unknown`. El control solo comprobó autenticación; no envió una completion. No se
       inició el smoke, no se creó token y no se enviaron tickets ni perfiles sintéticos; sigue pendiente que
       el perfil de WebAPI quede autenticado y el único smoke dedicado complete.
+      Nueva revalidación tras autenticación (14-10-2026, UTC): la sesión WebAPI pasó a `ready` a las
+      07:15:52Z. El primer intento volvió a parar antes del smoke por los ajustes de logging; se respetó
+      el control y, usando el opt-in explícito de logs redacted, una corrida aislada envió exactamente una
+      petición al endpoint WebAPI y recibió HTTP 400. El log local sanitizado identifica
+      `OpenCodeHttpError` y el fallo `Unsupported JSON Schema feature` en
+      `$.properties.events.items.properties.date.format` (keyword `format`). El código WebAPI valida
+      `response_format` antes de iniciar la sesión/proveedor; no hay sesión de modelo para esa petición,
+      no llegó a ChatGPT y no se reintentó. Causa en HogarIA: `z.iso.date()` se serializa como el keyword
+      `format`, que este WebAPI rechaza; se conserva este hallazgo para la regresión y se corrigió antes
+      de la siguiente prueba documentada debajo. No se tocaron tickets, inventario,
+      calendario real ni configuración de WebAPI.
+      Segunda revalidación (14-10-2026): WebAPI devolvió readiness y autenticación `ready`; el esquema
+      corregido superó su preflight y el proveedor respondió una única completion HTTP 200 cuyo
+      contenido tenía forma de objeto JSON. El smoke terminó sin validar (`1 completion`, `1 intento`)
+      y no reintentó. No se puede declarar aceptada la propuesta: la corrida aislada no quedó validada.
+      El runner suprime la salida de Playwright y limpia el directorio aislado; el coordinador no recibió
+      un motivo/fase que permita distinguir entre error de aserción, salida del proceso o limpieza, así
+      que esa limitación queda registrada y no se atribuye el fallo a la IA ni a la aplicación.
+      No se repitió la petición ni se tocaron tickets, inventario, calendario real o ajustes de WebAPI.
 
 - [x] **QA-HOME-MEALS.CALENDAR.1** — persistencia idempotente tras confirmar, calendario actual,
       evento compartido visible una vez a todos los miembros activos con `calendar.view` aunque la comida

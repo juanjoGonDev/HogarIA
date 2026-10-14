@@ -64,6 +64,23 @@ function getObjects(value: unknown): Record<string, unknown>[] {
 }
 
 describe('meal proposal schema', () => {
+  it('uses a WebAPI-supported date pattern in the strict provider schema', () => {
+    const responseFormat = createMealProposalResponseFormat();
+    const schema = responseFormat.json_schema.schema as {
+      properties: {
+        events: {
+          items: { properties: { date: Record<string, unknown> } };
+        };
+      };
+    };
+    const dateSchema = schema.properties.events.items.properties.date;
+
+    expect(dateSchema.type).toBe('string');
+    expect(dateSchema.pattern).toContain('-02-29');
+    expect(dateSchema.format).toBeUndefined();
+    expect(JSON.stringify(responseFormat.json_schema.schema)).not.toContain('"format"');
+  });
+
   it('accepts scheduled and unresolved events with explicit nullable values', () => {
     const parsed = mealProposalSchema.parse({
       events: [makeScheduledEvent(), makeUnresolvedEvent({ date: '2026-10-14', mealType: 'lunch' })]
@@ -277,7 +294,12 @@ describe('meal proposal schema', () => {
     const eventProperties = (
       root.properties.events as { items: { properties: Record<string, unknown> } }
     ).items.properties;
-    expect(eventProperties.date).toMatchObject({ type: 'string', format: 'date' });
+    const dateSchema = eventProperties.date as Record<string, unknown>;
+    expect(dateSchema).toMatchObject({
+      type: 'string',
+      pattern: expect.stringContaining('-02-29')
+    });
+    expect(dateSchema.format).toBeUndefined();
     expect(isNullable(eventProperties.time)).toBe(true);
     expect(isNullable(eventProperties.recipe)).toBe(true);
     expect(isNullable(eventProperties.reason)).toBe(true);
