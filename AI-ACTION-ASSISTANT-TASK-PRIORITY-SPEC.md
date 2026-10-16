@@ -37,6 +37,7 @@ Añadir prioridad real a las tareas del hogar y al registro del asistente. El ob
 ### UX y verificación
 
 - [ ] Labels y opciones de prioridad están en ES/EN; controles usan labels accesibles, teclado y patrones visuales existentes.
+- [ ] En móvil, al expandir los detalles de una tarea, tarjeta y fila crecen en el flujo; el pie sticky de guardado no tapa sus controles.
 - [ ] Playwright real contra app/API y SQLite temporal cubre crear, editar, recargar, rechazo sin escritura, confirmar y replay en desktop y móvil.
 - [ ] Capturas sintéticas desktop/móvil se inspeccionan y guardan fuera de Git; el cambio no introduce overflow ni rompe geometría compartida.
 - [ ] Coverage de archivos del alcance ≥70 % en statements, branches, functions y lines; suites completas, `check:ui`, typecheck, build y hooks registrados.
