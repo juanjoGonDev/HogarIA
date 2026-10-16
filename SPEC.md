@@ -147,3 +147,15 @@ El checklist anterior de este archivo decía que la unidad de recetas no ampliab
 **Comandos reproducibles:** `pnpm run test:client:coverage`; `pnpm run build`; `pnpm run typecheck:e2e`; `pnpm run check:ui`; `node scripts/run-isolated-playwright.mjs tests/e2e/main-layout-drawer.spec.ts tests/e2e/safe-area-layout.spec.ts --project=mobile-chrome`; `node scripts/run-isolated-playwright.mjs tests/e2e/recipes-ai-generation.spec.ts --project=mobile-chrome`; `$env:HOGARIA_RECIPE_LOCAL_AI_SMOKE='1'; node scripts/run-isolated-playwright.mjs --config=playwright.full-stack.config.ts tests/e2e/full-stack/recipe-local-ai-smoke.spec.ts --project=mobile-chrome`.
 
 **Hallazgo visual resuelto:** al sustituir wizard por preview, el modal heredaba 42 px de scroll del paso 3 y el foco quedaba en un control desmontado. El cambio mínimo reinicia el scroll tras renderizar y mueve foco al título; el test local real reproduce rojo antes del cambio y queda verde después.
+
+## Ampliación del asistente global — unidades A/B (2026-10-16)
+
+La autorización del usuario para ampliar PR #47 incluye la edición segura de tareas domésticas (Unidad A) y la propuesta/confirmación de comidas (Unidad B). Esta evidencia supersede la nota anterior que mantenía ambas capacidades fuera del asistente. No cierra el alcance global: edición de despensa/compras/calendario/recetas y prioridad de tareas siguen pendientes por dominio.
+
+- TDD reprodujo y corrigió una regresión en la confirmación de comidas: las raciones revisadas se restablecían al número de participantes. El endpoint persiste ahora las raciones validadas; la prueba verifica que 3 sigue siendo 3 en la respuesta y DB.
+- Servidor: suites focales de esquema/rutas/contrato **521** pasan; rutas de propuestas de comidas **36** pasan. Cliente: suites focales del asistente/comidas/ejecución **33** pasan.
+- `pnpm run test:coverage`: cliente **1.630/1.630**, **90,60 / 80,38 / 92,10 / 92,99 % S/B/F/L**; servidor **1.955 aprobadas / 1 omitida**, **89,84 / 82,22 / 95,89 / 92,91 % S/B/F/L**. Los gates locales superan el 70 % en las cuatro métricas.
+- `pnpm run build`, `pnpm run typecheck:e2e`, `pnpm run check:ui` (**262 ficheros/21 reglas**) y Prettier pasan. El build conserva los avisos de presupuesto/tamaño existentes; no se rebajaron umbrales. Lint sigue limitado por la configuración existente descrita arriba.
+- Playwright full-stack aislado con backend/APIs reales, SQLite temporal y respuestas IA sintéticas: **10/10** en escritorio y móvil; viewports 320×568–1440×900, breakpoints, orientación, overflow/scroll, teclado/foco, reduced-motion, targets táctiles, confirmación, persistencia y ausencia de escritura previa verificados.
+- Capturas sintéticas PC/móvil inspeccionadas fuera del repositorio: `C:\Users\juanj\.codex\visualizations\2026\10\16\01a144e3-1d9b-78e3-a440-0f38ab3e1e80\ai-action-assistant\chromium\meal-plan-confirm.png`, `...\chromium\meal-plan-saved.png`, `...\mobile-chrome\meal-plan-confirm.png` y `...\mobile-chrome\meal-plan-saved.png`.
+- Proveedor externo y micrófono real no probados en esta unidad; respuestas IA deterministas se interceptan en E2E. El PR #47 debe seguir Draft y no mergearse.
