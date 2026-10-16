@@ -1,6 +1,20 @@
 import type { RecipeDetailLevel } from '../../shared/models/recipe-instructions';
+import type { TranslationKey } from '../../core/i18n';
+import { COOKING_LEVEL_LABEL_KEYS } from '../../shared/models/home-profile';
+import type { CookingLevel } from '../../shared/models/home-profile';
 
 export type RecipeDetailPreferences = Readonly<Record<string, RecipeDetailLevel>>;
+
+const DETAIL_LEVEL_COOKING_LEVEL: Record<RecipeDetailLevel, CookingLevel> = {
+  basic: 'beginner',
+  intermediate: 'intermediate',
+  expert: 'expert'
+};
+
+/** Reuse the personal-profile labels so the recipe selector names the same skill levels. */
+export function recipeDetailLevelLabelKey(level: RecipeDetailLevel): TranslationKey {
+  return COOKING_LEVEL_LABEL_KEYS[DETAIL_LEVEL_COOKING_LEVEL[level]];
+}
 
 /** Keep recipe generation aligned with the cook's profile: unknown/none means beginner detail. */
 export function detailLevelForCookingLevel(level: unknown): RecipeDetailLevel {

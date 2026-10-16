@@ -57,6 +57,7 @@ import {
 import { AiParticipantsComponent } from '../../shared/components/ai-participants.component';
 import {
   detailLevelForCookingLevel,
+  recipeDetailLevelLabelKey,
   recipeDetailLevelFor,
   rememberRecipeDetailLevel,
   scaleRecipeQuantity,
@@ -588,9 +589,9 @@ function difficultyFromQuery(value: string | null): Difficulty | null {
                     [ngModelOptions]="{ standalone: true }"
                     class="form-select"
                   >
-                    <option value="basic">{{ 'recipes.basico' | t }}</option>
-                    <option value="intermediate">{{ 'auth.intermediate' | t }}</option>
-                    <option value="expert">{{ 'auth.expert' | t }}</option>
+                    <option value="basic">{{ detailLevelLabel('basic') | t }}</option>
+                    <option value="intermediate">{{ detailLevelLabel('intermediate') | t }}</option>
+                    <option value="expert">{{ detailLevelLabel('expert') | t }}</option>
                   </select>
                 </div>
               </div>
@@ -805,9 +806,9 @@ function difficultyFromQuery(value: string | null): Difficulty | null {
                   [ngModel]="generatedPreviewDetailLevel()"
                   (ngModelChange)="setGeneratedPreviewDetailLevel($event)"
                 >
-                  <option value="basic">{{ 'recipes.basico' | t }}</option>
-                  <option value="intermediate">{{ 'auth.intermediate' | t }}</option>
-                  <option value="expert">{{ 'auth.expert' | t }}</option>
+                  <option value="basic">{{ detailLevelLabel('basic') | t }}</option>
+                  <option value="intermediate">{{ detailLevelLabel('intermediate') | t }}</option>
+                  <option value="expert">{{ detailLevelLabel('expert') | t }}</option>
                 </select>
               </div>
               <div class="generated-recipe__steps">
@@ -954,9 +955,9 @@ function difficultyFromQuery(value: string | null): Difficulty | null {
                     [ngModel]="generatedRecipeDetailLevel(i)"
                     (ngModelChange)="setGeneratedRecipeDetailLevel(i, $event)"
                   >
-                    <option value="basic">{{ 'recipes.basico' | t }}</option>
-                    <option value="intermediate">{{ 'auth.intermediate' | t }}</option>
-                    <option value="expert">{{ 'auth.expert' | t }}</option>
+                    <option value="basic">{{ detailLevelLabel('basic') | t }}</option>
+                    <option value="intermediate">{{ detailLevelLabel('intermediate') | t }}</option>
+                    <option value="expert">{{ detailLevelLabel('expert') | t }}</option>
                   </select>
                   <ol class="generated-option__steps">
                     <li
@@ -1093,6 +1094,7 @@ export class RecipesComponent implements OnInit {
   isCookingMode = signal(false);
   hasCookingSession = signal(false);
   recipeServings = signal(2);
+  private readonly recipeServingsTouched = signal(false);
   generatedPreviewServings = signal(1);
   selectedIngredients = signal<any[]>([]);
   selectedRecipeDetailLevel = signal<DetailLevel>('intermediate');
@@ -1152,6 +1154,10 @@ export class RecipesComponent implements OnInit {
         this.tasteProfileService.profile().cookingLevel
       );
     }
+  });
+  private readonly synchronizeRecipeServingsDefault = effect(() => {
+    if (!this.selectedRecipe() || this.recipeServingsTouched()) return;
+    this.recipeServings.set(this.householdService.defaultServings());
   });
 
   /** Cuatro filtros, cuatro claves. «IA» en ingles se escribe «AI», y eso un catalogo con la frase dentro no lo puede saber. */
@@ -1539,6 +1545,7 @@ export class RecipesComponent implements OnInit {
   setRecipeServings(value: number | string): void {
     const servings = Number(value);
     if (Number.isSafeInteger(servings) && servings >= 1) {
+      this.recipeServingsTouched.set(true);
       this.recipeServings.set(servings);
     }
   }
@@ -1695,19 +1702,20 @@ export class RecipesComponent implements OnInit {
     this.selectedRecipe.set(recipe);
     this.recipeDetailSection.set('preparation');
     this.checkedRecipeIngredients.set(new Set<number>());
-    this.resetRecipeServings(recipe);
+    this.recipeServingsTouched.set(false);
+    this.resetRecipeServings();
     this.selectedRecipeDetailLevel.set(
       recipeDetailLevelFor(
         this.recipeDetailPreferences(),
         recipe.id,
-        this.singleGeneratedDetailLevel()
+        detailLevelForCookingLevel(this.tasteProfileService.profile().cookingLevel)
       )
     );
     this.focusAfterRender('[data-test="recipe-detail-title"]');
   }
 
-  private resetRecipeServings(recipe: Recipe): void {
-    this.recipeServings.set(Math.max(1, Math.trunc(recipe.servings || 2)));
+  private resetRecipeServings(): void {
+    this.recipeServings.set(this.householdService.defaultServings());
   }
 
   private focusAfterRender(selector: string): void {
@@ -2106,6 +2114,10 @@ export class RecipesComponent implements OnInit {
       default:
         return difficulty;
     }
+  }
+
+  detailLevelLabel(level: DetailLevel): TranslationKey {
+    return recipeDetailLevelLabelKey(level);
   }
 
   trackById(_index: number, item: Recipe): string {

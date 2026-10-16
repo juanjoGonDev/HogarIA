@@ -141,8 +141,24 @@ export const RECIPE_BOOK_SEEDS: readonly RecipeBookSeed[] = [
     instructionsByLevel: {
       basic: [
         step(
-          'Pocha las patatas y la cebolla en aceite a fuego medio-bajo hasta que estén blandas. Escurre, mezcla con los huevos batidos y la sal, y cuaja la tortilla por ambos lados.',
+          'Pela las patatas y córtalas en láminas finas, de grosor parecido, para que se ablanden a la vez. Si vas a usar cebolla, pélala y córtala en tiras finas.'
+        ),
+        step(
+          'Calienta el aceite en una sartén a fuego medio-bajo y añade las patatas y la cebolla con cuidado. Muévelas de vez en cuando: deben quedar blandas y ligeramente transparentes, no tostadas.',
           25
+        ),
+        step(
+          'Pasa las patatas y la cebolla a un colador colocado sobre un bol. Espera a que escurra el aceite y reserva una cucharada para la sartén.'
+        ),
+        step(
+          'Casca los huevos en otro bol, añade la sal y bátelos hasta que yema y clara queden mezcladas. Incorpora las patatas y la cebolla con una cuchara y deja reposar cinco minutos.'
+        ),
+        step(
+          'Calienta la sartén con el aceite reservado a fuego medio-bajo. Vierte la mezcla y cocina hasta que el borde se vea cuajado y la parte superior aún esté algo húmeda.'
+        ),
+        step(
+          'Despega el borde con una espátula. Cubre la sartén con un plato grande, sujétalo con firmeza y dale la vuelta lejos del fuego; desliza la tortilla de nuevo y termina de cuajarla al punto que prefieras.',
+          6
         )
       ],
       intermediate: [
@@ -157,11 +173,11 @@ export const RECIPE_BOOK_SEEDS: readonly RecipeBookSeed[] = [
       ],
       expert: [
         step(
-          'Mantén la patata a 120–130 °C para ablandarla sin freírla en exceso; escurre bien y sala antes de incorporarla al huevo. Ajusta el reposo de la mezcla según la humedad de la patata.',
+          'Confita la patata a 120–130 °C sin dorarla; escurre, sala e incorpora al huevo. Ajusta el reposo según su humedad.',
           25
         ),
         step(
-          'Vierte en sartén precalentada, remueve brevemente el centro para una cuajada uniforme y voltea con decisión; retira cuando el centro conserve la textura buscada.',
+          'Cuaja en sartén precalentada, remueve brevemente el centro y voltea cuando el borde esté firme; retira al punto elegido.',
           6,
           'El huevo poco cuajado requiere huevos frescos y conservación refrigerada.'
         )
@@ -233,8 +249,20 @@ export const RECIPE_BOOK_SEEDS: readonly RecipeBookSeed[] = [
     instructionsByLevel: {
       basic: [
         step(
-          'Lava y trocea las hortalizas. Tritúralas con ajo, aceite, vinagre, sal y agua fría; enfría antes de servir.',
-          5
+          'Corta los tomates y el pepino en trozos que quepan en la batidora. Retira el tallo y las semillas del pimiento; pela el ajo.'
+        ),
+        step(
+          'Pon en la batidora las hortalizas, el ajo, el vinagre, la sal y el pan si quieres que quede más espeso. Cierra bien la tapa y tritura hasta que no veas trozos.'
+        ),
+        step(
+          'Con la batidora en marcha, vierte el aceite poco a poco para que se mezcle y quede una textura uniforme.'
+        ),
+        step(
+          'Añade el agua fría poco a poco, prueba con una cuchara y detente cuando la sopa tenga la densidad que te guste. Si aún notas pieles, pásala por un colador.'
+        ),
+        step(
+          'Tapa la jarra y deja el gazpacho en el frigorífico al menos una hora. Sírvelo frío y prueba de nuevo la sal y el vinagre antes de llevarlo a la mesa.',
+          60
         )
       ],
       intermediate: [
@@ -249,13 +277,10 @@ export const RECIPE_BOOK_SEEDS: readonly RecipeBookSeed[] = [
       ],
       expert: [
         step(
-          'Tritura las hortalizas con vinagre y sal, incorpora el aceite en hilo para emulsionar y pasa por un colador fino si buscas una textura sedosa.',
+          'Tritura hortalizas, vinagre y sal; emulsiona con el aceite en hilo y cuela si buscas finura.',
           6
         ),
-        step(
-          'Enfría en recipiente tapado y rectifica acidez, sal y densidad justo antes de servir; evita añadir hielo para no diluirlo.',
-          10
-        )
+        step('Enfría tapado y rectifica acidez y densidad al servir; no añadas hielo.', 10)
       ]
     },
     tags: ['tradicional', 'frío', 'vegetariano'],
@@ -319,8 +344,26 @@ export const RECIPE_BOOK_SEEDS: readonly RecipeBookSeed[] = [
     instructionsByLevel: {
       basic: [
         step(
-          'Dora el pollo y el conejo con aceite y sal. Añade judías, tomate y pimentón; cubre con agua y cocina hasta que la carne esté tierna. Incorpora arroz, garrofón y azafrán; cuece sin remover hasta que el arroz absorba el caldo.',
-          45
+          'Calienta el aceite en la paella a fuego medio. Coloca el pollo y el conejo separados, añade parte de la sal y dóralos por todos sus lados; usa utensilios limpios después de tocar la carne cruda.',
+          10
+        ),
+        step(
+          'Aparta la carne hacia los bordes. Añade las judías al centro y remuévelas unos minutos; agrega el tomate y cocina hasta que pierda parte de su líquido.'
+        ),
+        step(
+          'Añade el pimentón y remueve solo unos segundos para que no se queme. Vierte el agua con cuidado, incorpora la carne y deja que hierva suavemente hasta que esté tierna.',
+          20
+        ),
+        step(
+          'Agrega el garrofón y el azafrán. Reparte el arroz por la paella en una capa uniforme y no lo remuevas después de distribuirlo.'
+        ),
+        step(
+          'Cocina a fuego vivo durante los primeros minutos y luego bájalo para mantener un hervor constante. Está listo cuando el arroz esté tierno y ya no quede caldo suelto; vigila el fuego todo el tiempo.',
+          18
+        ),
+        step(
+          'Apaga el fuego, cubre la paella con un paño limpio y deja reposar cinco minutos antes de servir.',
+          5
         )
       ],
       intermediate: [
@@ -335,15 +378,14 @@ export const RECIPE_BOOK_SEEDS: readonly RecipeBookSeed[] = [
       ],
       expert: [
         step(
-          'Busca un dorado uniforme en la carne y concentra el sofrito sin ennegrecer el pimentón. Mide el caldo según el diámetro de la paella y deja que el hervor se estabilice antes de añadir el arroz.',
-          15
+          'Dora la carne y concentra judías y tomate; incorpora el pimentón sin quemarlo. Ajusta el caldo a la paella y estabiliza el hervor.',
+          12
         ),
         step(
-          'Distribuye el grano una sola vez y no lo remuevas. Controla el fuego para que el líquido se consuma al tiempo que el arroz queda tierno; escucha el socarrat al final sin dejar que humee.',
+          'Añade garrofón, azafrán y arroz en una sola capa. No remuevas; controla el fuego hasta la absorción y busca socarrat sin humo. Reposa tapado.',
           30,
           'Mantén la paella estable y supervisa el fuego continuamente.'
-        ),
-        step('Retira, cubre con un paño limpio y deja reposar para repartir la humedad.', 8)
+        )
       ]
     },
     tags: ['tradicional', 'arroz', 'valencia'],
@@ -406,8 +448,21 @@ export const RECIPE_BOOK_SEEDS: readonly RecipeBookSeed[] = [
     instructionsByLevel: {
       basic: [
         step(
-          'Cuece los garbanzos con las carnes en agua suave hasta que estén tiernos. Añade patata y zanahoria al final; cocina el repollo aparte. Sirve primero el caldo con fideos y después garbanzos, carnes y verduras.',
-          150
+          'Enjuaga los garbanzos que dejaste en remojo y escúrrelos. Ponlos en una olla con las carnes y agua fría suficiente para cubrirlas; no llenes la olla hasta el borde.'
+        ),
+        step(
+          'Calienta hasta que empiece a hervir. Retira con una cuchara la espuma que suba, baja el fuego y deja un hervor suave; añade agua caliente si los garbanzos dejan de estar cubiertos.',
+          120
+        ),
+        step(
+          'Cuando los garbanzos estén casi tiernos, añade el chorizo. Comprueba el punto pinchando uno: debe aplastarse con facilidad, pero conservar su forma.'
+        ),
+        step(
+          'Añade la patata y la zanahoria en trozos grandes y cocina hasta que un cuchillo entre sin resistencia. Cuece el repollo aparte en agua hasta que esté blando y escúrrelo.'
+        ),
+        step(
+          'Cuela parte del caldo en un cazo, añade los fideos y cuécelos el tiempo indicado en el paquete. Sirve primero la sopa y después los garbanzos, las carnes y las verduras.',
+          6
         )
       ],
       intermediate: [
@@ -422,11 +477,11 @@ export const RECIPE_BOOK_SEEDS: readonly RecipeBookSeed[] = [
       ],
       expert: [
         step(
-          'Mantén un hervor apenas perceptible y espuma con frecuencia para obtener un caldo limpio. Ajusta el punto de las carnes por separado y retíralas si se ablandan antes que los garbanzos.',
+          'Mantén un hervor mínimo y espuma para un caldo limpio; retira cada carne cuando alcance su punto.',
           120
         ),
         step(
-          'Cuece las hortalizas evitando que se deshagan, desengrasa el caldo si hace falta y cocina los fideos justo antes de servir. Presenta los vuelcos por separado para conservar texturas.',
+          'Cuece las hortalizas sin deshacerlas, desgrasa el caldo y cocina los fideos al servir. Presenta los vuelcos separados.',
           35
         )
       ]
@@ -494,8 +549,21 @@ export const RECIPE_BOOK_SEEDS: readonly RecipeBookSeed[] = [
     instructionsByLevel: {
       basic: [
         step(
-          'Cuece el pulpo a fuego medio hasta que esté tierno y hierve las patatas en el mismo caldo. Corta el pulpo, coloca sobre las patatas y aliña con aceite, pimentón y sal.',
-          55
+          'Pon agua suficiente en una olla grande y espera a que hierva. Sujeta el pulpo con unas pinzas, bájalo al agua unos segundos y sácalo; repite tres veces para que los tentáculos se ricen.'
+        ),
+        step(
+          'Deja el pulpo dentro, baja el fuego para que el agua hierva suavemente y tapa parcialmente la olla. Está tierno cuando una brocheta entra con poca resistencia en la parte gruesa del tentáculo.',
+          45
+        ),
+        step(
+          'Saca el pulpo con las pinzas y cuece las patatas en esa misma agua. Comprueba el centro con un cuchillo; si aún está duro, deja que hiervan unos minutos más.',
+          15
+        ),
+        step(
+          'Escurre las patatas y córtalas en rodajas cuando puedas manipularlas. Corta el pulpo con tijeras en trozos de un bocado, con cuidado porque conserva calor.'
+        ),
+        step(
+          'Coloca primero las patatas y luego el pulpo en una fuente. Añade aceite de oliva, pimentón y sal justo antes de servir.'
         )
       ],
       intermediate: [
@@ -510,12 +578,12 @@ export const RECIPE_BOOK_SEEDS: readonly RecipeBookSeed[] = [
       ],
       expert: [
         step(
-          'Controla un hervor moderado para que la piel se mantenga y la carne se ablande sin romperse. Comprueba el punto en la parte gruesa del tentáculo y ajusta el tiempo al tamaño real.',
+          'Cuece a hervor moderado hasta que la brocheta entre con poca resistencia en la parte gruesa del tentáculo.',
           45,
           'Usa una olla amplia y evita salpicaduras al introducir el pulpo.'
         ),
         step(
-          'Templa las patatas en rodajas, coloca el pulpo recién cortado encima y termina con sal gruesa, pimentón y aceite de oliva.',
+          'Templa las patatas, cubre con pulpo recién cortado y termina con sal gruesa, pimentón y aceite.',
           10
         )
       ]
@@ -576,8 +644,23 @@ export const RECIPE_BOOK_SEEDS: readonly RecipeBookSeed[] = [
     instructionsByLevel: {
       basic: [
         step(
-          'Bate los huevos con azúcar, añade almendra, limón y canela. Vierte en un molde engrasado y hornea hasta que el centro esté firme. Enfría antes de desmoldar.',
+          'Enciende el horno a 180 °C para que se caliente mientras preparas la mezcla. Coloca papel de horno en la base del molde y engrasa ligeramente los lados.'
+        ),
+        step(
+          'Casca los huevos en un bol, añade el azúcar y bátelos hasta que la mezcla tenga un color uniforme. No hace falta que quede muy espumosa.'
+        ),
+        step(
+          'Añade la almendra molida, la ralladura fina de limón y la canela. Mezcla despacio hasta que no queden zonas secas en la masa.'
+        ),
+        step(
+          'Vierte la masa en el molde y alisa la superficie con una cuchara. Coloca el molde en el centro del horno y cierra la puerta.',
           35
+        ),
+        step(
+          'Comprueba el centro con un palillo: debe salir limpio o con unas migas, no cubierto de masa líquida. Si sale húmedo, hornea cinco minutos más y vuelve a comprobar.'
+        ),
+        step(
+          'Saca el molde con guantes de horno y deja enfriar por completo sobre una superficie resistente al calor. Desmolda cuando esté fría y espolvorea el azúcar glas.'
         )
       ],
       intermediate: [
@@ -591,12 +674,9 @@ export const RECIPE_BOOK_SEEDS: readonly RecipeBookSeed[] = [
         )
       ],
       expert: [
+        step('Mezcla lo justo para una miga compacta y húmeda; nivela la masa en el molde.', 10),
         step(
-          'Pesa los ingredientes y mezcla lo justo para evitar incorporar aire: la miga debe quedar húmeda y compacta. Extiende la masa en un molde de altura uniforme.',
-          10
-        ),
-        step(
-          'Hornea a temperatura estable; si se dora pronto, cubre sin apretar con papel. Comprueba el centro, enfría sobre rejilla y añade el acabado una vez fría.',
+          'Hornea a 180 °C hasta que el centro esté firme. Enfría en rejilla y termina con azúcar glas.',
           35
         )
       ]
@@ -661,7 +741,22 @@ export const RECIPE_BOOK_SEEDS: readonly RecipeBookSeed[] = [
     instructionsByLevel: {
       basic: [
         step(
-          'Mezcla el repollo y la zanahoria con vinagre y sal para hacer el curtido. Humedece la masa, forma discos, rellena con queso, frijol y chicharrón, cierra y aplana. Cocina en comal por ambos lados.',
+          'Pon el repollo y la zanahoria en un bol limpio. Añade el vinagre y parte de la sal, mezcla con una cuchara y deja reposar el curtido mientras preparas las pupusas.'
+        ),
+        step(
+          'En otro bol, mezcla el quesillo, el frijol refrito y el chicharrón molido. No llenes demasiado las pupusas; reserva el relleno que no quepa.'
+        ),
+        step(
+          'Pon la masa en un bol y agrega el agua poco a poco mientras amasas. Detente cuando puedas formar una bola suave que no se agriete al apretarla.'
+        ),
+        step(
+          'Divide la masa en porciones iguales. Humedécete las manos, aplana una porción en la palma y deja el centro un poco más grueso que los bordes.'
+        ),
+        step(
+          'Coloca una cucharada de relleno en el centro, junta los bordes para cerrarla y aplástala despacio hasta formar un disco. Si aparece una grieta, ciérrala con los dedos húmedos.'
+        ),
+        step(
+          'Cocina los discos en un comal caliente a fuego medio. Dales la vuelta cuando la base tenga manchas doradas y cocina el otro lado hasta que el relleno esté caliente; sirve con el curtido escurrido.',
           18
         )
       ],
@@ -677,13 +772,10 @@ export const RECIPE_BOOK_SEEDS: readonly RecipeBookSeed[] = [
       ],
       expert: [
         step(
-          'Ajusta la hidratación de la masa hasta que no se agriete al aplanar. Distribuye el relleno en una capa fina, expulsa el aire y sella completamente los bordes para evitar fugas.',
+          'Hidrata la masa hasta que no se agriete. Dosifica poco relleno, expulsa el aire y sella el borde.',
           15
         ),
-        step(
-          'Cocina a calor medio, girando cuando la superficie se seque y el disco se desprenda. Sirve caliente con curtido escurrido y salsa de tomate aparte.',
-          12
-        )
+        step('Dora a calor medio por ambos lados; sirve caliente con curtido escurrido.', 12)
       ]
     },
     tags: ['tradicional', 'maíz', 'antojito'],
@@ -745,8 +837,26 @@ export const RECIPE_BOOK_SEEDS: readonly RecipeBookSeed[] = [
     instructionsByLevel: {
       basic: [
         step(
-          'Cocina el pollo y reserva el caldo. Mezcla masa, caldo, aceite y sal hasta que quede suave. Pon masa, pollo, tomate y patata sobre hojas de plátano, envuelve y cocina al vapor hasta que la masa esté firme.',
-          65
+          'Pasa cada hoja de plátano unos segundos por una sartén caliente para que se vuelva flexible. Retírala antes de que se tueste y déjala sobre una bandeja limpia.'
+        ),
+        step(
+          'Corta el tomate y la patata en trozos pequeños. Cocina el tomate con un poco de caldo hasta que se ablande y reserva la salsa para el relleno.'
+        ),
+        step(
+          'Pon la masa, el aceite y la sal en un bol. Añade el caldo poco a poco y mezcla hasta obtener una masa suave que puedas extender con una cuchara, no líquida.'
+        ),
+        step(
+          'Extiende una porción de masa sobre cada hoja. Añade pollo ya cocido, patata y un poco de tomate; deja espacio alrededor para poder cerrar el paquete.'
+        ),
+        step(
+          'Dobla los lados de la hoja sobre el relleno y pliega los extremos para que no se salga. Ata el paquete con hilo de cocina sin apretarlo demasiado.'
+        ),
+        step(
+          'Pon agua en la vaporera sin que toque la cesta, coloca los tamales y tapa. Mantén el agua hirviendo suavemente; comprueba que no se evapore y añade agua caliente si hace falta.',
+          60
+        ),
+        step(
+          'Saca un tamal con cuidado y déjalo reposar unos minutos. La masa debe estar firme y separarse de la hoja; si sigue húmeda, vuelve a cocer los tamales un poco más.'
         )
       ],
       intermediate: [
@@ -761,11 +871,11 @@ export const RECIPE_BOOK_SEEDS: readonly RecipeBookSeed[] = [
       ],
       expert: [
         step(
-          'Ajusta la masa con caldo poco a poco: debe quedar untable y sostener el relleno. Reparte cantidades similares y deja holgura en el envoltorio para que el vapor circule.',
+          'Hidrata la masa hasta que sea untable y sostenga el relleno. Dosifica por igual y deja holgura en cada envoltorio.',
           20
         ),
         step(
-          'Mantén agua hirviendo a fuego constante sin que toque los tamales. Comprueba uno al centro: la masa debe separarse de la hoja y no quedar húmeda en el interior.',
+          'Mantén vapor constante sin que el agua toque los tamales. Termina cuando la masa se separe de la hoja y esté firme.',
           60
         )
       ]
@@ -830,8 +940,24 @@ export const RECIPE_BOOK_SEEDS: readonly RecipeBookSeed[] = [
     instructionsByLevel: {
       basic: [
         step(
-          'Cuece los plátanos con su piel hasta que estén blandos. Tritura con una pizca de sal, rellena porciones con frijol, ciérralas y dóralas en aceite caliente. Reboza con azúcar.',
-          25
+          'Pon los plátanos enteros y con piel en una olla con agua. Hiérvelos hasta que puedas atravesarlos fácilmente con un tenedor; luego escúrrelos con cuidado.',
+          15
+        ),
+        step(
+          'Espera a que estén lo bastante tibios para manipularlos. Pela los plátanos, ponlos en un bol y aplástalos con la sal hasta que no queden trozos grandes.'
+        ),
+        step(
+          'Deja que la masa pierda calor para poder tocarla sin quemarte. Divide en porciones, aplana cada una en la mano y coloca una cucharada de frijol espeso en el centro.'
+        ),
+        step(
+          'Cierra la masa alrededor del frijol y presiona la unión con los dedos. Comprueba que no haya grietas por donde pueda salirse el relleno al freír.'
+        ),
+        step(
+          'Calienta el aceite en una sartén amplia a fuego medio. Fríe pocas empanadas cada vez y dales la vuelta cuando la parte inferior esté dorada; no dejes el aceite sin vigilancia.',
+          20
+        ),
+        step(
+          'Retíralas con una espumadera y déjalas escurrir sobre una rejilla o papel limpio. Añade el azúcar cuando aún estén tibias.'
         )
       ],
       intermediate: [
@@ -846,11 +972,11 @@ export const RECIPE_BOOK_SEEDS: readonly RecipeBookSeed[] = [
       ],
       expert: [
         step(
-          'Usa plátanos bien maduros para aportar dulzor y cohesión; evita añadir líquido. Enfría la masa unos minutos para que se manipule mejor y controla que el relleno no llegue al borde.',
+          'Usa plátanos maduros, evita añadir líquido y enfría la masa. Mantén el relleno alejado del borde.',
           18
         ),
         step(
-          'Fríe a temperatura moderada para calentar el centro sin quemar el azúcar natural. Escurre en rejilla y espolvorea azúcar cuando aún estén tibias.',
+          'Fríe a temperatura moderada hasta dorar; escurre en rejilla y espolvorea azúcar en tibio.',
           18
         )
       ]
@@ -919,8 +1045,20 @@ export const RECIPE_BOOK_SEEDS: readonly RecipeBookSeed[] = [
     instructionsByLevel: {
       basic: [
         step(
-          'Hierve la yuca con sal hasta que esté tierna. Mezcla repollo, tomate y pepino con vinagre para el curtido. Sirve la yuca caliente con chicharrón y curtido.',
-          30
+          'Corta la yuca en trozos de tamaño parecido para que se cuezan a la vez. Ponlos en una olla, cúbrelos con el agua y añade la sal.'
+        ),
+        step(
+          'Lleva el agua a ebullición y baja el fuego para mantener un hervor constante, sin salpicaduras. Cocina hasta que un cuchillo entre en el centro sin resistencia y los bordes empiecen a abrirse.',
+          25
+        ),
+        step(
+          'Mientras se cuece la yuca, corta el repollo en tiras finas y el tomate y el pepino en trozos pequeños. Ponlos en un bol con el vinagre y una pizca de sal; mezcla y refrigera.'
+        ),
+        step(
+          'Escurre la yuca con un colador. Si ves una fibra dura en el centro, retírala con un cuchillo cuando la yuca se pueda manipular sin quemarte.'
+        ),
+        step(
+          'Reparte la yuca caliente en los platos. Añade el chicharrón al final para que conserve su textura y sirve el curtido aparte o encima, como prefieras.'
         )
       ],
       intermediate: [
@@ -935,11 +1073,11 @@ export const RECIPE_BOOK_SEEDS: readonly RecipeBookSeed[] = [
       ],
       expert: [
         step(
-          'Retira la fibra central de la yuca si resulta dura y mantén un hervor suave para que los trozos no se rompan. Comprueba el centro con un cuchillo antes de escurrir.',
+          'Cuece la yuca a hervor suave hasta que ceda al cuchillo; retira la fibra central si está dura.',
           25
         ),
         step(
-          'Equilibra la acidez del curtido con una pizca de sal y deja reposar brevemente. Monta los componentes separados para conservar el contraste de temperaturas y texturas.',
+          'Reposa el curtido y sirve los componentes separados para conservar temperatura y textura.',
           10
         )
       ]
@@ -1007,8 +1145,24 @@ export const RECIPE_BOOK_SEEDS: readonly RecipeBookSeed[] = [
     instructionsByLevel: {
       basic: [
         step(
-          'Cocina carne, patata, zanahoria y tomate hasta que el relleno esté hecho. Forma discos con la masa, rellena, dobla y sella. Fríe hasta dorar y sirve con curtido.',
-          20
+          'Calienta una sartén a fuego medio y cocina la carne picada hasta que deje de verse cruda. Separa los grumos con una cuchara y usa utensilios limpios después de tocar la carne.'
+        ),
+        step(
+          'Añade la patata, la zanahoria, el tomate, el agua y la sal. Tapa parcialmente y cocina hasta que las verduras estén tiernas; remueve de vez en cuando para que no se pegue.',
+          18
+        ),
+        step(
+          'Deja que el relleno pierda el calor y escurre cualquier líquido que quede. Debe estar jugoso, pero no soltar agua al ponerlo sobre la masa.'
+        ),
+        step(
+          'Mezcla la masa con el agua poco a poco hasta que sea fácil de moldear. Divide en porciones iguales y aplana cada una sobre una superficie limpia.'
+        ),
+        step(
+          'Pon una cucharada de relleno en una mitad de cada disco, deja libre el borde, dobla la otra mitad encima y presiona todo el contorno para cerrarlo.'
+        ),
+        step(
+          'Calienta el aceite a fuego medio y fríe pocos pastelitos cada vez. Dales la vuelta cuando estén dorados por debajo; sácalos con una espumadera y deja escurrir antes de servir.',
+          15
         )
       ],
       intermediate: [
@@ -1023,11 +1177,11 @@ export const RECIPE_BOOK_SEEDS: readonly RecipeBookSeed[] = [
       ],
       expert: [
         step(
-          'Reduce el relleno hasta que quede jugoso pero sin líquido suelto; enfríalo antes de formar para no ablandar la masa. Mantén los discos de grosor parejo.',
+          'Reduce el relleno hasta que quede jugoso y sin líquido; enfríalo antes de formar discos uniformes.',
           18
         ),
         step(
-          'Sella el borde sin bolsas de aire y fríe a temperatura estable hasta que la costra quede crujiente. Escurre en rejilla y acompaña con curtido, no encima, para conservar el crujiente.',
+          'Sella sin bolsas de aire y fríe a temperatura estable hasta dorar. Escurre en rejilla y sirve el curtido aparte.',
           15
         )
       ]
@@ -1094,8 +1248,23 @@ export const RECIPE_BOOK_SEEDS: readonly RecipeBookSeed[] = [
     instructionsByLevel: {
       basic: [
         step(
-          'Muele el maíz tierno con sal y azúcar hasta obtener una masa espesa. Coloca porciones sobre hoja de plátano y cocina en comal, volteando con cuidado hasta que estén firmes y doradas.',
+          'Pon el maíz en la licuadora en varias tandas y tritura con pulsos cortos. Para y revisa la textura: debe quedar una pasta espesa con algunos trocitos, no un líquido.'
+        ),
+        step(
+          'Pasa la pasta a un bol, añade la sal y el azúcar y mezcla hasta que estén repartidas. Si la masa se escurre de la cuchara, déjala reposar un momento para que espese.'
+        ),
+        step(
+          'Calienta las hojas de plátano unos segundos sobre el comal para que se doblen sin romperse. Extiende una gota de aceite en cada hoja y coloca una porción de masa en el centro.'
+        ),
+        step(
+          'Si quieres, pon un poco de queso fresco sobre la masa. Dobla la hoja para cubrirla y aplana suavemente hasta dejar una tortita de grosor parecido por todas partes.'
+        ),
+        step(
+          'Coloca las hojas sobre el comal a fuego medio. Cuando la base esté firme y dorada, dales la vuelta con una espátula; cocina hasta que ambos lados estén dorados y el centro firme.',
           22
+        ),
+        step(
+          'Retira las riguas y déjalas reposar un minuto antes de abrir la hoja. Sirve calientes; si la masa sigue húmeda en el centro, cocínalas un poco más a fuego moderado.'
         )
       ],
       intermediate: [
@@ -1110,11 +1279,11 @@ export const RECIPE_BOOK_SEEDS: readonly RecipeBookSeed[] = [
       ],
       expert: [
         step(
-          'Busca una masa húmeda que se sostenga sobre la hoja sin escurrirse; regula con el propio maíz, no con harina. Mantén porciones del mismo grosor para cocción pareja.',
+          'Ajusta por escurrido una masa húmeda que no se deslice; dosifica porciones de grosor uniforme.',
           10
         ),
         step(
-          'Cocina cubiertas al inicio para que el interior cuaje con vapor y termina destapadas para dorar. Sirve calientes; no abras hasta que la masa esté firme.',
+          'Dora sobre hoja a fuego medio y voltea cuando la base se desprenda. Sirve al cuajar.',
           20
         )
       ]

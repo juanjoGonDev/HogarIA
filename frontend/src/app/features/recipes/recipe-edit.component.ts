@@ -51,6 +51,7 @@ import {
   RecipeEditorStep,
   recipeToEditDraft
 } from './recipe-edit.util';
+import { recipeDetailLevelLabelKey } from './recipe-detail.util';
 import { RecipeImproveDialogComponent } from './recipe-improve-dialog.component';
 import {
   applyRecipeImprovement as applyRecipeImprovementPatch,
@@ -561,7 +562,7 @@ type RecipeEditorTab =
               </ng-container>
               <ng-template #legacyInstructions>
                 <div class="editor-section__heading">
-                  <h3>{{ 'recipes.editor.basic' | t }}</h3>
+                  <h3>{{ detailLevelLabel('basic') }}</h3>
                   <app-button variant="outline" (onClick)="addStep(form)">
                     <app-icon name="add" [size]="18" [label]="null" />
                     {{ 'recipes.editor.add_step' | t }}
@@ -2859,12 +2860,7 @@ export class RecipeEditComponent implements OnInit, OnDestroy {
   }
 
   detailLevelLabel(level: RecipeDetailLevel): string {
-    const keys: Record<RecipeDetailLevel, string> = {
-      basic: 'recipes.editor.basic',
-      intermediate: 'recipes.editor.intermediate',
-      expert: 'recipes.editor.expert'
-    };
-    return this.i18n.t(keys[level] as TranslationKey);
+    return this.i18n.t(recipeDetailLevelLabelKey(level));
   }
 
   trackIndex(index: number): number {

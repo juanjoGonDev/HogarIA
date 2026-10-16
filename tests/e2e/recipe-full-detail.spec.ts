@@ -181,6 +181,7 @@ test('la ficha completa presenta detalle, ajusta raciones solo en pantalla y no 
     await expect(page.locator('[data-test="recipe-list-view"]')).toBeHidden();
     await expect(detail).toBeVisible();
     await expect(page.locator('[data-test="recipe-detail-title"]')).toBeFocused();
+    await expect(detail.locator('[data-test="recipe-serving-count"]')).toHaveValue('1');
     await expect(detail.locator('.recipe-detail__header app-badge')).toHaveText('Fácil');
     const timings = detail.locator('.recipe-detail__timings');
     await expect(timings).toHaveCSS('display', 'flex');
@@ -197,6 +198,20 @@ test('la ficha completa presenta detalle, ajusta raciones solo en pantalla y no 
       fullPage: false,
       animations: 'disabled'
     });
+    if (testInfo.project.name === 'chromium') {
+      const tabletViewport = { width: 768, height: 1024 };
+      await page.setViewportSize(tabletViewport);
+      await expect
+        .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
+        .toBeLessThanOrEqual(tabletViewport.width);
+      await expect(page.locator('[data-test="recipe-detail-level"]')).toBeVisible();
+      await page.screenshot({
+        path: resolve(screenshotDirectory, 'detail-tablet-768x1024.png'),
+        fullPage: false,
+        animations: 'disabled'
+      });
+      await page.setViewportSize(viewport);
+    }
     if (testInfo.project.name === 'mobile-chrome') {
       await page.setViewportSize({ width: 320, height: 640 });
       await expect
@@ -379,6 +394,19 @@ test('la ficha completa presenta detalle, ajusta raciones solo en pantalla y no 
 
     const detailLevel = page.locator('[data-test="recipe-detail-level"]');
     await expect(detailLevel).toBeVisible();
+    await expect(
+      detailLevel.locator('[data-test="recipe-detail-level-basic"]')
+    ).toHaveAccessibleName('Principiante');
+    await expect(
+      detailLevel.locator('[data-test="recipe-detail-level-intermediate"]')
+    ).toHaveAccessibleName('Intermedio');
+    await expect(
+      detailLevel.locator('[data-test="recipe-detail-level-expert"]')
+    ).toHaveAccessibleName('Experto');
+    await expect(detailLevel.locator('[data-test="recipe-detail-level-basic"]')).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
     const commonIngredientRows = await detail
       .locator('[data-test="recipe-ingredients"] li')
       .allTextContents();
@@ -417,9 +445,9 @@ test('la ficha completa presenta detalle, ajusta raciones solo en pantalla y no 
 
     await ingredientsTab.click();
     const servings = page.locator('[data-test="recipe-serving-count"]');
-    await expect(servings).toHaveValue('2');
+    await expect(servings).toHaveValue('1');
     await expect(detail.locator('[data-test="recipe-ingredients"] li').first()).toContainText(
-      '200 g'
+      '100 g'
     );
     await servings.fill('4');
     await expect(detail.locator('[data-test="recipe-ingredients"] li').first()).toContainText(

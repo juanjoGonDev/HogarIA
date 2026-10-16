@@ -1,5 +1,5 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { signal } from '@angular/core';
+import { signal, type WritableSignal } from '@angular/core';
 import { ActivatedRoute, convertToParamMap, type ParamMap, Router } from '@angular/router';
 import { BehaviorSubject, of, Subject, throwError } from 'rxjs';
 import { RecipesComponent } from './recipes.component';
@@ -13,6 +13,7 @@ import { ToastService } from '../../core/services/toast.service';
 import { I18nService } from '../../core/services/i18n.service';
 import type { Recipe } from '../../shared/models/recipe.model';
 import type { AIRecipeResponse } from '../../shared/models/ai-config.model';
+import type { HomeProfile } from '../../shared/models/home-profile';
 
 const RECIPE: Recipe = {
   id: 'synthetic-recipe',
@@ -140,6 +141,7 @@ describe('RecipesComponent', () => {
   let authUserId: string | null;
   let authCurrentUser: any;
   let authUpdateProfile: jasmine.Spy;
+  let cookingProfile: WritableSignal<HomeProfile>;
 
   function createRecipeService() {
     return {
@@ -209,6 +211,7 @@ describe('RecipesComponent', () => {
     ai = createAiService();
     pantry = createPantryService();
     household = createHouseholdService();
+    cookingProfile = signal({ cookingLevel: 'intermediate', modules: [] });
     toast = jasmine.createSpyObj<ToastService>('ToastService', ['success', 'error']);
     authUserId = 'synthetic-user';
     authCurrentUser = signal({
@@ -250,7 +253,7 @@ describe('RecipesComponent', () => {
         {
           provide: TasteProfileService,
           useValue: {
-            profile: signal({ cookingLevel: 'intermediate' }),
+            profile: cookingProfile,
             ensureLoaded: jasmine.createSpy('ensureLoaded')
           }
         },
@@ -612,6 +615,92 @@ describe('RecipesComponent', () => {
     );
   });
 
+  it('defaults each recipe to the current profile level and remembers explicit per-recipe choices', () => {
+    cookingProfile.set({ cookingLevel: 'expert', modules: [] });
+    const firstRecipe = { ...RECIPE, id: 'recipe-a' };
+    const secondRecipe = { ...RECIPE, id: 'recipe-b' };
+    recipes.getRecipe.and.returnValue(of(firstRecipe));
+
+    queryParams.next(convertToParamMap({ recipe: firstRecipe.id }));
+    expect(component.selectedRecipeDetailLevel()).toBe('expert');
+
+    component.setSelectedRecipeDetailLevel('basic');
+    recipes.getRecipe.and.returnValue(of(secondRecipe));
+    queryParams.next(convertToParamMap({ recipe: secondRecipe.id }));
+    expect(component.selectedRecipeDetailLevel()).toBe('expert');
+
+    recipes.getRecipe.and.returnValue(of(firstRecipe));
+    queryParams.next(convertToParamMap({ recipe: firstRecipe.id }));
+    expect(component.selectedRecipeDetailLevel()).toBe('basic');
+  });
+
+  it('defaults saved recipe servings to the household count instead of its base yield', () => {
+    household.defaultServings.and.returnValue(3);
+    recipes.getRecipe.and.returnValue(of(RECIPE));
+
+    queryParams.next(convertToParamMap({ recipe: RECIPE.id }));
+
+    expect(component.recipeServings()).toBe(3);
+    component.setRecipeServings(5);
+    expect(component.recipeServings()).toBe(5);
+  });
+
+  it('tracks household loading until servings are edited, then preserves the explicit value', () => {
+    household.defaultServings.and.callFake(() => {
+      const activeMembers =
+        household.household()?.members.filter((member: { isActive: boolean }) => member.isActive)
+          .length ?? 0;
+      return activeMembers || 2;
+    });
+    recipes.getRecipe.and.returnValue(of(RECIPE));
+    queryParams.next(convertToParamMap({ recipe: RECIPE.id }));
+    expect(component.recipeServings()).toBe(2);
+
+    household.household.set({
+      id: 'home-a',
+      members: [
+        { id: 'active-a', isActive: true },
+        { id: 'active-b', isActive: true },
+        { id: 'inactive', isActive: false }
+      ]
+    });
+    fixture.detectChanges();
+    expect(component.recipeServings()).toBe(2);
+
+    component.setRecipeServings(5);
+    household.household.set({
+      id: 'home-b',
+      members: [
+        { id: 'active-a', isActive: true },
+        { id: 'active-b', isActive: true },
+        { id: 'active-c', isActive: true }
+      ]
+    });
+    fixture.detectChanges();
+    expect(component.recipeServings()).toBe(5);
+  });
+
+  it('uses the profile cooking level as the untouched AI-generation default', () => {
+    cookingProfile.set({ cookingLevel: 'expert', modules: [] });
+    fixture.detectChanges();
+    component.openAiModal();
+    expect(component.aiOptions.detailLevel).toBe('expert');
+
+    cookingProfile.set({ cookingLevel: 'intermediate', modules: [] });
+    fixture.detectChanges();
+    expect(component.aiOptions.detailLevel).toBe('intermediate');
+
+    component.setAiDetailLevel('basic');
+    cookingProfile.set({ cookingLevel: 'expert', modules: [] });
+    fixture.detectChanges();
+    expect(component.aiOptions.detailLevel).toBe('basic');
+
+    component.closeAiModal();
+    component.openAiModal();
+    fixture.detectChanges();
+    expect(component.aiOptions.detailLevel).toBe('expert');
+  });
+
   it('waits for cooking confirmation, rejects duplicate clicks, and keeps retry available', () => {
     const owned = { ...RECIPE, author: 'user' as const, authorId: 'synthetic-user' };
     const pending = new Subject<boolean>();
@@ -651,7 +740,7 @@ describe('RecipesComponent', () => {
     queryParams.next(convertToParamMap({ recipe: RECIPE.id }));
     expect(recipes.getRecipe).toHaveBeenCalledWith(RECIPE.id);
     expect(component.selectedRecipe()).toEqual(RECIPE);
-    expect(component.recipeServings()).toBe(4);
+    expect(component.recipeServings()).toBe(2);
 
     fragment.next('ai');
     expect(component.isAiModalOpen()).toBeTrue();
@@ -774,6 +863,7 @@ describe('RecipesComponent', () => {
     household.household.set({ id: 'home-b', members: [{ id: 'member-b', isActive: true }] });
     fixture.detectChanges();
     expect(component.recipeMemberIds()).toEqual(['member-b']);
+    expect(component.aiOptions.servings).toBe(1);
     component.setAiServings(5);
     component.recipeGuests.set([
       { allergies: [], intolerances: [], diets: [], likes: [], dislikes: [], notes: '' }

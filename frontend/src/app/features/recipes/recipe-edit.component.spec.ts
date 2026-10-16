@@ -277,9 +277,9 @@ describe('RecipeEditComponent', () => {
 
     expect(fixture.nativeElement.querySelector('[data-test="recipe-editor-page"]')).not.toBeNull();
     expect(fixture.nativeElement.querySelector('[data-test="recipe-editor-form"]')).not.toBeNull();
-    expect(fixture.nativeElement.textContent).toContain('recipes.editor.basic');
-    expect(fixture.nativeElement.textContent).toContain('recipes.editor.intermediate');
-    expect(fixture.nativeElement.textContent).toContain('recipes.editor.expert');
+    expect(fixture.nativeElement.textContent).toContain('auth.beginner');
+    expect(fixture.nativeElement.textContent).toContain('auth.intermediate');
+    expect(fixture.nativeElement.textContent).toContain('auth.expert');
     fixture.componentInstance.setActiveTab('media');
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('[data-test="recipe-photo-search"]')).not.toBeNull();

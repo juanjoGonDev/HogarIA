@@ -124,6 +124,25 @@ describe('catálogo editorial de recetas', () => {
     }
   });
 
+  it('presenta los niveles del catálogo de más guía principiante a más concisión experta', () => {
+    const wordCount = (steps: { instruction: string }[]) =>
+      steps.reduce((total, step) => total + step.instruction.trim().split(/\s+/).length, 0);
+
+    for (const recipe of book.RECIPE_BOOK_SEEDS) {
+      const levels = recipe.instructionsByLevel;
+      expect(levels.basic.length, `${recipe.name}: pasos de Principiante`).toBeGreaterThan(
+        levels.expert.length
+      );
+      expect(wordCount(levels.basic), `${recipe.name}: detalle de Principiante`).toBeGreaterThan(
+        wordCount(levels.intermediate)
+      );
+      expect(
+        wordCount(levels.intermediate),
+        `${recipe.name}: detalle de Intermedio`
+      ).toBeGreaterThan(wordCount(levels.expert));
+    }
+  });
+
   it('cada receta del libro guarda una ficha completa y pasos útiles en los tres niveles', () => {
     const allowedAppliances = new Set([
       'Freidora de aire / mini horno (máximo 200 °C)',
@@ -289,7 +308,7 @@ describe('catálogo editorial de recetas', () => {
       rating: 5,
       times_cooked: 7
     });
-    expect(levels.basic).toHaveLength(4);
+    expect(levels.basic).toHaveLength(seed.instructionsByLevel.basic.length + 3);
     expect(
       db
         .prepare('SELECT is_favorite, times_cooked, notes FROM user_recipes WHERE id = ?')

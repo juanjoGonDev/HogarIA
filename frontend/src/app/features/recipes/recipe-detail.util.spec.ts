@@ -1,5 +1,6 @@
 import {
   detailLevelForCookingLevel,
+  recipeDetailLevelLabelKey,
   recipeDetailLevelFor,
   rememberRecipeDetailLevel,
   scaleRecipeQuantity
@@ -23,6 +24,12 @@ describe('scaleRecipeQuantity', () => {
 });
 
 describe('recipe detail level preferences', () => {
+  it('uses the same proficiency names as the personal cooking profile', () => {
+    expect(recipeDetailLevelLabelKey('basic')).toBe('auth.beginner');
+    expect(recipeDetailLevelLabelKey('intermediate')).toBe('auth.intermediate');
+    expect(recipeDetailLevelLabelKey('expert')).toBe('auth.expert');
+  });
+
   it('maps cooking skill to the matching instruction depth', () => {
     expect(detailLevelForCookingLevel('beginner')).toBe('basic');
     expect(detailLevelForCookingLevel('none')).toBe('basic');

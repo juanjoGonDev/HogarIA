@@ -698,10 +698,50 @@ test.describe('Generación de recetas IA', () => {
     await expect(dialog.locator('#recipe-serving-input')).toHaveValue('1');
     await expect(dialog.locator('#recipe-detail-level')).toHaveAccessibleName('Nivel de detalle');
     await expect(dialog.locator('#recipe-detail-level')).toHaveValue('basic');
-    await captureScreenshot(page, 'active-household-defaults', viewport, testInfo.project.name);
-    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
-      viewport.width
+    await expect(dialog.locator('#recipe-detail-level option[value="basic"]')).toHaveText(
+      'Principiante'
     );
+    await expect(dialog.locator('#recipe-detail-level option[value="intermediate"]')).toHaveText(
+      'Intermedio'
+    );
+    await expect(dialog.locator('#recipe-detail-level option[value="expert"]')).toHaveText(
+      'Experto'
+    );
+
+    const difficulty = dialog.locator('#recipe-difficulty');
+    await expect(difficulty).toHaveAccessibleName('Dificultad');
+    const visualViewports = [
+      { name: 'desktop', width: 1440, height: 900 },
+      { name: 'tablet', width: 768, height: 1024 },
+      { name: 'mobile', width: 393, height: 851 }
+    ] as const;
+    for (const visualViewport of visualViewports) {
+      await page.setViewportSize(visualViewport);
+      const initialBox = await difficulty.boundingBox();
+      expect(initialBox).not.toBeNull();
+      for (const value of ['easy', 'medium', 'hard']) {
+        await difficulty.selectOption(value);
+        await expect(difficulty).toHaveValue(value);
+        const nextBox = await difficulty.boundingBox();
+        expect(nextBox).not.toBeNull();
+        for (const dimension of ['x', 'y', 'width', 'height'] as const) {
+          expect(Math.abs(nextBox![dimension] - initialBox![dimension])).toBeLessThanOrEqual(1);
+        }
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+        visualViewport.width
+      );
+      const screenshotDirectory = process.env.E2E_SCREENSHOT_DIR;
+      if (screenshotDirectory && testInfo.project.name === 'chromium') {
+        mkdirSync(screenshotDirectory, { recursive: true });
+        await page.screenshot({
+          path: join(screenshotDirectory, `recipe-defaults-${visualViewport.name}.png`),
+          animations: 'disabled'
+        });
+      }
+    }
+    await page.setViewportSize(viewport);
+    await captureScreenshot(page, 'active-household-defaults', viewport, testInfo.project.name);
   });
 
   for (const viewport of VIEWPORTS.slice(0, 2)) {

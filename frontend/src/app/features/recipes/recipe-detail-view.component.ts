@@ -4,7 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { Recipe } from '../../shared/models/recipe.model';
 import type { RecipeInstructionStep } from '../../shared/models/recipe-instructions';
 import type { DetailLevel } from '../../shared/models/ai-config.model';
-import { scaleRecipeQuantity } from './recipe-detail.util';
+import { recipeDetailLevelLabelKey, scaleRecipeQuantity } from './recipe-detail.util';
 import { ButtonComponent } from '../../shared/components/ui/button/button.component';
 import {
   BadgeComponent,
@@ -13,6 +13,7 @@ import {
 import { IconComponent } from '../../shared/components/ui/icon/icon.component';
 import { TranslatePipe } from '../../core/pipes/translate.pipe';
 import { RecipeCookingViewComponent } from './recipe-cooking-view.component';
+import type { TranslationKey } from '../../core/i18n';
 
 export type RecipeDetailSection = 'preparation' | 'ingredients' | 'guidance' | 'storage';
 
@@ -297,7 +298,7 @@ export type RecipeDetailSection = 'preparation' | 'ingredients' | 'guidance' | '
                     [class.is-active]="detailLevel === 'basic'"
                     (click)="selectDetailLevel('basic')"
                   >
-                    {{ 'recipes.basico' | t }}
+                    {{ detailLevelLabel('basic') | t }}
                   </button>
                   <button
                     type="button"
@@ -306,7 +307,7 @@ export type RecipeDetailSection = 'preparation' | 'ingredients' | 'guidance' | '
                     [class.is-active]="detailLevel === 'intermediate'"
                     (click)="selectDetailLevel('intermediate')"
                   >
-                    {{ 'auth.intermediate' | t }}
+                    {{ detailLevelLabel('intermediate') | t }}
                   </button>
                   <button
                     type="button"
@@ -315,7 +316,7 @@ export type RecipeDetailSection = 'preparation' | 'ingredients' | 'guidance' | '
                     [class.is-active]="detailLevel === 'expert'"
                     (click)="selectDetailLevel('expert')"
                   >
-                    {{ 'auth.expert' | t }}
+                    {{ detailLevelLabel('expert') | t }}
                   </button>
                 </div>
               </div>
@@ -679,6 +680,10 @@ export class RecipeDetailViewComponent {
   selectDetailLevel(level: DetailLevel): void {
     this.showAllPreparationSteps = false;
     this.detailLevelChanged.emit(level);
+  }
+
+  detailLevelLabel(level: DetailLevel): TranslationKey {
+    return recipeDetailLevelLabelKey(level);
   }
 
   handleDetailTabKeydown(event: KeyboardEvent, index: number): void {

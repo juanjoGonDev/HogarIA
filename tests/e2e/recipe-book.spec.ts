@@ -399,23 +399,60 @@ test.describe('Libro de recetas', () => {
     await expect(page.locator('[data-test="recipe-detail-title"]')).toHaveText(
       'Tortilla de patatas'
     );
+    const detailLevel = page.locator('[data-test="recipe-detail-level"]');
+    await expect(
+      detailLevel.locator('[data-test="recipe-detail-level-basic"]')
+    ).toHaveAccessibleName('Principiante');
+    await expect(detailLevel.locator('[data-test="recipe-detail-level-basic"]')).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
+    await expect(detail.locator('[data-test="recipe-serving-count"]')).toHaveValue('1');
+    const preparation = detail.locator('[data-test="recipe-preparation"]');
+    const basicInstructions = await preparation
+      .locator('.step-card__instruction')
+      .allTextContents();
+    const basicWordCount = basicInstructions.join(' ').trim().split(/\s+/).length;
+    const basicStepCount = basicInstructions.length;
     const preparationTab = detail.locator('[data-test="recipe-detail-tab-preparation"]');
     const ingredientsTab = detail.locator('[data-test="recipe-detail-tab-ingredients"]');
     const guidanceTab = detail.locator('[data-test="recipe-detail-tab-guidance"]');
     const storageTab = detail.locator('[data-test="recipe-detail-tab-storage"]');
     await expect(preparationTab).toHaveAttribute('aria-selected', 'true');
-    await expect(detail.locator('[data-test="recipe-preparation"]')).toBeVisible();
+    await expect(preparation).toBeVisible();
     expect(
-      await detail.locator('[data-test="recipe-preparation"] .step-card').count()
-    ).toBeGreaterThanOrEqual(4);
+      basicStepCount,
+      'Principiante debe ofrecer más pasos guiados que Experto'
+    ).toBeGreaterThan(4);
     await expect(detail.locator('.step-card').first()).toContainText(
       /lav|enjuag|no hace falta lavar/i
     );
 
+    const screenshotDirectory = resolveScreenshotDirectory(
+      '.e2e-screenshots/recipe-book-full-detail'
+    );
+    mkdirSync(screenshotDirectory, { recursive: true });
+    await preparation.scrollIntoViewIfNeeded();
+    const expandSteps = page.locator(
+      '[data-test="recipe-expand-steps-mobile"]:visible, [data-test="recipe-expand-steps-desktop"]:visible'
+    );
+    await expandSteps.click();
+    await expect(expandSteps).toHaveAttribute('aria-expanded', 'true');
+    await preparation.locator('[data-step-number="4"]').scrollIntoViewIfNeeded();
+    await page.screenshot({
+      path: resolve(
+        screenshotDirectory,
+        `${testInfo.project.name}-tortilla-detail-basic-cooking-step.png`
+      ),
+      fullPage: false,
+      animations: 'disabled'
+    });
+    await expandSteps.click();
+
     await ingredientsTab.click();
     await expect(ingredientsTab).toHaveAttribute('aria-selected', 'true');
     const firstIngredient = detail.locator('[data-test="recipe-ingredients"] li').first();
-    await expect(firstIngredient).toContainText('600 g');
+    await expect(firstIngredient).toContainText('150 g');
     await detail.locator('[data-test="recipe-serving-count"]').fill('2');
     await expect(firstIngredient).toContainText('300 g');
 
@@ -431,19 +468,23 @@ test.describe('Libro de recetas', () => {
     await expect(detail.locator('[data-test="recipe-nutrition"]')).toBeVisible();
 
     await preparationTab.click();
-    await detail.locator('[data-test="recipe-detail-level-expert"]').click();
+    await detailLevel.locator('[data-test="recipe-detail-level-expert"]').click();
+    const expertInstructions = await preparation
+      .locator('.step-card__instruction')
+      .allTextContents();
+    const expertWordCount = expertInstructions.join(' ').trim().split(/\s+/).length;
     expect(
-      await detail.locator('[data-test="recipe-preparation"] .step-card').count()
-    ).toBeGreaterThanOrEqual(4);
+      expertInstructions.length,
+      'Experto debe ser más conciso en número de pasos'
+    ).toBeLessThan(basicStepCount);
+    expect(expertWordCount, 'Experto debe ser más conciso en la redacción').toBeLessThan(
+      basicWordCount
+    );
     expect(aiRequests, 'el cambio de detalle/raciones debe ser local').toEqual([]);
     await expect
       .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
       .toBeLessThanOrEqual(viewport.width);
 
-    const screenshotDirectory = resolveScreenshotDirectory(
-      '.e2e-screenshots/recipe-book-full-detail'
-    );
-    mkdirSync(screenshotDirectory, { recursive: true });
     await page.screenshot({
       path: resolve(screenshotDirectory, `${testInfo.project.name}-tortilla-detail-top.png`),
       fullPage: false,
