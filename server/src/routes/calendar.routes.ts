@@ -1,14 +1,18 @@
 import { Hono } from 'hono';
 import { nanoid } from 'nanoid';
+import { isDeepStrictEqual } from 'node:util';
 import { getDatabase } from '../config/database.js';
 import { authMiddleware } from '../middleware/auth.middleware.js';
+import { zoneStampValue } from '../middleware/timestamp.middleware.js';
 import {
   ASSISTANT_HOUSEHOLD_CONTEXT_CHANGED,
+  ASSISTANT_HOUSEHOLD_HEADER,
   assistantHouseholdContextMiddleware,
   currentAssistantHouseholdSnapshot
 } from '../utils/ai-assistant-household-context.js';
 import {
   ASSISTANT_ACTION_ID_HEADER,
+  isAssistantActionId,
   withAssistantActionIdempotency
 } from '../utils/assistant-action-idempotency.js';
 import {
@@ -22,6 +26,7 @@ import {
   createCalendarEventSchema,
   updateCalendarEventSchema
 } from '../schemas/calendar.schema.js';
+import { assistantUpdateCalendarEventSchema } from '../schemas/ai-assistant-calendar-update.schema.js';
 import { ensureWeekCalendar } from '../utils/week-calendar.js';
 import {
   dayFromISO,
@@ -1082,6 +1087,246 @@ calendarRoutes.patch('/events/:id', async (c) => {
       attendeeIds: attendees.map((person) => person.id)
     }
   });
+});
+
+calendarRoutes.patch('/events/:id/assistant-update', async (c) => {
+  const actionId = c.req.header(ASSISTANT_ACTION_ID_HEADER);
+  if (!actionId) return c.json({ success: false, code: 'ASSISTANT_ACTION_ID_REQUIRED' }, 400);
+  if (!isAssistantActionId(actionId)) {
+    return c.json({ success: false, code: 'ASSISTANT_ACTION_ID_INVALID' }, 400);
+  }
+  if (c.req.header(ASSISTANT_HOUSEHOLD_HEADER) === undefined) {
+    return c.json({ success: false, code: 'ASSISTANT_HOUSEHOLD_CONTEXT_REQUIRED' }, 400);
+  }
+
+  const rawBody = await c.req.json().catch(() => null);
+  const parsed = assistantUpdateCalendarEventSchema.safeParse(rawBody);
+  if (!parsed.success) {
+    return c.json({ success: false, code: 'INVALID_ASSISTANT_EVENT_UPDATE' }, 400);
+  }
+
+  const targetId = c.req.param('id');
+  if (parsed.data.assistantAction.targetId !== targetId) {
+    return c.json({ success: false, code: 'ASSISTANT_ACTION_TARGET_MISMATCH' }, 400);
+  }
+
+  const db = getDatabase();
+  const userId = c.get('userId') as string;
+  const initialContext = currentAssistantHouseholdSnapshot(c);
+  if (!initialContext.valid) {
+    return c.json({ success: false, code: ASSISTANT_HOUSEHOLD_CONTEXT_CHANGED }, 409);
+  }
+  const { changes, assistantAction } = parsed.data;
+  const before = assistantAction.before;
+  if (
+    assistantAction.householdId !== initialContext.householdId ||
+    before.householdId !== initialContext.householdId
+  ) {
+    return c.json({ success: false, code: ASSISTANT_HOUSEHOLD_CONTEXT_CHANGED }, 409);
+  }
+
+  const result = withAssistantActionIdempotency(
+    db,
+    userId,
+    actionId,
+    {
+      operation: 'calendar.update_event',
+      householdId: initialContext.householdId,
+      targetId,
+      before,
+      changes
+    },
+    () => {
+      const currentContext = currentAssistantHouseholdSnapshot(c);
+      if (!currentContext.valid || currentContext.householdId !== assistantAction.householdId) {
+        return {
+          body: { success: false, code: ASSISTANT_HOUSEHOLD_CONTEXT_CHANGED },
+          status: 409,
+          record: false
+        };
+      }
+
+      const row = db
+        .prepare(
+          `SELECT id, household_id AS householdId, title, kind, date,
+                  start_time AS startTime, end_time AS endTime, all_day AS allDay,
+                  color, notes, location, recurrence,
+                  recurrence_rule AS recurrenceRule, exceptions, source,
+                  updated_at AS updatedAt
+             FROM calendar_events
+            WHERE id = ? AND user_id = ? AND source = 'user' AND kind != 'meal'`
+        )
+        .get(targetId, userId) as
+        ({ id: string } & Omit<typeof before, 'allDay'> & { allDay: number }) | undefined;
+      if (!row) {
+        return {
+          body: { success: false, message: 'Evento no encontrado' },
+          status: 404,
+          record: false
+        };
+      }
+
+      const current = {
+        householdId: row.householdId,
+        title: row.title,
+        kind: row.kind,
+        date: row.date,
+        startTime: row.startTime,
+        endTime: row.endTime,
+        allDay: Boolean(row.allDay),
+        color: row.color,
+        notes: row.notes,
+        location: row.location,
+        recurrence: row.recurrence,
+        recurrenceRule: row.recurrenceRule,
+        exceptions: row.exceptions,
+        source: row.source,
+        updatedAt: zoneStampValue(row.updatedAt, 'updatedAt')
+      };
+      const expected = {
+        ...before,
+        updatedAt: zoneStampValue(before.updatedAt, 'updatedAt')
+      };
+      if (current.recurrence !== 'none') {
+        return {
+          body: { success: false, code: 'ASSISTANT_EVENT_RECURRENCE_UNSUPPORTED' },
+          status: 409,
+          record: false
+        };
+      }
+      if (!isDeepStrictEqual(current, expected)) {
+        return {
+          body: { success: false, code: 'ASSISTANT_EVENT_STALE' },
+          status: 409,
+          record: false
+        };
+      }
+
+      const hasNewTime =
+        (changes.startTime !== undefined && changes.startTime !== null) ||
+        (changes.endTime !== undefined && changes.endTime !== null);
+      const nextAllDay = changes.allDay ?? (hasNewTime ? false : current.allDay);
+      const nextStartTime = nextAllDay
+        ? null
+        : changes.startTime !== undefined
+          ? changes.startTime
+          : current.startTime;
+      const nextEndTime = nextAllDay
+        ? null
+        : changes.endTime !== undefined
+          ? changes.endTime
+          : current.endTime;
+      if (!nextAllDay && !nextStartTime && !nextEndTime) {
+        return {
+          body: { success: false, code: 'CALENDAR_EVENT_TIME_REQUIRED' },
+          status: 400,
+          record: false
+        };
+      }
+      if (nextStartTime && nextEndTime && nextEndTime < nextStartTime) {
+        return {
+          body: { success: false, code: 'INVALID_EVENT_TIME_RANGE' },
+          status: 400,
+          record: false
+        };
+      }
+
+      const next = {
+        ...current,
+        ...changes,
+        allDay: nextAllDay,
+        startTime: nextStartTime,
+        endTime: nextEndTime
+      };
+      const fieldMap = {
+        title: 'title',
+        kind: 'kind',
+        date: 'date',
+        startTime: 'start_time',
+        endTime: 'end_time',
+        allDay: 'all_day',
+        notes: 'notes',
+        location: 'location'
+      } as const;
+      const assignments: string[] = [];
+      const values: Array<string | number | null> = [];
+      for (const field of Object.keys(fieldMap) as Array<keyof typeof fieldMap>) {
+        if (next[field] === current[field]) continue;
+        assignments.push(`${fieldMap[field]} = ?`);
+        values.push(
+          field === 'allDay' ? (next.allDay ? 1 : 0) : (next[field] as string | number | null)
+        );
+      }
+      if (!assignments.length) {
+        return {
+          body: { success: false, code: 'ASSISTANT_ACTION_NO_CHANGE' },
+          status: 400,
+          record: false
+        };
+      }
+      assignments.push('updated_at = CURRENT_TIMESTAMP');
+      const write = db
+        .prepare(
+          `UPDATE calendar_events SET ${assignments.join(', ')}
+            WHERE id = ? AND user_id = ? AND source = ? AND household_id IS ?
+              AND title IS ? AND kind IS ? AND date IS ? AND start_time IS ?
+              AND end_time IS ? AND all_day IS ? AND color IS ? AND notes IS ?
+              AND location IS ? AND recurrence IS ? AND recurrence_rule IS ?
+              AND exceptions IS ? AND updated_at IS ?`
+        )
+        .run(
+          ...values,
+          targetId,
+          userId,
+          current.source,
+          current.householdId,
+          current.title,
+          current.kind,
+          current.date,
+          current.startTime,
+          current.endTime,
+          current.allDay ? 1 : 0,
+          current.color,
+          current.notes,
+          current.location,
+          current.recurrence,
+          current.recurrenceRule,
+          current.exceptions,
+          row.updatedAt
+        );
+      if (write.changes !== 1) {
+        return {
+          body: { success: false, code: 'ASSISTANT_EVENT_STALE' },
+          status: 409,
+          record: false
+        };
+      }
+
+      const updatedRow = db
+        .prepare(`SELECT ${EVENT_COLUMNS} FROM calendar_events WHERE id = ? AND user_id = ?`)
+        .get(targetId, userId) as unknown as CalendarEventRow;
+      const attendees = attendeesByEvent(db, [targetId]).get(targetId) ?? [];
+      return {
+        body: {
+          success: true,
+          data: {
+            ...toEvent(updatedRow, null),
+            editable: true,
+            attendees,
+            attendeeIds: attendees.map((attendee) => attendee.id)
+          }
+        },
+        status: 200
+      };
+    }
+  );
+
+  if ('error' in result) {
+    return result.error === 'invalid_action_id'
+      ? c.json({ success: false, code: 'ASSISTANT_ACTION_ID_INVALID' }, 400)
+      : c.json({ success: false, code: 'ASSISTANT_ACTION_ID_CONFLICT' }, 409);
+  }
+  return c.json(result.body, result.status);
 });
 
 // DELETE /api/calendar/events/:id/attendees/me —salir de un evento ajeno.

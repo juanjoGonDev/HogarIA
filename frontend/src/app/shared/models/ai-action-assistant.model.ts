@@ -24,7 +24,8 @@ interface AssistantActionBase<
   executionTarget?:
     | AssistantTaskUpdateExecutionTarget
     | AssistantShoppingListUpdateExecutionTarget
-    | AssistantPantryIngredientUpdateExecutionTarget;
+    | AssistantPantryIngredientUpdateExecutionTarget
+    | AssistantCalendarEventUpdateExecutionTarget;
 }
 
 export interface PantryIngredientPayload {
@@ -155,6 +156,44 @@ export interface CalendarEventPayload {
   notes: string | null;
 }
 
+export interface CalendarEventUpdatePayload {
+  targetTitle: string;
+  targetDate: string;
+  targetStartTime: string | null;
+  changes: {
+    title?: string;
+    kind?: CalendarEventPayload['kind'];
+    date?: string;
+    startTime?: string | null;
+    endTime?: string | null;
+    allDay?: boolean;
+    location?: string | null;
+    notes?: string | null;
+  };
+}
+
+export interface AssistantCalendarEventUpdateExecutionTarget {
+  kind: 'calendar-event';
+  id: string;
+  householdId: string | null;
+  updatedAt: string | null;
+  snapshot: {
+    title: string;
+    kind: CalendarEventPayload['kind'];
+    date: string;
+    startTime: string | null;
+    endTime: string | null;
+    allDay: boolean;
+    color: string | null;
+    notes: string | null;
+    location: string | null;
+    recurrence: string;
+    recurrenceRule: string | null;
+    exceptions: string;
+    source: string;
+  };
+}
+
 export interface AssistantActionCandidateBase<TKind extends string, TPayload> {
   kind: TKind;
   title: string;
@@ -174,6 +213,7 @@ export type AssistantActionCandidate =
   | AssistantActionCandidateBase<'household.create_task', HouseholdTaskPayload>
   | AssistantActionCandidateBase<'household.update_task', HouseholdTaskUpdatePayload>
   | AssistantActionCandidateBase<'calendar.create_event', CalendarEventPayload>
+  | AssistantActionCandidateBase<'calendar.update_event', CalendarEventUpdatePayload>
   | AssistantActionCandidateBase<'recipes.create_draft', { recipe: AIRecipeResponse }>;
 
 export type AssistantAction =
@@ -235,8 +275,15 @@ export type AssistantAction =
       'calendar',
       'create_event',
       CalendarEventPayload
+    > & { dependsOn: string[] })
+  | (AssistantActionBase<
+      'calendar.update_event',
+      'calendar',
+      'update_event',
+      CalendarEventUpdatePayload
     > & {
       dependsOn: string[];
+      executionTarget: AssistantCalendarEventUpdateExecutionTarget;
     })
   | (AssistantActionBase<
       'recipes.create_draft',

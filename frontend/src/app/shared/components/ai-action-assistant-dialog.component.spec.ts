@@ -10,9 +10,11 @@ import { PantryService } from '../../core/services/pantry.service';
 import type { HouseholdMealProposal } from '../../core/services/household-meal-proposal.service';
 import { I18nService } from '../../core/services/i18n.service';
 import type {
+  AssistantCalendarEventUpdateExecutionTarget,
   AssistantAction,
   AssistantActionCandidate,
-  AssistantActionPlan
+  AssistantActionPlan,
+  CalendarEventUpdatePayload
 } from '../models/ai-action-assistant.model';
 import type { AIRecipeResponse } from '../models/ai-config.model';
 import type { Household } from '../models/household.model';
@@ -532,6 +534,296 @@ describe('AiActionAssistantDialogComponent', () => {
     expect(confirmation.textContent).toContain('Yogur natural');
     expect(confirmation.textContent).toContain('Yogur cremoso');
     expect(confirmation.textContent).toContain('0');
+    expect(execution.execute).not.toHaveBeenCalled();
+  });
+
+  it('shows the calendar preimage and keeps the edited event pending until explicit approval', () => {
+    const action: AssistantAction = {
+      id: 'calendar-update-1',
+      kind: 'calendar.update_event',
+      domain: 'calendar',
+      actionType: 'update_event',
+      title: 'Editar dentista',
+      summary: 'Mueve la cita y deja el evento como día completo.',
+      payload: {
+        targetTitle: 'Dentista',
+        targetDate: '2026-10-20',
+        targetStartTime: '09:00',
+        changes: { date: '2026-10-21', allDay: true }
+      },
+      executionTarget: {
+        kind: 'calendar-event',
+        id: 'event-1',
+        householdId: null,
+        updatedAt: '2026-10-16 10:00:00',
+        snapshot: {
+          title: 'Dentista',
+          kind: 'appointment',
+          date: '2026-10-20',
+          startTime: '09:00',
+          endTime: '09:30',
+          allDay: false,
+          color: '#60a5fa',
+          notes: 'Llevar tarjeta',
+          location: 'Calle Mayor',
+          recurrence: 'none',
+          recurrenceRule: null,
+          exceptions: '[]',
+          source: 'user'
+        }
+      },
+      dependsOn: [],
+      warnings: [],
+      selected: false,
+      status: 'pending'
+    };
+    component.plan.set({
+      id: 'calendar-update-plan',
+      summary: 'Actualiza un evento existente.',
+      actions: [action],
+      questions: []
+    });
+    component.stage.set('review');
+    fixture.detectChanges();
+
+    const target = fixture.nativeElement.querySelector(
+      '[data-test="ai-assistant-calendar-target"]'
+    ) as HTMLElement;
+    expect(target.textContent).toContain('Dentista');
+    expect(target.textContent).toContain('2026-10-20');
+    expect(target.textContent).toContain('09:00');
+    expect(component.isActionValid(action)).toBeTrue();
+
+    const fields = component.editableFields(action);
+    expect(fields.find((field) => field.path[1] === 'title')?.value).toBe('Dentista');
+    expect(fields.find((field) => field.path[1] === 'startTime')?.value).toBeNull();
+    expect(fields.find((field) => field.path[1] === 'endTime')?.value).toBeNull();
+
+    component.updateField(action.id, ['changes', 'title'], 'Dentista nuevo');
+    component.updateField(action.id, ['changes', 'notes'], '');
+    fixture.detectChanges();
+    const edited = component.plan()!.actions[0];
+    if (edited.kind !== 'calendar.update_event') throw new Error('Expected calendar action');
+    expect(edited.payload).toEqual(
+      jasmine.objectContaining({
+        targetTitle: 'Dentista',
+        targetDate: '2026-10-20',
+        targetStartTime: '09:00',
+        changes: jasmine.objectContaining({
+          title: 'Dentista nuevo',
+          date: '2026-10-21',
+          allDay: true,
+          notes: null
+        })
+      })
+    );
+    expect('startTime' in edited.payload.changes).toBeFalse();
+    expect('endTime' in edited.payload.changes).toBeFalse();
+    expect(component.isActionValid(edited)).toBeTrue();
+    expect(execution.execute).not.toHaveBeenCalled();
+
+    component.setSelected(action.id, true);
+    component.goToConfirmation();
+    fixture.detectChanges();
+    const confirmation = fixture.nativeElement.querySelector(
+      '[data-test="ai-assistant-confirm"]'
+    ) as HTMLElement;
+    expect(confirmation.textContent).toContain('Dentista');
+    expect(confirmation.textContent).toContain('Dentista nuevo');
+    expect(confirmation.textContent).toContain('2026-10-20');
+    expect(execution.execute).not.toHaveBeenCalled();
+  });
+
+  it('shows every proposed calendar value while preserving unchanged snapshot values', () => {
+    const action = calendarUpdateAction({
+      title: 'Dentista nuevo',
+      kind: 'personal',
+      date: '2026-10-22',
+      startTime: '10:00',
+      endTime: '10:30',
+      allDay: false,
+      location: 'Avenida Norte',
+      notes: 'Llamar al llegar'
+    });
+
+    const fields = component.editableFields(action);
+    expect(fields.map(({ value }) => value)).toEqual([
+      'Dentista nuevo',
+      'personal',
+      '2026-10-22',
+      '10:00',
+      '10:30',
+      false,
+      'Avenida Norte',
+      'Llamar al llegar'
+    ]);
+    expect(component.isActionValid(action)).toBeTrue();
+  });
+
+  it('rejects malformed, out-of-scope, empty, and conflicting calendar updates', () => {
+    const valid = calendarUpdateAction({ title: 'Dentista' });
+    const cases: Array<[string, AssistantAction]> = [
+      ['wrong target kind', calendarUpdateAction({ date: '2026-10-21' }, { kind: 'other' })],
+      ['missing target id', calendarUpdateAction({ date: '2026-10-21' }, { id: '' })],
+      ['different household', calendarUpdateAction({ date: '2026-10-21' }, { householdId: 'h2' })],
+      [
+        'non-user event',
+        calendarUpdateAction({ date: '2026-10-21' }, { snapshot: { source: 'household' } })
+      ],
+      [
+        'recurring event',
+        calendarUpdateAction({ date: '2026-10-21' }, { snapshot: { recurrence: 'weekly' } })
+      ],
+      [
+        'title preimage mismatch',
+        calendarUpdateAction({ date: '2026-10-21' }, { targetTitle: 'Other event' })
+      ],
+      [
+        'date preimage mismatch',
+        calendarUpdateAction({ date: '2026-10-21' }, { targetDate: '2026-10-21' })
+      ],
+      [
+        'time preimage mismatch',
+        calendarUpdateAction({ date: '2026-10-21' }, { targetStartTime: '08:00' })
+      ],
+      [
+        'invalid snapshot date',
+        calendarUpdateAction({ date: '2026-10-21' }, { snapshot: { date: '2026-02-30' } })
+      ],
+      ['empty patch', calendarUpdateAction({})],
+      ['unknown patch field', calendarUpdateAction({ unexpected: 'value' } as never)],
+      ['blank title', calendarUpdateAction({ title: '   ' })],
+      ['oversized title', calendarUpdateAction({ title: 'x'.repeat(121) })],
+      ['invalid kind', calendarUpdateAction({ kind: 'unknown' as never })],
+      ['invalid date', calendarUpdateAction({ date: '2026-02-30' })],
+      ['invalid start time', calendarUpdateAction({ startTime: '25:00' })],
+      ['invalid end time', calendarUpdateAction({ endTime: '9:00' })],
+      ['oversized notes', calendarUpdateAction({ notes: 'x'.repeat(501) })],
+      ['oversized location', calendarUpdateAction({ location: 'x'.repeat(121) })],
+      ['all-day with a timed value', calendarUpdateAction({ allDay: true, startTime: '09:00' })],
+      ['all-day with an end time', calendarUpdateAction({ allDay: true, endTime: '09:30' })],
+      [
+        'timed event without any time',
+        calendarUpdateAction({ allDay: false, startTime: null, endTime: null })
+      ],
+      ['end before start', calendarUpdateAction({ startTime: '11:00', endTime: '10:00' })],
+      ['unchanged values', valid]
+    ];
+
+    for (const [description, action] of cases) {
+      expect(component.isActionValid(action)).withContext(description).toBeFalse();
+    }
+  });
+
+  it('normalizes calendar editor changes, clears times for all-day, and restores originals', () => {
+    const action = calendarUpdateAction({
+      date: '2026-10-21',
+      startTime: '09:15',
+      endTime: '09:45'
+    });
+    component.plan.set({
+      id: 'calendar-update-plan',
+      summary: 'Actualiza un evento existente.',
+      actions: [action, pantryPlan().actions[0]],
+      questions: []
+    });
+    component.updateField(action.id, ['changes', 'startTime'], '09:20');
+    let edited = component.plan()!.actions[0];
+    if (edited.kind !== 'calendar.update_event') throw new Error('Expected calendar update action');
+    expect('allDay' in edited.payload.changes).toBeFalse();
+
+    component.updateField(action.id, ['changes', 'allDay'], true);
+    edited = component.plan()!.actions[0];
+    if (edited.kind !== 'calendar.update_event') throw new Error('Expected calendar update action');
+    expect(edited.payload).toEqual(
+      jasmine.objectContaining({
+        changes: jasmine.objectContaining({ date: '2026-10-21', allDay: true })
+      })
+    );
+    expect('startTime' in edited.payload.changes).toBeFalse();
+    expect('endTime' in edited.payload.changes).toBeFalse();
+
+    component.updateField(action.id, ['changes', 'startTime'], '09:15');
+    component.updateField(action.id, ['changes', 'location'], '   ');
+    component.updateField(action.id, ['changes', 'notes'], '');
+    edited = component.plan()!.actions[0];
+    if (edited.kind !== 'calendar.update_event') throw new Error('Expected calendar update action');
+    expect(edited.payload.changes).toEqual(
+      jasmine.objectContaining({ location: null, notes: null, allDay: false })
+    );
+    component.updateField(action.id, ['changes', 'startTime'], '');
+    component.updateField(action.id, ['changes', 'location'], '  Oficina  ');
+    component.updateField(action.id, ['changes', 'notes'], '  Llamar antes  ');
+    component.updateField(action.id, ['changes', 'title'], 'Otro título');
+    component.updateField(action.id, ['changes', 'title'], 'Dentista');
+    edited = component.plan()!.actions[0];
+    if (edited.kind !== 'calendar.update_event') throw new Error('Expected calendar update action');
+    expect(edited.payload.changes).toEqual({
+      date: '2026-10-21',
+      startTime: null,
+      allDay: false,
+      location: 'Oficina',
+      notes: 'Llamar antes'
+    });
+    expect(edited.manualFields).toContain(JSON.stringify(['changes', 'allDay']));
+    expect(edited.manualFields).toContain(JSON.stringify(['changes', 'startTime']));
+    expect(component.isActionValid(edited)).toBeTrue();
+    expect(component.plan()?.actions[1]).toEqual(pantryPlan().actions[0]);
+  });
+
+  it('formats timed, all-day, and time-less calendar snapshots for confirmation', () => {
+    const action = calendarUpdateAction({ date: '2026-10-21' });
+    expect(component.calendarEventTimeLabel(action)).toBe('09:00–09:30');
+    expect(
+      component.calendarEventTimeLabel(
+        calendarUpdateAction({ date: '2026-10-21' }, { snapshot: { allDay: true } })
+      )
+    ).toBe('Todo el día');
+    expect(
+      component.calendarEventTimeLabel(
+        calendarUpdateAction(
+          { date: '2026-10-21' },
+          {
+            snapshot: { startTime: null, endTime: null }
+          }
+        )
+      )
+    ).toBe('—');
+  });
+
+  it('invalidates calendar approval when the active household changes', async () => {
+    householdContext.activeHouseholdId.set('home-a');
+    const action = calendarUpdateAction({ date: '2026-10-21' }, { householdId: 'home-a' });
+    assistant.propose.and.returnValue(
+      of({
+        id: 'calendar-household-plan',
+        summary: 'Actualiza un evento propio.',
+        actions: [action],
+        questions: []
+      })
+    );
+    enterPrompt('Mueve el dentista al día siguiente.');
+    fixture.detectChanges();
+    click('[data-test="ai-assistant-submit"]');
+    fixture.detectChanges();
+    expect(component.stage()).toBe('review');
+    component.setSelected(action.id, true);
+    component.goToConfirmation();
+    expect(component.stage()).toBe('confirm');
+
+    householdContext.activeHouseholdId.set('home-b');
+    fixture.detectChanges();
+
+    expect(component.canContinue()).toBeFalse();
+    expect(component.canExecuteSelected()).toBeFalse();
+    expect(
+      (
+        fixture.nativeElement.querySelector(
+          '[data-test="ai-assistant-confirm-submit"] button'
+        ) as HTMLButtonElement
+      ).disabled
+    ).toBeTrue();
+    await component.executeSelected();
     expect(execution.execute).not.toHaveBeenCalled();
   });
 
@@ -1270,6 +1562,66 @@ function calendarAction(): AssistantAction {
       sharedWithHousehold: false,
       location: null,
       notes: null
+    },
+    dependsOn: [],
+    warnings: [],
+    selected: false,
+    status: 'pending'
+  };
+}
+
+function calendarUpdateAction(
+  changes: CalendarEventUpdatePayload['changes'],
+  overrides: {
+    kind?: string;
+    id?: string;
+    householdId?: string | null;
+    targetTitle?: string;
+    targetDate?: string;
+    targetStartTime?: string | null;
+    snapshot?: Partial<AssistantCalendarEventUpdateExecutionTarget['snapshot']>;
+  } = {}
+): Extract<AssistantAction, { kind: 'calendar.update_event' }> {
+  const snapshot: AssistantCalendarEventUpdateExecutionTarget['snapshot'] = {
+    title: 'Dentista',
+    kind: 'appointment',
+    date: '2026-10-20',
+    startTime: '09:00',
+    endTime: '09:30',
+    allDay: false,
+    color: '#60a5fa',
+    notes: 'Llevar tarjeta',
+    location: 'Calle Mayor',
+    recurrence: 'none',
+    recurrenceRule: null,
+    exceptions: '[]',
+    source: 'user'
+  };
+  const target: AssistantCalendarEventUpdateExecutionTarget = {
+    kind: 'calendar-event',
+    id: 'event-1',
+    householdId: null,
+    updatedAt: '2026-10-16 10:00:00',
+    snapshot: { ...snapshot, ...overrides.snapshot }
+  };
+  return {
+    id: 'calendar-update-1',
+    kind: 'calendar.update_event',
+    domain: 'calendar',
+    actionType: 'update_event',
+    title: 'Editar dentista',
+    summary: 'Actualiza un evento existente.',
+    payload: {
+      targetTitle: overrides.targetTitle ?? target.snapshot.title,
+      targetDate: overrides.targetDate ?? target.snapshot.date,
+      targetStartTime: overrides.targetStartTime ?? target.snapshot.startTime,
+      changes
+    },
+    executionTarget: {
+      ...target,
+      kind: (overrides.kind ?? target.kind) as 'calendar-event',
+      id: overrides.id ?? target.id,
+      householdId: overrides.householdId ?? target.householdId
     },
     dependsOn: [],
     warnings: [],

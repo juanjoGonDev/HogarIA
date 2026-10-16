@@ -105,6 +105,8 @@ export const aiActionAssistantEs = {
     'Esta edición debe permanecer en la misma semana. Prepara una propuesta nueva para moverla a otra semana.',
   'ai_assistant.task_target':
     'Tarea existente: «{title}» · fecha original {date} · detalles: {details}',
+  'ai_assistant.calendar_event_target':
+    'Evento actual: «{title}» · fecha {date} · hora {time} · ubicación: {location} · notas: {notes}',
   'ai_assistant.shopping_list_target': 'Lista actual: «{name}» · tienda: {store}',
   'ai_assistant.pantry_ingredient_target':
     'Ingrediente actual: «{name}» · cantidad: {quantity} {unit} · categoría: {category} · caducidad: {expirationDate} · ubicación: {location} · notas: {notes}',
@@ -137,6 +139,7 @@ export const aiActionAssistantEs = {
   'ai_assistant.action.update_task': 'Editar tarea',
   'ai_assistant.action.plan_meals': 'Proponer comidas',
   'ai_assistant.action.create_event': 'Crear evento',
+  'ai_assistant.action.update_event': 'Editar evento',
   'ai_assistant.action.create_draft': 'Crear borrador de receta',
   'ai_assistant.event_kind.appointment': 'Cita',
   'ai_assistant.event_kind.home': 'Hogar',
@@ -322,6 +325,8 @@ export const aiActionAssistantEn: Record<keyof typeof aiActionAssistantEs, strin
     'This edit must stay within the same week. Prepare a new proposal to move it to another week.',
   'ai_assistant.task_target':
     'Existing task: “{title}” · original date {date} · details: {details}',
+  'ai_assistant.calendar_event_target':
+    'Current event: “{title}” · date {date} · time {time} · location: {location} · notes: {notes}',
   'ai_assistant.shopping_list_target': 'Current list: “{name}” · store: {store}',
   'ai_assistant.pantry_ingredient_target':
     'Current ingredient: “{name}” · quantity: {quantity} {unit} · category: {category} · expiry: {expirationDate} · location: {location} · notes: {notes}',
@@ -353,6 +358,7 @@ export const aiActionAssistantEn: Record<keyof typeof aiActionAssistantEs, strin
   'ai_assistant.action.update_task': 'Edit task',
   'ai_assistant.action.plan_meals': 'Propose meals',
   'ai_assistant.action.create_event': 'Create event',
+  'ai_assistant.action.update_event': 'Edit event',
   'ai_assistant.action.create_draft': 'Create recipe draft',
   'ai_assistant.event_kind.appointment': 'Appointment',
   'ai_assistant.event_kind.home': 'Home',

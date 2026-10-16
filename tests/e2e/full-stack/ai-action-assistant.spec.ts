@@ -1,4 +1,6 @@
 import { mkdirSync } from 'node:fs';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { join, resolve } from 'node:path';
 import { expect, test, type Page } from '../fixtures';
 import { createHousehold, registerUser } from '../helpers/auth';
@@ -348,6 +350,116 @@ function pantryUpdateProposal(executionTarget: Record<string, any>) {
       actions: [{ ...update, executionTarget }]
     }
   };
+}
+
+function calendarUpdateCandidate(targetTitle: string, targetStartTime: string | null = '09:00') {
+  return JSON.stringify({
+    summary: 'Editar un evento existente.',
+    questions: [],
+    actions: [
+      {
+        kind: 'calendar.update_event',
+        title: 'Editar evento existente',
+        summary: 'Actualiza la fecha y las notas del evento.',
+        payload: {
+          targetTitle,
+          targetDate: '2026-10-20',
+          targetStartTime,
+          changes: { date: '2026-10-21', notes: 'Notas propuestas QA' }
+        },
+        dependsOn: [],
+        warnings: []
+      }
+    ]
+  });
+}
+
+async function startDeterministicAiProvider(initialContent: string) {
+  let content = initialContent;
+  const requests: string[] = [];
+  const server = createServer((request, response) => {
+    let body = '';
+    request.setEncoding('utf8');
+    request.on('data', (chunk: string) => (body += chunk));
+    request.on('end', () => {
+      requests.push(body);
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ choices: [{ message: { content } }] }));
+    });
+  });
+  await new Promise<void>((resolveListen, rejectListen) => {
+    server.once('error', rejectListen);
+    server.listen(0, '127.0.0.1', resolveListen);
+  });
+  const address = server.address() as AddressInfo;
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    requests,
+    setContent(nextContent: string) {
+      content = nextContent;
+    },
+    close: () =>
+      new Promise<void>((resolveClose, rejectClose) => {
+        server.close((error) => (error ? rejectClose(error) : resolveClose()));
+      })
+  };
+}
+
+async function configureDeterministicAi(page: Page, token: string, baseUrl: string): Promise<void> {
+  const response = await page.request.post('/api/ai/configs', {
+    headers: { authorization: `Bearer ${token}` },
+    data: {
+      name: 'Proveedor determinista E2E',
+      provider: 'custom',
+      baseUrl,
+      apiKey: 'fixture-only-not-a-secret',
+      model: 'calendar-fixture',
+      temperature: 0,
+      maxTokens: 512,
+      timeout: 10000,
+      retryAttempts: 0,
+      concurrency: 1
+    }
+  });
+  expect(response.status(), await response.text()).toBe(201);
+}
+
+async function createCalendarEvent(
+  page: Page,
+  token: string,
+  householdId: string,
+  title: string,
+  startTime: string,
+  endTime: string
+): Promise<any> {
+  const response = await page.request.post('/api/calendar/events', {
+    headers: {
+      authorization: `Bearer ${token}`,
+      'x-assistant-household-id': householdId
+    },
+    data: {
+      title,
+      kind: 'appointment',
+      date: '2026-10-20',
+      startTime,
+      endTime,
+      allDay: false,
+      sharedWithHousehold: true,
+      location: 'Consulta QA',
+      notes: 'Notas originales QA'
+    }
+  });
+  const body = await response.json();
+  expect(response.status(), JSON.stringify(body)).toBe(201);
+  return body.data;
+}
+
+async function calendarEventsOn(page: Page, token: string, date: string): Promise<any[]> {
+  const response = await page.request.get(`/api/calendar/events?from=${date}&to=${date}`, {
+    headers: { authorization: `Bearer ${token}` }
+  });
+  expect(response.status(), 'lectura real del calendario sintético').toBe(200);
+  return (await response.json()).data as any[];
 }
 
 async function tokenOf(page: Page): Promise<string> {
@@ -2086,4 +2198,423 @@ test('asistente global: preimagen obsoleta del inventario no pisa el cambio conc
     name: 'Tomate triturado QA',
     quantity: 4
   });
+});
+
+test('asistente global: resuelve y edita un evento propio con aprobación, rechazo y replay real', async ({
+  page
+}, testInfo) => {
+  const provider = await startDeterministicAiProvider(calendarUpdateCandidate('No existe QA'));
+  const assistantWrites: Array<{ body: any; actionId: string | undefined }> = [];
+  const pageErrors: string[] = [];
+  const consoleErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(`${error.name}: ${error.message}`));
+  page.on('console', (message) => {
+    if (message.type() === 'error') consoleErrors.push(message.text());
+  });
+  page.on('request', (request) => {
+    if (
+      request.method() === 'PATCH' &&
+      new URL(request.url()).pathname.startsWith('/api/calendar/events/') &&
+      new URL(request.url()).pathname.endsWith('/assistant-update')
+    ) {
+      assistantWrites.push({
+        body: request.postDataJSON(),
+        actionId: request.headers()['x-assistant-action-id']
+      });
+    }
+  });
+
+  try {
+    await registerUser(page, 'Asistente edita evento E2E');
+    await createHousehold(page, 'Hogar sintético edita evento');
+    await page.goto('/dashboard');
+    const token = await tokenOf(page);
+    const authHeaders = { authorization: `Bearer ${token}` };
+    const memberships = await page.request.get('/api/household/memberships', {
+      headers: authHeaders
+    });
+    expect(memberships.status()).toBe(200);
+    const householdId = (await memberships.json()).data.activeHouseholdId as string;
+    expect(householdId).toBeTruthy();
+    await configureDeterministicAi(page, token, provider.baseUrl);
+
+    const ambiguousTitle = 'Ambigua calendario QA';
+    await createCalendarEvent(page, token, householdId, ambiguousTitle, '09:00', '09:30');
+    await createCalendarEvent(page, token, householdId, ambiguousTitle, '09:00', '10:00');
+    const uniqueEvent = await createCalendarEvent(
+      page,
+      token,
+      householdId,
+      'Dentista calendario QA',
+      '11:00',
+      '11:30'
+    );
+    const noMatchCandidate = calendarUpdateCandidate('Evento inexistente QA');
+    provider.setContent(noMatchCandidate);
+    const noMatch = await page.request.post('/api/ai/assistant/proposals', {
+      headers: { ...authHeaders, 'x-assistant-household-id': householdId },
+      data: { prompt: 'Mueve el evento inexistente QA.', route: 'calendar' }
+    });
+    expect(noMatch.status(), await noMatch.text()).toBe(200);
+    expect(await noMatch.json()).toMatchObject({
+      data: {
+        actions: [],
+        questions: [expect.stringMatching(/no encontré exactamente un evento/i)]
+      }
+    });
+    expect(assistantWrites).toEqual([]);
+
+    provider.setContent(calendarUpdateCandidate(ambiguousTitle));
+    const ambiguous = await page.request.post('/api/ai/assistant/proposals', {
+      headers: { ...authHeaders, 'x-assistant-household-id': householdId },
+      data: { prompt: 'Mueve el evento ambiguo QA.', route: 'calendar' }
+    });
+    expect(ambiguous.status(), await ambiguous.text()).toBe(200);
+    expect(await ambiguous.json()).toMatchObject({
+      data: { actions: [], questions: [expect.stringMatching(/más de un evento propio/i)] }
+    });
+    expect(assistantWrites).toEqual([]);
+
+    const readUniqueEvent = async (date: string) =>
+      (await calendarEventsOn(page, token, date)).filter((event) => event.id === uniqueEvent.id);
+    expect(await readUniqueEvent('2026-10-20')).toHaveLength(1);
+    provider.setContent(calendarUpdateCandidate(uniqueEvent.title, uniqueEvent.startTime));
+
+    const openAssistantAndPropose = async () => {
+      const responsePromise = page.waitForResponse((response) => {
+        const path = new URL(response.url()).pathname;
+        return response.request().method() === 'POST' && path === '/api/ai/assistant/proposals';
+      });
+      await page.locator('[data-test="ai-assistant-open"]').click();
+      await page
+        .locator('[data-test="ai-assistant-prompt"]')
+        .fill('Mueve la cita del dentista calendario QA al día siguiente.');
+      await page.locator('[data-test="ai-assistant-submit"] button').click();
+      await expect(page.locator('[data-test="ai-assistant-review"]')).toBeVisible();
+      return responsePromise;
+    };
+
+    await openAssistantAndPropose();
+    let review = page.locator('[data-test="ai-assistant-review"]');
+    await expect(review.locator('[data-test="ai-assistant-calendar-target"]')).toContainText(
+      'Dentista calendario QA'
+    );
+    await expect(review.locator('[data-test="ai-assistant-calendar-target"]')).toContainText(
+      '2026-10-20'
+    );
+    await expect(review.locator('[data-test="ai-assistant-calendar-target"]')).toContainText(
+      '11:00–11:30'
+    );
+    expect((await readUniqueEvent('2026-10-20'))[0]).toMatchObject({
+      title: uniqueEvent.title,
+      date: '2026-10-20',
+      notes: 'Notas originales QA'
+    });
+    expect(assistantWrites).toEqual([]);
+    expect(provider.requests.at(-1)).toBeTruthy();
+    expect(provider.requests.at(-1)).not.toContain(uniqueEvent.id);
+
+    await review.locator('[data-test="ai-assistant-remove"]').click();
+    await expect(review.locator('.assistant__empty')).toBeVisible();
+    expect((await readUniqueEvent('2026-10-20'))[0].date).toBe('2026-10-20');
+    expect(assistantWrites).toEqual([]);
+    await page.getByRole('button', { name: 'Cerrar asistente' }).click();
+    await expect(page.getByRole('dialog', { name: '¿Descartar este borrador?' })).toBeVisible();
+    await page.getByRole('button', { name: 'Descartar borrador' }).click();
+
+    const uiProposalResponse = await openAssistantAndPropose();
+    const uiProposal = await uiProposalResponse.json();
+    review = page.locator('[data-test="ai-assistant-review"]');
+    const details = review.locator('details.assistant__details').first();
+    await details.locator('summary').click();
+    const dateField = details.locator('input[type="date"]');
+    const notesField = details.locator('textarea');
+    await expect(dateField).toHaveAccessibleName('Fecha');
+    await expect(notesField).toHaveAccessibleName('Notas');
+    if (testInfo.project.name === 'mobile-chrome') {
+      const editorTouchTargets = await details.evaluate((section) =>
+        Array.from(
+          section.querySelectorAll<HTMLElement>('input, textarea, button, [role="button"], summary')
+        )
+          .filter((control) => control.getClientRects().length > 0)
+          .map((control) => {
+            const target = control.matches('input[type="checkbox"]')
+              ? ((control.closest('label') as HTMLElement | null) ?? control)
+              : control;
+            const bounds = target.getBoundingClientRect();
+            return {
+              control: control.getAttribute('type') ?? control.tagName.toLowerCase(),
+              width: bounds.width,
+              height: bounds.height
+            };
+          })
+      );
+      expect(editorTouchTargets.length).toBeGreaterThan(0);
+      for (const target of editorTouchTargets) {
+        expect(target.width, `${target.control} touch width`).toBeGreaterThanOrEqual(44);
+        expect(target.height, `${target.control} touch height`).toBeGreaterThanOrEqual(44);
+      }
+    }
+    await expect(dateField).toHaveValue('2026-10-21');
+    await dateField.fill('2026-10-22');
+    await notesField.fill('Notas confirmadas QA');
+    await notesField.focus();
+    await expect(notesField).toBeFocused();
+    expect((await readUniqueEvent('2026-10-20'))[0]).toMatchObject({
+      date: '2026-10-20',
+      notes: 'Notas originales QA'
+    });
+    expect(assistantWrites).toEqual([]);
+
+    await notesField.evaluate((element: HTMLTextAreaElement) => element.blur());
+    await review.evaluate((element) =>
+      element.closest<HTMLElement>('.modal__body')?.scrollTo(0, 0)
+    );
+    await capture(page, testInfo, 'calendar-update-review');
+    if (testInfo.project.name === 'mobile-chrome') {
+      await notesField.scrollIntoViewIfNeeded();
+      await capture(page, testInfo, 'calendar-update-review-fields-mobile');
+      await review.evaluate((element) =>
+        element.closest<HTMLElement>('.modal__body')?.scrollTo(0, 0)
+      );
+    }
+    if (testInfo.project.name === 'chromium') {
+      await page.setViewportSize({ width: 834, height: 1112 });
+      await capture(page, testInfo, 'calendar-update-review-tablet');
+      await page.setViewportSize({ width: 1280, height: 720 });
+    }
+    await page.getByRole('button', { name: 'Seleccionar todas' }).click();
+    await page.locator('[data-test="ai-assistant-continue"] button').click();
+    const confirmation = page.locator('[data-test="ai-assistant-confirm"]');
+    await expect(confirmation).toContainText('Dentista calendario QA');
+    await expect(confirmation).toContainText('2026-10-20');
+    await expect(confirmation).toContainText('2026-10-22');
+    await expect(confirmation).toContainText('Notas originales QA');
+    await expect(confirmation).toContainText('Notas confirmadas QA');
+    expect(await readUniqueEvent('2026-10-20')).toHaveLength(1);
+    expect(assistantWrites).toEqual([]);
+    await capture(page, testInfo, 'calendar-update-confirm');
+    if (testInfo.project.name === 'chromium') {
+      await page.setViewportSize({ width: 834, height: 1112 });
+      await capture(page, testInfo, 'calendar-update-confirm-tablet');
+      await page.setViewportSize({ width: 1280, height: 720 });
+    }
+
+    const saveResponsePromise = page.waitForResponse((response) => {
+      const path = new URL(response.url()).pathname;
+      return response.request().method() === 'PATCH' && path.endsWith('/assistant-update');
+    });
+    await page.locator('[data-test="ai-assistant-confirm-submit"] button').click();
+    const saveResponse = await saveResponsePromise;
+    const saveBody = await saveResponse.json();
+    const currentBeforeSubmit = (await readUniqueEvent('2026-10-20'))[0];
+    expect(
+      saveResponse.status(),
+      JSON.stringify({
+        saveBody,
+        request: assistantWrites[0],
+        uiTarget: uiProposal.data.actions[0],
+        currentBeforeSubmit
+      })
+    ).toBe(200);
+    await expect(
+      confirmation.locator('.assistant__confirm-list > li .assistant__confirm-status')
+    ).toHaveText('Completada');
+    expect(assistantWrites).toHaveLength(1);
+    expect(assistantWrites[0]).toMatchObject({
+      body: {
+        changes: {
+          date: '2026-10-22',
+          notes: 'Notas confirmadas QA'
+        },
+        assistantAction: {
+          operation: 'update_event',
+          targetId: uniqueEvent.id,
+          householdId
+        }
+      }
+    });
+    const saved = (await readUniqueEvent('2026-10-22'))[0];
+    expect(saved).toMatchObject({
+      id: uniqueEvent.id,
+      title: uniqueEvent.title,
+      date: '2026-10-22',
+      startTime: '11:00',
+      endTime: '11:30',
+      notes: 'Notas confirmadas QA'
+    });
+    await capture(page, testInfo, 'calendar-update-saved');
+
+    const replay = await page.request.patch(
+      `/api/calendar/events/${uniqueEvent.id}/assistant-update`,
+      {
+        headers: {
+          ...authHeaders,
+          'x-assistant-action-id': assistantWrites[0].actionId as string,
+          'x-assistant-household-id': householdId
+        },
+        data: assistantWrites[0].body
+      }
+    );
+    expect(replay.status()).toBe(200);
+    expect(await replay.json()).toMatchObject({ success: true, idempotent: true });
+    expect(await readUniqueEvent('2026-10-22')).toHaveLength(1);
+    await page.reload();
+    await expect(page.locator('[data-test="ai-assistant-open"]')).toBeVisible();
+    expect((await readUniqueEvent('2026-10-22'))[0]).toMatchObject({
+      date: '2026-10-22',
+      notes: 'Notas confirmadas QA'
+    });
+    expect(provider.requests).toHaveLength(4);
+    expect(pageErrors).toEqual([]);
+    expect(consoleErrors).toEqual([]);
+  } finally {
+    await provider.close();
+  }
+});
+
+test('asistente global: evento obsoleto no pisa el cambio concurrente', async ({ page }) => {
+  const provider = await startDeterministicAiProvider(calendarUpdateCandidate('Cita obsoleta QA'));
+  const assistantResponses: number[] = [];
+  page.on('response', (response) => {
+    if (new URL(response.url()).pathname.endsWith('/assistant-update')) {
+      assistantResponses.push(response.status());
+    }
+  });
+
+  try {
+    await registerUser(page, 'Asistente conflicto calendario E2E');
+    await createHousehold(page, 'Hogar sintético conflicto calendario');
+    await page.goto('/dashboard');
+    const token = await tokenOf(page);
+    const authHeaders = { authorization: `Bearer ${token}` };
+    const memberships = await page.request.get('/api/household/memberships', {
+      headers: authHeaders
+    });
+    expect(memberships.status()).toBe(200);
+    const householdId = (await memberships.json()).data.activeHouseholdId as string;
+    await configureDeterministicAi(page, token, provider.baseUrl);
+    const target = await createCalendarEvent(
+      page,
+      token,
+      householdId,
+      'Cita obsoleta QA',
+      '09:00',
+      '09:30'
+    );
+
+    await page.locator('[data-test="ai-assistant-open"]').click();
+    await page
+      .locator('[data-test="ai-assistant-prompt"]')
+      .fill('Mueve la cita obsoleta QA al día siguiente.');
+    await page.locator('[data-test="ai-assistant-submit"] button').click();
+    await expect(page.locator('[data-test="ai-assistant-review"]')).toBeVisible();
+    const concurrent = await page.request.patch(`/api/calendar/events/${target.id}`, {
+      headers: { ...authHeaders, 'x-assistant-household-id': householdId },
+      data: { notes: 'Cambio concurrente QA' }
+    });
+    expect(concurrent.status()).toBe(200);
+
+    await page.getByRole('button', { name: 'Seleccionar todas' }).click();
+    await page.locator('[data-test="ai-assistant-continue"] button').click();
+    await page.locator('[data-test="ai-assistant-confirm-submit"] button').click();
+    const row = page.locator('[data-test="ai-assistant-confirm"] .assistant__confirm-list > li');
+    await expect(row.locator('.assistant__confirm-status')).toHaveText('Fallida');
+    expect(assistantResponses).toEqual([409]);
+
+    const saved = (await calendarEventsOn(page, token, '2026-10-20')).filter(
+      (event) => event.id === target.id
+    );
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatchObject({
+      date: '2026-10-20',
+      notes: 'Cambio concurrente QA'
+    });
+  } finally {
+    await provider.close();
+  }
+});
+
+test('asistente global: cambio del hogar invalida la aprobación del evento', async ({ page }) => {
+  const provider = await startDeterministicAiProvider(
+    calendarUpdateCandidate('Cita cambio hogar QA')
+  );
+  const assistantResponses: number[] = [];
+  page.on('response', (response) => {
+    if (new URL(response.url()).pathname.endsWith('/assistant-update')) {
+      assistantResponses.push(response.status());
+    }
+  });
+
+  try {
+    await registerUser(page, 'Asistente cambio hogar E2E');
+    await createHousehold(page, 'Hogar activo sintético');
+    await page.goto('/dashboard');
+    const token = await tokenOf(page);
+    const authHeaders = { authorization: `Bearer ${token}` };
+    const memberships = await page.request.get('/api/household/memberships', {
+      headers: authHeaders
+    });
+    expect(memberships.status()).toBe(200);
+    const firstHouseholdId = (await memberships.json()).data.activeHouseholdId as string;
+
+    const createdSecondHousehold = await page.request.post('/api/household', {
+      headers: authHeaders,
+      data: { name: 'Hogar alternativo sintético', sharedPantry: true }
+    });
+    expect(createdSecondHousehold.status(), await createdSecondHousehold.text()).toBe(201);
+    const secondHouseholdId = (await createdSecondHousehold.json()).data.id as string;
+    const restoreFirstHousehold = await page.request.post('/api/household/active', {
+      headers: authHeaders,
+      data: { householdId: firstHouseholdId }
+    });
+    expect(restoreFirstHousehold.status()).toBe(200);
+    await page.reload();
+    await expect(page.locator('[data-test="household-switcher"]')).toBeVisible();
+    await configureDeterministicAi(page, token, provider.baseUrl);
+
+    const target = await createCalendarEvent(
+      page,
+      token,
+      firstHouseholdId,
+      'Cita cambio hogar QA',
+      '09:00',
+      '09:30'
+    );
+    await page.locator('[data-test="ai-assistant-open"]').click();
+    await page
+      .locator('[data-test="ai-assistant-prompt"]')
+      .fill('Mueve la cita cambio hogar QA al día siguiente.');
+    await page.locator('[data-test="ai-assistant-submit"] button').click();
+    await expect(page.locator('[data-test="ai-assistant-review"]')).toBeVisible();
+    await page.getByRole('button', { name: 'Seleccionar todas' }).click();
+    await page.locator('[data-test="ai-assistant-continue"] button').click();
+
+    const switched = await page.request.post('/api/household/active', {
+      headers: authHeaders,
+      data: { householdId: secondHouseholdId }
+    });
+    expect(switched.status()).toBe(200);
+
+    await page.locator('[data-test="ai-assistant-confirm-submit"] button').click();
+    const row = page.locator('[data-test="ai-assistant-confirm"] .assistant__confirm-list > li');
+    await expect(row.locator('.assistant__confirm-status')).toHaveText('Fallida');
+    expect(assistantResponses).toEqual([409]);
+
+    const restoreForRead = await page.request.post('/api/household/active', {
+      headers: authHeaders,
+      data: { householdId: firstHouseholdId }
+    });
+    expect(restoreForRead.status()).toBe(200);
+    const saved = (await calendarEventsOn(page, token, '2026-10-20')).filter(
+      (event) => event.id === target.id
+    );
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatchObject({
+      date: '2026-10-20',
+      notes: 'Notas originales QA'
+    });
+  } finally {
+    await provider.close();
+  }
 });

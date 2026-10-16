@@ -119,6 +119,149 @@ describe('AiActionAssistantExecutionService', () => {
     await expectAsync(execution).toBeResolvedTo(undefined);
   });
 
+  it('sends a reviewed calendar edit with its server target and complete preimage', async () => {
+    householdContext.activeHouseholdId.set('home-a');
+    const before = {
+      title: 'Dentista',
+      kind: 'appointment',
+      date: '2026-10-20',
+      startTime: '09:00',
+      endTime: '09:30',
+      allDay: false,
+      color: '#60a5fa',
+      notes: 'Llevar tarjeta',
+      location: 'Calle Mayor',
+      recurrence: 'none',
+      recurrenceRule: null,
+      exceptions: '[]',
+      source: 'user'
+    };
+    const action = {
+      ...actionBase('calendar.update_event', 'calendar', 'update_event'),
+      kind: 'calendar.update_event',
+      payload: {
+        targetTitle: before.title,
+        targetDate: before.date,
+        targetStartTime: before.startTime,
+        changes: { date: '2026-10-21', allDay: true, notes: null }
+      },
+      executionTarget: {
+        kind: 'calendar-event',
+        id: 'event-1',
+        householdId: 'home-a',
+        updatedAt: '2026-10-16 10:00:00',
+        snapshot: before
+      }
+    } as AssistantAction;
+
+    const execution = service.execute(action, 'home-a');
+    const request = http.expectOne('/api/calendar/events/event-1/assistant-update');
+    expect(request.request.method).toBe('PATCH');
+    expect(request.request.body).toEqual({
+      changes: { date: '2026-10-21', allDay: true, notes: null },
+      assistantAction: {
+        operation: 'update_event',
+        targetId: 'event-1',
+        householdId: 'home-a',
+        before: { ...before, householdId: 'home-a', updatedAt: '2026-10-16 10:00:00' }
+      }
+    });
+    expect(request.request.headers.get('x-assistant-action-id')).toBe(action.id);
+    expect(request.request.headers.get('x-assistant-household-id')).toBe('home-a');
+    expect(request.request.body.attendeeIds).toBeUndefined();
+    request.flush({ success: true, data: { id: 'event-1' } });
+    await expectAsync(execution).toBeResolvedTo(undefined);
+  });
+
+  it('rejects a calendar approval if the selected household changed after proposal', async () => {
+    householdContext.activeHouseholdId.set('home-b');
+    const action = calendarUpdateAction();
+
+    await expectAsync(service.execute(action, 'home-a')).toBeRejectedWithError(
+      'ASSISTANT_HOUSEHOLD_CONTEXT_CHANGED'
+    );
+    http.expectNone('/api/calendar/events/event-1/assistant-update');
+  });
+
+  it('rejects mismatched calendar targets, scopes, and non-editable fields before HTTP', async () => {
+    householdContext.activeHouseholdId.set('home-a');
+    const invalidCases = [
+      (action: any) => (action.executionTarget = undefined),
+      (action: any) => (action.executionTarget.kind = 'other'),
+      (action: any) => (action.executionTarget.id = ''),
+      (action: any) => (action.executionTarget.householdId = 'home-b'),
+      (action: any) => (action.executionTarget.snapshot.source = 'meal'),
+      (action: any) => (action.executionTarget.snapshot.recurrence = 'weekly'),
+      (action: any) => (action.payload.targetTitle = 'Otro evento'),
+      (action: any) => (action.payload.targetDate = '2026-10-21'),
+      (action: any) => (action.payload.targetStartTime = '10:00'),
+      (action: any) => (action.payload.changes = {}),
+      (action: any) => (action.payload.changes = { recurrence: 'weekly' })
+    ];
+
+    for (const [index, mutate] of invalidCases.entries()) {
+      const action = structuredClone(calendarUpdateAction()) as any;
+      action.id = `calendar-invalid-target-${index}`;
+      mutate(action);
+      await expectAsync(service.execute(action, 'home-a')).toBeRejectedWithError(
+        'ASSISTANT_CALENDAR_EVENT_TARGET_INVALID'
+      );
+    }
+
+    http.expectNone('/api/calendar/events/event-1/assistant-update');
+  });
+
+  it('rejects invalid calendar patches and no-op edits before HTTP', async () => {
+    householdContext.activeHouseholdId.set('home-a');
+    const invalidPatches: Array<Record<string, unknown>> = [
+      { startTime: null, endTime: null },
+      { startTime: '25:00' },
+      { endTime: '25:00' },
+      { startTime: '12:00', endTime: '11:00' },
+      { title: '   ' },
+      { title: 'x'.repeat(121) },
+      { date: '2026-02-30' },
+      { kind: 'meal' },
+      { notes: 4 },
+      { notes: 'x'.repeat(501) },
+      { location: 4 },
+      { location: 'x'.repeat(121) }
+    ];
+
+    for (const [index, changes] of invalidPatches.entries()) {
+      const action = calendarUpdateAction(changes);
+      action.id = `calendar-invalid-patch-${index}`;
+      await expectAsync(service.execute(action, 'home-a')).toBeRejectedWithError(
+        'ASSISTANT_CALENDAR_EVENT_PATCH_INVALID'
+      );
+    }
+
+    const noOp = calendarUpdateAction({ startTime: '09:00' });
+    noOp.id = 'calendar-update-no-op';
+    await expectAsync(service.execute(noOp, 'home-a')).toBeRejectedWithError(
+      'ASSISTANT_CALENDAR_EVENT_NO_CHANGE'
+    );
+    http.expectNone('/api/calendar/events/event-1/assistant-update');
+  });
+
+  it('preserves existing end time when clearing only start time and rejects failed domain response', async () => {
+    householdContext.activeHouseholdId.set('home-a');
+    const action = calendarUpdateAction({ startTime: null });
+    action.id = 'calendar-update-clear-start';
+    const execution = service.execute(action, 'home-a');
+    const request = http.expectOne('/api/calendar/events/event-1/assistant-update');
+    expect(request.request.body.changes).toEqual({ startTime: null });
+    expect(request.request.body.assistantAction.before).toEqual(
+      jasmine.objectContaining({
+        startTime: '09:00',
+        endTime: '09:30',
+        updatedAt: '2026-10-16 10:00:00'
+      })
+    );
+    request.flush({ success: false });
+    await expectAsync(execution).toBeRejectedWithError('ASSISTANT_DOMAIN_WRITE_REJECTED');
+  });
+
   it('updates one resolved household task using a fresh week snapshot and preserves other tasks', async () => {
     householdContext.activeHouseholdId.set('home-a');
     const before = {
@@ -435,6 +578,43 @@ function actionBase<K extends AssistantAction['kind']>(
     selected: true,
     status: 'pending',
     payload: {} as never
+  } as AssistantAction;
+}
+
+function calendarUpdateAction(
+  changes: Record<string, unknown> = { date: '2026-10-21' }
+): AssistantAction {
+  const snapshot = {
+    title: 'Dentista',
+    kind: 'appointment',
+    date: '2026-10-20',
+    startTime: '09:00',
+    endTime: '09:30',
+    allDay: false,
+    color: '#60a5fa',
+    notes: 'Llevar tarjeta',
+    location: 'Calle Mayor',
+    recurrence: 'none',
+    recurrenceRule: null,
+    exceptions: '[]',
+    source: 'user'
+  };
+  return {
+    ...actionBase('calendar.update_event', 'calendar', 'update_event'),
+    kind: 'calendar.update_event',
+    payload: {
+      targetTitle: snapshot.title,
+      targetDate: snapshot.date,
+      targetStartTime: snapshot.startTime,
+      changes
+    },
+    executionTarget: {
+      kind: 'calendar-event',
+      id: 'event-1',
+      householdId: 'home-a',
+      updatedAt: '2026-10-16 10:00:00',
+      snapshot
+    }
   } as AssistantAction;
 }
 

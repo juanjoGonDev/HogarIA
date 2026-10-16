@@ -155,6 +155,28 @@ function pantryUpdateCandidate(targetName = 'Yogur natural'): object {
   };
 }
 
+function calendarUpdateCandidate(): object {
+  return {
+    summary: 'Mueve la revisión del coche.',
+    actions: [
+      {
+        kind: 'calendar.update_event',
+        title: 'Mueve la revisión',
+        summary: 'Cambia la hora de la revisión existente.',
+        payload: {
+          targetTitle: 'Revisión del coche',
+          targetDate: '2026-10-20',
+          targetStartTime: '09:00',
+          changes: { startTime: '10:30' }
+        },
+        dependsOn: [],
+        warnings: []
+      }
+    ],
+    questions: []
+  };
+}
+
 function mealRecipe(name = 'Arroz con verduras') {
   const step = (instruction: string) => ({
     stepNumber: 1,
@@ -507,6 +529,227 @@ describe('POST /api/ai/assistant/proposals', () => {
     });
     const providerRequest = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
     expect(JSON.stringify(providerRequest)).not.toContain('assistant-pantry-target');
+    expect(persistedSnapshot()).toEqual(before);
+  });
+
+  it('resolves only one owned event in the selected household without exposing its ID to the model', async () => {
+    addConfig(alice);
+    db.prepare(
+      `INSERT INTO calendar_events
+        (id, household_id, user_id, title, kind, date, start_time, end_time, all_day, notes, location, source)
+       VALUES (?, NULL, ?, ?, 'appointment', ?, ?, ?, 0, ?, ?, 'user')`
+    ).run(
+      'assistant-calendar-target',
+      alice.id,
+      'Revisión del coche',
+      '2026-10-20',
+      '09:00',
+      '11:00',
+      'Revisar frenos',
+      'Taller'
+    );
+    db.prepare(
+      `INSERT INTO calendar_events
+        (id, household_id, user_id, title, kind, date, start_time, end_time, all_day, recurrence, source)
+       VALUES (?, NULL, ?, 'Revisión del coche', 'appointment', '2026-10-20', '09:00', '11:00', 0, 'weekly', 'user')`
+    ).run('assistant-calendar-recurring', alice.id);
+    const before = persistedSnapshot();
+    const fetchMock = stubProvider(JSON.stringify(calendarUpdateCandidate()));
+
+    const response = await call(
+      'POST',
+      '/proposals',
+      { prompt: 'Mueve la revisión del coche a las diez y media.', route: 'calendar' },
+      alice.token,
+      { 'x-assistant-household-id': '' }
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { data: any };
+    expect(body.data.actions[0]).toMatchObject({
+      kind: 'calendar.update_event',
+      executionTarget: {
+        kind: 'calendar-event',
+        id: 'assistant-calendar-target',
+        householdId: null,
+        snapshot: {
+          title: 'Revisión del coche',
+          kind: 'appointment',
+          date: '2026-10-20',
+          startTime: '09:00',
+          endTime: '11:00',
+          allDay: false,
+          notes: 'Revisar frenos',
+          location: 'Taller',
+          recurrence: 'none',
+          recurrenceRule: null,
+          exceptions: '[]',
+          source: 'user'
+        }
+      }
+    });
+    const providerRequest = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
+    expect(JSON.stringify(providerRequest)).not.toContain('assistant-calendar-target');
+    expect(persistedSnapshot()).toEqual(before);
+  });
+
+  it('asks for clarification when an owned event is ambiguous and ignores another owner’s row', async () => {
+    addConfig(alice);
+    db.prepare('INSERT INTO users (id, email, name, password_hash) VALUES (?, ?, ?, ?)').run(
+      'assistant-other-owner',
+      'assistant-other-owner@test.local',
+      'Other owner',
+      'hash'
+    );
+    const insertEvent = (id: string, ownerId: string) =>
+      db
+        .prepare(
+          `INSERT INTO calendar_events
+          (id, household_id, user_id, title, kind, date, start_time, end_time, all_day, source)
+         VALUES (?, NULL, ?, 'Revisión del coche', 'appointment', '2026-10-20', '09:00', '11:00', 0, 'user')`
+        )
+        .run(id, ownerId);
+    insertEvent('assistant-calendar-owned-1', alice.id);
+    insertEvent('assistant-calendar-owned-2', alice.id);
+    insertEvent('assistant-calendar-other-owner', 'assistant-other-owner');
+    const before = persistedSnapshot();
+    const fetchMock = stubProvider(JSON.stringify(calendarUpdateCandidate()));
+
+    const response = await call(
+      'POST',
+      '/proposals',
+      { prompt: 'Mueve la revisión del coche.', route: 'calendar' },
+      alice.token,
+      { 'x-assistant-household-id': '' }
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: { actions: [], questions: [expect.stringMatching(/más de un evento propio/i)] }
+    });
+    const providerRequest = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
+    expect(JSON.stringify(providerRequest)).not.toContain('assistant-calendar-owned');
+    expect(persistedSnapshot()).toEqual(before);
+  });
+
+  it('requires an explicit household or personal scope before resolving calendar actions', async () => {
+    addConfig(alice);
+    const before = persistedSnapshot();
+    const fetchMock = stubProvider(JSON.stringify(calendarUpdateCandidate()));
+
+    const response = await call(
+      'POST',
+      '/proposals',
+      { prompt: 'Mueve la revisión del coche.', route: 'calendar' },
+      alice.token
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: {
+        actions: [],
+        questions: [
+          expect.stringMatching(/selecciona explícitamente el hogar o el ámbito personal/i)
+        ]
+      }
+    });
+    expect(JSON.stringify(fetchMock.mock.calls[0][1])).not.toContain('assistant-calendar-');
+    expect(persistedSnapshot()).toEqual(before);
+  });
+
+  it('clarifies when no owned calendar event matches, including unspecified original time', async () => {
+    addConfig(alice);
+    const candidate = calendarUpdateCandidate() as any;
+    candidate.actions[0].payload.targetTitle = 'Evento inexistente';
+    candidate.actions[0].payload.targetStartTime = null;
+    const before = persistedSnapshot();
+    const fetchMock = stubProvider(JSON.stringify(candidate));
+
+    const response = await call(
+      'POST',
+      '/proposals',
+      { prompt: 'Mueve un evento inexistente.', route: 'calendar' },
+      alice.token,
+      { 'x-assistant-household-id': '' }
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: {
+        actions: [],
+        questions: [
+          expect.stringMatching(/no encontré exactamente un evento propio.*hora no especificada/i)
+        ]
+      }
+    });
+    expect(JSON.stringify(fetchMock.mock.calls[0][1])).not.toContain('assistant-calendar-');
+    expect(persistedSnapshot()).toEqual(before);
+  });
+
+  it('does not return a calendar action when requested values already match', async () => {
+    addConfig(alice);
+    db.prepare(
+      `INSERT INTO calendar_events
+        (id, household_id, user_id, title, kind, date, start_time, end_time, all_day, source)
+       VALUES (?, NULL, ?, 'Revisión del coche', 'appointment', '2026-10-20', '09:00', '11:00', 0, 'user')`
+    ).run('assistant-calendar-no-op', alice.id);
+    const candidate = calendarUpdateCandidate() as any;
+    candidate.actions[0].payload.changes = { startTime: '09:00' };
+    const before = persistedSnapshot();
+    stubProvider(JSON.stringify(candidate));
+
+    const response = await call(
+      'POST',
+      '/proposals',
+      { prompt: 'Deja la revisión del coche a las nueve.', route: 'calendar' },
+      alice.token,
+      { 'x-assistant-household-id': '' }
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: {
+        actions: [],
+        questions: [expect.stringMatching(/ya tiene esos valores; no hay cambios que aplicar/i)]
+      }
+    });
+    expect(persistedSnapshot()).toEqual(before);
+  });
+
+  it('blocks duplicate calendar actions that target the same event', async () => {
+    addConfig(alice);
+    db.prepare(
+      `INSERT INTO calendar_events
+        (id, household_id, user_id, title, kind, date, start_time, end_time, all_day, source)
+       VALUES (?, NULL, ?, 'Revisión del coche', 'appointment', '2026-10-20', '09:00', '11:00', 0, 'user')`
+    ).run('assistant-calendar-duplicate-action', alice.id);
+    const candidate = calendarUpdateCandidate() as any;
+    candidate.actions.push({
+      ...structuredClone(candidate.actions[0]),
+      title: 'Cambia también la duración',
+      payload: { ...candidate.actions[0].payload, changes: { endTime: '12:00' } }
+    });
+    const before = persistedSnapshot();
+    stubProvider(JSON.stringify(candidate));
+
+    const response = await call(
+      'POST',
+      '/proposals',
+      { prompt: 'Mueve y amplía la revisión del coche.', route: 'calendar' },
+      alice.token,
+      { 'x-assistant-household-id': '' }
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: {
+        actions: [],
+        questions: [
+          expect.stringMatching(/varias acciones para el mismo evento/i),
+          expect.stringMatching(/varias acciones para el mismo evento/i)
+        ]
+      }
+    });
     expect(persistedSnapshot()).toEqual(before);
   });
 

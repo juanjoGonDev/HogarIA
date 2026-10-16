@@ -205,6 +205,7 @@ const ACTION_LABELS: Record<AssistantAction['actionType'], TranslationKey> = {
   update_task: 'ai_assistant.action.update_task',
   plan_meals: 'ai_assistant.action.plan_meals',
   create_event: 'ai_assistant.action.create_event',
+  update_event: 'ai_assistant.action.update_event',
   create_draft: 'ai_assistant.action.create_draft'
 };
 const EVENT_KINDS: Array<{ value: string; labelKey: TranslationKey }> = [
@@ -518,6 +519,23 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
                               location: pantryLocationLabel(
                                 action.executionTarget.snapshot.location
                               ),
+                              notes: action.executionTarget.snapshot.notes || '—'
+                            }
+                    }}
+                  </p>
+                  <p
+                    *ngIf="action.kind === 'calendar.update_event'"
+                    class="assistant__action-summary"
+                    data-test="ai-assistant-calendar-target"
+                  >
+                    {{
+                      'ai_assistant.calendar_event_target'
+                        | t
+                          : {
+                              title: action.executionTarget.snapshot.title,
+                              date: action.executionTarget.snapshot.date,
+                              time: calendarEventTimeLabel(action),
+                              location: action.executionTarget.snapshot.location || '—',
                               notes: action.executionTarget.snapshot.notes || '—'
                             }
                     }}
@@ -960,6 +978,23 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
                               location: pantryLocationLabel(
                                 action.executionTarget.snapshot.location
                               ),
+                              notes: action.executionTarget.snapshot.notes || '—'
+                            }
+                    }}
+                  </p>
+                  <p
+                    *ngIf="action.kind === 'calendar.update_event'"
+                    class="assistant__action-summary"
+                    data-test="ai-assistant-calendar-target-confirm"
+                  >
+                    {{
+                      'ai_assistant.calendar_event_target'
+                        | t
+                          : {
+                              title: action.executionTarget.snapshot.title,
+                              date: action.executionTarget.snapshot.date,
+                              time: calendarEventTimeLabel(action),
+                              location: action.executionTarget.snapshot.location || '—',
                               notes: action.executionTarget.snapshot.notes || '—'
                             }
                     }}
@@ -1858,6 +1893,7 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
     const currentPlan = this.plan();
     return Boolean(
       currentPlan &&
+      this.household.activeHouseholdId() === this.proposalHouseholdId &&
       selected.length > 0 &&
       currentPlan.questions.length === 0 &&
       selected.every(
@@ -2657,6 +2693,72 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
           this.field('location', ['location'], action.payload.location, 'text'),
           this.field('notes', ['notes'], action.payload.notes, 'textarea')
         ];
+      case 'calendar.update_event': {
+        const { changes } = action.payload;
+        const snapshot = action.executionTarget.snapshot;
+        return [
+          this.field(
+            'title',
+            ['changes', 'title'],
+            changes.title !== undefined ? changes.title : snapshot.title,
+            'text',
+            true
+          ),
+          this.field(
+            'kind',
+            ['changes', 'kind'],
+            changes.kind !== undefined ? changes.kind : snapshot.kind,
+            'select',
+            true,
+            EVENT_KINDS.map(({ value, labelKey }) => ({ value, label: this.i18n.t(labelKey) }))
+          ),
+          this.field(
+            'date',
+            ['changes', 'date'],
+            changes.date !== undefined ? changes.date : snapshot.date,
+            'date',
+            true
+          ),
+          this.field(
+            'startTime',
+            ['changes', 'startTime'],
+            changes.allDay === true
+              ? null
+              : changes.startTime !== undefined
+                ? changes.startTime
+                : snapshot.startTime,
+            'time'
+          ),
+          this.field(
+            'endTime',
+            ['changes', 'endTime'],
+            changes.allDay === true
+              ? null
+              : changes.endTime !== undefined
+                ? changes.endTime
+                : snapshot.endTime,
+            'time'
+          ),
+          this.field(
+            'allDay',
+            ['changes', 'allDay'],
+            changes.allDay ?? snapshot.allDay,
+            'checkbox'
+          ),
+          this.field(
+            'location',
+            ['changes', 'location'],
+            changes.location !== undefined ? changes.location : snapshot.location,
+            'text'
+          ),
+          this.field(
+            'notes',
+            ['changes', 'notes'],
+            changes.notes !== undefined ? changes.notes : snapshot.notes,
+            'textarea'
+          )
+        ];
+      }
       case 'recipes.create_draft': {
         const recipe = action.payload.recipe;
         return [
@@ -2712,6 +2814,15 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
     if (location === 'freezer') return this.i18n.t('ai_assistant.location.freezer');
     if (location === 'counter') return this.i18n.t('ai_assistant.location.counter');
     return location || '—';
+  }
+
+  calendarEventTimeLabel(
+    action: Extract<AssistantAction, { kind: 'calendar.update_event' }>
+  ): string {
+    const snapshot = action.executionTarget.snapshot;
+    if (snapshot.allDay) return this.i18n.t('ai_assistant.field.allDay');
+    if (!snapshot.startTime && !snapshot.endTime) return '—';
+    return [snapshot.startTime, snapshot.endTime].filter(Boolean).join('–');
   }
 
   confirmationFieldValue(field: AssistantField): string {
@@ -2874,6 +2985,73 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
       )
         return false;
     }
+    if (action.kind === 'calendar.update_event') {
+      const { changes } = action.payload;
+      const target = action.executionTarget;
+      const snapshot = target.snapshot;
+      const hasNewTime =
+        (changes.startTime !== undefined && changes.startTime !== null) ||
+        (changes.endTime !== undefined && changes.endTime !== null);
+      const nextAllDay = changes.allDay ?? (hasNewTime ? false : snapshot.allDay);
+      const nextStartTime = nextAllDay
+        ? null
+        : changes.startTime !== undefined
+          ? changes.startTime
+          : snapshot.startTime;
+      const nextEndTime = nextAllDay
+        ? null
+        : changes.endTime !== undefined
+          ? changes.endTime
+          : snapshot.endTime;
+      const allowedFields = [
+        'title',
+        'kind',
+        'date',
+        'startTime',
+        'endTime',
+        'allDay',
+        'notes',
+        'location'
+      ];
+      const changed = Object.entries(changes).some(
+        ([field, value]) => value !== snapshot[field as keyof typeof snapshot]
+      );
+      return (
+        target.kind === 'calendar-event' &&
+        Boolean(target.id) &&
+        target.householdId === this.proposalHouseholdId &&
+        snapshot.source === 'user' &&
+        snapshot.recurrence === 'none' &&
+        this.comparableName(action.payload.targetTitle) === this.comparableName(snapshot.title) &&
+        action.payload.targetDate === snapshot.date &&
+        action.payload.targetStartTime === snapshot.startTime &&
+        this.isIsoDate(snapshot.date) &&
+        Object.keys(changes).length > 0 &&
+        Object.keys(changes).every((field) => allowedFields.includes(field)) &&
+        (changes.title === undefined ||
+          (changes.title.trim().length > 0 && changes.title.length <= 120)) &&
+        (changes.kind === undefined || EVENT_KINDS.some(({ value }) => value === changes.kind)) &&
+        (changes.date === undefined || this.isIsoDate(changes.date)) &&
+        (changes.startTime === undefined ||
+          changes.startTime === null ||
+          this.isValidTime(changes.startTime)) &&
+        (changes.endTime === undefined ||
+          changes.endTime === null ||
+          this.isValidTime(changes.endTime)) &&
+        (changes.notes === undefined || changes.notes === null || changes.notes.length <= 500) &&
+        (changes.location === undefined ||
+          changes.location === null ||
+          changes.location.length <= 120) &&
+        !(
+          nextAllDay &&
+          ((changes.startTime !== undefined && changes.startTime !== null) ||
+            (changes.endTime !== undefined && changes.endTime !== null))
+        ) &&
+        (nextAllDay || Boolean(nextStartTime || nextEndTime)) &&
+        !(nextStartTime && nextEndTime && nextEndTime < nextStartTime) &&
+        changed
+      );
+    }
     if (action.kind === 'recipes.create_draft') {
       const recipe = action.payload.recipe;
       return (
@@ -2989,6 +3167,62 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
             payload: { ...action.payload, changes },
             manualFields: [...new Set([...(action.manualFields ?? []), serializedPath, flagPath])]
           } as AssistantAction;
+        })
+      );
+      return;
+    }
+
+    if (
+      currentAction?.kind === 'calendar.update_event' &&
+      path[0] === 'changes' &&
+      typeof path[1] === 'string' &&
+      ['title', 'kind', 'date', 'startTime', 'endTime', 'allDay', 'notes', 'location'].includes(
+        path[1]
+      )
+    ) {
+      const field = path[1] as keyof typeof currentAction.payload.changes;
+      let nextValue: string | boolean | null;
+      if (field === 'allDay') {
+        nextValue = rawValue === true;
+      } else if (field === 'startTime' || field === 'endTime') {
+        nextValue = rawValue === '' ? null : String(rawValue).trim();
+      } else if (field === 'notes' || field === 'location') {
+        const text = String(rawValue).trim();
+        nextValue = text === '' ? null : text;
+      } else {
+        nextValue = String(rawValue).trim();
+      }
+
+      const snapshot = currentAction.executionTarget.snapshot;
+      const beforeValue = snapshot[field];
+      const serializedPath = JSON.stringify(path);
+      this.updateActions((actions) =>
+        actions.map((action) => {
+          if (action.id !== actionId || action.kind !== 'calendar.update_event') return action;
+          const changes: Record<string, string | boolean | null | undefined> = {
+            ...action.payload.changes
+          };
+          if (nextValue === beforeValue) delete changes[field];
+          else changes[field] = nextValue;
+          if (field === 'allDay' && nextValue === true) {
+            delete changes['startTime'];
+            delete changes['endTime'];
+          }
+          if (
+            (field === 'startTime' || field === 'endTime') &&
+            nextValue !== null &&
+            (snapshot.allDay || changes['allDay'] === true)
+          ) {
+            changes['allDay'] = false;
+          }
+          return {
+            ...action,
+            payload: {
+              ...action.payload,
+              changes: changes as typeof action.payload.changes
+            },
+            manualFields: [...new Set([...(action.manualFields ?? []), serializedPath])]
+          };
         })
       );
       return;

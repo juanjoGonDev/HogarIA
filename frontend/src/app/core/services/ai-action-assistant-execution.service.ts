@@ -197,6 +197,10 @@ export class AiActionAssistantExecutionService {
         );
         return;
 
+      case 'calendar.update_event':
+        await this.updateCalendarEvent(action, expectedHouseholdId);
+        return;
+
       case 'recipes.create_draft': {
         const recipe = action.payload.recipe;
         await this.post(
@@ -489,6 +493,99 @@ export class AiActionAssistantExecutionService {
     if (response?.success !== true) throw new Error('ASSISTANT_DOMAIN_WRITE_REJECTED');
   }
 
+  private async updateCalendarEvent(
+    action: Extract<AssistantAction, { kind: 'calendar.update_event' }>,
+    householdId: string | null
+  ): Promise<void> {
+    const target = action.executionTarget;
+    const { changes } = action.payload;
+    const allowedFields = new Set([
+      'title',
+      'kind',
+      'date',
+      'startTime',
+      'endTime',
+      'allDay',
+      'notes',
+      'location'
+    ]);
+    if (
+      !target ||
+      target.kind !== 'calendar-event' ||
+      !target.id ||
+      target.householdId !== householdId ||
+      target.snapshot.source !== 'user' ||
+      target.snapshot.recurrence !== 'none' ||
+      this.comparable(target.snapshot.title) !== this.comparable(action.payload.targetTitle) ||
+      target.snapshot.date !== action.payload.targetDate ||
+      target.snapshot.startTime !== action.payload.targetStartTime ||
+      Object.keys(changes).length === 0 ||
+      Object.keys(changes).some((field) => !allowedFields.has(field))
+    ) {
+      throw new Error('ASSISTANT_CALENDAR_EVENT_TARGET_INVALID');
+    }
+
+    const nextAllDay = changes.allDay ?? target.snapshot.allDay;
+    const nextStartTime = nextAllDay
+      ? null
+      : changes.startTime !== undefined
+        ? changes.startTime
+        : target.snapshot.startTime;
+    const nextEndTime = nextAllDay
+      ? null
+      : changes.endTime !== undefined
+        ? changes.endTime
+        : target.snapshot.endTime;
+    if (
+      (!nextAllDay && !nextStartTime && !nextEndTime) ||
+      (nextStartTime !== null && !/^([01]\d|2[0-3]):[0-5]\d$/.test(nextStartTime)) ||
+      (nextEndTime !== null && !/^([01]\d|2[0-3]):[0-5]\d$/.test(nextEndTime)) ||
+      (nextStartTime !== null && nextEndTime !== null && nextEndTime < nextStartTime) ||
+      (changes.title !== undefined && (!changes.title.trim() || changes.title.length > 120)) ||
+      (changes.date !== undefined && !this.isIsoDate(changes.date)) ||
+      (changes.kind !== undefined &&
+        !['appointment', 'home', 'shopping', 'personal', 'other'].includes(changes.kind)) ||
+      (changes.notes !== undefined &&
+        changes.notes !== null &&
+        (typeof changes.notes !== 'string' || changes.notes.length > 500)) ||
+      (changes.location !== undefined &&
+        changes.location !== null &&
+        (typeof changes.location !== 'string' || changes.location.length > 120))
+    ) {
+      throw new Error('ASSISTANT_CALENDAR_EVENT_PATCH_INVALID');
+    }
+
+    const hasChange = Object.entries(changes).some(
+      ([field, value]) => value !== target.snapshot[field as keyof typeof target.snapshot]
+    );
+    if (!hasChange) throw new Error('ASSISTANT_CALENDAR_EVENT_NO_CHANGE');
+
+    const before = {
+      ...target.snapshot,
+      householdId: target.householdId,
+      updatedAt: target.updatedAt
+    };
+    const response = await firstValueFrom(
+      this.http.patch<ApiEnvelope<unknown>>(
+        `${this.apiUrl}/calendar/events/${encodeURIComponent(target.id)}/assistant-update`,
+        {
+          changes,
+          assistantAction: {
+            operation: 'update_event',
+            targetId: target.id,
+            householdId: target.householdId,
+            before
+          }
+        },
+        {
+          context: this.silentContext,
+          headers: this.householdHeaders(householdId).set('x-assistant-action-id', action.id)
+        }
+      )
+    );
+    if (response?.success !== true) throw new Error('ASSISTANT_DOMAIN_WRITE_REJECTED');
+  }
+
   private async post(
     path: string,
     body: unknown,
@@ -538,6 +635,11 @@ export class AiActionAssistantExecutionService {
 
   private comparablePantryName(value: string): string {
     return value.normalize('NFC').replace(/\s+/g, ' ').trim().toLowerCase();
+  }
+
+  private isIsoDate(value: string): boolean {
+    const timestamp = Date.parse(`${value}T00:00:00.000Z`);
+    return Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === value;
   }
 
   private sameTask(left: HouseholdTaskOccurrence, right: HouseholdTaskOccurrence): boolean {

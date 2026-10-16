@@ -45,6 +45,26 @@ function call(user: User, method: string, path: string, body?: unknown) {
   });
 }
 
+function assistantCall(
+  user: User,
+  method: string,
+  path: string,
+  body: unknown,
+  householdId: string,
+  actionId: string
+) {
+  return app.request(`/api/calendar${path}`, {
+    method,
+    headers: {
+      authorization: `Bearer ${user.token}`,
+      'content-type': 'application/json',
+      'x-assistant-household-id': householdId,
+      'x-assistant-action-id': actionId
+    },
+    body: JSON.stringify(body)
+  });
+}
+
 /** Igual que en la compra: `Response.json()` es `unknown` y aqui se ancha una vez. */
 async function data(response: Response) {
   const raw = await response.text();
@@ -644,6 +664,242 @@ describe('calendario de la casa (§8f)', () => {
     expect(updated.endTime).toBeNull();
     // El titulo sigue ahi: un PATCH parcial no borra lo que no se menciona.
     expect(updated.title).toBe(event.title);
+  });
+
+  it('aplica una actualización del asistente con preimagen y replay idempotente', async () => {
+    const alice = await makeUser('calendar-assistant-alice', householdId, 'Alice');
+    db.prepare('UPDATE users SET household_id = ? WHERE id = ?').run(householdId, alice.id);
+    db.prepare(
+      `INSERT INTO household_members (id, household_id, user_id, role, is_active)
+       VALUES (?, ?, ?, 'admin', 1)`
+    ).run('calendar-assistant-membership', householdId, alice.id);
+    const targetId = 'calendar-assistant-target';
+    db.prepare(
+      `INSERT INTO calendar_events
+        (id, household_id, user_id, title, kind, date, start_time, end_time, all_day, notes, location, source)
+       VALUES (?, ?, ?, ?, 'appointment', '2026-10-20', '09:00', '11:00', 0, 'Revisar frenos', 'Taller', 'user')`
+    ).run(targetId, householdId, alice.id, 'Revisión del coche');
+    const raw = db
+      .prepare(
+        `SELECT household_id AS householdId, title, kind, date, start_time AS startTime,
+                end_time AS endTime, all_day AS allDay, color, notes, location, recurrence,
+                recurrence_rule AS recurrenceRule, exceptions, source, updated_at AS updatedAt
+           FROM calendar_events WHERE id = ?`
+      )
+      .get(targetId) as any;
+    const before = { ...raw, allDay: Boolean(raw.allDay) };
+    const body = {
+      changes: { startTime: '10:30' },
+      assistantAction: {
+        operation: 'update_event',
+        targetId,
+        householdId,
+        before
+      }
+    };
+    const actionId = 'a10d7286-73d1-4da1-8d3c-8e855a66b0a1';
+
+    const updated = await assistantCall(
+      alice,
+      'PATCH',
+      `/events/${targetId}/assistant-update`,
+      body,
+      householdId,
+      actionId
+    );
+    const updatedBody = await updated.json();
+    expect(updated.status, JSON.stringify(updatedBody)).toBe(200);
+    expect(updatedBody).toMatchObject({
+      success: true,
+      data: { id: targetId, title: 'Revisión del coche', startTime: '10:30' }
+    });
+
+    const replay = await assistantCall(
+      alice,
+      'PATCH',
+      `/events/${targetId}/assistant-update`,
+      body,
+      householdId,
+      actionId
+    );
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toMatchObject({ success: true, idempotent: true });
+    expect(
+      db.prepare('SELECT start_time AS startTime FROM calendar_events WHERE id = ?').get(targetId)
+    ).toEqual({ startTime: '10:30' });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM assistant_action_results').get()).toEqual({
+      count: 1
+    });
+
+    const conflictingReplay = await assistantCall(
+      alice,
+      'PATCH',
+      `/events/${targetId}/assistant-update`,
+      { ...body, changes: { title: 'Cita falsa' } },
+      householdId,
+      actionId
+    );
+    expect(conflictingReplay.status).toBe(409);
+    expect(await conflictingReplay.json()).toMatchObject({ code: 'ASSISTANT_ACTION_ID_CONFLICT' });
+
+    const currentRaw = db
+      .prepare(
+        `SELECT household_id AS householdId, title, kind, date, start_time AS startTime,
+                end_time AS endTime, all_day AS allDay, color, notes, location, recurrence,
+                recurrence_rule AS recurrenceRule, exceptions, source, updated_at AS updatedAt
+           FROM calendar_events WHERE id = ?`
+      )
+      .get(targetId) as any;
+    const invalidRange = await assistantCall(
+      alice,
+      'PATCH',
+      `/events/${targetId}/assistant-update`,
+      {
+        changes: { endTime: '10:00' },
+        assistantAction: {
+          ...body.assistantAction,
+          before: { ...currentRaw, allDay: Boolean(currentRaw.allDay) }
+        }
+      },
+      householdId,
+      'b20d7286-73d1-4da1-8d3c-8e855a66b0a2'
+    );
+    expect(invalidRange.status).toBe(400);
+    expect(await invalidRange.json()).toMatchObject({ code: 'INVALID_EVENT_TIME_RANGE' });
+
+    const stale = await assistantCall(
+      alice,
+      'PATCH',
+      `/events/${targetId}/assistant-update`,
+      body,
+      householdId,
+      'c30d7286-73d1-4da1-8d3c-8e855a66b0a3'
+    );
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toMatchObject({ code: 'ASSISTANT_EVENT_STALE' });
+    expect(
+      db
+        .prepare(
+          'SELECT start_time AS startTime, end_time AS endTime FROM calendar_events WHERE id = ?'
+        )
+        .get(targetId)
+    ).toEqual({ startTime: '10:30', endTime: '11:00' });
+
+    db.prepare('INSERT INTO households (id, name, invite_code) VALUES (?, ?, ?)').run(
+      'calendar-other-house',
+      'Otra casa',
+      'CALOTHER'
+    );
+    db.prepare(
+      "INSERT INTO household_members (id, household_id, user_id, role, is_active) VALUES (?, ?, ?, 'admin', 1)"
+    ).run('calendar-other-membership', 'calendar-other-house', alice.id);
+    db.prepare('UPDATE users SET household_id = ? WHERE id = ?').run(
+      'calendar-other-house',
+      alice.id
+    );
+    const changedHousehold = await assistantCall(
+      alice,
+      'PATCH',
+      `/events/${targetId}/assistant-update`,
+      body,
+      householdId,
+      'd40d7286-73d1-4da1-8d3c-8e855a66b0a4'
+    );
+    expect(changedHousehold.status).toBe(409);
+    expect(await changedHousehold.json()).toMatchObject({
+      code: 'ASSISTANT_HOUSEHOLD_CONTEXT_CHANGED'
+    });
+  });
+
+  it('acepta preimagen con updatedAt normalizado por la API sin perder CAS', async () => {
+    const alice = await makeUser('calendar-assistant-timestamp-alice', householdId, 'Alice');
+    db.prepare('UPDATE users SET household_id = ? WHERE id = ?').run(householdId, alice.id);
+    db.prepare(
+      `INSERT INTO household_members (id, household_id, user_id, role, is_active)
+       VALUES (?, ?, ?, 'admin', 1)`
+    ).run('calendar-assistant-timestamp-membership', householdId, alice.id);
+    const targetId = 'calendar-assistant-timestamp-target';
+    db.prepare(
+      `INSERT INTO calendar_events
+        (id, household_id, user_id, title, kind, date, start_time, end_time, all_day, notes, source)
+       VALUES (?, ?, ?, 'Cita de prueba', 'appointment', '2026-10-20', '09:00', '10:00', 0, 'Notas antes', 'user')`
+    ).run(targetId, householdId, alice.id);
+
+    const raw = db
+      .prepare(
+        `SELECT household_id AS householdId, title, kind, date, start_time AS startTime,
+                end_time AS endTime, all_day AS allDay, color, notes, location, recurrence,
+                recurrence_rule AS recurrenceRule, exceptions, source, updated_at AS updatedAt
+           FROM calendar_events WHERE id = ?`
+      )
+      .get(targetId) as any;
+    const { zoneStampValue } = await import('../middleware/timestamp.middleware.js');
+    const before = {
+      ...raw,
+      allDay: Boolean(raw.allDay),
+      updatedAt: zoneStampValue(raw.updatedAt, 'updatedAt')
+    };
+    expect(before.updatedAt).toBe(`${raw.updatedAt.replace(' ', 'T')}Z`);
+
+    const response = await assistantCall(
+      alice,
+      'PATCH',
+      `/events/${targetId}/assistant-update`,
+      {
+        changes: { notes: 'Notas después' },
+        assistantAction: { operation: 'update_event', targetId, householdId, before }
+      },
+      householdId,
+      'e50d7286-73d1-4da1-8d3c-8e855a66b0a6'
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ success: true });
+    expect(db.prepare('SELECT notes FROM calendar_events WHERE id = ?').get(targetId)).toEqual({
+      notes: 'Notas después'
+    });
+  });
+
+  it('rechaza los eventos recurrentes en la ruta de actualización del asistente', async () => {
+    const alice = await makeUser('calendar-assistant-recurring-alice', householdId, 'Alice');
+    db.prepare('UPDATE users SET household_id = ? WHERE id = ?').run(householdId, alice.id);
+    db.prepare(
+      `INSERT INTO household_members (id, household_id, user_id, role, is_active)
+       VALUES (?, ?, ?, 'admin', 1)`
+    ).run('calendar-assistant-recurring-membership', householdId, alice.id);
+    const targetId = 'calendar-assistant-recurring-target';
+    db.prepare(
+      `INSERT INTO calendar_events
+        (id, household_id, user_id, title, kind, date, start_time, end_time, all_day, recurrence, source)
+       VALUES (?, ?, ?, 'Dentista', 'appointment', '2026-10-20', '09:00', '09:30', 0, 'weekly', 'user')`
+    ).run(targetId, householdId, alice.id);
+    const raw = db
+      .prepare(
+        `SELECT household_id AS householdId, title, kind, date, start_time AS startTime,
+                end_time AS endTime, all_day AS allDay, color, notes, location, recurrence,
+                recurrence_rule AS recurrenceRule, exceptions, source, updated_at AS updatedAt
+           FROM calendar_events WHERE id = ?`
+      )
+      .get(targetId) as any;
+    const before = { ...raw, allDay: Boolean(raw.allDay) };
+
+    const response = await assistantCall(
+      alice,
+      'PATCH',
+      `/events/${targetId}/assistant-update`,
+      {
+        changes: { title: 'Dentista semanal' },
+        assistantAction: { operation: 'update_event', targetId, householdId, before }
+      },
+      householdId,
+      'a50d7286-73d1-4da1-8d3c-8e855a66b0a5'
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: 'ASSISTANT_EVENT_RECURRENCE_UNSUPPORTED' });
+    expect(db.prepare('SELECT title FROM calendar_events WHERE id = ?').get(targetId)).toEqual({
+      title: 'Dentista'
+    });
   });
 
   it('fuera de la ventana no se devuelve nada, aunque el evento exista', async () => {
