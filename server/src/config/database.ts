@@ -192,6 +192,19 @@ async function runMigrations(db: Database.Database): Promise<void> {
       FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
     );
 
+    -- Durable idempotency keys for explicit global-assistant domain writes. Store no prompt,
+    -- proposal or domain content: only the actor, stable action id and request digest/status.
+    CREATE TABLE IF NOT EXISTS assistant_action_results (
+      user_id TEXT NOT NULL,
+      action_id TEXT NOT NULL,
+      request_hash TEXT NOT NULL,
+      response_status INTEGER NOT NULL CHECK (response_status BETWEEN 200 AND 599),
+      succeeded INTEGER NOT NULL CHECK (succeeded IN (0, 1)),
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (user_id, action_id),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
     -- One persisted, explicitly configured weekly automation per household.
     CREATE TABLE IF NOT EXISTS household_planning_automations (
       household_id TEXT PRIMARY KEY NOT NULL,

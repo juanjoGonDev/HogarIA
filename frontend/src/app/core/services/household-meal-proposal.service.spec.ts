@@ -4,6 +4,8 @@ import { TestBed } from '@angular/core/testing';
 import { SILENT_TOAST } from '../interceptors/error.interceptor';
 import {
   HouseholdMealProposalService,
+  type AssistantHouseholdMealProposalRefinementRequest,
+  type AssistantHouseholdMealProposalRequest,
   type HouseholdMealProposal,
   type HouseholdMealProposalConfirmation,
   type HouseholdMealProposalConfirmRequest,
@@ -30,6 +32,14 @@ describe('HouseholdMealProposalService', () => {
     proposalId: 'proposal-1',
     recipes: [],
     events: []
+  };
+  const assistantProposalRequest: AssistantHouseholdMealProposalRequest = {
+    ...proposalRequest,
+    instructions: 'Comidas sencillas.'
+  };
+  const assistantRefinementRequest: AssistantHouseholdMealProposalRefinementRequest = {
+    ...confirmationRequest,
+    instructions: 'Cambia el arroz por pasta.'
   };
   const confirmation: HouseholdMealProposalConfirmation = {
     proposalId: 'proposal-1',
@@ -75,6 +85,39 @@ describe('HouseholdMealProposalService', () => {
     request.flush({ success: true, data: confirmation });
 
     expect(result).toEqual(confirmation);
+  });
+
+  it('generates assistant meal drafts through the transient assistant endpoint', () => {
+    let result: HouseholdMealProposal | undefined;
+    service.createAssistantProposal('home-3', assistantProposalRequest).subscribe((value) => {
+      result = value;
+    });
+
+    const request = http.expectOne('/api/ai/assistant/meal-proposals');
+    expect(request.request.method).toBe('POST');
+    expect(request.request.headers.get('x-assistant-household-id')).toBe('home-3');
+    expect(request.request.headers.has('x-household-id')).toBeFalse();
+    expect(request.request.body).toEqual(assistantProposalRequest);
+    expect(request.request.context.get(SILENT_TOAST)).toBeTrue();
+    request.flush({ success: true, data: proposal });
+
+    expect(result).toEqual(proposal);
+  });
+
+  it('refines a meal draft without confirming or writing it', () => {
+    let result: HouseholdMealProposal | undefined;
+    service.refineAssistantProposal('home-4', assistantRefinementRequest).subscribe((value) => {
+      result = value;
+    });
+
+    const request = http.expectOne('/api/ai/assistant/meal-proposals/refine');
+    expect(request.request.method).toBe('POST');
+    expect(request.request.headers.get('x-assistant-household-id')).toBe('home-4');
+    expect(request.request.body).toEqual(assistantRefinementRequest);
+    expect(request.request.context.get(SILENT_TOAST)).toBeTrue();
+    request.flush({ success: true, data: proposal });
+
+    expect(result).toEqual(proposal);
   });
 
   it('rejects an unsuccessful proposal envelope without data', () => {

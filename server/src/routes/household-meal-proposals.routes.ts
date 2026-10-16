@@ -480,7 +480,7 @@ householdMealProposalRoutes.post(
           time: event.time,
           recipeId,
           customMeal: typeof recipeSnapshot.name === 'string' ? recipeSnapshot.name : 'Receta',
-          servings: event.servings,
+          servings: source.servings,
           participantIds: participantIds as string[],
           recipeSnapshot
         });

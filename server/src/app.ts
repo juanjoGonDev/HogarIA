@@ -34,6 +34,7 @@ import { householdPlanningAutomationRoutes } from './routes/household-planning-a
 import { householdTasksRoutes } from './routes/household-tasks.routes.js';
 import { calendarRoutes } from './routes/calendar.routes.js';
 import { aiRoutes } from './routes/ai.routes.js';
+import { aiAssistantRoutes } from './routes/ai-assistant.routes.js';
 import { aiQueueRoutes } from './routes/ai-queue.routes.js';
 import { healthRoutes } from './routes/health.routes.js';
 import { logRoutes } from './routes/logs.routes.js';
@@ -320,7 +321,14 @@ export function createApp(options: AppOptions = {}): Hono {
     cors({
       origin: config.cors.origin,
       allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      allowHeaders: ['Content-Type', 'Authorization', 'Range'],
+      allowHeaders: [
+        'Content-Type',
+        'Authorization',
+        'Range',
+        'X-Assistant-Household-Id',
+        'X-Assistant-Action-Id',
+        'X-Household-Id'
+      ],
       exposeHeaders: [
         'X-Request-Id',
         'Retry-After',
@@ -468,6 +476,7 @@ export function createApp(options: AppOptions = {}): Hono {
   app.route('/api/household', householdTasksRoutes);
   app.route('/api/calendar', calendarRoutes);
   app.route('/api/ai', aiRoutes);
+  app.route('/api/ai/assistant', aiAssistantRoutes);
   app.route('/api/ai', aiQueueRoutes);
   app.route('/api/logs', logRoutes);
 

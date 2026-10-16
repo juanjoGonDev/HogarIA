@@ -45,7 +45,16 @@ export const householdTaskWeekWriteSchema = z
   .object({
     baseVersion: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
     weekStart: weekStartSchema,
-    tasks: householdTaskOccurrencesSchema
+    tasks: householdTaskOccurrencesSchema,
+    assistantAction: z
+      .object({
+        operation: z.literal('update_task'),
+        targetId: z.string().trim().min(1).max(80),
+        before: householdTaskOccurrenceSchema
+      })
+      .strict()
+      .nullable()
+      .optional()
   })
   .superRefine((value, context) => {
     const start = Date.parse(`${value.weekStart}T00:00:00.000Z`);

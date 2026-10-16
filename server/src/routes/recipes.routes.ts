@@ -2,6 +2,11 @@ import { Hono } from 'hono';
 import { nanoid } from 'nanoid';
 import { getDatabase } from '../config/database.js';
 import { authMiddleware } from '../middleware/auth.middleware.js';
+import { assistantHouseholdContextMiddleware } from '../utils/ai-assistant-household-context.js';
+import {
+  ASSISTANT_ACTION_ID_HEADER,
+  withAssistantActionIdempotency
+} from '../utils/assistant-action-idempotency.js';
 import { recipeContentBodyLimit } from '../middleware/recipe-content-body-limit.middleware.js';
 import { ensureRecipeBookCatalog } from '../utils/recipe-book-seed.js';
 import {
@@ -27,6 +32,7 @@ import type { AppEnv } from '../types/hono-env.js';
 const recipeRoutes = new Hono<AppEnv>();
 
 recipeRoutes.use('*', authMiddleware);
+recipeRoutes.use('*', assistantHouseholdContextMiddleware());
 
 // Map from camelCase API field names to snake_case DB column names,
 // plus an allow-list to prevent SQL injection via ORDER BY.
@@ -601,7 +607,6 @@ recipeRoutes.post('/', recipeContentBodyLimit(), async (c) => {
   const input = createRecipeSchema.parse(body);
 
   const db = getDatabase();
-  const id = nanoid();
   const resolvedPhotos = await resolveStepPhotoSelections(input.instructionsByLevel ?? input.steps);
   if ('error' in resolvedPhotos) {
     const status = resolvedPhotos.error === 'unavailable' ? 502 : 400;
@@ -636,45 +641,62 @@ recipeRoutes.post('/', recipeContentBodyLimit(), async (c) => {
     );
   }
 
-  db.transaction(() => {
-    db.prepare(
-      `
+  const result = withAssistantActionIdempotency(
+    db,
+    userId,
+    c.req.header(ASSISTANT_ACTION_ID_HEADER),
+    { operation: 'recipes.create_draft', input },
+    () => {
+      const id = nanoid();
+      db.transaction(() => {
+        db.prepare(
+          `
     INSERT INTO recipes (id, name, description, difficulty, cuisine, country_code, meal_type, total_time, prep_time, cook_time, rest_time, servings, calories, image, ingredients, utensils, steps, recipe_guidance, nutrition, storage, author, author_id, tags, is_public)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `
-    ).run(
-      id,
-      input.name,
-      input.description,
-      input.difficulty,
-      input.cuisine,
-      input.countryCode,
-      JSON.stringify(input.mealType),
-      input.totalTime,
-      input.prepTime,
-      input.cookTime,
-      input.restTime,
-      input.servings,
-      input.calories,
-      input.image,
-      JSON.stringify(input.ingredients),
-      JSON.stringify(input.utensils),
-      JSON.stringify(resolvedVideos.data),
-      input.guidance ? JSON.stringify(input.guidance) : null,
-      input.nutrition ? JSON.stringify(input.nutrition) : null,
-      input.storage ? JSON.stringify(input.storage) : null,
-      input.author,
-      userId,
-      JSON.stringify(input.tags),
-      input.isPublic ? 1 : 0
-    );
-    for (const asset of resolvedPhotos.assets) storeRecipePhotoAsset(db, asset);
-    replaceRecipeStepVideoSelections(db, id, resolvedVideos.assets);
-  })();
+        ).run(
+          id,
+          input.name,
+          input.description,
+          input.difficulty,
+          input.cuisine,
+          input.countryCode,
+          JSON.stringify(input.mealType),
+          input.totalTime,
+          input.prepTime,
+          input.cookTime,
+          input.restTime,
+          input.servings,
+          input.calories,
+          input.image,
+          JSON.stringify(input.ingredients),
+          JSON.stringify(input.utensils),
+          JSON.stringify(resolvedVideos.data),
+          input.guidance ? JSON.stringify(input.guidance) : null,
+          input.nutrition ? JSON.stringify(input.nutrition) : null,
+          input.storage ? JSON.stringify(input.storage) : null,
+          input.author,
+          userId,
+          JSON.stringify(input.tags),
+          input.isPublic ? 1 : 0
+        );
+        for (const asset of resolvedPhotos.assets) storeRecipePhotoAsset(db, asset);
+        replaceRecipeStepVideoSelections(db, id, resolvedVideos.assets);
+      })();
 
-  const recipe = db.prepare('SELECT * FROM recipes WHERE id = ?').get(id);
-
-  return c.json({ success: true, data: mapRecipe(recipe as Record<string, unknown>) }, 201);
+      const recipe = db.prepare('SELECT * FROM recipes WHERE id = ?').get(id);
+      return {
+        body: { success: true, data: mapRecipe(recipe as Record<string, unknown>) },
+        status: 201
+      };
+    }
+  );
+  if ('error' in result) {
+    return result.error === 'invalid_action_id'
+      ? c.json({ success: false, code: 'ASSISTANT_ACTION_ID_INVALID' }, 400)
+      : c.json({ success: false, code: 'ASSISTANT_ACTION_ID_CONFLICT' }, 409);
+  }
+  return c.json(result.body, result.status);
 });
 
 // PATCH /api/recipes/:id

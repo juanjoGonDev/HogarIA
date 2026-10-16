@@ -10,6 +10,10 @@ export interface HouseholdMealProposalRequest {
   householdMemberIds: string[];
 }
 
+export interface AssistantHouseholdMealProposalRequest extends HouseholdMealProposalRequest {
+  instructions: string;
+}
+
 export interface HouseholdMealProposalIngredient {
   name: string;
   quantity: number;
@@ -115,6 +119,10 @@ export interface HouseholdMealProposalConfirmRequest extends HouseholdMealPropos
   events: HouseholdMealProposalEvent[];
 }
 
+export interface AssistantHouseholdMealProposalRefinementRequest extends HouseholdMealProposalConfirmRequest {
+  instructions: string;
+}
+
 export interface HouseholdMealProposalConfirmation {
   proposalId: string;
   weekStart: string;
@@ -141,6 +149,7 @@ interface ApiEnvelope<T> {
 export class HouseholdMealProposalService {
   private readonly http = inject(HttpClient);
   private readonly apiUrl = `${environment.apiUrl}/household/meal-planning`;
+  private readonly assistantApiUrl = `${environment.apiUrl}/ai/assistant/meal-proposals`;
   private readonly silentContext = new HttpContext().set(SILENT_TOAST, true);
 
   createProposal(
@@ -150,6 +159,30 @@ export class HouseholdMealProposalService {
     return this.http
       .post<ApiEnvelope<HouseholdMealProposal>>(`${this.apiUrl}/proposal`, request, {
         headers: this.householdHeaders(householdId),
+        context: this.silentContext
+      })
+      .pipe(map((response) => this.requireData(response)));
+  }
+
+  createAssistantProposal(
+    householdId: string,
+    request: AssistantHouseholdMealProposalRequest
+  ): Observable<HouseholdMealProposal> {
+    return this.http
+      .post<ApiEnvelope<HouseholdMealProposal>>(`${this.assistantApiUrl}`, request, {
+        headers: this.assistantHouseholdHeaders(householdId),
+        context: this.silentContext
+      })
+      .pipe(map((response) => this.requireData(response)));
+  }
+
+  refineAssistantProposal(
+    householdId: string,
+    request: AssistantHouseholdMealProposalRefinementRequest
+  ): Observable<HouseholdMealProposal> {
+    return this.http
+      .post<ApiEnvelope<HouseholdMealProposal>>(`${this.assistantApiUrl}/refine`, request, {
+        headers: this.assistantHouseholdHeaders(householdId),
         context: this.silentContext
       })
       .pipe(map((response) => this.requireData(response)));
@@ -169,6 +202,10 @@ export class HouseholdMealProposalService {
 
   private householdHeaders(householdId: string): HttpHeaders {
     return new HttpHeaders({ 'x-household-id': householdId });
+  }
+
+  private assistantHouseholdHeaders(householdId: string): HttpHeaders {
+    return new HttpHeaders({ 'x-assistant-household-id': householdId });
   }
 
   private requireData<T>(response: ApiEnvelope<T>): T {

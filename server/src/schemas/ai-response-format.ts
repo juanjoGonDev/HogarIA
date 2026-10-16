@@ -11,6 +11,8 @@ export interface AiResponseFormat {
   };
 }
 
+export type AiCallResponseFormat = AiResponseFormat | { type: 'json_object' };
+
 /**
  * Build the strict subset sent by Chat Completions from the same Zod schema that
  * validates the provider's output locally.

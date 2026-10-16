@@ -23,6 +23,7 @@ import { ReceiptQueueComponent } from '../../shared/components/receipts/receipt-
 import { PageContainerComponent } from '../../shared/components/page-container/page-container.component';
 import { HouseholdSwitcherComponent } from '../../shared/components/household-switcher.component';
 import { HouseholdPlanningAutomationNoticeComponent } from '../../shared/components/household-planning-automation-notice.component';
+import { AiActionAssistantLauncherComponent } from '../../shared/components/ai-action-assistant-launcher.component';
 import { HouseholdService } from '../../core/services/household.service';
 import type { DrawerGestureSource } from './mobile-drawer-gesture.controller';
 import type { TranslationKey } from '../../core/i18n';
@@ -55,7 +56,8 @@ interface NavItem {
     ReceiptQueueComponent,
     PageContainerComponent,
     HouseholdSwitcherComponent,
-    HouseholdPlanningAutomationNoticeComponent
+    HouseholdPlanningAutomationNoticeComponent,
+    AiActionAssistantLauncherComponent
   ],
   template: `
     <div class="layout">
@@ -204,6 +206,8 @@ interface NavItem {
       [canManage]="canManagePlanningAutomation()"
       [canActivate]="canActivatePlanningAutomation()"
     />
+
+    <app-ai-action-assistant-launcher [householdId]="activeHouseholdId()" />
 
     <app-toast></app-toast>
     <app-confirm-dialog></app-confirm-dialog>

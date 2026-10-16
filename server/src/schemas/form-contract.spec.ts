@@ -111,6 +111,15 @@ import {
   updateAiConfigSchema,
   replaceMealSchema
 } from './ai.schema.js';
+import {
+  aiAssistantActionRefinementRequestSchema,
+  aiAssistantBatchRefinementRequestSchema,
+  aiAssistantProposalRequestSchema,
+  assistantMealProposalRequestSchema,
+  assistantActionBatchRefinementCandidateSchema,
+  assistantActionPlanCandidateSchema,
+  assistantActionRefinementCandidateSchema
+} from './ai-assistant.schema.js';
 
 /**
  * EL CONTRATO DE LOS FORMULARIOS: lo opcional tiene que poder no llegar.
@@ -698,6 +707,114 @@ const ROWS: Row[] = [
 
   // ── IA ──
   {
+    name: 'aiAssistantProposalRequestSchema',
+    schema: aiAssistantProposalRequestSchema,
+    required: { prompt: 'Añade lentejas a la despensa.' }
+  },
+  {
+    name: 'assistantMealProposalRequestSchema',
+    schema: assistantMealProposalRequestSchema,
+    required: {
+      weekStart: '2026-10-12',
+      householdMemberIds: ['membership-1'],
+      instructions: 'Planifica cenas sencillas.'
+    },
+    note: 'Requiere semana lunes y al menos un miembro seleccionado explícitamente.'
+  },
+  {
+    name: 'aiAssistantActionRefinementRequestSchema',
+    schema: aiAssistantActionRefinementRequestSchema,
+    required: {
+      actionId: 'action-1',
+      instruction: 'Cambia la cantidad.',
+      action: {
+        kind: 'pantry.add_ingredient',
+        title: 'Añadir lentejas',
+        summary: 'Añade lentejas a la despensa.',
+        dependsOn: [],
+        warnings: [],
+        payload: {
+          name: 'Lentejas',
+          category: 'legumes',
+          quantity: 500,
+          unit: 'g',
+          expirationDate: null,
+          location: 'pantry',
+          notes: null
+        }
+      },
+      scope: { kind: 'action' }
+    }
+  },
+  {
+    name: 'aiAssistantBatchRefinementRequestSchema',
+    schema: aiAssistantBatchRefinementRequestSchema,
+    required: {
+      instruction: 'Revisa el lote.',
+      scope: { kind: 'batch' },
+      actions: [
+        {
+          actionId: 'pantry-1',
+          action: {
+            kind: 'pantry.add_ingredient',
+            title: 'Añadir lentejas',
+            summary: 'Añade lentejas.',
+            payload: {
+              name: 'Lentejas',
+              category: 'legumes',
+              quantity: 1,
+              unit: 'unit',
+              expirationDate: null,
+              location: 'pantry',
+              notes: null
+            },
+            dependsOn: [],
+            warnings: []
+          }
+        },
+        {
+          actionId: 'shopping-1',
+          action: {
+            kind: 'shopping.create_list',
+            title: 'Crear lista',
+            summary: 'Crea una lista.',
+            payload: { name: 'Compra semanal', store: null },
+            dependsOn: [],
+            warnings: []
+          }
+        }
+      ]
+    }
+  },
+  {
+    name: 'assistantActionPlanCandidateSchema',
+    schema: assistantActionPlanCandidateSchema,
+    required: { summary: 'Sin acciones.', actions: [], questions: [] }
+  },
+  {
+    name: 'assistantActionRefinementCandidateSchema',
+    schema: assistantActionRefinementCandidateSchema,
+    required: { summary: 'Cantidad revisada.', replacement: null, questions: [] }
+  },
+  {
+    name: 'assistantActionBatchRefinementCandidateSchema',
+    schema: assistantActionBatchRefinementCandidateSchema,
+    required: {
+      summary: 'Lote revisado.',
+      replacements: [
+        {
+          kind: 'shopping.create_list',
+          title: 'Crear lista',
+          summary: 'Crea una lista.',
+          payload: { name: 'Compra semanal', store: null },
+          dependsOn: [],
+          warnings: []
+        }
+      ],
+      questions: []
+    }
+  },
+  {
     name: 'createAiConfigSchema',
     schema: createAiConfigSchema,
     required: { name: 'Local', baseUrl: 'http://localhost:1234/v1', apiKey: 'sk-x', model: 'qwen' }
@@ -759,7 +876,9 @@ const EXEMPT: Record<string, string> = {
   mealReplacementCandidateSchema:
     'respuesta estructurada temporal del proveedor de IA, no es un formulario de usuario',
   mealReplacementResponseSchema:
-    'contrato estricto de salida del modelo para sustituciones, no es un formulario de usuario'
+    'contrato estricto de salida del modelo para sustituciones, no es un formulario de usuario',
+  assistantMealProposalRefinementInstructionSchema:
+    'campo escalar acotado dentro de la refinación compuesta; no es un cuerpo de formulario independiente'
 };
 
 function shapeOf(schema: z.ZodTypeAny): Record<string, z.ZodTypeAny> | null {

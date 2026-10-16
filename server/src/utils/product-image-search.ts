@@ -11,10 +11,12 @@ import {
 
 type SqlDb = Database.Database;
 
-const TEST_IMAGE_BYTES = new Uint8Array(Buffer.from(
-  'iVBORw0KGgoAAAANSUhEUgAAAFAAAAA8CAIAAAB+RarbAAABfElEQVR4nO3aTW7CMBAFYO6UBRKrSixQlSP0Du0FWHIjjoNyiKLu6SKSNbKxY/C8ySR50lvxI82nRyDY3j3ut01lN/sEBBNMMMEEE0zwZmIB/rycQl59luAlgAsqYy3ByHx8H0JSsNkYc4Lt67UDD30nwUPfDX0nweMjawCPkggsqUEbslRwxKgHQ9kocArIgX+/9mNszPrgaOjgkeC/n2OanNw1+Kl29EyCJRtn1gSnWimpBAc2yAwBy2LfA6dVuwPnun1czzI11FzPjsCVWg9mZXD0SW4HR2YX4MKlqwVWNCuDo1lVwLolt4ILv0MgcKNZDZxq27+lESXDwVohmGCCgeCnN8/q4GCeH7y5hgkmmODFg6FmR/fSNiU7+rc0uZSlovUFRpfsbsUDeiU7XdMCmf2uWkZmlYvZ+7r05M5DS7dOweW9pfeK1dWa7h5WUhe2e5hjS3ku6VsQg9mdAEj95ReAprI741Ef6Dx2p3hmp5qC/YTgtYfgtecfDUQWo6W+HLIAAAAASUVORK5CYII=',
-  'base64'
-));
+const TEST_IMAGE_BYTES = new Uint8Array(
+  Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAFAAAAA8CAIAAAB+RarbAAABfElEQVR4nO3aTW7CMBAFYO6UBRKrSixQlSP0Du0FWHIjjoNyiKLu6SKSNbKxY/C8ySR50lvxI82nRyDY3j3ut01lN/sEBBNMMMEEE0zwZmIB/rycQl59luAlgAsqYy3ByHx8H0JSsNkYc4Lt67UDD30nwUPfDX0nweMjawCPkggsqUEbslRwxKgHQ9kocArIgX+/9mNszPrgaOjgkeC/n2OanNw1+Kl29EyCJRtn1gSnWimpBAc2yAwBy2LfA6dVuwPnun1czzI11FzPjsCVWg9mZXD0SW4HR2YX4MKlqwVWNCuDo1lVwLolt4ILv0MgcKNZDZxq27+lESXDwVohmGCCgeCnN8/q4GCeH7y5hgkmmODFg6FmR/fSNiU7+rc0uZSlovUFRpfsbsUDeiU7XdMCmf2uWkZmlYvZ+7r05M5DS7dOweW9pfeK1dWa7h5WUhe2e5hjS3ku6VsQg9mdAEj95ReAprI741Ef6Dx2p3hmp5qC/YTgtYfgtecfDUQWo6W+HLIAAAAASUVORK5CYII=',
+    'base64'
+  )
+);
 const TEST_PHOTOS: RecipeStepPhoto[] = Array.from({ length: 10 }, (_, index) => ({
   id: (index + 1).toString(16).padStart(24, '0'),
   altText: `Fotografía sintética de alimento ${index + 1}`,
@@ -77,7 +79,7 @@ interface StoredSearch {
 function parseCandidates(value: string): ProductImageCandidate[] {
   try {
     const result: unknown = JSON.parse(value);
-    return Array.isArray(result) ? result.slice(0, 10) as ProductImageCandidate[] : [];
+    return Array.isArray(result) ? (result.slice(0, 10) as ProductImageCandidate[]) : [];
   } catch {
     return [];
   }
@@ -111,7 +113,8 @@ export function readProductImageSearch(
   if (!row) return { status: 'idle', jobId: null, candidates: [], errorCode: null };
 
   const status = safeState(row);
-  const errorCode = status === 'failed' ? (row.queue_error ?? row.error_code ?? 'SEARCH_FAILED') : null;
+  const errorCode =
+    status === 'failed' ? (row.queue_error ?? row.error_code ?? 'SEARCH_FAILED') : null;
   if (status !== row.status || errorCode !== row.error_code) {
     db.prepare(
       `UPDATE product_image_searches SET status = ?, error_code = ?, updated_at = CURRENT_TIMESTAMP
@@ -135,19 +138,31 @@ export function queueProductImageSearch(
   db: SqlDb,
   userId: string,
   ingredientId: string,
-  options: { force?: boolean; provider?: RecipeStepPhotoProvider } = {}
+  options: {
+    force?: boolean;
+    provider?: RecipeStepPhotoProvider;
+    /** Use the action's validated scope without repairing the user's selected-household pointer. */
+    householdId?: string | null;
+  } = {}
 ): ProductImageSearchView {
   const provider = options.provider ?? productImagePhotoProvider;
-  const selectedHome = activeHouseholdId(db, userId);
-  const ingredient = (selectedHome
-    ? db.prepare(
-        `SELECT id, name, user_id, household_id, image FROM ingredients
+  const selectedHome =
+    options.householdId === undefined ? activeHouseholdId(db, userId) : options.householdId;
+  const ingredient = (
+    selectedHome
+      ? db
+          .prepare(
+            `SELECT id, name, user_id, household_id, image FROM ingredients
           WHERE id = ? AND (household_id = ? OR (household_id IS NULL AND user_id = ?))`
-      ).get(ingredientId, selectedHome, userId)
-    : db.prepare(
-        `SELECT id, name, user_id, household_id, image FROM ingredients
+          )
+          .get(ingredientId, selectedHome, userId)
+      : db
+          .prepare(
+            `SELECT id, name, user_id, household_id, image FROM ingredients
           WHERE id = ? AND household_id IS NULL AND user_id = ?`
-      ).get(ingredientId, userId)) as IngredientRow | undefined;
+          )
+          .get(ingredientId, userId)
+  ) as IngredientRow | undefined;
   if (!ingredient) throw new Error('PRODUCT_NOT_FOUND');
 
   const existing = readProductImageSearch(db, ingredientId, userId, ingredient.household_id);
@@ -156,7 +171,10 @@ export function queueProductImageSearch(
   if (ingredient.image && !options.force) return existing;
 
   const jobId = nanoid();
-  const providerHouseholdId = activeHouseholdId(db, userId) ?? ingredient.household_id;
+  const providerHouseholdId =
+    options.householdId === undefined
+      ? (activeHouseholdId(db, userId) ?? ingredient.household_id)
+      : options.householdId;
   const config = activeAiConfigForScope(db, userId, providerHouseholdId);
   db.prepare(
     `INSERT INTO product_image_searches
@@ -188,7 +206,8 @@ export function queueProductImageSearch(
             .trim()
             .slice(0, 65);
           const photos = await provider.searchByQuery(`${name} food product`, signal);
-          if (signal.aborted) throw Object.assign(new Error('Search cancelled'), { name: 'AbortError' });
+          if (signal.aborted)
+            throw Object.assign(new Error('Search cancelled'), { name: 'AbortError' });
           const candidates: ProductImageCandidate[] = photos.slice(0, 10).map((photo) => ({
             ...photo,
             previewUrl: photo.thumbnailUrl || `/api/product-image-previews/${photo.id}`
@@ -204,7 +223,8 @@ export function queueProductImageSearch(
             .prepare('SELECT attempts, max_attempts FROM ai_jobs WHERE id = ?')
             .get(jobId) as { attempts: number; max_attempts: number } | undefined;
           const cancelled = signal.aborted || (error as Error)?.name === 'AbortError';
-          const finalFailure = !cancelled && (!attempts || attempts.attempts >= attempts.max_attempts);
+          const finalFailure =
+            !cancelled && (!attempts || attempts.attempts >= attempts.max_attempts);
           if (cancelled || finalFailure) {
             db.prepare(
               `UPDATE product_image_searches SET status = ?, error_code = ?, updated_at = CURRENT_TIMESTAMP
@@ -230,7 +250,13 @@ export function queueProductImageSearch(
     db.prepare(
       `UPDATE product_image_searches SET status = 'failed', error_code = ?, updated_at = CURRENT_TIMESTAMP
         WHERE ingredient_id = ? AND job_id = ?`
-    ).run((error as { detail?: string })?.detail === 'QUEUE_CAPACITY' ? 'QUEUE_CAPACITY' : 'QUEUE_FAILED', ingredient.id, jobId);
+    ).run(
+      (error as { detail?: string })?.detail === 'QUEUE_CAPACITY'
+        ? 'QUEUE_CAPACITY'
+        : 'QUEUE_FAILED',
+      ingredient.id,
+      jobId
+    );
   }
 
   return readProductImageSearch(db, ingredientId, userId, ingredient.household_id);
@@ -250,9 +276,9 @@ export function cancelProductImageSearch(
     )
     .get(ingredientId, householdId, userId) as { job_id: string } | undefined;
   if (!row) return false;
-  const job = db.prepare('SELECT user_id, config_id, status FROM ai_jobs WHERE id = ?').get(row.job_id) as
-    | { user_id: string; config_id: string | null; status: string }
-    | undefined;
+  const job = db
+    .prepare('SELECT user_id, config_id, status FROM ai_jobs WHERE id = ?')
+    .get(row.job_id) as { user_id: string; config_id: string | null; status: string } | undefined;
   if (!job || !['queued', 'running'].includes(job.status)) return false;
   const cancelled = cancelarTrabajo(db, job.user_id, job.config_id ?? '', row.job_id);
   if (!cancelled) return false;

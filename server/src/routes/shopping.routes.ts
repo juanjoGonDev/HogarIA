@@ -2,6 +2,15 @@ import { Hono } from 'hono';
 import { nanoid } from 'nanoid';
 import { getDatabase } from '../config/database.js';
 import { authMiddleware } from '../middleware/auth.middleware.js';
+import {
+  ASSISTANT_HOUSEHOLD_CONTEXT_CHANGED,
+  assistantHouseholdContextMiddleware,
+  currentAssistantHouseholdSnapshot
+} from '../utils/ai-assistant-household-context.js';
+import {
+  ASSISTANT_ACTION_ID_HEADER,
+  withAssistantActionIdempotency
+} from '../utils/assistant-action-idempotency.js';
 import { productKeyOf } from '../utils/product-key.js';
 import { queueProductImageSearch } from '../utils/product-image-search.js';
 import {
@@ -95,23 +104,25 @@ import {
 const shoppingRoutes = new Hono<AppEnv>();
 
 shoppingRoutes.use('*', authMiddleware);
+shoppingRoutes.use('*', assistantHouseholdContextMiddleware());
 
 type Scope = { clause: string; params: string[]; householdId: string | null };
 
-function getScope(userId: string): Scope {
+function getScope(userId: string, householdSnapshot?: string | null): Scope {
   const db = getDatabase();
   const user = db
     .prepare(`SELECT u.household_id AS hid FROM users u WHERE u.id = ?`)
     .get(userId) as { hid: string | null } | undefined;
+  const householdId = householdSnapshot === undefined ? (user?.hid ?? null) : householdSnapshot;
 
-  if (user?.hid) {
+  if (householdId) {
     return {
       // Una fila ligada a un hogar solo se comparte dentro de ese hogar. No basta
       // con ser su creador: al cambiar de casa (o quedarse sin hogar activo) no
       // debemos filtrar datos domésticos anteriores por `user_id`.
       clause: '((user_id = ? AND household_id IS NULL) OR household_id = ?)',
-      params: [userId, user.hid],
-      householdId: user.hid
+      params: [userId, householdId],
+      householdId
     };
   }
   return {
@@ -305,7 +316,15 @@ shoppingRoutes.post('/categories', async (c) => {
 
 shoppingRoutes.get('/lists', async (c) => {
   const db = getDatabase();
-  const scope = getScope(c.get('userId'));
+  const userId = c.get('userId');
+  const assistantSnapshot = currentAssistantHouseholdSnapshot(c);
+  if (!assistantSnapshot.valid) {
+    return c.json({ success: false, code: ASSISTANT_HOUSEHOLD_CONTEXT_CHANGED }, 409);
+  }
+  const scope =
+    assistantSnapshot.householdId === undefined
+      ? getScope(userId)
+      : getScope(userId, assistantSnapshot.householdId);
   const filter = listFilterSchema.parse(c.req.query());
 
   // Con el JOIN del agregado, `user_id` a secas seria ambiguo: el ambito se escribe
@@ -444,17 +463,46 @@ shoppingRoutes.get('/stores', async (c) => {
 shoppingRoutes.post('/lists', async (c) => {
   const db = getDatabase();
   const userId = c.get('userId');
-  const scope = getScope(userId);
+  const originalScope = getScope(userId);
   const body = createListSchema.parse(await c.req.json());
+  const assistantSnapshot = currentAssistantHouseholdSnapshot(c);
+  if (!assistantSnapshot.valid) {
+    return c.json({ success: false, code: ASSISTANT_HOUSEHOLD_CONTEXT_CHANGED }, 409);
+  }
+  const scope =
+    assistantSnapshot.householdId === undefined
+      ? originalScope
+      : getScope(userId, assistantSnapshot.householdId);
 
-  const id = nanoid();
-  db.prepare(
-    `INSERT INTO shopping_lists (id, user_id, household_id, name, store) VALUES (?, ?, ?, ?, ?)`
-  ).run(id, userId, scope.householdId, body.name, body.store ?? null);
+  const result = withAssistantActionIdempotency(
+    db,
+    userId,
+    c.req.header(ASSISTANT_ACTION_ID_HEADER),
+    { operation: 'shopping.create_list', householdId: scope.householdId, input: body },
+    () => {
+      if (!currentAssistantHouseholdSnapshot(c).valid) {
+        return {
+          body: { success: false, code: ASSISTANT_HOUSEHOLD_CONTEXT_CHANGED },
+          status: 409,
+          record: false
+        };
+      }
+      const id = nanoid();
+      db.prepare(
+        `INSERT INTO shopping_lists (id, user_id, household_id, name, store) VALUES (?, ?, ?, ?, ?)`
+      ).run(id, userId, scope.householdId, body.name, body.store ?? null);
 
-  const list = readList(db, scope, id);
-  announce(db, list, userId, 'list.create', null);
-  return c.json({ success: true, data: { ...list, ...listTotals(db, id) } }, 201);
+      const list = readList(db, scope, id);
+      announce(db, list, userId, 'list.create', null);
+      return { body: { success: true, data: { ...list, ...listTotals(db, id) } }, status: 201 };
+    }
+  );
+  if ('error' in result) {
+    return result.error === 'invalid_action_id'
+      ? c.json({ success: false, code: 'ASSISTANT_ACTION_ID_INVALID' }, 400)
+      : c.json({ success: false, code: 'ASSISTANT_ACTION_ID_CONFLICT' }, 409);
+  }
+  return c.json(result.body, result.status);
 });
 
 shoppingRoutes.get('/lists/:id', async (c) => {
@@ -624,22 +672,65 @@ function insertItem(
 
 shoppingRoutes.post('/lists/:id/items', async (c) => {
   const db = getDatabase();
-  const scope = getScope(c.get('userId'));
-  const list = readList(db, scope, c.req.param('id'));
+  const userId = c.get('userId');
+  const initialAssistantSnapshot = currentAssistantHouseholdSnapshot(c);
+  if (!initialAssistantSnapshot.valid) {
+    return c.json({ success: false, code: ASSISTANT_HOUSEHOLD_CONTEXT_CHANGED }, 409);
+  }
+  let scope =
+    initialAssistantSnapshot.householdId === undefined
+      ? getScope(userId)
+      : getScope(userId, initialAssistantSnapshot.householdId);
+  let list = readList(db, scope, c.req.param('id'));
   if (!list) return notFound(c, 'List');
 
   const body = createItemSchema.parse(await c.req.json());
-  const outcome = upsertLine(db, list, body, c.get('userId'));
-  db.prepare(
-    'UPDATE shopping_lists SET version = version + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
-  ).run(list.id);
-  announce(db, list, c.get('userId'), outcome.merged ? 'item.merge' : 'item.add', outcome.row.name);
-  // `merged` en el cuerpo, como siempre: la UI tiene que poder distinguir «he creado
-  // una fila» de «he sumado a la que habia» para no pintar dos avisos distintos.
-  return c.json(
-    { success: true, data: { ...outcome.row, merged: outcome.merged } },
-    outcome.merged ? 200 : 201
+  const assistantSnapshot = currentAssistantHouseholdSnapshot(c);
+  if (!assistantSnapshot.valid) {
+    return c.json({ success: false, code: ASSISTANT_HOUSEHOLD_CONTEXT_CHANGED }, 409);
+  }
+  if (assistantSnapshot.householdId !== undefined) {
+    scope = getScope(userId, assistantSnapshot.householdId);
+    list = readList(db, scope, c.req.param('id'));
+    if (!list) return notFound(c, 'List');
+  }
+  const result = withAssistantActionIdempotency(
+    db,
+    userId,
+    c.req.header(ASSISTANT_ACTION_ID_HEADER),
+    {
+      operation: 'shopping.add_item',
+      householdId: scope.householdId,
+      listId: list.id,
+      input: body
+    },
+    () => {
+      if (!currentAssistantHouseholdSnapshot(c).valid) {
+        return {
+          body: { success: false, code: ASSISTANT_HOUSEHOLD_CONTEXT_CHANGED },
+          status: 409,
+          record: false
+        };
+      }
+      const outcome = upsertLine(db, list, body, userId);
+      db.prepare(
+        'UPDATE shopping_lists SET version = version + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+      ).run(list.id);
+      announce(db, list, userId, outcome.merged ? 'item.merge' : 'item.add', outcome.row.name);
+      // `merged` en el cuerpo, como siempre: la UI tiene que poder distinguir «he creado
+      // una fila» de «he sumado a la que habia» para no pintar dos avisos distintos.
+      return {
+        body: { success: true, data: { ...outcome.row, merged: outcome.merged } },
+        status: outcome.merged ? 200 : 201
+      };
+    }
   );
+  if ('error' in result) {
+    return result.error === 'invalid_action_id'
+      ? c.json({ success: false, code: 'ASSISTANT_ACTION_ID_INVALID' }, 400)
+      : c.json({ success: false, code: 'ASSISTANT_ACTION_ID_CONFLICT' }, 409);
+  }
+  return c.json(result.body, result.status);
 });
 
 /**

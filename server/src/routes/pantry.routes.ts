@@ -41,6 +41,15 @@ import { productKeyOf } from '../utils/product-key.js';
 import { nanoid } from 'nanoid';
 import { getDatabase } from '../config/database.js';
 import { authMiddleware } from '../middleware/auth.middleware.js';
+import {
+  ASSISTANT_HOUSEHOLD_CONTEXT_CHANGED,
+  assistantHouseholdContextMiddleware,
+  currentAssistantHouseholdSnapshot
+} from '../utils/ai-assistant-household-context.js';
+import {
+  ASSISTANT_ACTION_ID_HEADER,
+  withAssistantActionIdempotency
+} from '../utils/assistant-action-idempotency.js';
 import { activeHouseholdId } from '../utils/household-context.js';
 import { queueProductImageSearch } from '../utils/product-image-search.js';
 import {
@@ -58,10 +67,12 @@ const pantryRoutes = new Hono<AppEnv>();
 function enqueueIngredientPhoto(
   db: ReturnType<typeof getDatabase>,
   userId: string,
-  ingredientId: string
+  ingredientId: string,
+  householdId?: string | null
 ): void {
   try {
-    queueProductImageSearch(db, userId, ingredientId);
+    if (householdId === undefined) queueProductImageSearch(db, userId, ingredientId);
+    else queueProductImageSearch(db, userId, ingredientId, { householdId });
   } catch {
     // La búsqueda es auxiliar: un proveedor sin capacidad no revierte el alta de inventario.
   }
@@ -69,15 +80,17 @@ function enqueueIngredientPhoto(
 
 // Apply auth middleware to all routes
 pantryRoutes.use('*', authMiddleware);
+pantryRoutes.use('*', assistantHouseholdContextMiddleware());
 
 /**
  * Returns the user's household context:
  *   { householdId, scope: 'user_id = ?' | '(user_id = ? OR household_id = ?)', params }
  * If shared_pantry = 1, items belonging to the household are visible to all members.
  */
-function getUserScope(userId: string) {
+function getUserScope(userId: string, householdSnapshot?: string | null) {
   const db = getDatabase();
-  const householdId = activeHouseholdId(db, userId);
+  const householdId =
+    householdSnapshot === undefined ? activeHouseholdId(db, userId) : householdSnapshot;
   const household = householdId
     ? (db.prepare('SELECT shared_pantry FROM households WHERE id = ?').get(householdId) as
         { shared_pantry: number } | undefined)
@@ -301,42 +314,65 @@ pantryRoutes.post('/ingredients', async (c) => {
   const input = createIngredientSchema.parse(body);
 
   const db = getDatabase();
-  const id = nanoid();
-
-  const scope = getUserScope(userId);
-  const categoriaMala = comprobarCategoria(c, db, scopeDePantry(userId), input.category);
+  const assistantSnapshot = currentAssistantHouseholdSnapshot(c);
+  if (!assistantSnapshot.valid) {
+    return c.json({ success: false, code: ASSISTANT_HOUSEHOLD_CONTEXT_CHANGED }, 409);
+  }
+  const scope = getUserScope(userId, assistantSnapshot.householdId);
+  const categoriaMala = comprobarCategoria(
+    c,
+    db,
+    scopeDePantry(userId, assistantSnapshot.householdId),
+    input.category
+  );
   if (categoriaMala) return categoriaMala;
 
-  db.prepare(
-    `
+  const result = withAssistantActionIdempotency(
+    db,
+    userId,
+    c.req.header(ASSISTANT_ACTION_ID_HEADER),
+    { operation: 'pantry.add_ingredient', householdId: scope.householdId, input },
+    () => {
+      if (!currentAssistantHouseholdSnapshot(c).valid) {
+        return {
+          body: { success: false, code: ASSISTANT_HOUSEHOLD_CONTEXT_CHANGED },
+          status: 409,
+          record: false
+        };
+      }
+      const id = nanoid();
+      db.prepare(
+        `
     INSERT INTO ingredients (id, user_id, household_id, name, category, quantity, unit, expiration_date, location, image, barcode, notes)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `
-  ).run(
-    id,
-    userId,
-    scope.householdId,
-    input.name,
-    input.category,
-    input.quantity,
-    input.unit,
-    input.expirationDate,
-    input.location,
-    input.image,
-    input.barcode,
-    input.notes
+      ).run(
+        id,
+        userId,
+        scope.householdId,
+        input.name,
+        input.category,
+        input.quantity,
+        input.unit,
+        input.expirationDate,
+        input.location,
+        input.image,
+        input.barcode,
+        input.notes
+      );
+
+      const ingredient = db.prepare('SELECT * FROM ingredients WHERE id = ?').get(id);
+      enqueueIngredientPhoto(db, userId, id, scope.householdId);
+      return { body: { success: true, data: ingredient }, status: 201 };
+    }
   );
 
-  const ingredient = db.prepare('SELECT * FROM ingredients WHERE id = ?').get(id);
-  enqueueIngredientPhoto(db, userId, id);
-
-  return c.json(
-    {
-      success: true,
-      data: ingredient
-    },
-    201
-  );
+  if ('error' in result) {
+    return result.error === 'invalid_action_id'
+      ? c.json({ success: false, code: 'ASSISTANT_ACTION_ID_INVALID' }, 400)
+      : c.json({ success: false, code: 'ASSISTANT_ACTION_ID_CONFLICT' }, 409);
+  }
+  return c.json(result.body, result.status);
 });
 
 // PATCH /api/pantry/ingredients/:id
@@ -755,8 +791,8 @@ export { pantryRoutes };
 
 type Casa = { userId: string; householdId: string | null };
 
-function scopeDePantry(userId: string): Casa {
-  const scope = getUserScope(userId);
+function scopeDePantry(userId: string, householdSnapshot?: string | null): Casa {
+  const scope = getUserScope(userId, householdSnapshot);
   // `householdId` solo viene puesto cuando la casa comparte la despensa: el ambito del catalogo es, a
   // proposito, el mismo ambito de las filas. Categorias que no se ven con los articulos que agrupan son la
   // mitad del bug que hacia que «Otros» se llenara solo.

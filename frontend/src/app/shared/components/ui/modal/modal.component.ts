@@ -80,6 +80,15 @@ const FOCUSABLE_SELECTOR =
         animation: scaleIn var(--duration-200) var(--ease-out);
       }
 
+      @media (prefers-reduced-motion: reduce) {
+        .modal-overlay,
+        .modal,
+        .modal__close {
+          animation: none;
+          transition: none;
+        }
+      }
+
       .modal--sm {
         width: 100%;
         max-width: 400px;

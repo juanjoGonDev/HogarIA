@@ -36,6 +36,7 @@ import { profileEs, profileEn } from './dict/profile';
 import { settingsEs, settingsEn } from './dict/settings';
 import { tasteEs, tasteEn } from './dict/taste';
 import { aiParticipantsEs, aiParticipantsEn } from './dict/ai_participants';
+import { aiActionAssistantEs, aiActionAssistantEn } from './dict/ai_action_assistant';
 
 const es = {
   ...homeProfilePickerEs,
@@ -61,6 +62,7 @@ const es = {
   ...settingsEs,
   ...tasteEs,
   ...aiParticipantsEs,
+  ...aiActionAssistantEs,
   ...uiEs
 };
 
@@ -88,6 +90,7 @@ const en: Record<keyof typeof es, string> = {
   ...settingsEn,
   ...tasteEn,
   ...aiParticipantsEn,
+  ...aiActionAssistantEn,
   ...uiEn
 };
 

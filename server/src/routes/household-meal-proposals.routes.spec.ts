@@ -1870,8 +1870,9 @@ describe('household meal proposal preview route', () => {
       weekStart: WEEK_START,
       householdMemberIds: [planner.membershipId, second.membershipId],
       recipes: preview.data.recipes,
-      events: preview.data.events.map((event: Record<string, any>) => ({
+      events: preview.data.events.map((event: Record<string, any>, index: number) => ({
         ...event,
+        servings: index === 0 ? 3 : event.servings,
         // These echoed IDs are deliberately tampered with; the route must derive them from aliases.
         participantIds: ['not-a-household-member']
       }))
@@ -1883,6 +1884,7 @@ describe('household meal proposal preview route', () => {
     expect(firstJson).toMatchObject({ success: true, data: { idempotent: false } });
     expect(firstJson.data.events).toHaveLength(7);
     expect(firstJson.data.events[0].participantIds).toEqual([planner.id, second.id]);
+    expect(firstJson.data.events[0].servings).toBe(3);
     expect(firstJson.data.events[0].recipeSnapshot).toMatchObject({
       name: 'Arroz con verduras',
       baseServings: 1,

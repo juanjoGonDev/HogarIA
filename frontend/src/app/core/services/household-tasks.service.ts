@@ -33,14 +33,27 @@ export class HouseholdTasksService {
     householdId: string,
     weekStart: string,
     baseVersion: number,
-    tasks: HouseholdTaskOccurrence[]
+    tasks: HouseholdTaskOccurrence[],
+    assistantActionId?: string,
+    assistantAction?: {
+      operation: 'update_task';
+      targetId: string;
+      before: HouseholdTaskOccurrence;
+    }
   ): Observable<VersionedHouseholdTaskWeek> {
+    let headers = this.householdHeaders(householdId);
+    if (assistantActionId) headers = headers.set('x-assistant-action-id', assistantActionId);
+    const body = {
+      weekStart,
+      baseVersion,
+      tasks,
+      ...(assistantAction ? { assistantAction } : {})
+    };
     return this.http
-      .put<ApiEnvelope<VersionedHouseholdTaskWeek>>(
-        this.apiUrl,
-        { weekStart, baseVersion, tasks },
-        { headers: this.householdHeaders(householdId), context: this.silentContext }
-      )
+      .put<ApiEnvelope<VersionedHouseholdTaskWeek>>(this.apiUrl, body, {
+        headers,
+        context: this.silentContext
+      })
       .pipe(map((response) => response.data));
   }
 

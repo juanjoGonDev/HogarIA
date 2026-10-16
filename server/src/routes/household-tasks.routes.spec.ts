@@ -153,6 +153,19 @@ describe('household task week routes', () => {
     });
   }
 
+  function callAssistantUpdate(user: User, body: unknown, actionId: string) {
+    return app.request('/api/household/tasks', {
+      method: 'PUT',
+      headers: {
+        authorization: `Bearer ${user.token}`,
+        'content-type': 'application/json',
+        'x-household-id': currentHouseholdId(user) ?? '',
+        'x-assistant-action-id': actionId
+      },
+      body: JSON.stringify(body)
+    });
+  }
+
   function saveBody(tasks: HouseholdTaskOccurrence[], baseVersion = 0) {
     return { baseVersion, weekStart: '2026-10-05', tasks };
   }
@@ -210,6 +223,109 @@ describe('household task week routes', () => {
       success: false,
       code: 'HOUSEHOLD_CALENDAR_EDIT_REQUIRED'
     });
+  });
+
+  it('updates exactly one task with a preimage and replays the same approval idempotently', async () => {
+    makeHousehold('home-a');
+    const editor = makeUser('editor-a', 'home-a', { calendar: { edit: true } });
+    const before = task({ spaceId: null });
+    db.prepare(
+      `INSERT INTO household_task_weeks (household_id, week_start, version, tasks_json, updated_by)
+       VALUES (?, ?, ?, ?, ?)`
+    ).run('home-a', '2026-10-05', 3, JSON.stringify([before]), editor.id);
+    const actionId = '123e4567-e89b-42d3-a456-426614174000';
+    const updated = { ...before, title: 'Bajar reciclaje' };
+    const body = {
+      ...saveBody([updated], 3),
+      assistantAction: { operation: 'update_task', targetId: before.id, before }
+    };
+
+    const first = await callAssistantUpdate(editor, body, actionId);
+    expect(first.status).toBe(200);
+    const replay = await callAssistantUpdate(editor, body, actionId);
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toMatchObject({ success: true, idempotent: true });
+    expect(
+      db.prepare('SELECT version FROM household_task_weeks WHERE household_id = ?').get('home-a')
+    ).toEqual({ version: 4 });
+
+    const changedBody = {
+      ...saveBody([{ ...before, title: 'Poner lavadora' }], 3),
+      assistantAction: { operation: 'update_task', targetId: before.id, before }
+    };
+    const changedRetry = await callAssistantUpdate(editor, changedBody, actionId);
+    expect(changedRetry.status).toBe(409);
+    expect(await changedRetry.json()).toMatchObject({
+      success: false,
+      code: 'ASSISTANT_ACTION_ID_CONFLICT'
+    });
+    expect(
+      db.prepare('SELECT tasks_json FROM household_task_weeks WHERE household_id = ?').get('home-a')
+    ).toEqual({ tasks_json: JSON.stringify([updated]) });
+  });
+
+  it('rejects a stale task snapshot without changing the newer week', async () => {
+    makeHousehold('home-a');
+    const editor = makeUser('editor-a', 'home-a', { calendar: { edit: true } });
+    const before = task({ spaceId: null });
+    const newer = { ...before, title: 'Tarea editada en otra pestaña' };
+    db.prepare(
+      `INSERT INTO household_task_weeks (household_id, week_start, version, tasks_json, updated_by)
+       VALUES (?, ?, ?, ?, ?)`
+    ).run('home-a', '2026-10-05', 4, JSON.stringify([newer]), editor.id);
+    const actionId = '123e4567-e89b-42d3-a456-426614174001';
+    const staleBody = {
+      ...saveBody([{ ...before, details: 'Cambiar detalle' }], 3),
+      assistantAction: { operation: 'update_task', targetId: before.id, before }
+    };
+
+    const response = await callAssistantUpdate(editor, staleBody, actionId);
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ success: false, code: 'TASK_TARGET_CHANGED' });
+    expect(
+      db
+        .prepare('SELECT version, tasks_json FROM household_task_weeks WHERE household_id = ?')
+        .get('home-a')
+    ).toEqual({ version: 4, tasks_json: JSON.stringify([newer]) });
+  });
+
+  it('rejects a task target from another household without writing either week', async () => {
+    makeHousehold('home-a');
+    makeHousehold('home-b');
+    const editor = makeUser('editor-a', 'home-a', { calendar: { edit: true } });
+    const otherEditor = makeUser('editor-b', 'home-b', { calendar: { edit: true } });
+    const otherHouseholdTask = task({ id: 'foreign-task', spaceId: null });
+    db.prepare(
+      `INSERT INTO household_task_weeks (household_id, week_start, version, tasks_json, updated_by)
+       VALUES (?, ?, ?, ?, ?)`
+    ).run('home-b', '2026-10-05', 3, JSON.stringify([otherHouseholdTask]), otherEditor.id);
+    const proposedTask = { ...otherHouseholdTask, title: 'Tarea extranjera modificada' };
+    const response = await callAssistantUpdate(
+      editor,
+      {
+        ...saveBody([proposedTask], 0),
+        assistantAction: {
+          operation: 'update_task',
+          targetId: otherHouseholdTask.id,
+          before: otherHouseholdTask
+        }
+      },
+      '123e4567-e89b-42d3-a456-426614174002'
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ success: false, code: 'TASK_TARGET_CHANGED' });
+    expect(
+      db
+        .prepare('SELECT version, tasks_json FROM household_task_weeks WHERE household_id = ?')
+        .all('home-a')
+    ).toEqual([]);
+    expect(
+      db
+        .prepare('SELECT version, tasks_json FROM household_task_weeks WHERE household_id = ?')
+        .get('home-b')
+    ).toEqual({ version: 3, tasks_json: JSON.stringify([otherHouseholdTask]) });
   });
 
   it('accepts legacy admin membership and rejects malformed permission data or request bodies', async () => {

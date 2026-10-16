@@ -24,6 +24,22 @@ function bearerToken(c: Context): string | null {
 }
 
 export async function authMiddleware(c: Context<AppEnv>, next: Next): Promise<Response | void> {
+  return authenticate(c, next, true);
+}
+
+/** Authentication for endpoints whose contract forbids repairing user state during a read. */
+export async function readOnlyAuthMiddleware(
+  c: Context<AppEnv>,
+  next: Next
+): Promise<Response | void> {
+  return authenticate(c, next, false);
+}
+
+async function authenticate(
+  c: Context<AppEnv>,
+  next: Next,
+  repairStaleHouseholdSelection: boolean
+): Promise<Response | void> {
   const token = bearerToken(c);
 
   if (!token) {
@@ -97,7 +113,9 @@ export async function authMiddleware(c: Context<AppEnv>, next: Next): Promise<Re
 
     if (selection?.household_id && selection.membership_active !== 1) {
       if (activeMemberships.count === 0) {
-        db.prepare('UPDATE users SET household_id = NULL WHERE id = ?').run(payload.sub);
+        if (repairStaleHouseholdSelection) {
+          db.prepare('UPDATE users SET household_id = NULL WHERE id = ?').run(payload.sub);
+        }
       } else if (!selectionRoute) {
         return c.json({ success: false, code: 'HOUSEHOLD_SELECTION_REQUIRED' }, 409);
       }

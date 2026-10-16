@@ -11,8 +11,12 @@
 
 import { z } from 'zod';
 import { isIP } from 'node:net';
-import { activeHouseholdId, hasActiveHouseholdMemberships } from './household-context.js';
-import type { AiResponseFormat } from '../schemas/ai-response-format.js';
+import {
+  activeHouseholdId,
+  hasActiveHouseholdMemberships,
+  readActiveHouseholdId
+} from './household-context.js';
+import type { AiCallResponseFormat, AiResponseFormat } from '../schemas/ai-response-format.js';
 
 export type AiMessagePart =
   | { type: 'text'; text: string }
@@ -81,6 +85,13 @@ export class AiCallError extends Error {
 /** La fila activa de `ai_config`: se lee siempre desde la BD, no se guarda en memoria. */
 export function activeAiConfig(db: SqlDb, userId: string) {
   const householdId = activeHouseholdId(db, userId);
+  if (!householdId && hasActiveHouseholdMemberships(db, userId)) return undefined;
+  return activeAiConfigForScope(db, userId, householdId);
+}
+
+/** Resolve provider config without repairing household selection during read-only assistant requests. */
+export function readOnlyActiveAiConfig(db: SqlDb, userId: string) {
+  const householdId = readActiveHouseholdId(db, userId);
   if (!householdId && hasActiveHouseholdMemberships(db, userId)) return undefined;
   return activeAiConfigForScope(db, userId, householdId);
 }
@@ -215,7 +226,7 @@ export async function callAI(
 export async function callAIWithConfig(
   active: AiConfigRow,
   messages: AiMessage[],
-  responseFormat: AiResponseFormat,
+  responseFormat: AiCallResponseFormat,
   signal?: AbortSignal
 ): Promise<string> {
   const apiKey = resolveProviderApiKey(active.base_url, active.api_key);
