@@ -14,7 +14,7 @@ import type {
 } from '../../shared/models/household-plan.model';
 import type { HouseholdMember } from '../../shared/models/household.model';
 
-const TEST_DICTS = {
+const TEST_DICTS: Record<'es' | 'en', Record<string, string>> = {
   es: { ...DICTS.es, ...householdEs },
   en: { ...DICTS.en, ...householdEn }
 };

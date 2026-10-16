@@ -1,5 +1,6 @@
 import { DICTS } from './index';
 import { householdEs, householdEn } from './dict/household';
+import { recipesEs, recipesEn } from './dict/recipes';
 
 /**
  * El diccionario, por dentro. `check-ui` (reglas 15 y 20) ya vigila que una clave usada exista en los dos
@@ -14,8 +15,8 @@ import { householdEs, householdEn } from './dict/household';
  *    («Gluten», «Soy»), que son iguales en los dos idiomas por naturaleza.
  */
 describe('diccionario simetrico', () => {
-  const es = { ...DICTS.es, ...householdEs } as Record<string, string>;
-  const en = { ...DICTS.en, ...householdEn } as Record<string, string>;
+  const es = { ...DICTS.es, ...householdEs, ...recipesEs } as Record<string, string>;
+  const en = { ...DICTS.en, ...householdEn, ...recipesEn } as Record<string, string>;
   const claveDe = (dict: Record<string, string>) => Object.keys(dict).sort();
 
   it('tiene las mismas claves en los dos idiomas', () => {

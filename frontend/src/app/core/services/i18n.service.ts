@@ -26,6 +26,8 @@ type HouseholdDictionary = {
   en: Readonly<Record<string, string>>;
 };
 
+type RecipeDictionary = HouseholdDictionary;
+
 @Injectable({ providedIn: 'root' })
 export class I18nService {
   private readonly LANG_KEY = STORAGE_KEYS.language;
@@ -33,6 +35,8 @@ export class I18nService {
   private resolvedSignal = signal<ResolvedLanguage>(this.resolve(this.getStoredLang()));
   private householdDictionary: HouseholdDictionary | null = null;
   private householdDictionaryLoad: Promise<void> | null = null;
+  private recipeDictionary: RecipeDictionary | null = null;
+  private recipeDictionaryLoad: Promise<void> | null = null;
 
   readonly lang = this.langSignal.asReadonly();
   readonly resolved = this.resolvedSignal.asReadonly();
@@ -94,6 +98,23 @@ export class I18nService {
     return this.householdDictionaryLoad;
   }
 
+  /** La biblioteca de recetas carga ambos idiomas al entrar en su ruta, no en el bundle inicial. */
+  loadRecipeTranslations(): Promise<void> {
+    if (this.recipeDictionary) return Promise.resolve();
+    if (!this.recipeDictionaryLoad) {
+      this.recipeDictionaryLoad = import('../i18n/dict/recipes')
+        .then(({ recipesEs, recipesEn }) => {
+          this.recipeDictionary = { es: recipesEs, en: recipesEn };
+          this.changeTick.update((value) => value + 1);
+        })
+        .catch((error: unknown) => {
+          this.recipeDictionaryLoad = null;
+          throw error;
+        });
+    }
+    return this.recipeDictionaryLoad;
+  }
+
   /**
    * El texto de una clave, con sustitucion simple de {placeholder}.
    *
@@ -151,11 +172,14 @@ export class I18nService {
     const activeDictionary = DICTS[language] as Record<string, string>;
     const spanishDictionary = DICTS.es as Record<string, string>;
     const householdDictionary = this.householdDictionary;
+    const recipeDictionary = this.recipeDictionary;
     const encontrada =
       activeDictionary[key] ??
       householdDictionary?.[language][key] ??
+      recipeDictionary?.[language][key] ??
       spanishDictionary[key] ??
-      householdDictionary?.es[key];
+      householdDictionary?.es[key] ??
+      recipeDictionary?.es[key];
     let str: string = encontrada ?? key;
     if (encontrada === undefined && !environment.production) {
       // Un hueco de texto de Angular acepta cualquier `string`, asi que una clave que no existe NO falla: se

@@ -163,6 +163,26 @@ describe('I18nService', () => {
     expect(i18n.changeTick()).toBe(changeTickAfterLoad);
   });
 
+  it('loads recipe translations lazily once for both languages', async () => {
+    const i18n = injectService();
+    const dictionaries = DICTS.es as Record<string, string>;
+    const changeTickBeforeLoad = i18n.changeTick();
+
+    expect(dictionaries['recipes.title']).toBeUndefined();
+    await Promise.all([i18n.loadRecipeTranslations(), i18n.loadRecipeTranslations()]);
+
+    expect(i18n.changeTick()).toBe(changeTickBeforeLoad + 1);
+    expect(i18n.t('recipes.title')).toBe('Recetas');
+
+    i18n.setLang('en');
+    TestBed.flushEffects();
+    expect(i18n.t('recipes.title')).toBe('Recipes');
+
+    const changeTickAfterLoad = i18n.changeTick();
+    await i18n.loadRecipeTranslations();
+    expect(i18n.changeTick()).toBe(changeTickAfterLoad);
+  });
+
   it('returns and warns with a missing key in development, but stays quiet in production', () => {
     const i18n = injectService();
     const missingKey = 'test.missing.translation' as TranslationKey;

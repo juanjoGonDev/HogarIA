@@ -33,7 +33,6 @@ import { pantryEs, pantryEn } from './dict/pantry';
 import { receiptsEs, receiptsEn } from './dict/receipts';
 import { preferencesEs, preferencesEn } from './dict/preferences';
 import { profileEs, profileEn } from './dict/profile';
-import { recipesEs, recipesEn } from './dict/recipes';
 import { settingsEs, settingsEn } from './dict/settings';
 import { tasteEs, tasteEn } from './dict/taste';
 import { aiParticipantsEs, aiParticipantsEn } from './dict/ai_participants';
@@ -59,7 +58,6 @@ const es = {
   ...preferencesEs,
   ...receiptsEs,
   ...profileEs,
-  ...recipesEs,
   ...settingsEs,
   ...tasteEs,
   ...aiParticipantsEs,
@@ -87,7 +85,6 @@ const en: Record<keyof typeof es, string> = {
   ...preferencesEn,
   ...receiptsEn,
   ...profileEn,
-  ...recipesEn,
   ...settingsEn,
   ...tasteEn,
   ...aiParticipantsEn,
@@ -97,7 +94,10 @@ const en: Record<keyof typeof es, string> = {
 export const DICTS = { es, en };
 
 /** Claves estáticas y del diccionario hogar, cargado bajo demanda al entrar en su ruta. */
-export type TranslationKey = keyof typeof es | keyof typeof import('./dict/household').householdEs;
+export type TranslationKey =
+  | keyof typeof es
+  | keyof typeof import('./dict/household').householdEs
+  | keyof typeof import('./dict/recipes').recipesEs;
 
 /** Lo que hay que traducir, por si manana el diccionario viene de un JSON y no de un literal. */
 /**

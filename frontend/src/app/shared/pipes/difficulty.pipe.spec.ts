@@ -1,5 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { DICTS, type TranslationKey } from '../../core/i18n';
+import { recipesEn, recipesEs } from '../../core/i18n/dict/recipes';
 import { DifficultyPipe, difficultyLabel } from './difficulty.pipe';
 import { I18nService } from '../../core/services/i18n.service';
 
@@ -7,7 +8,8 @@ import { I18nService } from '../../core/services/i18n.service';
  * `t` se le pasa por parametro y el diccionario en espanol es el de verdad: el pipe no tiene logica propia,
  * y lo que puede romperse es el reparto de claves, el punto de color y el «esto no es una dificultad».
  */
-const es = (key: TranslationKey) => (DICTS.es as Record<string, string>)[key] ?? key;
+const es = (key: TranslationKey) =>
+  (({ ...DICTS.es, ...recipesEs }) as Record<string, string>)[key] ?? key;
 
 describe('difficultyLabel', () => {
   it('traduce las tres', () => {
@@ -17,7 +19,8 @@ describe('difficultyLabel', () => {
   });
 
   it('la marca no la cambia el idioma', () => {
-    const en = (key: TranslationKey) => (DICTS.en as Record<string, string>)[key] ?? key;
+    const en = (key: TranslationKey) =>
+      (({ ...DICTS.en, ...recipesEn }) as Record<string, string>)[key] ?? key;
     expect(difficultyLabel('easy', en)).toBe('Easy');
     expect(difficultyLabel('hard', en)).toBe('Hard');
   });
@@ -43,13 +46,14 @@ describe('difficultyLabel', () => {
 });
 
 describe('DifficultyPipe', () => {
-  it('uses the active language without adding an icon', () => {
+  it('uses the active language without adding an icon', async () => {
     TestBed.configureTestingModule({ providers: [DifficultyPipe, I18nService] });
     const i18n = TestBed.inject(I18nService);
+    await i18n.loadRecipeTranslations();
     const pipe = TestBed.inject(DifficultyPipe);
     const label = pipe.transform('medium');
 
-    expect(label).toBe(i18n.t('recipes.medio'));
+    expect(label).toBe('Medio');
     expect(label).not.toMatch(/\p{Extended_Pictographic}/u);
   });
 });
