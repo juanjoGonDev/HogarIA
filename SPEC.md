@@ -30,7 +30,7 @@ El checklist anterior de este archivo decía que la unidad de recetas no ampliab
 ### P0 — Contrato, seguridad y flujo HITL
 
 - [x] El usuario confirma que este trabajo amplía el PR #47; queda prohibido abrir otro PR.
-- [ ] Actualizar el cuerpo del PR #47 con el alcance, invariantes y gates de esta spec; confirmar Draft antes de implementar.
+- [x] Actualizar el cuerpo del PR #47 con el alcance, invariantes y gates de esta spec; confirmar Draft antes de implementar.
 - [ ] Definir esquemas estrictos compartidos para solicitud, plan, acción, edición y estado: ID estable generado por la app, dominio/tipo allowlist, payload editable tipado, dependencias, advertencias, selección y estado de ejecución. Rechazar campos/acciones desconocidas; no aceptar instrucciones ejecutables ni confiar IDs/authorization generados por IA.
 - [ ] Añadir generación universal por lotes (intenciones múltiples y entre dominios) con fechas/cantidades naturales, ambigüedad y contexto mínimo de ruta/hogar. Prompt injection en texto/contexto recuperado se trata como dato no confiable.
 - [ ] Generar y refinar propuestas sin escritura persistente. Refinar lote/grupo/acción/campo con alcance explícito; conservar acciones no afectadas y ediciones manuales salvo que se pidan reemplazar; soportar repetición, dependencias coherentes y descartar/deshacer cuando sea práctico.
@@ -63,6 +63,14 @@ El checklist anterior de este archivo decía que la unidad de recetas no ampliab
 3. Integrar FAB/input/propuesta/refinamiento accesibles con pruebas de componente.
 4. Añadir integración de dominios por unidades revisables, cada una con persistencia aprobada y prueba idempotente.
 5. Cerrar E2E real, matriz visual, rendimiento, checklist y entrega sin tocar cambios ajenos.
+
+## Evidencia de spec/PR previa a implementación (2026-10-16)
+
+- PR #47 actualizado en GitHub: título `feat(household): plans, chores + global AI assistant`, alcance y nuevos riesgos visibles; estado devuelto por GitHub: abierto, Draft, sin merge. HEAD remoto `403999e` contiene los commits de spec `29aedbe` y `403999e`.
+- Hooks pre-commit para ambas unidades de spec: Prettier pasa y `pnpm run check:ui` pasa (256 ficheros, 21 reglas).
+- Hook pre-push: `format-check`, `check:ui`, build de producción y `typecheck:e2e` pasan. Build mantiene budgets; bundle inicial 962,15 kB con warnings existentes de presupuesto, sin bajar umbrales.
+- Hook pre-push unit tests con `DATABASE_PATH=:memory:`: configuración pasa, cliente 1.598/1.598; coverage cliente 91,98 % statements, 82,79 % branches, 92,85 % functions y 94,31 % lines; servidor 1.856 pasa, 1 omitido. Sin escrituras a DB normal ni petición a proveedor IA.
+- Aún no comenzó implementación del asistente; los demás checkboxes siguen pendientes.
 
 ---
 
