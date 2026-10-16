@@ -11,6 +11,7 @@
 - [ ] Ejecutar Playwright real sobre la app y backend con almacenamiento temporal aislado. Cubrir biblioteca→ficha→cocina y alta/edición; probar mejora con proveedor local real si está disponible y seguro. Pruebas repetibles de terceros siguen simuladas; no escribir en la DB normal ni registrar secretos/datos personales.
 - [ ] Validar escritorio, tablet y móvil (incluidos 320 px y horizontal), teclado/tacto, reduced-motion, safe-area, estados/error/vacío y ausencia de overflow; inspeccionar y guardar capturas sintéticas PC/tablet/móvil ignoradas por Git.
 - [ ] Ejecutar pruebas focales primero y luego gates aplicables: cobertura ≥70 % S/B/F/L en alcance, typecheck, `check:ui`, build y suites requeridas. Registrar comandos, resultados y limitaciones en el contrato activo.
+- [ ] Mantener `pnpm run build` bajo los budgets existentes. Si la integración eleva el bundle inicial, dividir código no crítico en chunk diferido; no rebajar budgets. Revalidar que el gesto móvil siga listo antes de interacción real.
 - [ ] Revalidar geometría comparable de elementos equivalentes (≤1 CSS px), diff/árbol de trabajo y Draft PR; commits atómicos en la rama actual, hooks activos, push a `origin` sin force-push.
 
 ## Restricciones
@@ -18,3 +19,7 @@
 - No cambiar de rama, abrir otro PR, trabajar tareas del plano del hogar ni modificar dependencias fuera de necesidad demostrada.
 - Preservar cambios existentes staged, unstaged y sin seguimiento; no incluirlos en commits salvo unidad del checklist revisada y atribuible.
 - No marcar criterios completos sin evidencia reproducible. No hacer merge ni cambiar el PR a Ready.
+
+## Hallazgo de validación
+
+- En árbol de trabajo, `pnpm run build` falla: bundle inicial 1,005.55 kB frente al máximo de 1 MB. El mismo comando en worktree limpio de `HEAD` (`f148fe7`) pasa con 993.09 kB. No bajar budgets; aislar el peso incremental de la integración antes de corregirlo.
