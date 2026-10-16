@@ -55,6 +55,7 @@ export class AiActionAssistantExecutionService {
     const payloadSnapshot = JSON.stringify({
       kind: action.kind,
       payload: action.payload,
+      executionTarget: action.executionTarget ?? null,
       householdId: expectedHouseholdId,
       ...(action.kind === 'household.plan_meals' ? { mealProposal } : {})
     });
@@ -95,6 +96,10 @@ export class AiActionAssistantExecutionService {
           expectedHouseholdId,
           action.id
         );
+        return;
+
+      case 'pantry.update_ingredient':
+        await this.updatePantryIngredient(action, expectedHouseholdId);
         return;
 
       case 'shopping.create_list':
@@ -412,6 +417,78 @@ export class AiActionAssistantExecutionService {
     if (response?.success !== true) throw new Error('ASSISTANT_DOMAIN_WRITE_REJECTED');
   }
 
+  private async updatePantryIngredient(
+    action: Extract<AssistantAction, { kind: 'pantry.update_ingredient' }>,
+    householdId: string | null
+  ): Promise<void> {
+    const target = action.executionTarget;
+    const { changes } = action.payload;
+    if (
+      !target ||
+      target.kind !== 'pantry-ingredient' ||
+      !target.id ||
+      this.comparablePantryName(target.snapshot.name) !==
+        this.comparablePantryName(action.payload.targetName)
+    ) {
+      throw new Error('ASSISTANT_INGREDIENT_TARGET_INVALID');
+    }
+
+    const requestChanges: {
+      name?: string;
+      category?: string;
+      quantity?: number;
+      unit?: string;
+      expirationDate?: string | null;
+      location?: string;
+      notes?: string | null;
+    } = {};
+    const selectedFields = [
+      ['name', changes.name, changes.setName],
+      ['category', changes.category, changes.setCategory],
+      ['quantity', changes.quantity, changes.setQuantity],
+      ['unit', changes.unit, changes.setUnit],
+      ['expirationDate', changes.expirationDate, changes.setExpirationDate],
+      ['location', changes.location, changes.setLocation],
+      ['notes', changes.notes, changes.setNotes]
+    ] as const;
+    for (const [field, value, selected] of selectedFields) {
+      if (selected) {
+        if (value === null && field !== 'expirationDate' && field !== 'notes') {
+          throw new Error('ASSISTANT_INGREDIENT_PATCH_INVALID');
+        }
+        Object.assign(requestChanges, { [field]: value });
+      } else if (value !== null) {
+        throw new Error('ASSISTANT_INGREDIENT_PATCH_INVALID');
+      }
+    }
+    if (
+      Object.entries(requestChanges).every(
+        ([field, value]) => value === target.snapshot[field as keyof typeof target.snapshot]
+      )
+    ) {
+      throw new Error('ASSISTANT_INGREDIENT_NO_CHANGE');
+    }
+
+    const response = await firstValueFrom(
+      this.http.patch<ApiEnvelope<unknown>>(
+        `${this.apiUrl}/pantry/ingredients/${encodeURIComponent(target.id)}/assistant-update`,
+        {
+          changes: requestChanges,
+          assistantAction: {
+            operation: 'update_ingredient',
+            targetId: target.id,
+            before: target.snapshot
+          }
+        },
+        {
+          context: this.silentContext,
+          headers: this.householdHeaders(householdId).set('x-assistant-action-id', action.id)
+        }
+      )
+    );
+    if (response?.success !== true) throw new Error('ASSISTANT_DOMAIN_WRITE_REJECTED');
+  }
+
   private async post(
     path: string,
     body: unknown,
@@ -457,6 +534,10 @@ export class AiActionAssistantExecutionService {
       .normalize('NFC')
       .trim()
       .toLocaleLowerCase();
+  }
+
+  private comparablePantryName(value: string): string {
+    return value.normalize('NFC').replace(/\s+/g, ' ').trim().toLowerCase();
   }
 
   private sameTask(left: HouseholdTaskOccurrence, right: HouseholdTaskOccurrence): boolean {

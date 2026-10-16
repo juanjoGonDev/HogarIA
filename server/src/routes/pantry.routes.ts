@@ -20,6 +20,7 @@ import {
 } from '../schemas/pantry.schema.js';
 import {
   PROTECTED_PANTRY_KEY,
+  DEFAULT_PANTRY_CATEGORIES,
   PantryCategoryProtectedError,
   createCategory,
   deleteImpact,
@@ -42,6 +43,7 @@ import { nanoid } from 'nanoid';
 import { getDatabase } from '../config/database.js';
 import { authMiddleware } from '../middleware/auth.middleware.js';
 import {
+  ASSISTANT_HOUSEHOLD_HEADER,
   ASSISTANT_HOUSEHOLD_CONTEXT_CHANGED,
   assistantHouseholdContextMiddleware,
   currentAssistantHouseholdSnapshot
@@ -50,6 +52,11 @@ import {
   ASSISTANT_ACTION_ID_HEADER,
   withAssistantActionIdempotency
 } from '../utils/assistant-action-idempotency.js';
+import {
+  assistantPantryIngredientScope,
+  comparablePantryIngredientName,
+  comparablePantryIngredientUpdatedAt
+} from '../utils/assistant-pantry-ingredient-scope.js';
 import { activeHouseholdId } from '../utils/household-context.js';
 import { queueProductImageSearch } from '../utils/product-image-search.js';
 import {
@@ -60,6 +67,7 @@ import {
   updateUtensilSchema,
   utensilFilterSchema
 } from '../schemas/pantry.schema.js';
+import { assistantUpdateIngredientSchema } from '../schemas/ai-assistant-pantry-update.schema.js';
 import type { AppEnv } from '../types/hono-env.js';
 
 const pantryRoutes = new Hono<AppEnv>();
@@ -474,6 +482,205 @@ pantryRoutes.patch('/ingredients/:id', async (c) => {
     success: true,
     data: ingredient
   });
+});
+
+pantryRoutes.patch('/ingredients/:id/assistant-update', async (c) => {
+  const actionId = c.req.header(ASSISTANT_ACTION_ID_HEADER);
+  if (!actionId) return c.json({ success: false, code: 'ASSISTANT_ACTION_ID_REQUIRED' }, 400);
+  if (c.req.header(ASSISTANT_HOUSEHOLD_HEADER) === undefined) {
+    return c.json({ success: false, code: 'ASSISTANT_HOUSEHOLD_CONTEXT_REQUIRED' }, 400);
+  }
+
+  const body = assistantUpdateIngredientSchema.parse(await c.req.json());
+  const targetId = c.req.param('id');
+  if (body.assistantAction.targetId !== targetId) {
+    return c.json({ success: false, code: 'ASSISTANT_ACTION_TARGET_MISMATCH' }, 400);
+  }
+
+  const db = getDatabase();
+  const userId = c.get('userId');
+  const assistantSnapshot = currentAssistantHouseholdSnapshot(c);
+  if (!assistantSnapshot.valid) {
+    return c.json({ success: false, code: ASSISTANT_HOUSEHOLD_CONTEXT_CHANGED }, 409);
+  }
+  const scope = assistantPantryIngredientScope(userId, assistantSnapshot.householdId ?? null);
+  const before = body.assistantAction.before;
+  const result = withAssistantActionIdempotency(
+    db,
+    userId,
+    actionId,
+    {
+      operation: 'pantry.update_ingredient',
+      householdId: scope.householdId,
+      ingredientId: targetId,
+      before,
+      changes: body.changes
+    },
+    () => {
+      if (!currentAssistantHouseholdSnapshot(c).valid) {
+        return {
+          body: { success: false, code: ASSISTANT_HOUSEHOLD_CONTEXT_CHANGED },
+          status: 409,
+          record: false
+        };
+      }
+
+      const ingredient = db
+        .prepare(
+          `SELECT id, name, category, quantity, unit, expiration_date, location, notes, updated_at
+             FROM ingredients WHERE id = ? AND ${scope.clause}`
+        )
+        .get(targetId, ...scope.params) as
+        | {
+            id: string;
+            name: string;
+            category: string;
+            quantity: number;
+            unit: string;
+            expiration_date: string | null;
+            location: string | null;
+            notes: string | null;
+            updated_at: string | null;
+          }
+        | undefined;
+      if (!ingredient) {
+        return {
+          body: { success: false, message: 'Ingredient not found' },
+          status: 404,
+          record: false
+        };
+      }
+
+      const current = {
+        name: ingredient.name,
+        category: ingredient.category,
+        quantity: Number(ingredient.quantity),
+        unit: ingredient.unit,
+        expirationDate: ingredient.expiration_date,
+        location: ingredient.location,
+        notes: ingredient.notes,
+        updatedAt: ingredient.updated_at
+      };
+      if (
+        current.name !== before.name ||
+        current.category !== before.category ||
+        current.quantity !== before.quantity ||
+        current.unit !== before.unit ||
+        current.expirationDate !== before.expirationDate ||
+        current.location !== before.location ||
+        current.notes !== before.notes ||
+        comparablePantryIngredientUpdatedAt(current.updatedAt) !==
+          comparablePantryIngredientUpdatedAt(before.updatedAt)
+      ) {
+        return {
+          body: { success: false, code: 'ASSISTANT_INGREDIENT_STALE' },
+          status: 409,
+          record: false
+        };
+      }
+
+      const updates = Object.entries(body.changes).filter(
+        ([field, value]) => value !== current[field as keyof typeof current]
+      );
+      if (updates.length === 0) {
+        return {
+          body: { success: false, code: 'ASSISTANT_ACTION_NO_CHANGE' },
+          status: 400,
+          record: false
+        };
+      }
+
+      if (body.changes.name !== undefined && body.changes.name !== current.name) {
+        const otherNames = db
+          .prepare(`SELECT id, name FROM ingredients WHERE ${scope.clause} AND id != ?`)
+          .all(...scope.params, targetId) as Array<{ id: string; name: string }>;
+        if (
+          otherNames.some(
+            (row) =>
+              comparablePantryIngredientName(row.name) ===
+              comparablePantryIngredientName(body.changes.name!)
+          )
+        ) {
+          return {
+            body: { success: false, code: 'ASSISTANT_INGREDIENT_NAME_CONFLICT' },
+            status: 409,
+            record: false
+          };
+        }
+      }
+
+      if (body.changes.category !== undefined) {
+        const pantryScope = scopeDePantry(userId, scope.householdId);
+        if (!findCategoryByKey(db, pantryScope, body.changes.category)) {
+          if (
+            DEFAULT_PANTRY_CATEGORIES.some((category) => category.key === body.changes.category)
+          ) {
+            ensureDefaultCategories(db, pantryScope.userId, pantryScope.householdId);
+          }
+          if (!findCategoryByKey(db, pantryScope, body.changes.category)) {
+            return {
+              body: { success: false, code: 'PANTRY_CATEGORY_UNKNOWN' },
+              status: 400,
+              record: false
+            };
+          }
+        }
+      }
+
+      const columnByField = {
+        name: 'name',
+        category: 'category',
+        quantity: 'quantity',
+        unit: 'unit',
+        expirationDate: 'expiration_date',
+        location: 'location',
+        notes: 'notes'
+      } as const;
+      const assignments = updates.map(
+        ([field]) => `${columnByField[field as keyof typeof columnByField]} = ?`
+      );
+      assignments.push('updated_at = CURRENT_TIMESTAMP');
+      const write = db
+        .prepare(
+          `UPDATE ingredients SET ${assignments.join(', ')}
+             WHERE id = ? AND ${scope.clause}
+               AND name IS ? AND category IS ? AND quantity IS ? AND unit IS ?
+               AND expiration_date IS ? AND location IS ? AND notes IS ? AND updated_at IS ?`
+        )
+        .run(
+          ...updates.map(([, value]) => value),
+          targetId,
+          ...scope.params,
+          current.name,
+          current.category,
+          current.quantity,
+          current.unit,
+          current.expirationDate,
+          current.location,
+          current.notes,
+          current.updatedAt
+        );
+      if (write.changes !== 1) {
+        return {
+          body: { success: false, code: 'ASSISTANT_INGREDIENT_STALE' },
+          status: 409,
+          record: false
+        };
+      }
+
+      const updatedIngredient = db
+        .prepare(`SELECT * FROM ingredients WHERE id = ? AND ${scope.clause}`)
+        .get(targetId, ...scope.params);
+      return { body: { success: true, data: updatedIngredient }, status: 200 };
+    }
+  );
+
+  if ('error' in result) {
+    return result.error === 'invalid_action_id'
+      ? c.json({ success: false, code: 'ASSISTANT_ACTION_ID_INVALID' }, 400)
+      : c.json({ success: false, code: 'ASSISTANT_ACTION_ID_CONFLICT' }, 409);
+  }
+  return c.json(result.body, result.status);
 });
 
 // DELETE /api/pantry/ingredients/:id

@@ -121,6 +121,7 @@ import {
   assistantActionPlanCandidateSchema,
   assistantActionRefinementCandidateSchema
 } from './ai-assistant.schema.js';
+import { assistantUpdateIngredientSchema } from './ai-assistant-pantry-update.schema.js';
 
 /**
  * EL CONTRATO DE LOS FORMULARIOS: lo opcional tiene que poder no llegar.
@@ -804,6 +805,27 @@ const ROWS: Row[] = [
     name: 'assistantActionPlanCandidateSchema',
     schema: assistantActionPlanCandidateSchema,
     required: { summary: 'Sin acciones.', actions: [], questions: [] }
+  },
+  {
+    name: 'assistantUpdateIngredientSchema',
+    schema: assistantUpdateIngredientSchema,
+    required: {
+      changes: { quantity: 0 },
+      assistantAction: {
+        operation: 'update_ingredient',
+        targetId: 'ingredient-1',
+        before: {
+          name: 'Yogur natural',
+          category: 'dairy',
+          quantity: 2,
+          unit: 'unit',
+          expirationDate: null,
+          location: 'fridge',
+          notes: null,
+          updatedAt: null
+        }
+      }
+    }
   },
   {
     name: 'assistantActionRefinementCandidateSchema',

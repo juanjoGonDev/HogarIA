@@ -217,6 +217,68 @@ describe('AiActionAssistantExecutionService', () => {
     await expectAsync(execution).toBeResolvedTo(undefined);
   });
 
+  it('sends only selected pantry changes with the server preimage and action id', async () => {
+    householdContext.activeHouseholdId.set('home-a');
+    const action = {
+      ...actionBase('pantry.update_ingredient', 'pantry', 'update_ingredient'),
+      kind: 'pantry.update_ingredient',
+      payload: {
+        targetName: '  Yogur   natural  ',
+        changes: {
+          name: 'Yogur griego',
+          setName: true,
+          category: null,
+          setCategory: false,
+          quantity: 0,
+          setQuantity: true,
+          unit: null,
+          setUnit: false,
+          expirationDate: null,
+          setExpirationDate: true,
+          location: null,
+          setLocation: false,
+          notes: null,
+          setNotes: true
+        }
+      },
+      executionTarget: {
+        kind: 'pantry-ingredient',
+        id: 'ingredient-1',
+        snapshot: {
+          name: 'Yogur natural',
+          category: 'dairy',
+          quantity: 2,
+          unit: 'unit',
+          expirationDate: '2026-10-20',
+          location: 'fridge',
+          notes: 'Desayuno',
+          updatedAt: '2026-10-16 10:00:00'
+        }
+      }
+    } as AssistantAction;
+
+    const execution = service.execute(action, 'home-a');
+    const request = http.expectOne('/api/pantry/ingredients/ingredient-1/assistant-update');
+    expect(request.request.method).toBe('PATCH');
+    expect(request.request.body).toEqual({
+      changes: {
+        name: 'Yogur griego',
+        quantity: 0,
+        expirationDate: null,
+        notes: null
+      },
+      assistantAction: {
+        operation: 'update_ingredient',
+        targetId: 'ingredient-1',
+        before: action.executionTarget!.snapshot
+      }
+    });
+    expect(request.request.headers.get('x-assistant-action-id')).toBe(action.id);
+    expect(request.request.headers.get('x-assistant-household-id')).toBe('home-a');
+    request.flush({ success: true, data: { id: 'ingredient-1' } });
+    await expectAsync(execution).toBeResolvedTo(undefined);
+  });
+
   it('blocks stale and cross-week task updates before sending a write', async () => {
     householdContext.activeHouseholdId.set('home-a');
     const before = {

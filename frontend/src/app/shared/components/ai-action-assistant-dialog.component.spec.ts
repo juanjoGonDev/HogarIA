@@ -6,6 +6,7 @@ import { AiActionAssistantService } from '../../core/services/ai-action-assistan
 import { AiActionAssistantExecutionService } from '../../core/services/ai-action-assistant-execution.service';
 import { HouseholdService } from '../../core/services/household.service';
 import { HouseholdMealProposalService } from '../../core/services/household-meal-proposal.service';
+import { PantryService } from '../../core/services/pantry.service';
 import type { HouseholdMealProposal } from '../../core/services/household-meal-proposal.service';
 import { I18nService } from '../../core/services/i18n.service';
 import type {
@@ -15,6 +16,7 @@ import type {
 } from '../models/ai-action-assistant.model';
 import type { AIRecipeResponse } from '../models/ai-config.model';
 import type { Household } from '../models/household.model';
+import type { PantryCategory } from '../models/pantry.model';
 import { AiActionAssistantDialogComponent } from './ai-action-assistant-dialog.component';
 
 describe('AiActionAssistantDialogComponent', () => {
@@ -23,6 +25,7 @@ describe('AiActionAssistantDialogComponent', () => {
   let assistant: jasmine.SpyObj<AiActionAssistantService>;
   let execution: jasmine.SpyObj<AiActionAssistantExecutionService>;
   let mealProposals: jasmine.SpyObj<HouseholdMealProposalService>;
+  let pantryService: jasmine.SpyObj<PantryService>;
   let householdContext: {
     activeHouseholdId: ReturnType<typeof signal<string | null>>;
     household: ReturnType<typeof signal<Household | null>>;
@@ -54,6 +57,36 @@ describe('AiActionAssistantDialogComponent', () => {
     );
     mealProposals.createAssistantProposal.and.returnValue(of(emptyMealProposal()));
     mealProposals.refineAssistantProposal.and.returnValue(of(emptyMealProposal()));
+    pantryService = jasmine.createSpyObj<PantryService>('PantryService', ['loadCategories'], {
+      categories: signal<PantryCategory[]>([
+        {
+          id: 'category-dairy',
+          key: 'dairy',
+          name: 'Lácteos',
+          color: '#abcdef',
+          description: null,
+          parentKey: null,
+          parentName: null,
+          position: 1,
+          counts: { products: 0, children: 0, descendantProducts: 0 },
+          protected: false,
+          canDelete: true
+        },
+        {
+          id: 'category-other',
+          key: 'other',
+          name: 'Otros',
+          color: '#abcdef',
+          description: null,
+          parentKey: null,
+          parentName: null,
+          position: 2,
+          counts: { products: 0, children: 0, descendantProducts: 0 },
+          protected: true,
+          canDelete: false
+        }
+      ])
+    });
     householdContext = {
       activeHouseholdId: signal<string | null>(null),
       household: signal<Household | null>(null)
@@ -66,6 +99,7 @@ describe('AiActionAssistantDialogComponent', () => {
         { provide: AiActionAssistantService, useValue: assistant },
         { provide: AiActionAssistantExecutionService, useValue: execution },
         { provide: HouseholdMealProposalService, useValue: mealProposals },
+        { provide: PantryService, useValue: pantryService },
         { provide: HouseholdService, useValue: householdContext }
       ]
     }).compileComponents();
@@ -383,6 +417,121 @@ describe('AiActionAssistantDialogComponent', () => {
     expect(confirmation.textContent).toContain('Compra del jueves');
     expect(confirmation.textContent).toContain('—');
     expect(confirmation.textContent).not.toContain('Alcampo');
+    expect(execution.execute).not.toHaveBeenCalled();
+  });
+
+  it('shows an ingredient preimage and keeps its reviewed pantry patch editable until approval', () => {
+    const action: AssistantAction = {
+      id: 'pantry-update-1',
+      kind: 'pantry.update_ingredient',
+      domain: 'pantry',
+      actionType: 'update_ingredient',
+      title: 'Actualizar yogur',
+      summary: 'Deja el yogur sin existencias.',
+      payload: {
+        targetName: '  Yogur   natural  ',
+        changes: {
+          name: 'Yogur griego',
+          setName: true,
+          category: null,
+          setCategory: false,
+          quantity: 0,
+          setQuantity: true,
+          unit: null,
+          setUnit: false,
+          expirationDate: null,
+          setExpirationDate: true,
+          location: null,
+          setLocation: false,
+          notes: null,
+          setNotes: false
+        }
+      },
+      executionTarget: {
+        kind: 'pantry-ingredient',
+        id: 'ingredient-1',
+        snapshot: {
+          name: 'Yogur natural',
+          category: 'dairy',
+          quantity: 2,
+          unit: 'unit',
+          expirationDate: '2026-10-20',
+          location: 'fridge',
+          notes: 'Desayuno',
+          updatedAt: '2026-10-16 10:00:00'
+        }
+      },
+      dependsOn: [],
+      warnings: [],
+      selected: false,
+      status: 'pending'
+    };
+    component.plan.set({
+      id: 'pantry-update-plan',
+      summary: 'Actualiza un ingrediente existente.',
+      actions: [action],
+      questions: []
+    });
+    component.stage.set('review');
+    fixture.detectChanges();
+
+    const target = fixture.nativeElement.querySelector(
+      '[data-test="ai-assistant-pantry-target"]'
+    ) as HTMLElement;
+    expect(target.textContent).toContain('Yogur natural');
+    expect(target.textContent).toContain('2 unit');
+    expect(target.textContent).toContain('Desayuno');
+    expect(component.isActionValid(action)).toBeTrue();
+    const categoryField = component
+      .editableFields(action)
+      .find((field) => field.path[1] === 'category');
+    expect(categoryField?.kind).toBe('select');
+    expect(categoryField?.choices).toContain(
+      jasmine.objectContaining({ value: 'dairy', label: 'Lácteos' })
+    );
+
+    const details = fixture.nativeElement.querySelector(
+      `[data-test="ai-assistant-action-details-${action.id}"]`
+    ) as HTMLDetailsElement;
+    details.open = true;
+    fixture.detectChanges();
+    const name = details.querySelector('input[type="text"]') as HTMLInputElement;
+    name.value = 'Yogur cremoso';
+    name.dispatchEvent(new Event('input', { bubbles: true }));
+    component.updateField(action.id, ['changes', 'quantity'], '0', 'number');
+    component.updateField(action.id, ['changes', 'category'], 'other');
+    component.updateField(action.id, ['changes', 'notes'], '', 'textarea');
+    fixture.detectChanges();
+
+    const edited = component.plan()!.actions[0];
+    expect(edited.payload).toEqual(
+      jasmine.objectContaining({
+        targetName: '  Yogur   natural  ',
+        changes: jasmine.objectContaining({
+          name: 'Yogur cremoso',
+          setName: true,
+          quantity: 0,
+          setQuantity: true,
+          category: 'other',
+          setCategory: true,
+          notes: null,
+          setNotes: true
+        })
+      })
+    );
+    expect(edited.executionTarget?.id).toBe('ingredient-1');
+    expect(component.isActionValid(edited)).toBeTrue();
+    expect(execution.execute).not.toHaveBeenCalled();
+
+    component.setSelected(action.id, true);
+    component.goToConfirmation();
+    fixture.detectChanges();
+    const confirmation = fixture.nativeElement.querySelector(
+      '[data-test="ai-assistant-confirm"]'
+    ) as HTMLElement;
+    expect(confirmation.textContent).toContain('Yogur natural');
+    expect(confirmation.textContent).toContain('Yogur cremoso');
+    expect(confirmation.textContent).toContain('0');
     expect(execution.execute).not.toHaveBeenCalled();
   });
 

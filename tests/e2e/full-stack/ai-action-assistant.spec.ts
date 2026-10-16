@@ -312,6 +312,44 @@ function shoppingUpdateProposal(executionTarget: Record<string, any>) {
   };
 }
 
+function pantryUpdateProposal(executionTarget: Record<string, any>) {
+  const update = action(
+    '99999999-9999-4999-8999-999999999999',
+    'pantry.update_ingredient',
+    'pantry',
+    'update_ingredient',
+    'Actualizar ingrediente existente',
+    {
+      targetName: executionTarget.snapshot.name,
+      changes: {
+        name: 'Azúcar propuesta QA',
+        setName: true,
+        category: null,
+        setCategory: false,
+        quantity: 250,
+        setQuantity: true,
+        unit: null,
+        setUnit: false,
+        expirationDate: null,
+        setExpirationDate: false,
+        location: null,
+        setLocation: false,
+        notes: null,
+        setNotes: false
+      }
+    }
+  );
+  return {
+    success: true,
+    data: {
+      id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+      summary: 'Edita un ingrediente existente.',
+      questions: [],
+      actions: [{ ...update, executionTarget }]
+    }
+  };
+}
+
 async function tokenOf(page: Page): Promise<string> {
   const token = await page.evaluate((key) => window.localStorage.getItem(key), TOKEN_KEY);
   expect(token, 'sesión de usuario sintético').toBeTruthy();
@@ -1758,5 +1796,294 @@ test('asistente global: conflicto de lista obsoleta no pisa el cambio concurrent
     name: 'Lista en conflicto QA',
     store: 'Competidor',
     version: list.version + 1
+  });
+});
+
+test('asistente global: edita un ingrediente propio solo tras confirmar y protege el replay', async ({
+  page
+}, testInfo) => {
+  let updateProposal: ReturnType<typeof pantryUpdateProposal>;
+  let proposalRequests = 0;
+  const assistantWrites: Array<{ body: any; actionId: string | undefined; headers: any }> = [];
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(`${error.name}: ${error.message}`));
+  page.on('request', (request) => {
+    if (
+      request.method() === 'PATCH' &&
+      new URL(request.url()).pathname.startsWith('/api/pantry/ingredients/') &&
+      new URL(request.url()).pathname.endsWith('/assistant-update')
+    ) {
+      assistantWrites.push({
+        body: request.postDataJSON(),
+        actionId: request.headers()['x-assistant-action-id'],
+        headers: request.headers()
+      });
+    }
+  });
+  await page.route('**/api/ai/assistant/proposals', async (route) => {
+    proposalRequests += 1;
+    await route.fulfill({ json: updateProposal });
+  });
+
+  await registerUser(page, 'Asistente edita despensa E2E');
+  await createHousehold(page, 'Casa sintética edita despensa');
+  await page.goto('/dashboard');
+  const token = await tokenOf(page);
+  const authHeaders = { authorization: `Bearer ${token}` };
+  const memberships = await page.request.get('/api/household/memberships', {
+    headers: authHeaders
+  });
+  expect(memberships.status()).toBe(200);
+  const householdId = (await memberships.json()).data.activeHouseholdId as string;
+  expect(householdId).toBeTruthy();
+
+  const created = await page.request.post('/api/pantry/ingredients', {
+    headers: { ...authHeaders, 'x-assistant-household-id': householdId },
+    data: {
+      name: 'Azúcar moreno QA',
+      category: 'other',
+      quantity: 500,
+      unit: 'g',
+      expirationDate: '2026-11-30',
+      location: 'pantry',
+      notes: 'Reserva sintética para repostería'
+    }
+  });
+  expect(created.status(), await created.text()).toBe(201);
+  const ingredient = (await created.json()).data;
+  const executionTarget = {
+    kind: 'pantry-ingredient',
+    id: ingredient.id,
+    snapshot: {
+      name: ingredient.name,
+      category: ingredient.category,
+      quantity: ingredient.quantity,
+      unit: ingredient.unit,
+      expirationDate: ingredient.expiration_date,
+      location: ingredient.location,
+      notes: ingredient.notes,
+      updatedAt: ingredient.updated_at
+    }
+  };
+  updateProposal = pantryUpdateProposal(executionTarget);
+
+  const readIngredient = async () => {
+    const response = await page.request.get(`/api/pantry/ingredients/${ingredient.id}`, {
+      headers: authHeaders
+    });
+    expect(response.status(), 'lectura real del ingrediente sintético').toBe(200);
+    return (await response.json()).data;
+  };
+
+  await page.locator('[data-test="ai-assistant-open"]').click();
+  await page
+    .locator('[data-test="ai-assistant-prompt"]')
+    .fill('Corrige los datos del azúcar moreno.');
+  await page.locator('[data-test="ai-assistant-submit"] button').click();
+  const review = page.locator('[data-test="ai-assistant-review"]');
+  await expect(review).toBeVisible();
+  await expect(review.locator('[data-test="ai-assistant-pantry-target"]')).toContainText(
+    'Azúcar moreno QA'
+  );
+  expect(await readIngredient()).toMatchObject({
+    name: 'Azúcar moreno QA',
+    quantity: 500,
+    expiration_date: '2026-11-30',
+    notes: 'Reserva sintética para repostería'
+  });
+  expect(assistantWrites).toEqual([]);
+
+  await review.locator('[data-test="ai-assistant-remove"]').click();
+  await expect(review.locator('.assistant__empty')).toBeVisible();
+  expect(await readIngredient()).toMatchObject({ name: 'Azúcar moreno QA', quantity: 500 });
+  expect(assistantWrites).toEqual([]);
+
+  await page.getByRole('button', { name: 'Cerrar asistente' }).click();
+  await expect(page.getByRole('dialog', { name: '¿Descartar este borrador?' })).toBeVisible();
+  await page.getByRole('button', { name: 'Descartar borrador' }).click();
+  await expect(review).not.toBeVisible();
+  expect(await readIngredient()).toMatchObject({ name: 'Azúcar moreno QA', quantity: 500 });
+  expect(assistantWrites).toEqual([]);
+
+  await page.locator('[data-test="ai-assistant-open"]').click();
+  await page
+    .locator('[data-test="ai-assistant-prompt"]')
+    .fill('Corrige los datos del azúcar moreno.');
+  await page.locator('[data-test="ai-assistant-submit"] button').click();
+  await expect(review).toBeVisible();
+  const actionDetails = page.locator(
+    '[data-test="ai-assistant-action-details-99999999-9999-4999-8999-999999999999"]'
+  );
+  await actionDetails.locator('summary').click();
+  const textFields = actionDetails.locator('input[type="text"]');
+  const quantity = actionDetails.locator('input[type="number"]');
+  const expiration = actionDetails.locator('input[type="date"]');
+  const notes = actionDetails.locator('textarea');
+  await expect(textFields.nth(0)).toHaveValue('Azúcar propuesta QA');
+  await expect(quantity).toHaveValue('250');
+  await textFields.nth(0).fill('Azúcar confirmada QA');
+  await quantity.fill('0');
+  await expiration.fill('');
+  await notes.fill('');
+  expect(await readIngredient()).toMatchObject({
+    name: 'Azúcar moreno QA',
+    quantity: 500,
+    expiration_date: '2026-11-30',
+    notes: 'Reserva sintética para repostería'
+  });
+  expect(assistantWrites).toEqual([]);
+  await notes.evaluate((element: HTMLTextAreaElement) => element.blur());
+  await review.evaluate((element) => element.closest<HTMLElement>('.modal__body')?.scrollTo(0, 0));
+  await capture(page, testInfo, 'pantry-update-review');
+
+  await page.getByRole('button', { name: 'Seleccionar todas' }).click();
+  await page.locator('[data-test="ai-assistant-continue"] button').click();
+  const confirmation = page.locator('[data-test="ai-assistant-confirm"]');
+  await expect(confirmation).toContainText('Azúcar moreno QA');
+  await expect(confirmation).toContainText('Azúcar confirmada QA');
+  await expect(confirmation).toContainText('0 g');
+  expect(await readIngredient()).toMatchObject({ name: 'Azúcar moreno QA', quantity: 500 });
+  expect(assistantWrites).toEqual([]);
+  await capture(page, testInfo, 'pantry-update-confirm');
+
+  const updateResponse = page.waitForResponse((response) => {
+    const path = new URL(response.url()).pathname;
+    return response.request().method() === 'PATCH' && path.endsWith('/assistant-update');
+  });
+  await page.locator('[data-test="ai-assistant-confirm-submit"] button').click();
+  const writeResponse = await updateResponse;
+  const writeBody = await writeResponse.json();
+  expect(writeResponse.status(), JSON.stringify(writeBody)).toBe(200);
+  const row = confirmation.locator('.assistant__confirm-list > li');
+  await expect(row.locator('.assistant__confirm-status')).toHaveText('Completada');
+  expect(assistantWrites).toHaveLength(1);
+  expect(assistantWrites[0]).toMatchObject({
+    actionId: '99999999-9999-4999-8999-999999999999',
+    body: {
+      changes: {
+        name: 'Azúcar confirmada QA',
+        quantity: 0,
+        expirationDate: null,
+        notes: null
+      },
+      assistantAction: { operation: 'update_ingredient', targetId: ingredient.id }
+    }
+  });
+  const saved = await readIngredient();
+  expect(saved).toMatchObject({
+    name: 'Azúcar confirmada QA',
+    category: 'other',
+    quantity: 0,
+    unit: 'g',
+    expiration_date: null,
+    location: 'pantry',
+    notes: null
+  });
+  await capture(page, testInfo, 'pantry-update-saved');
+
+  const replay = await page.request.patch(
+    `/api/pantry/ingredients/${ingredient.id}/assistant-update`,
+    {
+      headers: {
+        ...authHeaders,
+        'x-assistant-action-id': assistantWrites[0].actionId as string,
+        'x-assistant-household-id': householdId
+      },
+      data: assistantWrites[0].body
+    }
+  );
+  expect(replay.status()).toBe(200);
+  expect(await replay.json()).toMatchObject({ success: true, idempotent: true });
+  expect((await readIngredient()).updated_at).toBe(saved.updated_at);
+
+  await page.reload();
+  await expect(page.locator('[data-test="ai-assistant-open"]')).toBeVisible();
+  expect(await readIngredient()).toMatchObject({
+    name: 'Azúcar confirmada QA',
+    quantity: 0,
+    expiration_date: null,
+    notes: null
+  });
+  expect(proposalRequests).toBe(2);
+  expect(pageErrors).toEqual([]);
+});
+
+test('asistente global: preimagen obsoleta del inventario no pisa el cambio concurrente', async ({
+  page
+}) => {
+  let updateProposal: ReturnType<typeof pantryUpdateProposal>;
+  const assistantResponses: number[] = [];
+  await page.route('**/api/ai/assistant/proposals', async (route) => {
+    await route.fulfill({ json: updateProposal });
+  });
+  page.on('response', (response) => {
+    if (new URL(response.url()).pathname.endsWith('/assistant-update')) {
+      assistantResponses.push(response.status());
+    }
+  });
+
+  await registerUser(page, 'Asistente conflicto despensa E2E');
+  await createHousehold(page, 'Casa sintética conflicto despensa');
+  await page.goto('/dashboard');
+  const token = await tokenOf(page);
+  const authHeaders = { authorization: `Bearer ${token}` };
+  const memberships = await page.request.get('/api/household/memberships', {
+    headers: authHeaders
+  });
+  expect(memberships.status()).toBe(200);
+  const householdId = (await memberships.json()).data.activeHouseholdId as string;
+  const created = await page.request.post('/api/pantry/ingredients', {
+    headers: { ...authHeaders, 'x-assistant-household-id': householdId },
+    data: {
+      name: 'Tomate triturado QA',
+      category: 'other',
+      quantity: 2,
+      unit: 'unit',
+      expirationDate: null,
+      location: 'pantry',
+      notes: null
+    }
+  });
+  expect(created.status(), await created.text()).toBe(201);
+  const ingredient = (await created.json()).data;
+  updateProposal = pantryUpdateProposal({
+    kind: 'pantry-ingredient',
+    id: ingredient.id,
+    snapshot: {
+      name: ingredient.name,
+      category: ingredient.category,
+      quantity: ingredient.quantity,
+      unit: ingredient.unit,
+      expirationDate: ingredient.expiration_date,
+      location: ingredient.location,
+      notes: ingredient.notes,
+      updatedAt: ingredient.updated_at
+    }
+  });
+
+  await page.locator('[data-test="ai-assistant-open"]').click();
+  await page.locator('[data-test="ai-assistant-prompt"]').fill('Actualiza el tomate triturado.');
+  await page.locator('[data-test="ai-assistant-submit"] button').click();
+  await expect(page.locator('[data-test="ai-assistant-review"]')).toBeVisible();
+  const concurrent = await page.request.patch(`/api/pantry/ingredients/${ingredient.id}`, {
+    headers: authHeaders,
+    data: { quantity: 4 }
+  });
+  expect(concurrent.status()).toBe(200);
+
+  await page.getByRole('button', { name: 'Seleccionar todas' }).click();
+  await page.locator('[data-test="ai-assistant-continue"] button').click();
+  await page.locator('[data-test="ai-assistant-confirm-submit"] button').click();
+  const row = page.locator('[data-test="ai-assistant-confirm"] .assistant__confirm-list > li');
+  await expect(row.locator('.assistant__confirm-status')).toHaveText('Fallida');
+  expect(assistantResponses).toEqual([409]);
+
+  const saved = await page.request.get(`/api/pantry/ingredients/${ingredient.id}`, {
+    headers: authHeaders
+  });
+  expect(saved.status()).toBe(200);
+  expect((await saved.json()).data).toMatchObject({
+    name: 'Tomate triturado QA',
+    quantity: 4
   });
 });

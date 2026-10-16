@@ -18,6 +18,7 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { finalize, Subscription } from 'rxjs';
 import { I18nService } from '../../core/services/i18n.service';
 import { ConfirmService } from '../../core/services/confirm.service';
+import { PantryService } from '../../core/services/pantry.service';
 import { AiActionAssistantService } from '../../core/services/ai-action-assistant.service';
 import { AiActionAssistantExecutionService } from '../../core/services/ai-action-assistant-execution.service';
 import { HouseholdService } from '../../core/services/household.service';
@@ -38,6 +39,7 @@ import type {
 } from '../models/ai-action-assistant.model';
 import type { AIRecipeResponse, AIRecipeIngredient, AIRecipeStep } from '../models/ai-config.model';
 import type { TranslationKey } from '../../core/i18n';
+import { pantryCategoryLabel } from '../../core/i18n/labels';
 import { TranslatePipe } from '../../core/pipes/translate.pipe';
 import type { HouseholdMember } from '../models/household.model';
 import { ButtonComponent } from './ui/button/button.component';
@@ -51,6 +53,17 @@ type AssistantStage = 'compose' | 'review' | 'refine' | 'confirm';
 type AssistantFieldKind = 'text' | 'textarea' | 'number' | 'date' | 'time' | 'select' | 'checkbox';
 type AssistantFieldValue = string | number | boolean | null;
 type HouseholdMealType = HouseholdMealProposalEvent['mealType'];
+type PantryIngredientChangeField =
+  'name' | 'category' | 'quantity' | 'unit' | 'expirationDate' | 'location' | 'notes';
+const PANTRY_CHANGE_FLAGS: Record<PantryIngredientChangeField, string> = {
+  ['name']: 'setName',
+  ['category']: 'setCategory',
+  ['quantity']: 'setQuantity',
+  ['unit']: 'setUnit',
+  ['expirationDate']: 'setExpirationDate',
+  ['location']: 'setLocation',
+  ['notes']: 'setNotes'
+};
 const ACTION_REFINEMENT_SCOPE = '__action__';
 const BATCH_REFINEMENT_SCOPE = '__batch__';
 const GROUP_REFINEMENT_SCOPE = '__group__';
@@ -184,6 +197,7 @@ const DOMAIN_LABELS: Record<AssistantAction['domain'], TranslationKey> = {
 };
 const ACTION_LABELS: Record<AssistantAction['actionType'], TranslationKey> = {
   add_ingredient: 'ai_assistant.action.add_ingredient',
+  update_ingredient: 'ai_assistant.action.update_ingredient',
   create_list: 'ai_assistant.action.create_list',
   update_list: 'ai_assistant.action.update_list',
   add_item: 'ai_assistant.action.add_item',
@@ -487,6 +501,27 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
                             }
                     }}
                   </p>
+                  <p
+                    *ngIf="action.kind === 'pantry.update_ingredient'"
+                    class="assistant__action-summary"
+                    data-test="ai-assistant-pantry-target"
+                  >
+                    {{
+                      'ai_assistant.pantry_ingredient_target'
+                        | t
+                          : {
+                              name: action.executionTarget.snapshot.name,
+                              quantity: action.executionTarget.snapshot.quantity,
+                              unit: action.executionTarget.snapshot.unit,
+                              category: action.executionTarget.snapshot.category,
+                              expirationDate: action.executionTarget.snapshot.expirationDate || '—',
+                              location: pantryLocationLabel(
+                                action.executionTarget.snapshot.location
+                              ),
+                              notes: action.executionTarget.snapshot.notes || '—'
+                            }
+                    }}
+                  </p>
                   <span class="assistant__status-tag" [attr.data-status]="action.status">
                     {{ statusLabel(action.status) | t }}
                   </span>
@@ -533,7 +568,14 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
                           [type]="field.kind"
                           [value]="field.value ?? ''"
                           [required]="field.required || false"
-                          [min]="field.kind === 'number' && field.required ? 0.01 : null"
+                          [min]="
+                            field.kind === 'number' && field.required
+                              ? action.kind === 'pantry.update_ingredient' &&
+                                field.path[1] === 'quantity'
+                                ? 0
+                                : 0.01
+                              : null
+                          "
                           [step]="field.kind === 'number' ? 'any' : null"
                           [disabled]="loading()"
                           (input)="
@@ -898,6 +940,27 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
                           : {
                               name: action.executionTarget.snapshot.name,
                               store: action.executionTarget.snapshot.store || '—'
+                            }
+                    }}
+                  </p>
+                  <p
+                    *ngIf="action.kind === 'pantry.update_ingredient'"
+                    class="assistant__action-summary"
+                    data-test="ai-assistant-pantry-target-confirm"
+                  >
+                    {{
+                      'ai_assistant.pantry_ingredient_target'
+                        | t
+                          : {
+                              name: action.executionTarget.snapshot.name,
+                              quantity: action.executionTarget.snapshot.quantity,
+                              unit: action.executionTarget.snapshot.unit,
+                              category: action.executionTarget.snapshot.category,
+                              expirationDate: action.executionTarget.snapshot.expirationDate || '—',
+                              location: pantryLocationLabel(
+                                action.executionTarget.snapshot.location
+                              ),
+                              notes: action.executionTarget.snapshot.notes || '—'
                             }
                     }}
                   </p>
@@ -1619,6 +1682,7 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
   private readonly mealProposalService = inject(HouseholdMealProposalService);
   private readonly confirmService = inject(ConfirmService);
   private readonly i18n = inject(I18nService);
+  private readonly pantry = inject(PantryService);
   private readonly injector = inject(Injector);
   private requestSubscription: Subscription | null = null;
   private mealRequestSubscriptions: Subscription[] = [];
@@ -1684,6 +1748,7 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
   private bodyOverflowBeforeLock: string | null = null;
 
   constructor() {
+    this.pantry.loadCategories();
     effect(() => {
       if (this.modalOpen()) this.lockBodyScroll();
       else this.restoreBodyScroll();
@@ -2422,6 +2487,72 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
           ]),
           this.field('notes', ['notes'], action.payload.notes, 'textarea')
         ];
+      case 'pantry.update_ingredient': {
+        const { changes } = action.payload;
+        const snapshot = action.executionTarget.snapshot;
+        return [
+          this.field(
+            'name',
+            ['changes', 'name'],
+            changes.setName ? changes.name : snapshot.name,
+            'text',
+            true
+          ),
+          this.field(
+            'category',
+            ['changes', 'category'],
+            changes.setCategory ? changes.category : snapshot.category,
+            'select',
+            true,
+            this.pantryCategoryChoices(
+              snapshot.category,
+              changes.setCategory ? changes.category : null
+            )
+          ),
+          this.field(
+            'quantity',
+            ['changes', 'quantity'],
+            changes.setQuantity ? changes.quantity : snapshot.quantity,
+            'number',
+            true
+          ),
+          this.field(
+            'unit',
+            ['changes', 'unit'],
+            changes.setUnit ? changes.unit : snapshot.unit,
+            'select',
+            true,
+            PANTRY_UNITS.map((value) => ({ value, label: value }))
+          ),
+          this.field(
+            'expirationDate',
+            ['changes', 'expirationDate'],
+            changes.setExpirationDate
+              ? changes.expirationDate
+              : (snapshot.expirationDate?.slice(0, 10) ?? null),
+            'date'
+          ),
+          this.field(
+            'location',
+            ['changes', 'location'],
+            changes.setLocation ? changes.location : snapshot.location,
+            'select',
+            false,
+            [
+              { value: 'pantry', label: this.i18n.t('ai_assistant.location.pantry') },
+              { value: 'fridge', label: this.i18n.t('ai_assistant.location.fridge') },
+              { value: 'freezer', label: this.i18n.t('ai_assistant.location.freezer') },
+              { value: 'counter', label: this.i18n.t('ai_assistant.location.counter') }
+            ]
+          ),
+          this.field(
+            'notes',
+            ['changes', 'notes'],
+            changes.setNotes ? changes.notes : snapshot.notes,
+            'textarea'
+          )
+        ];
+      }
       case 'shopping.create_list':
         return [
           this.field('name', ['name'], action.payload.name, 'text', true),
@@ -2575,6 +2706,14 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
         : this.i18n.t('ai_assistant.level.expert');
   }
 
+  pantryLocationLabel(location: string | null): string {
+    if (location === 'pantry') return this.i18n.t('ai_assistant.location.pantry');
+    if (location === 'fridge') return this.i18n.t('ai_assistant.location.fridge');
+    if (location === 'freezer') return this.i18n.t('ai_assistant.location.freezer');
+    if (location === 'counter') return this.i18n.t('ai_assistant.location.counter');
+    return location || '—';
+  }
+
   confirmationFieldValue(field: AssistantField): string {
     if (field.value === null || field.value === '') return '—';
     if (typeof field.value === 'boolean') {
@@ -2602,6 +2741,49 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
         action.payload.quantity <= 100000 &&
         action.payload.category.trim().length <= 64 &&
         (action.payload.expirationDate === null || this.isIsoDate(action.payload.expirationDate))
+      );
+    }
+    if (action.kind === 'pantry.update_ingredient') {
+      const { changes } = action.payload;
+      const target = action.executionTarget;
+      const changed =
+        (changes.setName && changes.name !== target.snapshot.name) ||
+        (changes.setCategory && changes.category !== target.snapshot.category) ||
+        (changes.setQuantity && changes.quantity !== target.snapshot.quantity) ||
+        (changes.setUnit && changes.unit !== target.snapshot.unit) ||
+        (changes.setExpirationDate && changes.expirationDate !== target.snapshot.expirationDate) ||
+        (changes.setLocation && changes.location !== target.snapshot.location) ||
+        (changes.setNotes && changes.notes !== target.snapshot.notes);
+      return (
+        target.kind === 'pantry-ingredient' &&
+        target.id.length > 0 &&
+        this.comparablePantryName(action.payload.targetName) ===
+          this.comparablePantryName(target.snapshot.name) &&
+        changes.setName === (changes.name !== null) &&
+        (changes.name === null ||
+          (changes.name.trim().length > 0 && changes.name.trim().length <= 3000)) &&
+        changes.setCategory === (changes.category !== null) &&
+        (changes.category === null ||
+          (changes.category.trim().length > 0 &&
+            changes.category.trim().length <= 64 &&
+            (!changes.setCategory ||
+              changes.category === target.snapshot.category ||
+              this.pantry.categories().some((category) => category.key === changes.category)))) &&
+        changes.setQuantity === (changes.quantity !== null) &&
+        (changes.quantity === null ||
+          (Number.isFinite(changes.quantity) &&
+            changes.quantity >= 0 &&
+            changes.quantity <= 100000)) &&
+        changes.setUnit === (changes.unit !== null) &&
+        (changes.unit === null || PANTRY_UNITS.includes(changes.unit)) &&
+        (changes.setExpirationDate || changes.expirationDate === null) &&
+        (changes.expirationDate === null || this.isIsoDate(changes.expirationDate)) &&
+        changes.setLocation === (changes.location !== null) &&
+        (changes.location === null ||
+          ['fridge', 'freezer', 'pantry', 'counter'].includes(changes.location)) &&
+        (changes.setNotes || changes.notes === null) &&
+        (changes.notes === null || changes.notes.length <= 500) &&
+        changed
       );
     }
     if (action.kind === 'shopping.create_list') {
@@ -2777,6 +2959,42 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
     }
 
     if (
+      currentAction?.kind === 'pantry.update_ingredient' &&
+      path[0] === 'changes' &&
+      typeof path[1] === 'string' &&
+      Object.prototype.hasOwnProperty.call(PANTRY_CHANGE_FLAGS, path[1])
+    ) {
+      const field = path[1] as PantryIngredientChangeField;
+      let nextValue: AssistantFieldValue = rawValue;
+      if (field === 'quantity') nextValue = rawValue === '' ? null : Number(rawValue);
+      else if (field === 'expirationDate' || field === 'notes') {
+        nextValue = rawValue === '' ? null : String(rawValue);
+      } else {
+        nextValue = String(rawValue).trim();
+      }
+      const beforeValue = currentAction.executionTarget.snapshot[field];
+      const changed = nextValue !== beforeValue;
+      const serializedPath = JSON.stringify(path);
+      const flagPath = JSON.stringify(['changes', PANTRY_CHANGE_FLAGS[field]]);
+      this.updateActions((actions) =>
+        actions.map((action) => {
+          if (action.id !== actionId || action.kind !== 'pantry.update_ingredient') return action;
+          const changes = {
+            ...action.payload.changes,
+            [field]: changed ? nextValue : null,
+            [PANTRY_CHANGE_FLAGS[field]]: changed
+          };
+          return {
+            ...action,
+            payload: { ...action.payload, changes },
+            manualFields: [...new Set([...(action.manualFields ?? []), serializedPath, flagPath])]
+          } as AssistantAction;
+        })
+      );
+      return;
+    }
+
+    if (
       this.plan()?.actions.some(
         (action) => action.id === actionId && action.kind === 'household.plan_meals'
       )
@@ -2942,6 +3160,23 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
 
   private comparableName(value: string): string {
     return value.normalize('NFC').trim().toLocaleLowerCase();
+  }
+
+  private comparablePantryName(value: string): string {
+    return value.normalize('NFC').replace(/\s+/g, ' ').trim().toLowerCase();
+  }
+
+  private pantryCategoryChoices(...keys: Array<string | null>): PickerOption[] {
+    const options = new Map<string, PickerOption>();
+    const label = (category: { key: string; name?: string | null } | string) =>
+      pantryCategoryLabel(category, (key) => this.i18n.t(key));
+    for (const category of this.pantry.categories()) {
+      options.set(category.key, { value: category.key, label: label(category) });
+    }
+    for (const key of keys) {
+      if (key && !options.has(key)) options.set(key, { value: key, label: label(key) });
+    }
+    return [...options.values()];
   }
 
   private mondayOf(date: string): string {
@@ -3210,6 +3445,12 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
       error instanceof HttpErrorResponse
         ? error
         : ((error as { original?: HttpErrorResponse } | null)?.original ?? null);
+    if (httpError?.error?.code === 'ASSISTANT_INGREDIENT_STALE') {
+      return 'ai_assistant.error_ingredient_stale';
+    }
+    if (httpError?.error?.code === 'ASSISTANT_INGREDIENT_NAME_CONFLICT') {
+      return 'ai_assistant.error_ingredient_name_conflict';
+    }
     if (httpError?.status === 403) return 'ai_assistant.error_permission';
     if (httpError && httpError.status >= 400 && httpError.status < 500) {
       return 'ai_assistant.error_domain_rejected';

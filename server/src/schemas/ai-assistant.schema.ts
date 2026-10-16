@@ -19,6 +19,20 @@ const dateSchema = z
     const timestamp = Date.parse(`${value}T00:00:00.000Z`);
     return Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === value;
   }, 'Expected a real ISO date');
+const pantryUnitSchema = z.enum([
+  'g',
+  'kg',
+  'ml',
+  'l',
+  'cup',
+  'tbsp',
+  'tsp',
+  'unit',
+  'bunch',
+  'slice',
+  'piece'
+]);
+const pantryLocationSchema = z.enum(['fridge', 'freezer', 'pantry', 'counter']);
 
 const actionMetaSchema = {
   title: z.string().trim().min(1).max(100),
@@ -36,23 +50,71 @@ const assistantActionCandidateSchema = z.union([
         .object({
           name: z.string().trim().min(1).max(120),
           quantity: z.number().finite().positive().max(100000),
-          unit: z.enum([
-            'g',
-            'kg',
-            'ml',
-            'l',
-            'cup',
-            'tbsp',
-            'tsp',
-            'unit',
-            'bunch',
-            'slice',
-            'piece'
-          ]),
+          unit: pantryUnitSchema,
           category: z.string().trim().min(1).max(64),
           expirationDate: dateSchema.nullable(),
-          location: z.enum(['fridge', 'freezer', 'pantry', 'counter']),
+          location: pantryLocationSchema,
           notes: z.string().trim().max(500).nullable()
+        })
+        .strict()
+    })
+    .strict(),
+  z
+    .object({
+      ...actionMetaSchema,
+      kind: z.literal('pantry.update_ingredient'),
+      payload: z
+        .object({
+          targetName: z.string().trim().min(1).max(3000),
+          changes: z
+            .object({
+              name: z.string().trim().min(1).max(3000).nullable(),
+              setName: z.boolean(),
+              category: z.string().trim().min(1).max(64).nullable(),
+              setCategory: z.boolean(),
+              quantity: z.number().finite().min(0).max(100000).nullable(),
+              setQuantity: z.boolean(),
+              unit: pantryUnitSchema.nullable(),
+              setUnit: z.boolean(),
+              expirationDate: dateSchema.nullable(),
+              setExpirationDate: z.boolean(),
+              location: pantryLocationSchema.nullable(),
+              setLocation: z.boolean(),
+              notes: z.string().trim().max(500).nullable(),
+              setNotes: z.boolean()
+            })
+            .strict()
+            .superRefine((changes, context) => {
+              const fields = [
+                ['name', changes.name, changes.setName, false],
+                ['category', changes.category, changes.setCategory, false],
+                ['quantity', changes.quantity, changes.setQuantity, false],
+                ['unit', changes.unit, changes.setUnit, false],
+                ['expirationDate', changes.expirationDate, changes.setExpirationDate, true],
+                ['location', changes.location, changes.setLocation, false],
+                ['notes', changes.notes, changes.setNotes, true]
+              ] as const;
+              if (!fields.some(([, , selected]) => selected)) {
+                context.addIssue({
+                  code: 'custom',
+                  message: 'At least one pantry ingredient field must change'
+                });
+              }
+              fields.forEach(([key, value, selected, nullableWhenSelected]) => {
+                if (
+                  (!selected && value !== null) ||
+                  (selected && !nullableWhenSelected && value === null)
+                ) {
+                  context.addIssue({
+                    code: 'custom',
+                    path: [key],
+                    message: selected
+                      ? 'A selected pantry field must have a value'
+                      : 'An unchanged pantry field must be null'
+                  });
+                }
+              });
+            })
         })
         .strict()
     })
@@ -374,8 +436,26 @@ export type AssistantAction = AssistantActionCandidate & {
   actionType: string;
   selected: boolean;
   status: 'pending';
-  executionTarget?: AssistantTaskUpdateExecutionTarget | AssistantShoppingListUpdateExecutionTarget;
+  executionTarget?:
+    | AssistantTaskUpdateExecutionTarget
+    | AssistantShoppingListUpdateExecutionTarget
+    | AssistantPantryIngredientUpdateExecutionTarget;
 };
+
+export interface AssistantPantryIngredientUpdateExecutionTarget {
+  kind: 'pantry-ingredient';
+  id: string;
+  snapshot: {
+    name: string;
+    category: string;
+    quantity: number;
+    unit: string;
+    expirationDate: string | null;
+    location: string | null;
+    notes: string | null;
+    updatedAt: string | null;
+  };
+}
 
 export interface AssistantTaskUpdateExecutionTarget {
   kind: 'household-task';
@@ -404,7 +484,9 @@ export function normalizeAssistantActionPlan(
   createId: () => string = randomUUID,
   executionTargets: ReadonlyMap<
     number,
-    AssistantTaskUpdateExecutionTarget | AssistantShoppingListUpdateExecutionTarget
+    | AssistantTaskUpdateExecutionTarget
+    | AssistantShoppingListUpdateExecutionTarget
+    | AssistantPantryIngredientUpdateExecutionTarget
   > = new Map()
 ): AssistantActionPlan {
   const ids = candidate.actions.map(() => createId());
@@ -421,6 +503,12 @@ export function normalizeAssistantActionPlan(
     }
     if (action.kind === 'shopping.update_list' && executionTarget?.kind !== 'shopping-list') {
       throw new Error('Missing server-resolved shopping list update target');
+    }
+    if (
+      action.kind === 'pantry.update_ingredient' &&
+      executionTarget?.kind !== 'pantry-ingredient'
+    ) {
+      throw new Error('Missing server-resolved pantry ingredient update target');
     }
     const [domain, actionType] = action.kind.split('.', 2);
     return {

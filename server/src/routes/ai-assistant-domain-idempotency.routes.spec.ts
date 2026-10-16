@@ -20,7 +20,8 @@ const ACTIONS = {
   item: '123e4567-e89b-42d3-a456-426614174003',
   event: '123e4567-e89b-42d3-a456-426614174004',
   recipe: '123e4567-e89b-42d3-a456-426614174005',
-  task: '123e4567-e89b-42d3-a456-426614174006'
+  task: '123e4567-e89b-42d3-a456-426614174006',
+  pantryUpdate: '123e4567-e89b-42d3-a456-426614174007'
 } as const;
 
 const userId = 'assistant-domain-user';
@@ -536,5 +537,326 @@ describe('atomic idempotency for global assistant domain actions', () => {
     expect(event.status).toBe(409);
     expect(event.body).toMatchObject({ code: 'ASSISTANT_HOUSEHOLD_REQUIRED' });
     expect(count('calendar_events')).toBe(0);
+  });
+
+  it('CAS-updates only the reviewed ingredient and safely replays the same action', async () => {
+    const ingredientId = 'assistant-pantry-update-target';
+    db.prepare(
+      `INSERT INTO ingredients
+        (id, user_id, household_id, name, category, quantity, unit, expiration_date, location, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      ingredientId,
+      userId,
+      householdId,
+      'Yogur natural',
+      'dairy',
+      2,
+      'unit',
+      '2026-10-20',
+      'fridge',
+      'Desayuno'
+    );
+    const before = db
+      .prepare(
+        `SELECT name, category, quantity, unit, expiration_date AS expirationDate,
+                location, notes, updated_at AS updatedAt FROM ingredients WHERE id = ?`
+      )
+      .get(ingredientId);
+    const input = {
+      changes: { quantity: 0, expirationDate: null, notes: null },
+      assistantAction: { operation: 'update_ingredient', targetId: ingredientId, before }
+    };
+
+    const first = await read(
+      await call(
+        'PATCH',
+        `/api/pantry/ingredients/${ingredientId}/assistant-update`,
+        input,
+        ACTIONS.pantryUpdate
+      )
+    );
+    expect(first.status).toBe(200);
+    expect(first.body).toMatchObject({ success: true });
+    expect(
+      db
+        .prepare('SELECT quantity, expiration_date, notes FROM ingredients WHERE id = ?')
+        .get(ingredientId)
+    ).toEqual({ quantity: 0, expiration_date: null, notes: null });
+    const updatedAt = (
+      db.prepare('SELECT updated_at FROM ingredients WHERE id = ?').get(ingredientId) as {
+        updated_at: string;
+      }
+    ).updated_at;
+
+    const replay = await read(
+      await call(
+        'PATCH',
+        `/api/pantry/ingredients/${ingredientId}/assistant-update`,
+        input,
+        ACTIONS.pantryUpdate
+      )
+    );
+    expect(replay.body).toMatchObject({ success: true, idempotent: true });
+    expect(
+      (
+        db.prepare('SELECT updated_at FROM ingredients WHERE id = ?').get(ingredientId) as {
+          updated_at: string;
+        }
+      ).updated_at
+    ).toBe(updatedAt);
+    expect(count('assistant_action_results')).toBe(1);
+
+    const changed = await read(
+      await call(
+        'PATCH',
+        `/api/pantry/ingredients/${ingredientId}/assistant-update`,
+        { ...input, changes: { quantity: 3 } },
+        ACTIONS.pantryUpdate
+      )
+    );
+    expect(changed.status).toBe(409);
+    expect(changed.body).toMatchObject({ code: 'ASSISTANT_ACTION_ID_CONFLICT' });
+    expect(
+      (
+        db.prepare('SELECT quantity FROM ingredients WHERE id = ?').get(ingredientId) as {
+          quantity: number;
+        }
+      ).quantity
+    ).toBe(0);
+  });
+
+  it('accepts equivalent SQLite and API ISO representations of the review timestamp', async () => {
+    const ingredientId = 'assistant-pantry-iso-preimage';
+    db.prepare(
+      `INSERT INTO ingredients (id, user_id, household_id, name, category, quantity, unit)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(ingredientId, userId, householdId, 'Leche', 'dairy', 1, 'l');
+    const before = db
+      .prepare(
+        `SELECT name, category, quantity, unit, expiration_date AS expirationDate,
+                location, notes, updated_at AS updatedAt FROM ingredients WHERE id = ?`
+      )
+      .get(ingredientId) as { updatedAt: string };
+    const apiBefore = {
+      ...before,
+      updatedAt: new Date(`${before.updatedAt.replace(' ', 'T')}Z`).toISOString()
+    };
+    const response = await read(
+      await call(
+        'PATCH',
+        `/api/pantry/ingredients/${ingredientId}/assistant-update`,
+        {
+          changes: { quantity: 2 },
+          assistantAction: {
+            operation: 'update_ingredient',
+            targetId: ingredientId,
+            before: apiBefore
+          }
+        },
+        ACTIONS.pantryUpdate
+      )
+    );
+
+    expect(response.status).toBe(200);
+    expect(db.prepare('SELECT quantity FROM ingredients WHERE id = ?').get(ingredientId)).toEqual({
+      quantity: 2
+    });
+    expect(count('assistant_action_results')).toBe(1);
+  });
+
+  it('rejects stale preimages and records no ledger entry on conflict', async () => {
+    const ingredientId = 'assistant-pantry-stale-target';
+    db.prepare(
+      `INSERT INTO ingredients (id, user_id, household_id, name, category, quantity, unit)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(ingredientId, userId, householdId, 'Tomate', 'vegetables', 2, 'unit');
+    const before = db
+      .prepare(
+        `SELECT name, category, quantity, unit, expiration_date AS expirationDate,
+                location, notes, updated_at AS updatedAt FROM ingredients WHERE id = ?`
+      )
+      .get(ingredientId);
+    db.prepare('UPDATE ingredients SET quantity = 4 WHERE id = ?').run(ingredientId);
+    const response = await read(
+      await call(
+        'PATCH',
+        `/api/pantry/ingredients/${ingredientId}/assistant-update`,
+        {
+          changes: { quantity: 0 },
+          assistantAction: { operation: 'update_ingredient', targetId: ingredientId, before }
+        },
+        ACTIONS.pantryUpdate
+      )
+    );
+
+    expect(response.status).toBe(409);
+    expect(response.body).toMatchObject({ code: 'ASSISTANT_INGREDIENT_STALE' });
+    expect(db.prepare('SELECT quantity FROM ingredients WHERE id = ?').get(ingredientId)).toEqual({
+      quantity: 4
+    });
+    expect(count('assistant_action_results')).toBe(0);
+  });
+
+  it('requires explicit approval metadata and rejects duplicate names or no-op patches', async () => {
+    const ingredientId = 'assistant-pantry-validation-target';
+    db.prepare(
+      `INSERT INTO ingredients (id, user_id, household_id, name, category, quantity, unit)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(ingredientId, userId, householdId, 'Yogur natural', 'other', 2, 'unit');
+    db.prepare(
+      `INSERT INTO ingredients (id, user_id, household_id, name, category, quantity, unit)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      'assistant-pantry-duplicate-name',
+      userId,
+      householdId,
+      'Yogur griego',
+      'dairy',
+      1,
+      'unit'
+    );
+    const before = db
+      .prepare(
+        `SELECT name, category, quantity, unit, expiration_date AS expirationDate,
+                location, notes, updated_at AS updatedAt FROM ingredients WHERE id = ?`
+      )
+      .get(ingredientId);
+    const requestBody = (changes: unknown, targetId = ingredientId) => ({
+      changes,
+      assistantAction: { operation: 'update_ingredient', targetId, before }
+    });
+    const path = `/api/pantry/ingredients/${ingredientId}/assistant-update`;
+
+    const noActionId = await app.request(path, {
+      method: 'PATCH',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+        'x-assistant-household-id': householdId
+      },
+      body: JSON.stringify(requestBody({ quantity: 0 }))
+    });
+    expect(noActionId.status).toBe(400);
+    expect(await noActionId.json()).toMatchObject({ code: 'ASSISTANT_ACTION_ID_REQUIRED' });
+
+    const noContext = await app.request(path, {
+      method: 'PATCH',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+        'x-assistant-action-id': ACTIONS.pantryUpdate
+      },
+      body: JSON.stringify(requestBody({ quantity: 0 }))
+    });
+    expect(noContext.status).toBe(400);
+    expect(await noContext.json()).toMatchObject({ code: 'ASSISTANT_HOUSEHOLD_CONTEXT_REQUIRED' });
+
+    const targetMismatch = await read(
+      await call('PATCH', path, requestBody({ quantity: 0 }, 'different-row'), ACTIONS.pantryUpdate)
+    );
+    expect(targetMismatch.status).toBe(400);
+    expect(targetMismatch.body).toMatchObject({ code: 'ASSISTANT_ACTION_TARGET_MISMATCH' });
+
+    const duplicate = await read(
+      await call('PATCH', path, requestBody({ name: '  YOGUR   GRIEGO  ' }), ACTIONS.pantryUpdate)
+    );
+    expect(duplicate.status).toBe(409);
+    expect(duplicate.body).toMatchObject({ code: 'ASSISTANT_INGREDIENT_NAME_CONFLICT' });
+    expect(count('assistant_action_results')).toBe(0);
+
+    const noChange = await read(
+      await call(
+        'PATCH',
+        path,
+        requestBody({ quantity: 2 }),
+        '123e4567-e89b-42d3-a456-426614174008'
+      )
+    );
+    expect(noChange.status).toBe(400);
+    expect(noChange.body).toMatchObject({ code: 'ASSISTANT_ACTION_NO_CHANGE' });
+    expect(count('assistant_action_results')).toBe(0);
+  });
+
+  it('rejects a shared row owned by another member and revalidates household after body read', async () => {
+    const foreignUserId = 'assistant-pantry-foreign-owner';
+    db.prepare('INSERT INTO users (id, email, name, password_hash) VALUES (?, ?, ?, ?)').run(
+      foreignUserId,
+      'assistant-pantry-foreign@test.local',
+      'Other member',
+      'hash'
+    );
+    db.prepare(
+      `INSERT INTO ingredients (id, user_id, household_id, name, category, quantity, unit)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run('foreign-pantry-row', foreignUserId, householdId, 'Leche', 'dairy', 1, 'l');
+    const foreignBefore = db
+      .prepare(
+        `SELECT name, category, quantity, unit, expiration_date AS expirationDate,
+                location, notes, updated_at AS updatedAt FROM ingredients WHERE id = ?`
+      )
+      .get('foreign-pantry-row');
+    const foreign = await read(
+      await call(
+        'PATCH',
+        '/api/pantry/ingredients/foreign-pantry-row/assistant-update',
+        {
+          changes: { quantity: 3 },
+          assistantAction: {
+            operation: 'update_ingredient',
+            targetId: 'foreign-pantry-row',
+            before: foreignBefore
+          }
+        },
+        ACTIONS.pantryUpdate
+      )
+    );
+    expect(foreign.status).toBe(404);
+    expect(count('assistant_action_results')).toBe(0);
+
+    const otherHouseholdId = 'assistant-pantry-other-home';
+    db.prepare('INSERT INTO households (id, name, invite_code) VALUES (?, ?, ?)').run(
+      otherHouseholdId,
+      'Otro hogar',
+      'ASSISTANT-PANTRY-OTHER'
+    );
+    db.prepare(
+      `INSERT INTO household_members (id, household_id, user_id, role, permissions)
+       VALUES (?, ?, ?, 'admin', NULL)`
+    ).run('assistant-pantry-other-membership', otherHouseholdId, userId);
+    db.prepare(
+      `INSERT INTO ingredients (id, user_id, household_id, name, category, quantity, unit)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run('context-pantry-row', userId, householdId, 'Pan', 'other', 1, 'unit');
+    const before = db
+      .prepare(
+        `SELECT name, category, quantity, unit, expiration_date AS expirationDate,
+                location, notes, updated_at AS updatedAt FROM ingredients WHERE id = ?`
+      )
+      .get('context-pantry-row');
+    const delayed = callWithDelayedBody(
+      'PATCH',
+      '/api/pantry/ingredients/context-pantry-row/assistant-update',
+      {
+        changes: { quantity: 2 },
+        assistantAction: {
+          operation: 'update_ingredient',
+          targetId: 'context-pantry-row',
+          before
+        }
+      },
+      ACTIONS.pantryUpdate
+    );
+    await delayed.bodyStarted;
+    db.prepare('UPDATE users SET household_id = ? WHERE id = ?').run(otherHouseholdId, userId);
+    delayed.releaseBody();
+
+    const contextChanged = await read(await delayed.pending);
+    expect(contextChanged.status).toBe(409);
+    expect(contextChanged.body).toMatchObject({ code: 'ASSISTANT_HOUSEHOLD_CONTEXT_CHANGED' });
+    expect(
+      db.prepare('SELECT quantity FROM ingredients WHERE id = ?').get('context-pantry-row')
+    ).toEqual({ quantity: 1 });
+    expect(count('assistant_action_results')).toBe(0);
   });
 });

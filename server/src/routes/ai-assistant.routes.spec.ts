@@ -120,6 +120,41 @@ function shoppingUpdateCandidate(targetName = 'Compra semanal'): object {
   };
 }
 
+function pantryUpdateCandidate(targetName = 'Yogur natural'): object {
+  return {
+    summary: 'Actualiza un ingrediente existente.',
+    actions: [
+      {
+        kind: 'pantry.update_ingredient',
+        title: 'Actualizar yogur',
+        summary: 'Deja el yogur sin existencias.',
+        payload: {
+          targetName,
+          changes: {
+            name: null,
+            setName: false,
+            category: null,
+            setCategory: false,
+            quantity: 0,
+            setQuantity: true,
+            unit: null,
+            setUnit: false,
+            expirationDate: null,
+            setExpirationDate: false,
+            location: null,
+            setLocation: false,
+            notes: null,
+            setNotes: false
+          }
+        },
+        dependsOn: [],
+        warnings: []
+      }
+    ],
+    questions: []
+  };
+}
+
 function mealRecipe(name = 'Arroz con verduras') {
   const step = (instruction: string) => ({
     stepNumber: 1,
@@ -422,6 +457,134 @@ describe('POST /api/ai/assistant/proposals', () => {
     const providerRequest = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
     expect(JSON.stringify(providerRequest)).not.toContain('shopping-list-target');
     expect(persistedSnapshot()).toEqual(before);
+  });
+
+  it('resolves an ingredient in the explicit editable scope without writing during proposal', async () => {
+    addConfig(alice);
+    db.prepare(
+      `INSERT INTO ingredients
+        (id, user_id, household_id, name, category, quantity, unit, expiration_date, location, notes)
+       VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      'assistant-pantry-target',
+      alice.id,
+      'Yogur natural',
+      'dairy',
+      2,
+      'unit',
+      '2026-10-20',
+      'fridge',
+      'Para desayunar'
+    );
+    const before = persistedSnapshot();
+    const fetchMock = stubProvider(JSON.stringify(pantryUpdateCandidate()));
+
+    const response = await call(
+      'POST',
+      '/proposals',
+      { prompt: 'Deja a cero el yogur natural de mi despensa.', route: 'pantry' },
+      alice.token,
+      { 'x-assistant-household-id': '' }
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { data: any };
+    expect(body.data.actions[0]).toMatchObject({
+      kind: 'pantry.update_ingredient',
+      executionTarget: {
+        kind: 'pantry-ingredient',
+        id: 'assistant-pantry-target',
+        snapshot: {
+          name: 'Yogur natural',
+          category: 'dairy',
+          quantity: 2,
+          unit: 'unit',
+          expirationDate: '2026-10-20',
+          location: 'fridge',
+          notes: 'Para desayunar'
+        }
+      }
+    });
+    const providerRequest = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
+    expect(JSON.stringify(providerRequest)).not.toContain('assistant-pantry-target');
+    expect(persistedSnapshot()).toEqual(before);
+  });
+
+  it('asks for clarification on ambiguous names and ignores other members shared rows', async () => {
+    addConfig(alice);
+    const headers = { 'x-assistant-household-id': '' };
+    db.prepare(
+      `INSERT INTO ingredients (id, user_id, name, category, quantity, unit)
+       VALUES (?, ?, ?, 'dairy', 1, 'unit')`
+    ).run('ambiguous-yogurt-1', alice.id, 'Yogur natural');
+    db.prepare(
+      `INSERT INTO ingredients (id, user_id, name, category, quantity, unit)
+       VALUES (?, ?, ?, 'dairy', 1, 'unit')`
+    ).run('ambiguous-yogurt-2', alice.id, 'YOGUR NATURAL');
+    stubProvider(JSON.stringify(pantryUpdateCandidate()));
+
+    const ambiguous = await call(
+      'POST',
+      '/proposals',
+      { prompt: 'Cambia el yogur natural.', route: 'pantry' },
+      alice.token,
+      headers
+    );
+    expect(ambiguous.status).toBe(200);
+    expect(await ambiguous.json()).toMatchObject({
+      data: { actions: [], questions: [expect.stringMatching(/más de un/i)] }
+    });
+
+    const bobId = 'assistant-pantry-other-member';
+    db.prepare('INSERT INTO users (id, email, name, password_hash) VALUES (?, ?, ?, ?)').run(
+      bobId,
+      'assistant-pantry-other-member@test.local',
+      'Other member',
+      'hash'
+    );
+    db.prepare('DELETE FROM ingredients WHERE id IN (?, ?)').run(
+      'ambiguous-yogurt-1',
+      'ambiguous-yogurt-2'
+    );
+    db.prepare(
+      'INSERT INTO households (id, name, invite_code, shared_pantry) VALUES (?, ?, ?, 1)'
+    ).run('assistant-pantry-shared-home', 'Hogar compartido', 'INVITE-PANTRY-SHARED');
+    db.prepare(
+      `INSERT INTO household_members (id, household_id, user_id, role, permissions)
+       VALUES (?, ?, ?, 'admin', NULL)`
+    ).run('assistant-pantry-alice-member', 'assistant-pantry-shared-home', alice.id);
+    db.prepare(
+      `INSERT INTO household_members (id, household_id, user_id, role, permissions)
+       VALUES (?, ?, ?, 'member', '{}')`
+    ).run('assistant-pantry-bob-member', 'assistant-pantry-shared-home', bobId);
+    db.prepare('UPDATE users SET household_id = ? WHERE id = ?').run(
+      'assistant-pantry-shared-home',
+      alice.id
+    );
+    db.prepare('UPDATE users SET household_id = ? WHERE id = ?').run(
+      'assistant-pantry-shared-home',
+      bobId
+    );
+    db.prepare('UPDATE ai_configs SET household_id = ? WHERE user_id = ?').run(
+      'assistant-pantry-shared-home',
+      alice.id
+    );
+    db.prepare(
+      `INSERT INTO ingredients (id, user_id, household_id, name, category, quantity, unit)
+       VALUES (?, ?, ?, ?, 'dairy', 1, 'unit')`
+    ).run('other-member-yogurt', bobId, 'assistant-pantry-shared-home', 'Yogur natural');
+    stubProvider(JSON.stringify(pantryUpdateCandidate()));
+    const foreign = await call(
+      'POST',
+      '/proposals',
+      { prompt: 'Cambia el yogur natural.', route: 'pantry' },
+      alice.token,
+      { 'x-assistant-household-id': 'assistant-pantry-shared-home' }
+    );
+    expect(foreign.status).toBe(200);
+    expect(await foreign.json()).toMatchObject({
+      data: { actions: [], questions: [expect.stringMatching(/no encontré exactamente un/i)] }
+    });
   });
 
   it('turns missing or ambiguous shopping-list targets into a question, never an executable action', async () => {

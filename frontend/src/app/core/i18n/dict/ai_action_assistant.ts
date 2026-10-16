@@ -89,6 +89,10 @@ export const aiActionAssistantEs = {
     'La acción cambió después de un intento. No se repetirá con datos distintos; comprueba el módulo y crea una propuesta nueva.',
   'ai_assistant.error_list_ambiguous':
     'No se encontró una única lista con ese nombre. Corrige el nombre antes de confirmar.',
+  'ai_assistant.error_ingredient_stale':
+    'El ingrediente cambió desde la propuesta. Revisa sus datos actuales antes de confirmar otra vez.',
+  'ai_assistant.error_ingredient_name_conflict':
+    'Ya hay otro ingrediente con ese nombre en el ámbito editable. El cambio no se aplicó.',
   'ai_assistant.error_space_ambiguous':
     'No se encontró un único espacio con ese nombre. Corrige la tarea antes de confirmar.',
   'ai_assistant.error_member_ambiguous':
@@ -102,6 +106,8 @@ export const aiActionAssistantEs = {
   'ai_assistant.task_target':
     'Tarea existente: «{title}» · fecha original {date} · detalles: {details}',
   'ai_assistant.shopping_list_target': 'Lista actual: «{name}» · tienda: {store}',
+  'ai_assistant.pantry_ingredient_target':
+    'Ingrediente actual: «{name}» · cantidad: {quantity} {unit} · categoría: {category} · caducidad: {expirationDate} · ubicación: {location} · notas: {notes}',
   'ai_assistant.discard_title': '¿Descartar este borrador?',
   'ai_assistant.discard_copy': 'Se perderán la petición y las propuestas sin confirmar.',
   'ai_assistant.discard_action': 'Descartar borrador',
@@ -123,6 +129,7 @@ export const aiActionAssistantEs = {
   'ai_assistant.domain.calendar': 'Calendario',
   'ai_assistant.domain.recipes': 'Recetas',
   'ai_assistant.action.add_ingredient': 'Añadir ingrediente',
+  'ai_assistant.action.update_ingredient': 'Actualizar ingrediente',
   'ai_assistant.action.create_list': 'Crear lista de compra',
   'ai_assistant.action.update_list': 'Editar lista de compra',
   'ai_assistant.action.add_item': 'Añadir artículo',
@@ -299,6 +306,10 @@ export const aiActionAssistantEn: Record<keyof typeof aiActionAssistantEs, strin
     'This action changed after an attempt. It will not be retried with different data; check the module and create a new proposal.',
   'ai_assistant.error_list_ambiguous':
     'No single list with that name was found. Correct the name before confirming.',
+  'ai_assistant.error_ingredient_stale':
+    'The ingredient changed after this proposal. Review its current details before confirming again.',
+  'ai_assistant.error_ingredient_name_conflict':
+    'Another ingredient with that name already exists in the editable scope. No change was applied.',
   'ai_assistant.error_space_ambiguous':
     'No single space with that name was found. Correct the task before confirming.',
   'ai_assistant.error_member_ambiguous':
@@ -312,6 +323,8 @@ export const aiActionAssistantEn: Record<keyof typeof aiActionAssistantEs, strin
   'ai_assistant.task_target':
     'Existing task: “{title}” · original date {date} · details: {details}',
   'ai_assistant.shopping_list_target': 'Current list: “{name}” · store: {store}',
+  'ai_assistant.pantry_ingredient_target':
+    'Current ingredient: “{name}” · quantity: {quantity} {unit} · category: {category} · expiry: {expirationDate} · location: {location} · notes: {notes}',
   'ai_assistant.discard_title': 'Discard this draft?',
   'ai_assistant.discard_copy': 'Your request and unconfirmed proposals will be lost.',
   'ai_assistant.discard_action': 'Discard draft',
@@ -332,6 +345,7 @@ export const aiActionAssistantEn: Record<keyof typeof aiActionAssistantEs, strin
   'ai_assistant.domain.calendar': 'Calendar',
   'ai_assistant.domain.recipes': 'Recipes',
   'ai_assistant.action.add_ingredient': 'Add ingredient',
+  'ai_assistant.action.update_ingredient': 'Update ingredient',
   'ai_assistant.action.create_list': 'Create shopping list',
   'ai_assistant.action.update_list': 'Edit shopping list',
   'ai_assistant.action.add_item': 'Add item',

@@ -21,7 +21,10 @@ interface AssistantActionBase<
   selected: boolean;
   status: AssistantActionStatus;
   manualFields?: string[];
-  executionTarget?: AssistantTaskUpdateExecutionTarget | AssistantShoppingListUpdateExecutionTarget;
+  executionTarget?:
+    | AssistantTaskUpdateExecutionTarget
+    | AssistantShoppingListUpdateExecutionTarget
+    | AssistantPantryIngredientUpdateExecutionTarget;
 }
 
 export interface PantryIngredientPayload {
@@ -46,6 +49,26 @@ export interface ShoppingListUpdatePayload {
     setName: boolean;
     store: string | null;
     setStore: boolean;
+  };
+}
+
+export interface PantryIngredientUpdatePayload {
+  targetName: string;
+  changes: {
+    name: string | null;
+    setName: boolean;
+    category: string | null;
+    setCategory: boolean;
+    quantity: number | null;
+    setQuantity: boolean;
+    unit: PantryIngredientPayload['unit'] | null;
+    setUnit: boolean;
+    expirationDate: string | null;
+    setExpirationDate: boolean;
+    location: PantryIngredientPayload['location'] | null;
+    setLocation: boolean;
+    notes: string | null;
+    setNotes: boolean;
   };
 }
 
@@ -105,6 +128,21 @@ export interface AssistantShoppingListUpdateExecutionTarget {
   snapshot: { name: string; store: string | null };
 }
 
+export interface AssistantPantryIngredientUpdateExecutionTarget {
+  kind: 'pantry-ingredient';
+  id: string;
+  snapshot: {
+    name: string;
+    category: string;
+    quantity: number;
+    unit: string;
+    expirationDate: string | null;
+    location: string | null;
+    notes: string | null;
+    updatedAt: string | null;
+  };
+}
+
 export interface CalendarEventPayload {
   title: string;
   kind: 'appointment' | 'home' | 'shopping' | 'personal' | 'other';
@@ -128,6 +166,7 @@ export interface AssistantActionCandidateBase<TKind extends string, TPayload> {
 
 export type AssistantActionCandidate =
   | AssistantActionCandidateBase<'pantry.add_ingredient', PantryIngredientPayload>
+  | AssistantActionCandidateBase<'pantry.update_ingredient', PantryIngredientUpdatePayload>
   | AssistantActionCandidateBase<'shopping.create_list', ShoppingListPayload>
   | AssistantActionCandidateBase<'shopping.update_list', ShoppingListUpdatePayload>
   | AssistantActionCandidateBase<'shopping.add_item', ShoppingItemPayload>
@@ -144,6 +183,15 @@ export type AssistantAction =
       'add_ingredient',
       PantryIngredientPayload
     > & { dependsOn: string[] })
+  | (AssistantActionBase<
+      'pantry.update_ingredient',
+      'pantry',
+      'update_ingredient',
+      PantryIngredientUpdatePayload
+    > & {
+      dependsOn: string[];
+      executionTarget: AssistantPantryIngredientUpdateExecutionTarget;
+    })
   | (AssistantActionBase<'shopping.create_list', 'shopping', 'create_list', ShoppingListPayload> & {
       dependsOn: string[];
     })

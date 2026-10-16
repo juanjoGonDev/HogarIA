@@ -29,7 +29,110 @@ const ingredientAction = {
   warnings: []
 };
 
+const pantryUpdateAction = {
+  kind: 'pantry.update_ingredient',
+  title: 'Actualizar queso',
+  summary: 'Actualiza cantidad y caducidad del queso.',
+  payload: {
+    targetName: 'Queso fresco',
+    changes: {
+      name: null,
+      setName: false,
+      category: null,
+      setCategory: false,
+      quantity: 0,
+      setQuantity: true,
+      unit: null,
+      setUnit: false,
+      expirationDate: null,
+      setExpirationDate: true,
+      location: null,
+      setLocation: false,
+      notes: 'Para la ensalada',
+      setNotes: true
+    }
+  },
+  dependsOn: [],
+  warnings: []
+};
+
 describe('ai assistant proposal schemas', () => {
+  it('accepts only a strict pantry update patch, including explicit zero and clear values', () => {
+    expect(
+      assistantActionPlanCandidateSchema.safeParse({
+        summary: 'Actualiza un ingrediente.',
+        actions: [pantryUpdateAction],
+        questions: []
+      }).success
+    ).toBe(true);
+
+    const invalidActions = [
+      { ...pantryUpdateAction, payload: { ...pantryUpdateAction.payload, id: 'model-id' } },
+      {
+        ...pantryUpdateAction,
+        payload: {
+          ...pantryUpdateAction.payload,
+          changes: { ...pantryUpdateAction.payload.changes, notes: 'sin cambiar', setNotes: false }
+        }
+      },
+      {
+        ...pantryUpdateAction,
+        payload: {
+          ...pantryUpdateAction.payload,
+          changes: {
+            ...pantryUpdateAction.payload.changes,
+            quantity: null,
+            setQuantity: true
+          }
+        }
+      },
+      {
+        ...pantryUpdateAction,
+        payload: {
+          ...pantryUpdateAction.payload,
+          changes: {
+            ...pantryUpdateAction.payload.changes,
+            expirationDate: '2026-02-30'
+          }
+        }
+      },
+      {
+        ...pantryUpdateAction,
+        payload: {
+          ...pantryUpdateAction.payload,
+          changes: { ...pantryUpdateAction.payload.changes, unit: 'box', setUnit: true }
+        }
+      },
+      {
+        ...pantryUpdateAction,
+        payload: {
+          ...pantryUpdateAction.payload,
+          changes: { ...pantryUpdateAction.payload.changes, quantity: -1 }
+        }
+      },
+      {
+        ...pantryUpdateAction,
+        payload: {
+          ...pantryUpdateAction.payload,
+          changes: {
+            ...pantryUpdateAction.payload.changes,
+            notes: 'nota',
+            targetId: 'untrusted'
+          }
+        }
+      }
+    ];
+
+    for (const action of invalidActions) {
+      expect(
+        assistantActionPlanCandidateSchema.safeParse({
+          summary: 'Actualiza un ingrediente.',
+          actions: [action],
+          questions: []
+        }).success
+      ).toBe(false);
+    }
+  });
   it('requires an explicit unique member selection and a Monday meal-plan week', () => {
     const valid = {
       weekStart: '2026-10-12',
@@ -600,6 +703,41 @@ describe('ai assistant proposal schemas', () => {
     expect(plan.actions.every((action) => !action.selected && action.status === 'pending')).toBe(
       true
     );
+  });
+
+  it('requires the server-resolved pantry target to normalize an existing-ingredient action', () => {
+    const candidate = assistantActionPlanCandidateSchema.parse({
+      summary: 'Actualiza el queso.',
+      actions: [pantryUpdateAction],
+      questions: []
+    });
+    expect(() => normalizeAssistantActionPlan(candidate)).toThrow(
+      /server-resolved pantry ingredient/i
+    );
+
+    const target = {
+      kind: 'pantry-ingredient' as const,
+      id: 'ingredient-1',
+      snapshot: {
+        name: 'Queso fresco',
+        category: 'dairy',
+        quantity: 1,
+        unit: 'unit',
+        expirationDate: null,
+        location: 'fridge',
+        notes: null,
+        updatedAt: '2026-10-16 00:00:00'
+      }
+    };
+    const plan = normalizeAssistantActionPlan(
+      candidate,
+      (() => {
+        let id = 0;
+        return () => `app-id-${++id}`;
+      })(),
+      new Map([[0, target]])
+    );
+    expect(plan.actions[0].executionTarget).toEqual(target);
   });
 
   it('rejects forward and duplicate dependency indexes during normalization', () => {
