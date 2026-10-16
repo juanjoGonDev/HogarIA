@@ -3,6 +3,7 @@ import { nanoid } from 'nanoid';
 import { getDatabase } from '../config/database.js';
 import { authMiddleware } from '../middleware/auth.middleware.js';
 import {
+  ASSISTANT_HOUSEHOLD_HEADER,
   ASSISTANT_HOUSEHOLD_CONTEXT_CHANGED,
   assistantHouseholdContextMiddleware,
   currentAssistantHouseholdSnapshot
@@ -11,6 +12,7 @@ import {
   ASSISTANT_ACTION_ID_HEADER,
   withAssistantActionIdempotency
 } from '../utils/assistant-action-idempotency.js';
+import { assistantShoppingListScope } from '../utils/assistant-shopping-list-scope.js';
 import { productKeyOf } from '../utils/product-key.js';
 import { queueProductImageSearch } from '../utils/product-image-search.js';
 import {
@@ -19,6 +21,7 @@ import {
 } from '../utils/pantry-categories.js';
 import {
   applyLinesSchema,
+  assistantUpdateListSchema,
   bulkItemsSchema,
   completeListSchema,
   createCategorySchema,
@@ -541,6 +544,145 @@ shoppingRoutes.get('/lists/:id', async (c) => {
       discountDescription: describeDiscount(discount)
     }
   });
+});
+
+shoppingRoutes.patch('/lists/:id/assistant-update', async (c) => {
+  const actionId = c.req.header(ASSISTANT_ACTION_ID_HEADER);
+  if (!actionId) return c.json({ success: false, code: 'ASSISTANT_ACTION_ID_REQUIRED' }, 400);
+  if (c.req.header(ASSISTANT_HOUSEHOLD_HEADER) === undefined) {
+    return c.json({ success: false, code: 'ASSISTANT_HOUSEHOLD_CONTEXT_REQUIRED' }, 400);
+  }
+
+  const body = assistantUpdateListSchema.parse(await c.req.json());
+  const targetId = c.req.param('id');
+  if (body.assistantAction.targetId !== targetId) {
+    return c.json({ success: false, code: 'ASSISTANT_ACTION_TARGET_MISMATCH' }, 400);
+  }
+
+  const db = getDatabase();
+  const userId = c.get('userId');
+  const assistantSnapshot = currentAssistantHouseholdSnapshot(c);
+  if (!assistantSnapshot.valid) {
+    return c.json({ success: false, code: ASSISTANT_HOUSEHOLD_CONTEXT_CHANGED }, 409);
+  }
+  const scope = assistantShoppingListScope(userId, assistantSnapshot.householdId ?? null);
+  const result = withAssistantActionIdempotency(
+    db,
+    userId,
+    actionId,
+    {
+      operation: 'shopping.update_list',
+      householdId: scope.householdId,
+      listId: targetId,
+      version: body.version,
+      before: body.assistantAction.before,
+      changes: body.changes
+    },
+    () => {
+      if (!currentAssistantHouseholdSnapshot(c).valid) {
+        return {
+          body: { success: false, code: ASSISTANT_HOUSEHOLD_CONTEXT_CHANGED },
+          status: 409,
+          record: false
+        };
+      }
+
+      const list = readList(db, scope, targetId);
+      if (!list) {
+        return {
+          body: { success: false, message: 'List not found' },
+          status: 404,
+          record: false
+        };
+      }
+      if (list.status !== 'active') {
+        return {
+          body: { success: false, code: 'SHOPPING_LIST_NOT_ACTIVE' },
+          status: 409,
+          record: false
+        };
+      }
+      if (
+        list.version !== body.version ||
+        list.name !== body.assistantAction.before.name ||
+        list.store !== body.assistantAction.before.store
+      ) {
+        return {
+          body: {
+            success: false,
+            message: 'LIST_VERSION_CONFLICT',
+            data: { currentVersion: list.version }
+          },
+          status: 409,
+          record: false
+        };
+      }
+
+      const changes = [
+        ...(body.changes.name !== undefined && body.changes.name !== list.name
+          ? [['name = ?', body.changes.name] as const]
+          : []),
+        ...(body.changes.store !== undefined && body.changes.store !== list.store
+          ? [['store = ?', body.changes.store] as const]
+          : [])
+      ];
+      if (changes.length === 0) {
+        return {
+          body: { success: false, code: 'ASSISTANT_ACTION_NO_CHANGE' },
+          status: 400,
+          record: false
+        };
+      }
+
+      const sets: string[] = changes.map(([set]) => set);
+      const values: unknown[] = changes.map(([, value]) => value);
+      sets.push('version = version + 1', 'updated_at = CURRENT_TIMESTAMP', 'updated_by = ?');
+      values.push(userId);
+      const updated = db
+        .prepare(
+          `UPDATE shopping_lists SET ${sets.join(', ')}
+            WHERE id = ? AND version = ? AND name = ? AND store IS ? AND status = 'active'
+              AND ${scope.clause}`
+        )
+        .run(
+          ...values,
+          targetId,
+          body.version,
+          body.assistantAction.before.name,
+          body.assistantAction.before.store,
+          ...scope.params
+        );
+      if (updated.changes !== 1) {
+        const current = readList(db, scope, targetId);
+        return {
+          body: {
+            success: false,
+            message: 'LIST_VERSION_CONFLICT',
+            data: { currentVersion: current?.version ?? null }
+          },
+          status: 409,
+          record: false
+        };
+      }
+
+      const updatedList = readList(db, scope, targetId);
+      announce(db, updatedList, userId, 'list.update', updatedList?.name ?? null);
+      return {
+        body: {
+          success: true,
+          data: { ...updatedList, ...listTotals(db, targetId) }
+        },
+        status: 200
+      };
+    }
+  );
+
+  if ('error' in result) {
+    return result.error === 'invalid_action_id'
+      ? c.json({ success: false, code: 'ASSISTANT_ACTION_ID_INVALID' }, 400)
+      : c.json({ success: false, code: 'ASSISTANT_ACTION_ID_CONFLICT' }, 409);
+  }
+  return c.json(result.body, result.status);
 });
 
 shoppingRoutes.patch('/lists/:id', async (c) => {

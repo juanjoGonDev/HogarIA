@@ -82,6 +82,7 @@ import {
 } from './household-planning-automation.schema.js';
 import { generatedRecipeCandidateSchema } from './generated-recipe.schema.js';
 import {
+  assistantUpdateListSchema,
   applyLinesSchema,
   bulkItemsSchema,
   completeListSchema,
@@ -676,6 +677,19 @@ const ROWS: Row[] = [
     required: { name: 'Semana', version: 1 },
     except: {
       name: 'NothingToUpdate: sin nombre, sin tienda y sin estado no hay PATCH que aplicar'
+    }
+  },
+  {
+    name: 'assistantUpdateListSchema',
+    schema: assistantUpdateListSchema,
+    required: {
+      version: 1,
+      changes: { store: null },
+      assistantAction: {
+        operation: 'update_list',
+        targetId: 'list-1',
+        before: { name: 'Semana', store: null }
+      }
     }
   },
   { name: 'createItemSchema', schema: createItemSchema, required: { name: 'Pan' } },

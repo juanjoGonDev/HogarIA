@@ -95,6 +95,31 @@ function assistantCandidate(): object {
   };
 }
 
+function shoppingUpdateCandidate(targetName = 'Compra semanal'): object {
+  return {
+    summary: 'Actualiza una lista activa.',
+    actions: [
+      {
+        kind: 'shopping.update_list',
+        title: 'Cambiar lista de compra',
+        summary: 'Renombra la lista y cambia la tienda.',
+        payload: {
+          targetName,
+          changes: {
+            name: 'Compra del sábado',
+            setName: true,
+            store: 'Mercadona',
+            setStore: true
+          }
+        },
+        dependsOn: [],
+        warnings: []
+      }
+    ],
+    questions: []
+  };
+}
+
 function mealRecipe(name = 'Arroz con verduras') {
   const step = (instruction: string) => ({
     stepNumber: 1,
@@ -364,6 +389,191 @@ describe('POST /api/ai/assistant/proposals', () => {
     const providerRequest = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
     expect(JSON.stringify(providerRequest)).not.toContain('task-bin');
     expect(db.prepare('SELECT version FROM household_task_weeks').get()).toEqual({ version: 4 });
+  });
+
+  it('resolves shopping-list targets server-side without exposing IDs to the model', async () => {
+    addConfig(alice);
+    db.prepare(
+      `INSERT INTO shopping_lists (id, user_id, name, store)
+       VALUES (?, ?, ?, ?)`
+    ).run('shopping-list-target', alice.id, 'Compra semanal', 'Lidl');
+    const before = persistedSnapshot();
+    const fetchMock = stubProvider(JSON.stringify(shoppingUpdateCandidate()));
+
+    const response = await call(
+      'POST',
+      '/proposals',
+      { prompt: 'Renombra Compra semanal a Compra del sábado y cambia la tienda a Mercadona.' },
+      alice.token,
+      { 'x-assistant-household-id': '' }
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { data: any };
+    expect(body.data.actions[0]).toMatchObject({
+      kind: 'shopping.update_list',
+      executionTarget: {
+        kind: 'shopping-list',
+        id: 'shopping-list-target',
+        version: 1,
+        snapshot: { name: 'Compra semanal', store: 'Lidl' }
+      }
+    });
+    const providerRequest = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
+    expect(JSON.stringify(providerRequest)).not.toContain('shopping-list-target');
+    expect(persistedSnapshot()).toEqual(before);
+  });
+
+  it('turns missing or ambiguous shopping-list targets into a question, never an executable action', async () => {
+    addConfig(alice);
+    stubProvider(JSON.stringify(shoppingUpdateCandidate('Lista de sábado')));
+    const headers = { 'x-assistant-household-id': '' };
+
+    db.prepare('INSERT INTO shopping_lists (id, user_id, name) VALUES (?, ?, ?)').run(
+      'shopping-list-done-target',
+      alice.id,
+      'Lista de sábado'
+    );
+    db.prepare("UPDATE shopping_lists SET status = 'done' WHERE id = ?").run(
+      'shopping-list-done-target'
+    );
+    db.prepare('INSERT INTO shopping_lists (id, user_id, name) VALUES (?, ?, ?)').run(
+      'shopping-list-archived-target',
+      alice.id,
+      'Lista de sábado'
+    );
+    db.prepare("UPDATE shopping_lists SET status = 'archived' WHERE id = ?").run(
+      'shopping-list-archived-target'
+    );
+
+    const missing = await call(
+      'POST',
+      '/proposals',
+      { prompt: 'Cambia la tienda de Lista de sábado.' },
+      alice.token,
+      headers
+    );
+    expect(missing.status).toBe(200);
+    expect(await missing.json()).toMatchObject({
+      data: { actions: [], questions: [expect.stringMatching(/no encontré exactamente una/i)] }
+    });
+
+    db.prepare('INSERT INTO shopping_lists (id, user_id, name) VALUES (?, ?, ?)').run(
+      'shopping-list-ambiguous-1',
+      alice.id,
+      'Lista de sábado'
+    );
+    db.prepare('INSERT INTO shopping_lists (id, user_id, name) VALUES (?, ?, ?)').run(
+      'shopping-list-ambiguous-2',
+      alice.id,
+      'Lista de sábado'
+    );
+    stubProvider(JSON.stringify(shoppingUpdateCandidate('Lista de sábado')));
+    const ambiguous = await call(
+      'POST',
+      '/proposals',
+      { prompt: 'Cambia la tienda de Lista de sábado.' },
+      alice.token,
+      headers
+    );
+    expect(ambiguous.status).toBe(200);
+    expect(await ambiguous.json()).toMatchObject({
+      data: { actions: [], questions: [expect.stringMatching(/más de una/i)] }
+    });
+  });
+
+  it('keeps personal and selected-household shopping targets in separate scopes', async () => {
+    addConfig(alice);
+    db.prepare('INSERT INTO households (id, name, invite_code) VALUES (?, ?, ?)').run(
+      'shopping-assistant-home',
+      'Casa de compra',
+      'INVITE-SHOPPING-ASSISTANT'
+    );
+    db.prepare(
+      'INSERT INTO household_members (id, household_id, user_id, role, permissions) VALUES (?, ?, ?, ?, ?)'
+    ).run('shopping-assistant-member', 'shopping-assistant-home', alice.id, 'member', '{}');
+    db.prepare('UPDATE users SET household_id = ? WHERE id = ?').run(
+      'shopping-assistant-home',
+      alice.id
+    );
+    db.prepare('UPDATE ai_configs SET household_id = ? WHERE user_id = ?').run(
+      'shopping-assistant-home',
+      alice.id
+    );
+    db.prepare('INSERT INTO shopping_lists (id, user_id, name) VALUES (?, ?, ?)').run(
+      'personal-shopping-target',
+      alice.id,
+      'Lista en ambos ámbitos'
+    );
+
+    const householdHeaders = { 'x-assistant-household-id': 'shopping-assistant-home' };
+    stubProvider(JSON.stringify(shoppingUpdateCandidate('Lista en ambos ámbitos')));
+    const personalOnly = await call(
+      'POST',
+      '/proposals',
+      { prompt: 'Cambia la tienda de Lista en ambos ámbitos.' },
+      alice.token,
+      householdHeaders
+    );
+    expect(personalOnly.status).toBe(200);
+    expect(await personalOnly.json()).toMatchObject({
+      data: { actions: [], questions: [expect.stringMatching(/no encontré exactamente una/i)] }
+    });
+
+    db.prepare(
+      'INSERT INTO shopping_lists (id, user_id, household_id, name) VALUES (?, ?, ?, ?)'
+    ).run(
+      'household-shopping-target',
+      alice.id,
+      'shopping-assistant-home',
+      'Lista en ambos ámbitos'
+    );
+    stubProvider(JSON.stringify(shoppingUpdateCandidate('Lista en ambos ámbitos')));
+    const householdTarget = await call(
+      'POST',
+      '/proposals',
+      { prompt: 'Cambia la tienda de Lista en ambos ámbitos.' },
+      alice.token,
+      householdHeaders
+    );
+    expect(householdTarget.status).toBe(200);
+    expect(await householdTarget.json()).toMatchObject({
+      data: {
+        actions: [
+          {
+            executionTarget: {
+              id: 'household-shopping-target',
+              snapshot: { name: 'Lista en ambos ámbitos' }
+            }
+          }
+        ]
+      }
+    });
+
+    db.prepare('UPDATE household_members SET is_active = 0 WHERE user_id = ?').run(alice.id);
+    db.prepare('UPDATE users SET household_id = NULL WHERE id = ?').run(alice.id);
+    db.prepare('UPDATE ai_configs SET household_id = NULL WHERE user_id = ?').run(alice.id);
+    stubProvider(JSON.stringify(shoppingUpdateCandidate('Lista en ambos ámbitos')));
+    const personalTarget = await call(
+      'POST',
+      '/proposals',
+      { prompt: 'Cambia la tienda de Lista en ambos ámbitos.' },
+      alice.token,
+      { 'x-assistant-household-id': '' }
+    );
+    expect(personalTarget.status).toBe(200);
+    expect(await personalTarget.json()).toMatchObject({
+      data: {
+        actions: [
+          {
+            executionTarget: {
+              id: 'personal-shopping-target',
+              snapshot: { name: 'Lista en ambos ámbitos' }
+            }
+          }
+        ]
+      }
+    });
   });
 
   it('turns missing or ambiguous update-task targets into questions with no executable action', async () => {
@@ -976,6 +1186,37 @@ describe('POST /api/ai/assistant/refine', () => {
       action,
       scope: { kind: 'action' }
     });
+
+    expect(response.status).toBe(502);
+    expect(await response.json()).toMatchObject({ success: false, code: 'INVALID_AI_RESULT' });
+  });
+
+  it('rejects a refinement that changes the server-resolved shopping-list selector', async () => {
+    addConfig(alice);
+    const action = (shoppingUpdateCandidate() as any).actions[0];
+    stubProvider(
+      JSON.stringify({
+        summary: 'Otra lista.',
+        replacement: {
+          ...action,
+          payload: { ...action.payload, targetName: 'Lista de otra persona' }
+        },
+        questions: []
+      })
+    );
+
+    const response = await call(
+      'POST',
+      '/refine',
+      {
+        actionId: 'shopping-action-1',
+        instruction: 'Cambia a otra lista',
+        action,
+        scope: { kind: 'action' }
+      },
+      alice.token,
+      { 'x-assistant-household-id': '' }
+    );
 
     expect(response.status).toBe(502);
     expect(await response.json()).toMatchObject({ success: false, code: 'INVALID_AI_RESULT' });

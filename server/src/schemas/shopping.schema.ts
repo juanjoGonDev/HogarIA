@@ -205,6 +205,34 @@ export const updateListSchema = z
     }
   );
 
+/** Narrow CAS contract for the reviewed global assistant; normal list editing stays unchanged. */
+export const assistantUpdateListSchema = z
+  .object({
+    version: z.number().int().positive(),
+    changes: z
+      .object({
+        name: z.string().trim().min(1).max(80).optional(),
+        store: z.string().trim().min(1).max(80).nullable().optional()
+      })
+      .strict()
+      .refine((changes) => Object.keys(changes).length > 0, {
+        message: 'NothingToUpdate'
+      }),
+    assistantAction: z
+      .object({
+        operation: z.literal('update_list'),
+        targetId: z.string().trim().min(1).max(128),
+        before: z
+          .object({
+            name: z.string().min(1).max(80),
+            store: z.string().max(80).nullable()
+          })
+          .strict()
+      })
+      .strict()
+  })
+  .strict();
+
 export const createItemSchema = z.object({
   name: z.string().trim().min(1),
   quantity: formField(quantity),

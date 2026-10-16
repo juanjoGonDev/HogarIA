@@ -70,6 +70,7 @@ const COVERED = [
   'src/utils/ai-assistant-runtime.ts',
   'src/utils/assistant-action-idempotency.ts',
   'src/utils/ai-assistant-household-context.ts',
+  'src/utils/assistant-shopping-list-scope.ts',
   'src/utils/ai-output-language.ts',
   'src/utils/ticket-queue.ts',
   'src/utils/ticket-lines-dedup.ts',

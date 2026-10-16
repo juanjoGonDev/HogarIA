@@ -109,6 +109,10 @@ export class AiActionAssistantExecutionService {
         );
         return;
 
+      case 'shopping.update_list':
+        await this.updateShoppingList(action, expectedHouseholdId);
+        return;
+
       case 'shopping.add_item': {
         const lists = await this.get<{ data: ShoppingListMatch[] }>(
           '/shopping/lists',
@@ -357,6 +361,55 @@ export class AiActionAssistantExecutionService {
         { operation: 'update_task', targetId: target.id, before: target.snapshot }
       )
     );
+  }
+
+  private async updateShoppingList(
+    action: Extract<AssistantAction, { kind: 'shopping.update_list' }>,
+    householdId: string | null
+  ): Promise<void> {
+    const target = action.executionTarget;
+    const { changes } = action.payload;
+    if (
+      !target ||
+      target.kind !== 'shopping-list' ||
+      !target.id ||
+      target.version < 1 ||
+      this.comparable(target.snapshot.name) !== this.comparable(action.payload.targetName) ||
+      changes.setName !== (changes.name !== null) ||
+      (!changes.setStore && changes.store !== null)
+    ) {
+      throw new Error('ASSISTANT_SHOPPING_LIST_TARGET_INVALID');
+    }
+
+    const requestChanges: { name?: string; store?: string | null } = {};
+    if (changes.setName && changes.name !== null) requestChanges.name = changes.name;
+    if (changes.setStore) requestChanges.store = changes.store;
+    const hasEffectiveChange =
+      ('name' in requestChanges && requestChanges.name !== target.snapshot.name) ||
+      ('store' in requestChanges && requestChanges.store !== target.snapshot.store);
+    if (!hasEffectiveChange) {
+      throw new Error('ASSISTANT_SHOPPING_LIST_NO_CHANGE');
+    }
+
+    const response = await firstValueFrom(
+      this.http.patch<ApiEnvelope<unknown>>(
+        `${this.apiUrl}/shopping/lists/${encodeURIComponent(target.id)}/assistant-update`,
+        {
+          version: target.version,
+          changes: requestChanges,
+          assistantAction: {
+            operation: 'update_list',
+            targetId: target.id,
+            before: target.snapshot
+          }
+        },
+        {
+          context: this.silentContext,
+          headers: this.householdHeaders(householdId).set('x-assistant-action-id', action.id)
+        }
+      )
+    );
+    if (response?.success !== true) throw new Error('ASSISTANT_DOMAIN_WRITE_REJECTED');
   }
 
   private async post(

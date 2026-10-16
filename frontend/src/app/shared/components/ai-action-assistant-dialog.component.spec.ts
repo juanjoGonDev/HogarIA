@@ -301,6 +301,91 @@ describe('AiActionAssistantDialogComponent', () => {
     expect(execution.execute).not.toHaveBeenCalled();
   });
 
+  it('shows and edits the resolved shopping list without writing before explicit approval', () => {
+    const action: AssistantAction = {
+      id: 'shopping-update-1',
+      kind: 'shopping.update_list',
+      domain: 'shopping',
+      actionType: 'update_list',
+      title: 'Cambiar lista de compra',
+      summary: 'Renombra la lista y cambia la tienda.',
+      payload: {
+        targetName: 'Compra semanal',
+        changes: { name: 'Compra del sábado', setName: true, store: 'Mercadona', setStore: true }
+      },
+      executionTarget: {
+        kind: 'shopping-list',
+        id: 'shopping-list-1',
+        version: 3,
+        snapshot: { name: 'Compra semanal', store: 'Lidl' }
+      },
+      dependsOn: [],
+      warnings: [],
+      selected: false,
+      status: 'pending'
+    };
+    component.plan.set({
+      id: 'shopping-update-plan',
+      summary: 'Actualiza una lista existente.',
+      actions: [action],
+      questions: []
+    });
+    component.stage.set('review');
+    fixture.detectChanges();
+
+    const target = fixture.nativeElement.querySelector(
+      '[data-test="ai-assistant-shopping-target"]'
+    ) as HTMLElement;
+    expect(target.textContent).toContain('Compra semanal');
+    expect(target.textContent).toContain('Lidl');
+    expect(component.isActionValid(action)).toBeTrue();
+
+    const details = fixture.nativeElement.querySelector(
+      `[data-test="ai-assistant-action-details-${action.id}"]`
+    ) as HTMLDetailsElement;
+    details.open = true;
+    fixture.detectChanges();
+    const fields = details.querySelectorAll('input[type="text"]') as NodeListOf<HTMLInputElement>;
+    expect(fields.length).toBe(2);
+    expect(fields[0].value).toBe('Compra del sábado');
+    expect(fields[1].value).toBe('Mercadona');
+    fields[0].value = 'Compra del jueves';
+    fields[0].dispatchEvent(new Event('input', { bubbles: true }));
+    fields[1].value = 'Alcampo';
+    fields[1].dispatchEvent(new Event('input', { bubbles: true }));
+    fixture.detectChanges();
+    expect(component.plan()?.actions[0].payload).toEqual(
+      jasmine.objectContaining({
+        targetName: 'Compra semanal',
+        changes: { name: 'Compra del jueves', setName: true, store: 'Alcampo', setStore: true }
+      })
+    );
+
+    fields[1].value = '   ';
+    fields[1].dispatchEvent(new Event('input', { bubbles: true }));
+    fixture.detectChanges();
+    expect(component.plan()?.actions[0].payload).toEqual(
+      jasmine.objectContaining({
+        targetName: 'Compra semanal',
+        changes: { name: 'Compra del jueves', setName: true, store: null, setStore: true }
+      })
+    );
+    expect(component.isActionValid(component.plan()!.actions[0])).toBeTrue();
+    expect(execution.execute).not.toHaveBeenCalled();
+
+    component.setSelected(action.id, true);
+    component.goToConfirmation();
+    fixture.detectChanges();
+    const confirmation = fixture.nativeElement.querySelector(
+      '[data-test="ai-assistant-confirm"]'
+    ) as HTMLElement;
+    expect(confirmation.textContent).toContain('Compra semanal');
+    expect(confirmation.textContent).toContain('Compra del jueves');
+    expect(confirmation.textContent).toContain('—');
+    expect(confirmation.textContent).not.toContain('Alcampo');
+    expect(execution.execute).not.toHaveBeenCalled();
+  });
+
   it('blocks selection when a required earlier action is unselected', () => {
     const plan = pantryPlan();
     const child: AssistantAction = {

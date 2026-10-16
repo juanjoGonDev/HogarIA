@@ -185,6 +185,7 @@ const DOMAIN_LABELS: Record<AssistantAction['domain'], TranslationKey> = {
 const ACTION_LABELS: Record<AssistantAction['actionType'], TranslationKey> = {
   add_ingredient: 'ai_assistant.action.add_ingredient',
   create_list: 'ai_assistant.action.create_list',
+  update_list: 'ai_assistant.action.update_list',
   add_item: 'ai_assistant.action.add_item',
   create_task: 'ai_assistant.action.create_task',
   update_task: 'ai_assistant.action.update_task',
@@ -469,6 +470,20 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
                               title: action.executionTarget.snapshot.title,
                               date: action.executionTarget.snapshot.scheduledDate,
                               details: action.executionTarget.snapshot.details || '—'
+                            }
+                    }}
+                  </p>
+                  <p
+                    *ngIf="action.kind === 'shopping.update_list'"
+                    class="assistant__action-summary"
+                    data-test="ai-assistant-shopping-target"
+                  >
+                    {{
+                      'ai_assistant.shopping_list_target'
+                        | t
+                          : {
+                              name: action.executionTarget.snapshot.name,
+                              store: action.executionTarget.snapshot.store || '—'
                             }
                     }}
                   </p>
@@ -869,6 +884,20 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
                               title: action.executionTarget.snapshot.title,
                               date: action.executionTarget.snapshot.scheduledDate,
                               details: action.executionTarget.snapshot.details || '—'
+                            }
+                    }}
+                  </p>
+                  <p
+                    *ngIf="action.kind === 'shopping.update_list'"
+                    class="assistant__action-summary"
+                    data-test="ai-assistant-shopping-target-confirm"
+                  >
+                    {{
+                      'ai_assistant.shopping_list_target'
+                        | t
+                          : {
+                              name: action.executionTarget.snapshot.name,
+                              store: action.executionTarget.snapshot.store || '—'
                             }
                     }}
                   </p>
@@ -2398,6 +2427,26 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
           this.field('name', ['name'], action.payload.name, 'text', true),
           this.field('store', ['store'], action.payload.store, 'text')
         ];
+      case 'shopping.update_list':
+        return [
+          this.field(
+            'name',
+            ['changes', 'name'],
+            action.payload.changes.setName
+              ? action.payload.changes.name
+              : action.executionTarget.snapshot.name,
+            'text',
+            true
+          ),
+          this.field(
+            'store',
+            ['changes', 'store'],
+            action.payload.changes.setStore
+              ? action.payload.changes.store
+              : action.executionTarget.snapshot.store,
+            'text'
+          )
+        ];
       case 'shopping.add_item':
         return [
           this.field('listName', ['listName'], action.payload.listName, 'text', true),
@@ -2561,6 +2610,27 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
         (action.payload.store === null || action.payload.store.length <= 80)
       );
     }
+    if (action.kind === 'shopping.update_list') {
+      const { changes } = action.payload;
+      const target = action.executionTarget;
+      const nameChanged =
+        changes.setName && changes.name !== null && changes.name !== target.snapshot.name;
+      const storeChanged = changes.setStore && changes.store !== target.snapshot.store;
+      return (
+        target.kind === 'shopping-list' &&
+        target.id.length > 0 &&
+        target.version > 0 &&
+        this.comparableName(action.payload.targetName) ===
+          this.comparableName(target.snapshot.name) &&
+        changes.setName === (changes.name !== null) &&
+        (changes.setStore || changes.store === null) &&
+        (changes.name === null ||
+          (changes.name.trim().length > 0 && changes.name.trim().length <= 80)) &&
+        (changes.store === null ||
+          (changes.store.trim().length > 0 && changes.store.trim().length <= 80)) &&
+        (nameChanged || storeChanged)
+      );
+    }
     if (action.kind === 'shopping.add_item') {
       return (
         action.payload.listName.trim().length <= 80 &&
@@ -2668,6 +2738,44 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
     rawValue: string | number | boolean,
     kind?: AssistantFieldKind
   ): void {
+    const currentAction = this.plan()?.actions.find((action) => action.id === actionId);
+    if (
+      currentAction?.kind === 'shopping.update_list' &&
+      path[0] === 'changes' &&
+      (path[1] === 'name' || path[1] === 'store')
+    ) {
+      const field = path[1];
+      const rawText = typeof rawValue === 'string' ? rawValue : String(rawValue);
+      const normalizedText = rawText.trim();
+      const nextValue = field === 'store' && normalizedText === '' ? null : normalizedText;
+      const beforeValue = currentAction.executionTarget.snapshot[field];
+      const changed = nextValue !== beforeValue;
+      const serializedPath = JSON.stringify(path);
+      this.updateActions((actions) =>
+        actions.map((action) => {
+          if (action.id !== actionId || action.kind !== 'shopping.update_list') return action;
+          const changes =
+            field === 'name'
+              ? {
+                  ...action.payload.changes,
+                  name: changed ? (nextValue as string) : null,
+                  setName: changed
+                }
+              : {
+                  ...action.payload.changes,
+                  store: changed ? nextValue : null,
+                  setStore: changed
+                };
+          return {
+            ...action,
+            payload: { ...action.payload, changes },
+            manualFields: [...new Set([...(action.manualFields ?? []), serializedPath])]
+          };
+        })
+      );
+      return;
+    }
+
     if (
       this.plan()?.actions.some(
         (action) => action.id === actionId && action.kind === 'household.plan_meals'
@@ -2830,6 +2938,10 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
     const timestamp = Date.parse(`${value}T00:00:00.000Z`);
     return Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === value;
+  }
+
+  private comparableName(value: string): string {
+    return value.normalize('NFC').trim().toLocaleLowerCase();
   }
 
   private mondayOf(date: string): string {

@@ -421,6 +421,105 @@ describe('ai assistant proposal schemas', () => {
     ).toBe(false);
   });
 
+  it('accepts only server-resolvable shopping list selectors and editable changes', () => {
+    const updateList = {
+      kind: 'shopping.update_list',
+      title: 'Cambiar lista de compra',
+      summary: 'Renombra la lista activa y asigna otra tienda.',
+      payload: {
+        targetName: 'Compra semanal',
+        changes: {
+          name: 'Compra del sábado',
+          setName: true,
+          store: 'Mercadona',
+          setStore: true
+        }
+      },
+      dependsOn: [],
+      warnings: []
+    };
+
+    expect(
+      assistantActionPlanCandidateSchema.safeParse({
+        summary: 'Lista revisada.',
+        actions: [updateList],
+        questions: []
+      }).success
+    ).toBe(true);
+    expect(
+      assistantActionPlanCandidateSchema.safeParse({
+        summary: 'Solo tienda.',
+        actions: [
+          {
+            ...updateList,
+            payload: {
+              ...updateList.payload,
+              changes: { name: null, setName: false, store: null, setStore: true }
+            }
+          }
+        ],
+        questions: []
+      }).success
+    ).toBe(true);
+    expect(
+      assistantActionPlanCandidateSchema.safeParse({
+        summary: 'Sin cambios.',
+        actions: [
+          {
+            ...updateList,
+            payload: {
+              ...updateList.payload,
+              changes: { name: null, setName: false, store: null, setStore: false }
+            }
+          }
+        ],
+        questions: []
+      }).success
+    ).toBe(false);
+    expect(
+      assistantActionPlanCandidateSchema.safeParse({
+        summary: 'El modelo no elige registros.',
+        actions: [
+          {
+            ...updateList,
+            payload: { ...updateList.payload, listId: 'model-owned-id' }
+          }
+        ],
+        questions: []
+      }).success
+    ).toBe(false);
+    expect(
+      assistantActionPlanCandidateSchema.safeParse({
+        summary: 'No se cambia el estado.',
+        actions: [
+          {
+            ...updateList,
+            payload: {
+              ...updateList.payload,
+              changes: { ...updateList.payload.changes, status: 'done' }
+            }
+          }
+        ],
+        questions: []
+      }).success
+    ).toBe(false);
+    expect(
+      assistantActionPlanCandidateSchema.safeParse({
+        summary: 'Nombre limitado.',
+        actions: [
+          {
+            ...updateList,
+            payload: {
+              ...updateList.payload,
+              changes: { name: 'x'.repeat(81), setName: true, store: null, setStore: false }
+            }
+          }
+        ],
+        questions: []
+      }).success
+    ).toBe(false);
+  });
+
   it('accepts scoped replacement or a question-only refinement result', () => {
     expect(
       assistantActionRefinementCandidateSchema.safeParse({

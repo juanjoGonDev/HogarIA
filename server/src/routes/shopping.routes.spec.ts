@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Hono } from 'hono';
 import jwt from 'jsonwebtoken';
+import { ReadableStream } from 'node:stream/web';
 
 /**
  * Lista de la compra y precios, sobre una BD en memoria real (nada de mocks de
@@ -37,13 +38,21 @@ async function makeUser(email: string, householdId: string | null = null) {
 
 type User = { id: string; token: string };
 
-function call(user: User, method: string, path: string, body?: unknown, language = 'es') {
+function call(
+  user: User,
+  method: string,
+  path: string,
+  body?: unknown,
+  language = 'es',
+  extraHeaders: Record<string, string> = {}
+) {
   return app.request(`/api/shopping${path}`, {
     method,
     headers: {
       authorization: `Bearer ${user.token}`,
       'content-type': 'application/json',
-      'x-app-language': language
+      'x-app-language': language,
+      ...extraHeaders
     },
     body: body === undefined ? undefined : JSON.stringify(body)
   });
@@ -194,6 +203,343 @@ describe('/lists', () => {
     );
     expect(stale.message).toBe('LIST_VERSION_CONFLICT');
     expect(stale.data.currentVersion).toBe(2);
+  });
+
+  it('edita una lista revisada con CAS e idempotencia en un endpoint exclusivo del asistente', async () => {
+    const list = await data(
+      await call(alice, 'POST', '/lists', { name: 'Compra semanal', store: 'Lidl' })
+    );
+    const actionId = '123e4567-e89b-42d3-a456-426614174000';
+    const headers = {
+      'x-assistant-action-id': actionId,
+      'x-assistant-household-id': ''
+    };
+    const body = {
+      version: list.version,
+      changes: { name: 'Compra del sábado', store: null },
+      assistantAction: {
+        operation: 'update_list',
+        targetId: list.id,
+        before: { name: list.name, store: list.store }
+      }
+    };
+    const eventCount = () =>
+      (
+        db
+          .prepare('SELECT COUNT(*) AS count FROM shopping_list_events WHERE list_id = ?')
+          .get(list.id) as { count: number }
+      ).count;
+
+    const eventsBefore = eventCount();
+    const first = await call(
+      alice,
+      'PATCH',
+      `/lists/${list.id}/assistant-update`,
+      body,
+      'es',
+      headers
+    );
+    expect(first.status).toBe(200);
+    expect(await data(first)).toMatchObject({
+      name: 'Compra del sábado',
+      store: null,
+      version: list.version + 1
+    });
+    expect(eventCount()).toBe(eventsBefore + 1);
+
+    const replay = await call(
+      alice,
+      'PATCH',
+      `/lists/${list.id}/assistant-update`,
+      body,
+      'es',
+      headers
+    );
+    expect(replay.status).toBe(200);
+    expect(await json(replay)).toMatchObject({ success: true, idempotent: true });
+    expect((await data(await call(alice, 'GET', `/lists/${list.id}`))).version).toBe(
+      list.version + 1
+    );
+    expect(eventCount()).toBe(eventsBefore + 1);
+
+    const changedReplay = await call(
+      alice,
+      'PATCH',
+      `/lists/${list.id}/assistant-update`,
+      { ...body, changes: { name: 'Otro nombre' } },
+      'es',
+      headers
+    );
+    expect(changedReplay.status).toBe(409);
+    expect(await json(changedReplay)).toMatchObject({ code: 'ASSISTANT_ACTION_ID_CONFLICT' });
+    expect((await data(await call(alice, 'GET', `/lists/${list.id}`))).name).toBe(
+      'Compra del sábado'
+    );
+    expect(eventCount()).toBe(eventsBefore + 1);
+  });
+
+  it('rechaza targets obsoletos, no activos o ajenos sin ledger ni efectos laterales', async () => {
+    const list = await createList(alice, 'Lista segura');
+    const staleBody = {
+      version: list.version,
+      changes: { name: 'Nombre obsoleto' },
+      assistantAction: {
+        operation: 'update_list',
+        targetId: list.id,
+        before: { name: list.name, store: list.store }
+      }
+    };
+    const header = (id: string, household = '') => ({
+      'x-assistant-action-id': id,
+      'x-assistant-household-id': household
+    });
+    db.prepare('UPDATE shopping_lists SET version = version + 1, store = ? WHERE id = ?').run(
+      'Competidor',
+      list.id
+    );
+    const eventsBefore = (
+      db
+        .prepare('SELECT COUNT(*) AS count FROM shopping_list_events WHERE list_id = ?')
+        .get(list.id) as {
+        count: number;
+      }
+    ).count;
+
+    const stale = await call(
+      alice,
+      'PATCH',
+      `/lists/${list.id}/assistant-update`,
+      staleBody,
+      'es',
+      header('223e4567-e89b-42d3-a456-426614174000')
+    );
+    expect(stale.status).toBe(409);
+    expect(
+      db.prepare('SELECT name, store, version FROM shopping_lists WHERE id = ?').get(list.id)
+    ).toEqual({
+      name: 'Lista segura',
+      store: 'Competidor',
+      version: list.version + 1
+    });
+    expect(
+      db
+        .prepare('SELECT COUNT(*) AS count FROM assistant_action_results WHERE action_id = ?')
+        .get('223e4567-e89b-42d3-a456-426614174000')
+    ).toEqual({ count: 0 });
+    expect(
+      (
+        db
+          .prepare('SELECT COUNT(*) AS count FROM shopping_list_events WHERE list_id = ?')
+          .get(list.id) as {
+          count: number;
+        }
+      ).count
+    ).toBe(eventsBefore);
+
+    const missingActionId = await call(
+      alice,
+      'PATCH',
+      `/lists/${list.id}/assistant-update`,
+      staleBody,
+      'es',
+      { 'x-assistant-household-id': '' }
+    );
+    expect(missingActionId.status).toBe(400);
+
+    const extraField = await call(
+      alice,
+      'PATCH',
+      `/lists/${list.id}/assistant-update`,
+      {
+        ...staleBody,
+        changes: { status: 'done' }
+      },
+      'es',
+      header('323e4567-e89b-42d3-a456-426614174000')
+    );
+    expect(extraField.status).toBe(400);
+
+    expect(
+      (
+        await call(
+          bob,
+          'PATCH',
+          `/lists/${list.id}/assistant-update`,
+          staleBody,
+          'es',
+          header('423e4567-e89b-42d3-a456-426614174000')
+        )
+      ).status
+    ).toBe(404);
+    expect((await data(await call(alice, 'GET', `/lists/${list.id}`))).name).toBe('Lista segura');
+  });
+
+  it('no convierte una tienda vacía en texto vacío: exige null para borrarla', async () => {
+    const list = await createList(alice, 'Lista sin tienda');
+    const response = await call(
+      alice,
+      'PATCH',
+      `/lists/${list.id}/assistant-update`,
+      {
+        version: list.version,
+        changes: { store: '   ' },
+        assistantAction: {
+          operation: 'update_list',
+          targetId: list.id,
+          before: { name: list.name, store: null }
+        }
+      },
+      'es',
+      {
+        'x-assistant-action-id': '523e4567-e89b-42d3-a456-426614174000',
+        'x-assistant-household-id': ''
+      }
+    );
+
+    expect(response.status).toBe(400);
+    expect(await data(await call(alice, 'GET', `/lists/${list.id}`))).toMatchObject({
+      store: null,
+      version: list.version
+    });
+  });
+
+  it('no permite editar una lista personal con el ámbito de un hogar seleccionado', async () => {
+    const list = await createList(alice, 'Lista personal');
+    const householdId = `assistant-scope-${Math.random().toString(36).slice(2)}`;
+    db.prepare('INSERT INTO households (id, name, invite_code) VALUES (?, ?, ?)').run(
+      householdId,
+      'Casa del asistente',
+      `${householdId}-code`
+    );
+    db.prepare(
+      `INSERT INTO household_members (id, household_id, user_id, role, permissions)
+       VALUES (?, ?, ?, 'member', '{}')`
+    ).run(`member-${householdId}`, householdId, alice.id);
+    db.prepare('UPDATE users SET household_id = ? WHERE id = ?').run(householdId, alice.id);
+    const response = await call(
+      alice,
+      'PATCH',
+      `/lists/${list.id}/assistant-update`,
+      {
+        version: list.version,
+        changes: { name: 'No debe cambiar' },
+        assistantAction: {
+          operation: 'update_list',
+          targetId: list.id,
+          before: { name: list.name, store: list.store }
+        }
+      },
+      'es',
+      {
+        'x-assistant-action-id': '623e4567-e89b-42d3-a456-426614174000',
+        'x-assistant-household-id': householdId
+      }
+    );
+
+    expect(response.status).toBe(404);
+    expect(await data(await call(alice, 'GET', `/lists/${list.id}`))).toMatchObject({
+      name: list.name,
+      version: list.version
+    });
+    expect(
+      db
+        .prepare('SELECT COUNT(*) AS count FROM assistant_action_results WHERE action_id = ?')
+        .get('623e4567-e89b-42d3-a456-426614174000')
+    ).toEqual({ count: 0 });
+  });
+
+  it('revalida el hogar después de leer el body y deja lista, eventos y ledger intactos', async () => {
+    const householdId = `assistant-before-${Math.random().toString(36).slice(2)}`;
+    const changedHouseholdId = `assistant-after-${Math.random().toString(36).slice(2)}`;
+    const insertHousehold = db.prepare(
+      'INSERT INTO households (id, name, invite_code) VALUES (?, ?, ?)'
+    );
+    insertHousehold.run(householdId, 'Casa inicial', `${householdId}-code`);
+    insertHousehold.run(changedHouseholdId, 'Casa nueva', `${changedHouseholdId}-code`);
+    const insertMember = db.prepare(
+      `INSERT INTO household_members (id, household_id, user_id, role, permissions)
+       VALUES (?, ?, ?, 'member', '{}')`
+    );
+    insertMember.run(`member-${householdId}`, householdId, alice.id);
+    insertMember.run(`member-${changedHouseholdId}`, changedHouseholdId, alice.id);
+    db.prepare('UPDATE users SET household_id = ? WHERE id = ?').run(householdId, alice.id);
+    const list = await createList(alice, 'Lista de casa');
+    const actionId = '723e4567-e89b-42d3-a456-426614174000';
+    const body = {
+      version: list.version,
+      changes: { name: 'No debe persistir' },
+      assistantAction: {
+        operation: 'update_list',
+        targetId: list.id,
+        before: { name: list.name, store: list.store }
+      }
+    };
+    const eventsBefore = (
+      db
+        .prepare('SELECT COUNT(*) AS count FROM shopping_list_events WHERE list_id = ?')
+        .get(list.id) as {
+        count: number;
+      }
+    ).count;
+    let notifyBodyStarted!: () => void;
+    let releaseBody!: () => void;
+    let hasStarted = false;
+    const bodyStarted = new Promise<void>((resolve) => (notifyBodyStarted = resolve));
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (!hasStarted) {
+          hasStarted = true;
+          notifyBodyStarted();
+        }
+        return new Promise<void>((resolve) => {
+          releaseBody = () => {
+            controller.enqueue(new TextEncoder().encode(JSON.stringify(body)));
+            controller.close();
+            resolve();
+          };
+        });
+      }
+    });
+    const pending = app.fetch(
+      new Request(`http://localhost/api/shopping/lists/${list.id}/assistant-update`, {
+        method: 'PATCH',
+        headers: {
+          authorization: `Bearer ${alice.token}`,
+          'content-type': 'application/json',
+          'x-assistant-action-id': actionId,
+          'x-assistant-household-id': householdId
+        },
+        body: stream,
+        duplex: 'half'
+      } as RequestInit & { duplex: 'half' })
+    );
+    await bodyStarted;
+    db.prepare('UPDATE users SET household_id = ? WHERE id = ?').run(changedHouseholdId, alice.id);
+    releaseBody();
+    const response = await pending;
+
+    expect(response.status).toBe(409);
+    expect(await json(response)).toMatchObject({ code: 'ASSISTANT_HOUSEHOLD_CONTEXT_CHANGED' });
+    expect(
+      db.prepare('SELECT name, version FROM shopping_lists WHERE id = ?').get(list.id)
+    ).toEqual({
+      name: list.name,
+      version: list.version
+    });
+    expect(
+      (
+        db
+          .prepare('SELECT COUNT(*) AS count FROM shopping_list_events WHERE list_id = ?')
+          .get(list.id) as {
+          count: number;
+        }
+      ).count
+    ).toBe(eventsBefore);
+    expect(
+      db
+        .prepare('SELECT COUNT(*) AS count FROM assistant_action_results WHERE action_id = ?')
+        .get(actionId)
+    ).toEqual({ count: 0 });
   });
 
   it('sin campos que cambiar no escribe nada', async () => {

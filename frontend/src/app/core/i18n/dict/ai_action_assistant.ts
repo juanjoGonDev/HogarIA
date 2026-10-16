@@ -101,6 +101,7 @@ export const aiActionAssistantEs = {
     'Esta edición debe permanecer en la misma semana. Prepara una propuesta nueva para moverla a otra semana.',
   'ai_assistant.task_target':
     'Tarea existente: «{title}» · fecha original {date} · detalles: {details}',
+  'ai_assistant.shopping_list_target': 'Lista actual: «{name}» · tienda: {store}',
   'ai_assistant.discard_title': '¿Descartar este borrador?',
   'ai_assistant.discard_copy': 'Se perderán la petición y las propuestas sin confirmar.',
   'ai_assistant.discard_action': 'Descartar borrador',
@@ -123,6 +124,7 @@ export const aiActionAssistantEs = {
   'ai_assistant.domain.recipes': 'Recetas',
   'ai_assistant.action.add_ingredient': 'Añadir ingrediente',
   'ai_assistant.action.create_list': 'Crear lista de compra',
+  'ai_assistant.action.update_list': 'Editar lista de compra',
   'ai_assistant.action.add_item': 'Añadir artículo',
   'ai_assistant.action.create_task': 'Crear tarea',
   'ai_assistant.action.update_task': 'Editar tarea',
@@ -309,6 +311,7 @@ export const aiActionAssistantEn: Record<keyof typeof aiActionAssistantEs, strin
     'This edit must stay within the same week. Prepare a new proposal to move it to another week.',
   'ai_assistant.task_target':
     'Existing task: “{title}” · original date {date} · details: {details}',
+  'ai_assistant.shopping_list_target': 'Current list: “{name}” · store: {store}',
   'ai_assistant.discard_title': 'Discard this draft?',
   'ai_assistant.discard_copy': 'Your request and unconfirmed proposals will be lost.',
   'ai_assistant.discard_action': 'Discard draft',
@@ -330,6 +333,7 @@ export const aiActionAssistantEn: Record<keyof typeof aiActionAssistantEs, strin
   'ai_assistant.domain.recipes': 'Recipes',
   'ai_assistant.action.add_ingredient': 'Add ingredient',
   'ai_assistant.action.create_list': 'Create shopping list',
+  'ai_assistant.action.update_list': 'Edit shopping list',
   'ai_assistant.action.add_item': 'Add item',
   'ai_assistant.action.create_task': 'Create task',
   'ai_assistant.action.update_task': 'Edit task',

@@ -21,7 +21,7 @@ interface AssistantActionBase<
   selected: boolean;
   status: AssistantActionStatus;
   manualFields?: string[];
-  executionTarget?: AssistantTaskUpdateExecutionTarget;
+  executionTarget?: AssistantTaskUpdateExecutionTarget | AssistantShoppingListUpdateExecutionTarget;
 }
 
 export interface PantryIngredientPayload {
@@ -37,6 +37,16 @@ export interface PantryIngredientPayload {
 export interface ShoppingListPayload {
   name: string;
   store: string | null;
+}
+
+export interface ShoppingListUpdatePayload {
+  targetName: string;
+  changes: {
+    name: string | null;
+    setName: boolean;
+    store: string | null;
+    setStore: boolean;
+  };
 }
 
 export interface ShoppingItemPayload {
@@ -88,6 +98,13 @@ export interface AssistantTaskUpdateExecutionTarget {
   };
 }
 
+export interface AssistantShoppingListUpdateExecutionTarget {
+  kind: 'shopping-list';
+  id: string;
+  version: number;
+  snapshot: { name: string; store: string | null };
+}
+
 export interface CalendarEventPayload {
   title: string;
   kind: 'appointment' | 'home' | 'shopping' | 'personal' | 'other';
@@ -112,6 +129,7 @@ export interface AssistantActionCandidateBase<TKind extends string, TPayload> {
 export type AssistantActionCandidate =
   | AssistantActionCandidateBase<'pantry.add_ingredient', PantryIngredientPayload>
   | AssistantActionCandidateBase<'shopping.create_list', ShoppingListPayload>
+  | AssistantActionCandidateBase<'shopping.update_list', ShoppingListUpdatePayload>
   | AssistantActionCandidateBase<'shopping.add_item', ShoppingItemPayload>
   | AssistantActionCandidateBase<'household.plan_meals', HouseholdMealPlanPayload>
   | AssistantActionCandidateBase<'household.create_task', HouseholdTaskPayload>
@@ -128,6 +146,15 @@ export type AssistantAction =
     > & { dependsOn: string[] })
   | (AssistantActionBase<'shopping.create_list', 'shopping', 'create_list', ShoppingListPayload> & {
       dependsOn: string[];
+    })
+  | (AssistantActionBase<
+      'shopping.update_list',
+      'shopping',
+      'update_list',
+      ShoppingListUpdatePayload
+    > & {
+      dependsOn: string[];
+      executionTarget: AssistantShoppingListUpdateExecutionTarget;
     })
   | (AssistantActionBase<'shopping.add_item', 'shopping', 'add_item', ShoppingItemPayload> & {
       dependsOn: string[];

@@ -182,6 +182,41 @@ describe('AiActionAssistantExecutionService', () => {
     await expectAsync(execution).toBeResolvedTo(undefined);
   });
 
+  it('sends a reviewed shopping-list edit with its server target, version, and preimage', async () => {
+    householdContext.activeHouseholdId.set('home-a');
+    const action = {
+      ...actionBase('shopping.update_list', 'shopping', 'update_list'),
+      kind: 'shopping.update_list',
+      payload: {
+        targetName: 'Compra semanal',
+        changes: { name: 'Compra del sábado', setName: true, store: null, setStore: true }
+      },
+      executionTarget: {
+        kind: 'shopping-list',
+        id: 'list-1',
+        version: 3,
+        snapshot: { name: 'Compra semanal', store: 'Lidl' }
+      }
+    } as AssistantAction;
+
+    const execution = service.execute(action, 'home-a');
+    const request = http.expectOne('/api/shopping/lists/list-1/assistant-update');
+    expect(request.request.method).toBe('PATCH');
+    expect(request.request.body).toEqual({
+      version: 3,
+      changes: { name: 'Compra del sábado', store: null },
+      assistantAction: {
+        operation: 'update_list',
+        targetId: 'list-1',
+        before: { name: 'Compra semanal', store: 'Lidl' }
+      }
+    });
+    expect(request.request.headers.get('x-assistant-action-id')).toBe(action.id);
+    expect(request.request.headers.get('x-assistant-household-id')).toBe('home-a');
+    request.flush({ success: true, data: { idempotent: false } });
+    await expectAsync(execution).toBeResolvedTo(undefined);
+  });
+
   it('blocks stale and cross-week task updates before sending a write', async () => {
     householdContext.activeHouseholdId.set('home-a');
     const before = {

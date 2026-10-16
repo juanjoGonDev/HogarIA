@@ -284,6 +284,34 @@ function taskUpdateProposal(executionTarget: Record<string, any>) {
   };
 }
 
+function shoppingUpdateProposal(executionTarget: Record<string, any>) {
+  const update = action(
+    '88888888-8888-4888-8888-888888888888',
+    'shopping.update_list',
+    'shopping',
+    'update_list',
+    'Editar lista existente',
+    {
+      targetName: executionTarget.snapshot.name,
+      changes: {
+        name: 'Compra propuesta QA',
+        setName: true,
+        store: 'Carrefour',
+        setStore: true
+      }
+    }
+  );
+  return {
+    success: true,
+    data: {
+      id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+      summary: 'Edita una lista activa existente.',
+      questions: [],
+      actions: [{ ...update, executionTarget }]
+    }
+  };
+}
+
 async function tokenOf(page: Page): Promise<string> {
   const token = await page.evaluate((key) => window.localStorage.getItem(key), TOKEN_KEY);
   expect(token, 'sesión de usuario sintético').toBeTruthy();
@@ -1522,3 +1550,213 @@ function assistantMealDraft(proposalId: string, recipeName: string, memberIds: s
     }
   };
 }
+
+test('asistente global: rechazar no escribe y renombrar una lista solo persiste tras confirmar', async ({
+  page
+}, testInfo) => {
+  let updateProposal: ReturnType<typeof shoppingUpdateProposal>;
+  let proposalRequests = 0;
+  const assistantWrites: Array<{ body: any; actionId: string | undefined }> = [];
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(`${error.name}: ${error.message}`));
+  page.on('request', (request) => {
+    if (
+      request.method() === 'PATCH' &&
+      new URL(request.url()).pathname.endsWith('/assistant-update')
+    ) {
+      assistantWrites.push({
+        body: request.postDataJSON(),
+        actionId: request.headers()['x-assistant-action-id']
+      });
+    }
+  });
+  await page.route('**/api/ai/assistant/proposals', async (route) => {
+    proposalRequests += 1;
+    await route.fulfill({ json: updateProposal });
+  });
+
+  await registerUser(page, 'Asistente edita lista E2E');
+  await createHousehold(page, 'Casa sintética edita lista');
+  await page.goto('/dashboard');
+  const token = await tokenOf(page);
+  const authHeaders = { authorization: `Bearer ${token}` };
+  const created = await page.request.post('/api/shopping/lists', {
+    headers: authHeaders,
+    data: { name: 'Compra privada QA', store: 'Lidl' }
+  });
+  const createdBody = await created.json();
+  expect(created.status(), JSON.stringify(createdBody)).toBe(201);
+  const list = createdBody.data;
+  const seededItem = await page.request.post(`/api/shopping/lists/${list.id}/items`, {
+    headers: authHeaders,
+    data: { name: 'Lentejas QA', quantity: 2, unit: 'latas' }
+  });
+  expect(seededItem.status()).toBe(201);
+  const seededListResponse = await page.request.get(`/api/shopping/lists/${list.id}`, {
+    headers: authHeaders
+  });
+  expect(seededListResponse.status()).toBe(200);
+  const seededList = (await seededListResponse.json()).data;
+  updateProposal = shoppingUpdateProposal({
+    kind: 'shopping-list',
+    id: list.id,
+    version: seededList.version,
+    snapshot: { name: seededList.name, store: seededList.store }
+  });
+
+  const readList = async () => {
+    const response = await page.request.get(`/api/shopping/lists/${list.id}`, {
+      headers: authHeaders
+    });
+    expect(response.status()).toBe(200);
+    return (await response.json()).data;
+  };
+
+  await page.locator('[data-test="ai-assistant-open"]').click();
+  await page.locator('[data-test="ai-assistant-prompt"]').fill('Renombra Compra privada QA.');
+  await page.locator('[data-test="ai-assistant-submit"] button').click();
+  const review = page.locator('[data-test="ai-assistant-review"]');
+  await expect(review).toBeVisible();
+  await expect(review.locator('[data-test="ai-assistant-shopping-target"]')).toContainText(
+    'Compra privada QA'
+  );
+  await expect(review.locator('[data-test="ai-assistant-shopping-target"]')).toContainText('Lidl');
+  expect(await readList()).toMatchObject({ name: 'Compra privada QA', store: 'Lidl' });
+  expect(assistantWrites).toEqual([]);
+
+  await page.getByRole('button', { name: 'Cerrar asistente' }).click();
+  await expect(page.getByRole('dialog', { name: '¿Descartar este borrador?' })).toBeVisible();
+  await page.getByRole('button', { name: 'Descartar borrador' }).click();
+  await expect(review).not.toBeVisible();
+  expect(await readList()).toMatchObject({ name: 'Compra privada QA', store: 'Lidl' });
+  expect(assistantWrites).toEqual([]);
+
+  await page.locator('[data-test="ai-assistant-open"]').click();
+  await page.locator('[data-test="ai-assistant-prompt"]').fill('Renombra Compra privada QA.');
+  await page.locator('[data-test="ai-assistant-submit"] button').click();
+  await expect(review).toBeVisible();
+  const actionDetails = page.locator(
+    '[data-test="ai-assistant-action-details-88888888-8888-4888-8888-888888888888"]'
+  );
+  await actionDetails.locator('summary').click();
+  const editFields = actionDetails.locator('input[type="text"]');
+  await expect(editFields.nth(0)).toHaveValue('Compra propuesta QA');
+  await expect(editFields.nth(1)).toHaveValue('Carrefour');
+  await editFields.nth(0).fill('Compra confirmada QA');
+  await editFields.nth(1).fill('Alcampo');
+  await editFields.nth(1).scrollIntoViewIfNeeded();
+  expect(
+    await editFields.nth(1).evaluate((element) => {
+      const modal = element.closest('app-modal');
+      const body = modal?.querySelector<HTMLElement>('.modal__body')?.getBoundingClientRect();
+      const footer = modal?.querySelector<HTMLElement>('.modal__footer')?.getBoundingClientRect();
+      const field = element.getBoundingClientRect();
+      return Boolean(body && footer && field.top >= body.top - 1 && field.bottom <= footer.top + 1);
+    }),
+    'la tienda debe poder verse y editarse por completo sobre el footer móvil'
+  ).toBe(true);
+  await editFields.nth(1).focus();
+  await expect(editFields.nth(1)).toBeFocused();
+  expect(await readList()).toMatchObject({ name: 'Compra privada QA', store: 'Lidl' });
+  expect(assistantWrites).toEqual([]);
+  await capture(page, testInfo, 'shopping-update-review');
+
+  await page.getByRole('button', { name: 'Seleccionar todas' }).click();
+  await page.locator('[data-test="ai-assistant-continue"] button').click();
+  const confirmation = page.locator('[data-test="ai-assistant-confirm"]');
+  await expect(confirmation).toContainText('Compra privada QA');
+  await expect(confirmation).toContainText('Compra confirmada QA');
+  await expect(confirmation).toContainText('Alcampo');
+  expect(await readList()).toMatchObject({ name: 'Compra privada QA', store: 'Lidl' });
+  expect(assistantWrites).toEqual([]);
+  await capture(page, testInfo, 'shopping-update-confirm');
+
+  await page.locator('[data-test="ai-assistant-confirm-submit"] button').click();
+  const row = confirmation.locator('.assistant__confirm-list > li');
+  await expect(row.locator('.assistant__confirm-status')).toHaveText('Completada');
+  expect(assistantWrites).toHaveLength(1);
+  expect(assistantWrites[0]).toMatchObject({
+    actionId: '88888888-8888-4888-8888-888888888888',
+    body: {
+      version: seededList.version,
+      changes: { name: 'Compra confirmada QA', store: 'Alcampo' },
+      assistantAction: {
+        operation: 'update_list',
+        targetId: list.id,
+        before: { name: 'Compra privada QA', store: 'Lidl' }
+      }
+    }
+  });
+  const saved = await readList();
+  expect(saved).toMatchObject({
+    name: 'Compra confirmada QA',
+    store: 'Alcampo',
+    version: seededList.version + 1,
+    items: [expect.objectContaining({ name: 'Lentejas QA', quantity: 2 })]
+  });
+  await capture(page, testInfo, 'shopping-update-saved');
+
+  await page.reload();
+  await expect(page.locator('[data-test="ai-assistant-open"]')).toBeVisible();
+  expect(await readList()).toMatchObject({ name: 'Compra confirmada QA', store: 'Alcampo' });
+  expect(proposalRequests).toBe(2);
+  expect(pageErrors).toEqual([]);
+});
+
+test('asistente global: conflicto de lista obsoleta no pisa el cambio concurrente', async ({
+  page
+}) => {
+  let updateProposal: ReturnType<typeof shoppingUpdateProposal>;
+  const assistantResponses: number[] = [];
+  await page.route('**/api/ai/assistant/proposals', async (route) => {
+    await route.fulfill({ json: updateProposal });
+  });
+  page.on('response', (response) => {
+    if (new URL(response.url()).pathname.endsWith('/assistant-update')) {
+      assistantResponses.push(response.status());
+    }
+  });
+
+  await registerUser(page, 'Asistente conflicto lista E2E');
+  await createHousehold(page, 'Casa sintética conflicto lista');
+  await page.goto('/dashboard');
+  const token = await tokenOf(page);
+  const headers = { authorization: `Bearer ${token}` };
+  const created = await page.request.post('/api/shopping/lists', {
+    headers,
+    data: { name: 'Lista en conflicto QA', store: 'Lidl' }
+  });
+  expect(created.status()).toBe(201);
+  const list = (await created.json()).data;
+  updateProposal = shoppingUpdateProposal({
+    kind: 'shopping-list',
+    id: list.id,
+    version: list.version,
+    snapshot: { name: list.name, store: list.store }
+  });
+
+  await page.locator('[data-test="ai-assistant-open"]').click();
+  await page.locator('[data-test="ai-assistant-prompt"]').fill('Renombra Lista en conflicto QA.');
+  await page.locator('[data-test="ai-assistant-submit"] button').click();
+  await expect(page.locator('[data-test="ai-assistant-review"]')).toBeVisible();
+  const concurrent = await page.request.patch(`/api/shopping/lists/${list.id}`, {
+    headers,
+    data: { version: list.version, store: 'Competidor' }
+  });
+  expect(concurrent.status()).toBe(200);
+
+  await page.getByRole('button', { name: 'Seleccionar todas' }).click();
+  await page.locator('[data-test="ai-assistant-continue"] button').click();
+  await page.locator('[data-test="ai-assistant-confirm-submit"] button').click();
+  const row = page.locator('[data-test="ai-assistant-confirm"] .assistant__confirm-list > li');
+  await expect(row.locator('.assistant__confirm-status')).toHaveText('Fallida');
+  expect(assistantResponses).toEqual([409]);
+
+  const saved = await page.request.get(`/api/shopping/lists/${list.id}`, { headers });
+  expect(saved.status()).toBe(200);
+  expect((await saved.json()).data).toMatchObject({
+    name: 'Lista en conflicto QA',
+    store: 'Competidor',
+    version: list.version + 1
+  });
+});

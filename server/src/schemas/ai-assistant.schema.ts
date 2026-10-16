@@ -72,6 +72,47 @@ const assistantActionCandidateSchema = z.union([
   z
     .object({
       ...actionMetaSchema,
+      kind: z.literal('shopping.update_list'),
+      payload: z
+        .object({
+          targetName: z.string().trim().min(1).max(80),
+          changes: z
+            .object({
+              name: z.string().trim().min(1).max(80).nullable(),
+              setName: z.boolean(),
+              store: z.string().trim().min(1).max(80).nullable(),
+              setStore: z.boolean()
+            })
+            .strict()
+            .superRefine((changes, context) => {
+              if (!changes.setName && !changes.setStore) {
+                context.addIssue({
+                  code: 'custom',
+                  message: 'At least one shopping list field must change'
+                });
+              }
+              if (changes.setName !== (changes.name !== null)) {
+                context.addIssue({
+                  code: 'custom',
+                  path: ['name'],
+                  message: 'A changed list name must be present'
+                });
+              }
+              if (!changes.setStore && changes.store !== null) {
+                context.addIssue({
+                  code: 'custom',
+                  path: ['store'],
+                  message: 'Unchanged store value must be null'
+                });
+              }
+            })
+        })
+        .strict()
+    })
+    .strict(),
+  z
+    .object({
+      ...actionMetaSchema,
       kind: z.literal('shopping.add_item'),
       payload: z
         .object({
@@ -333,7 +374,7 @@ export type AssistantAction = AssistantActionCandidate & {
   actionType: string;
   selected: boolean;
   status: 'pending';
-  executionTarget?: AssistantTaskUpdateExecutionTarget;
+  executionTarget?: AssistantTaskUpdateExecutionTarget | AssistantShoppingListUpdateExecutionTarget;
 };
 
 export interface AssistantTaskUpdateExecutionTarget {
@@ -342,6 +383,13 @@ export interface AssistantTaskUpdateExecutionTarget {
   weekStart: string;
   version: number;
   snapshot: HouseholdTaskOccurrence;
+}
+
+export interface AssistantShoppingListUpdateExecutionTarget {
+  kind: 'shopping-list';
+  id: string;
+  version: number;
+  snapshot: { name: string; store: string | null };
 }
 
 export interface AssistantActionPlan {
@@ -354,7 +402,10 @@ export interface AssistantActionPlan {
 export function normalizeAssistantActionPlan(
   candidate: AssistantActionPlanCandidate,
   createId: () => string = randomUUID,
-  taskUpdateTargets: ReadonlyMap<number, AssistantTaskUpdateExecutionTarget> = new Map()
+  executionTargets: ReadonlyMap<
+    number,
+    AssistantTaskUpdateExecutionTarget | AssistantShoppingListUpdateExecutionTarget
+  > = new Map()
 ): AssistantActionPlan {
   const ids = candidate.actions.map(() => createId());
   const actions = candidate.actions.map((action, index) => {
@@ -364,9 +415,12 @@ export function normalizeAssistantActionPlan(
     if (action.dependsOn.some((dependencyIndex) => dependencyIndex >= index)) {
       throw new Error('Invalid dependency indexes: dependencies must refer to earlier actions');
     }
-    const executionTarget = taskUpdateTargets.get(index);
-    if (action.kind === 'household.update_task' && !executionTarget) {
+    const executionTarget = executionTargets.get(index);
+    if (action.kind === 'household.update_task' && executionTarget?.kind !== 'household-task') {
       throw new Error('Missing server-resolved task update target');
+    }
+    if (action.kind === 'shopping.update_list' && executionTarget?.kind !== 'shopping-list') {
+      throw new Error('Missing server-resolved shopping list update target');
     }
     const [domain, actionType] = action.kind.split('.', 2);
     return {
