@@ -1,4 +1,64 @@
-# Continuación: integración de UI de recetas
+# Asistente global de acciones con IA
+
+**Estado:** especificación activa; implementación pendiente.
+**Rama/PR:** `feat/household-floorplan` / [#47](https://github.com/juanjoGonDev/MiCocinAI/pull/47), mantener en Draft.
+**Idioma de producto y reportes:** español (España); conservar el sistema i18n existente.
+
+## Decisión de alcance
+
+El checklist anterior de este archivo decía que la unidad de recetas no ampliaba producto. El 2026-10-16 el usuario autorizó expresamente ampliar el PR #47 para añadir el asistente global solicitado, sin abrir otro PR. Esta es una ampliación deliberada del alcance del PR, no una inferencia desde specs históricas. La restricción anterior sigue describiendo únicamente la unidad de recetas ya completada. Mantener la rama actual y el PR en Draft; no mergear ni cambiarlo a Ready.
+
+## Evidencia actual y decisiones técnicas
+
+- El shell autenticado compartido está en `frontend/src/app/layouts/main-layout/main-layout.component.ts`; `/auth`, invitaciones y `/onboarding` están fuera de ese shell. El FAB global se limita al shell autenticado, incluido el contexto de hogar, no a pantallas públicas/autenticación.
+- No existe un asistente global ni captura de voz actual. Las rutas IA presentes son por función. Usar la tubería existente de `callAI`/`ticket-queue` y la configuración local del usuario; no añadir proveedor, cuenta, clave, modelo pesado ni dependencia.
+- Generación y refinamiento devuelven propuestas tipadas y validadas; nunca escriben datos de dominio. La ejecución debe usar un registro allowlist de acciones y los servicios/endpoints de dominio existentes, que vuelven a validar autorización y reglas de negocio. Prohibidos código ejecutable del modelo y accesos directos a DB.
+- Se admite `SpeechRecognition`/`webkitSpeechRecognition` solo tras feature detection. La transcripción siempre puede revisarse/editase antes de enviarse; explicar claramente que el reconocimiento del navegador puede procesarse fuera del dispositivo antes de pedir consentimiento. Nunca conservar/subir audio desde la app; fallback completo a texto.
+- La carga global debe ser pequeña: FAB ligero en el shell y carga diferida de diálogo/flujo pesado. Reutilizar el modal, botones, tokens e i18n existentes. El aviso inferior de automatización de hogar ya ocupa abajo-derecha, por lo que la posición/stack del FAB se valida frente a ese aviso, teclado, drawer y safe-area.
+- QA repetible usa proveedores simulados y DB temporal aislada; el smoke final debe usar app/backend reales, interacción de navegador y DB temporal aislada. El proveedor IA real/local y micrófono son opt-in condicionados por privacidad, disponibilidad y recursos. Nunca escribir en la DB normal ni imprimir secretos/datos personales.
+
+## Aceptación priorizada
+
+### P0 — Contrato, seguridad y flujo HITL
+
+- [x] El usuario confirma que este trabajo amplía el PR #47; queda prohibido abrir otro PR.
+- [ ] Actualizar el cuerpo del PR #47 con el alcance, invariantes y gates de esta spec; confirmar Draft antes de implementar.
+- [ ] Definir esquemas estrictos compartidos para solicitud, plan, acción, edición y estado: ID estable generado por la app, dominio/tipo allowlist, payload editable tipado, dependencias, advertencias, selección y estado de ejecución. Rechazar campos/acciones desconocidas; no aceptar instrucciones ejecutables ni confiar IDs/authorization generados por IA.
+- [ ] Añadir generación universal por lotes (intenciones múltiples y entre dominios) con fechas/cantidades naturales, ambigüedad y contexto mínimo de ruta/hogar. Prompt injection en texto/contexto recuperado se trata como dato no confiable.
+- [ ] Generar y refinar propuestas sin escritura persistente. Refinar lote/grupo/acción/campo con alcance explícito; conservar acciones no afectadas y ediciones manuales salvo que se pidan reemplazar; soportar repetición, dependencias coherentes y descartar/deshacer cuando sea práctico.
+- [ ] Crear registro extensible de acciones y mapear cada acción compatible a APIs/servicios existentes, reglas de autorización, validadores y lecturas de conflictos/duplicados. No añadir operaciones destructivas al registro inicial; cualquier futura acción destructiva requiere confirmación adicional explícita.
+- [ ] La confirmación final ejecuta solo acciones seleccionadas y validadas. Orden topológico de dependencias; rechazos/fallos bloquean dependientes. Conservar resultados parciales, fallos por acción y reintentos seguros/idempotentes sin repetir éxitos; doble clic/cancelación no duplica escrituras.
+- [ ] La generación, refinamiento, edición, selección, expansión, rechazo y cierre sin confirmar causan cero escrituras. Cada persistencia ocurre únicamente después de aprobación explícita del usuario y validación backend de sesión, hogar/permisos, esquema, referencias y reglas de dominio.
+
+### P1 — Cobertura de dominios y UX
+
+- [ ] Registrar y verificar capacidades compatibles del producto: despensa/inventario (artículos, cantidad, categoría/unidad), compras (listas/artículos/cantidad/organización), tareas (crear/editar/prioridad/fecha), eventos/calendario (crear/editar/fecha/hora/lugar/descripción), recetas (borrador/generar/editar ingredientes e instrucciones) y planificación del hogar cuando su contrato permita propuesta y confirmación seguras. Excluir capacidades sin API de dominio reutilizable o sin autorización verificable y documentar el motivo.
+- [ ] Un solo FAB accesible en rutas bajo `MainLayout`; no duplicado por página, no tapa navegación inferior/controles, teclado ni aviso flotante existente; safe-area, target táctil, nombre/tooltip y estados listo/escuchando/procesando/error. Animación reducida respeta `prefers-reduced-motion`.
+- [ ] Entrada por texto y voz opcional con mismo pipeline. Estados visibles de permiso, soporte, grabación, parcial cuando exista, pausa solo si la API lo admite, parada, cancelación y fallo. No iniciar micrófono accidentalmente; detener/release reconocimiento al cancelar, navegar o cerrar.
+- [ ] Propuesta editable y expandible por dominio/acción/campos, selección independiente, seleccionar todo/ninguno, quitar/rechazar, refinar en ámbito y validar antes de aprobar. Aprobación por selección o todas requiere confirmación final visible; ninguna operación queda oculta.
+- [ ] Modal escritorio centrado/acotado y móvil hoja/pantalla adaptable; scroll interno, acciones contextuales estables, sin overflow/jitter/obstrucción de teclado, foco atrapado/restaurado, Escape/backdrop, scroll lock, aviso accesible ante descarte destructivo y estados de progreso/éxito/error.
+- [ ] Copy y errores bilingües en i18n existente; labels, nombres, live regions, navegación de teclado, foco, contraste, targets ≥44px y controles distinguibles sin depender solo del color.
+
+### P2 — Verificación, rendimiento y entrega
+
+- [ ] TDD: pruebas de esquema/registro/ruta y UI antes del cambio de comportamiento. Cubrir instrucción simple/múltiple/cruzada, ambigüedad, fechas/cantidades, payload inválido, prompt injection, permiso denegado, contexto de hogar cambiado, cancelar, repetición, dependencias, selección parcial, fallo parcial y reintento/doble clic. Afirmar que generación/refinamiento/rechazo no escriben.
+- [ ] E2E Playwright real contra app y backend, DB temporal verificada y datos sintéticos introducidos mediante interacción real. Verificar persistencia tras recarga, cero escrituras en rechazo y resultado correcto por selección. Proveedor local y voz real se prueban solo si preflight de privacidad/recursos/hardware pasa; registrar limitaciones sin afirmar cobertura no recorrida.
+- [ ] Verificar desktop/tablet/móvil, 320px, orientación, límites de breakpoints, safe-area, teclado virtual, scroll, diálogo expandido/colapsado, errores, teclado/foco y consola/red/logs. Guardar e inspeccionar capturas sintéticas comparables PC/tablet/móvil, ignoradas por Git; revisar geometría equivalente con tolerancia ≤1 CSS px.
+- [ ] Verificar lazy loading, bundle inicial dentro de budgets vigentes, ausencia de peticiones duplicadas, cancelación y limpieza de listeners/timers/streams; medir RAM/CPU antes/durante/después y documentar navegador/capacidades no soportados.
+- [ ] Coverage del alcance ≥70 % en statements/branches/functions/lines sin rebajar gates; ejecutar suites focales, typecheck, `check:ui`, build, E2E requerido y hooks. Anotar comandos/resultados/limitaciones en esta spec.
+- [ ] Commits atómicos Conventional Commit de solo archivos de esta unidad; preservar staged/unstaged/sin seguimiento previo, hooks activos, push no forzado a rama actual y árbol limpio respecto a los archivos de la unidad. Mantener PR #47 Draft; no merge/Ready.
+
+## Secuencia de trabajo
+
+1. Publicar esta spec y actualizar el PR Draft antes de código.
+2. Cerrar primero esquema/registro/seguridad backend con pruebas de cero escrituras.
+3. Integrar FAB/input/propuesta/refinamiento accesibles con pruebas de componente.
+4. Añadir integración de dominios por unidades revisables, cada una con persistencia aprobada y prueba idempotente.
+5. Cerrar E2E real, matriz visual, rendimiento, checklist y entrega sin tocar cambios ajenos.
+
+---
+
+# Continuación: integración de UI de recetas (unidad previa)
 
 **Rama/PR:** `feat/household-floorplan` / #47, mantener en Draft.  
 **Contrato base:** `HOGARIA-SPEC.md`, `QA-RECIPE.PENCIL-REDESIGN.1`, `QA-RECIPE.CREATE-EDIT-TABS.1`, `QA-RECIPE.AI-IMPROVE.1`, `QA-RECIPE.STEP-VIDEO-SEARCH.1` y `QA-SHELL.MOBILE-SIDEBAR-ONLY.1`. Este checklist acota la validación final; no sustituye esos contratos ni amplía el producto.
