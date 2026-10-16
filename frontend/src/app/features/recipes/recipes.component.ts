@@ -7,7 +7,8 @@ import {
   inject,
   Injector,
   OnInit,
-  signal
+  signal,
+  ViewChild
 } from '@angular/core';
 import { CommonModule, DOCUMENT } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -379,6 +380,7 @@ function difficultyFromQuery(value: string | null): Difficulty | null {
 
         <!-- AI Generation Modal -->
         <app-modal
+          #aiGenerationModal
           [isOpen]="isAiModalOpen()"
           [title]="'recipes.generar_receta_con_ia' | t"
           [size]="aiPreviewModalSize()"
@@ -652,7 +654,7 @@ function difficultyFromQuery(value: string | null): Difficulty | null {
           <!-- Generated Recipe -->
           <div *ngIf="generatedPreviewRecipe() as recipe" class="generated-recipe">
             <div class="generated-recipe__header">
-              <h3 class="generated-recipe__title">{{ recipe.name }}</h3>
+              <h3 tabindex="-1" class="generated-recipe__title">{{ recipe.name }}</h3>
               <div class="generated-recipe__meta">
                 <app-badge variant="secondary">{{
                   'recipes.porciones_n' | t: { n: generatedPreviewServings() }
@@ -923,7 +925,9 @@ function difficultyFromQuery(value: string | null): Difficulty | null {
             class="generated-options"
             [attr.aria-label]="'recipes.elige_una_para_guardar' | t"
           >
-            <h3 class="generated-options__title">{{ 'recipes.elige_una_para_guardar' | t }}</h3>
+            <h3 tabindex="-1" class="generated-options__title">
+              {{ 'recipes.elige_una_para_guardar' | t }}
+            </h3>
             <div class="generated-options__list">
               <article
                 *ngFor="let recipe of aiService.generatedRecipes(); let i = index"
@@ -1021,6 +1025,8 @@ function difficultyFromQuery(value: string | null): Difficulty | null {
   styleUrls: ['./recipes.component.css']
 })
 export class RecipesComponent implements OnInit {
+  @ViewChild('aiGenerationModal') private aiGenerationModal?: ModalComponent;
+
   private readonly i18n = inject(I18nService);
   private readonly authService = inject(AuthService);
   readonly householdService = inject(HouseholdService);
@@ -1607,10 +1613,12 @@ export class RecipesComponent implements OnInit {
     if (!this.aiService.generatedRecipes()[index]) return;
     this.selectedGeneratedOptionIndex.set(index);
     this.aiFormExpanded.set(false);
+    this.focusAfterRender('.generated-recipe__title', true);
   }
 
   returnToGeneratedOptions(): void {
     this.selectedGeneratedOptionIndex.set(null);
+    this.focusAfterRender('.generated-options__title', true);
   }
 
   isAiFormVisible(): boolean {
@@ -1625,6 +1633,7 @@ export class RecipesComponent implements OnInit {
     this.aiService.clearGenerated();
     this.aiFormExpanded.set(false);
     this.selectedGeneratedOptionIndex.set(null);
+    this.focusAfterRender(`[data-test="recipe-ai-step-${this.aiGenerationStep()}"] h3`, true);
   }
 
   private safeExternalUrl(value?: string | null): string | null {
@@ -1718,9 +1727,10 @@ export class RecipesComponent implements OnInit {
     this.recipeServings.set(this.householdService.defaultServings());
   }
 
-  private focusAfterRender(selector: string): void {
+  private focusAfterRender(selector: string, resetAiModalScroll = false): void {
     afterNextRender(
       () => {
+        if (resetAiModalScroll) this.aiGenerationModal?.resetBodyScroll();
         const target = Array.from(this.document.querySelectorAll<HTMLElement>(selector)).find(
           (element) =>
             element.getClientRects().length > 0 &&
@@ -1907,6 +1917,7 @@ export class RecipesComponent implements OnInit {
           this.i18n.t('recipes.receta_generada'),
           this.i18n.t('recipes.la_ia_ha_creado')
         );
+        this.focusAfterRender('.generated-recipe__title', true);
       },
       error: () => this.showRecipeGenerationError('recipes.no_se_pudo_generar')
     });
@@ -1958,6 +1969,7 @@ export class RecipesComponent implements OnInit {
           this.i18n.t('recipes.recetas_generadas'),
           this.i18n.t('recipes.selecciona_tu_favorita')
         );
+        this.focusAfterRender('.generated-options__title', true);
       },
       error: () => this.showRecipeGenerationError('recipes.no_se_pudieron_generar')
     });
