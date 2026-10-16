@@ -56,3 +56,6 @@
 - [ ] Test unitario de límites de release: progreso <50 % cierra y ≥50 % abre; velocidades <+0,45 px/ms no fuerzan abrir, ≥+0,45 abre; >−0,45 no fuerza cerrar, ≤−0,45 cierra.
 - [ ] Test de movimiento reducido: settle mantiene el drawer operable con transición prácticamente instantánea y sin estado intermedio persistente.
 - [ ] Repetir E2E drawer/safe-area con Chromium y prueba móvil de generación→revisión→guardado contra Ollama Qwen3:8B en SQLite temporal; verificar respuesta persistida y capturas sintéticas sin usar WebAPI/credenciales.
+- [ ] Al sustituir el paso 3 del wizard por la propuesta generada, el scroll del cuerpo del modal vuelve al inicio para revisar título y contenido sin quedar desplazado; cubrir con regresión E2E y captura real.
+
+**Hallazgo visual nuevo:** la primera ejecución real con Qwen3:8B completó alta de despensa, generación, revisión, guardado y recarga; la captura móvil mostró que el cuerpo del modal conserva el scroll inferior del wizard, por lo que el título de la propuesta queda parcialmente fuera de vista. Corregir el cambio de contenido antes de marcar QA real completo.
