@@ -18,7 +18,7 @@ pre-push:
   parallel: false
   jobs:
     - name: format-check
-      run: pnpm exec prettier --check {push_files}
+      run: node scripts/check-push-format.mjs
       glob:
         - '*.{ts,json,md,yml,yaml}'
       exclude:
