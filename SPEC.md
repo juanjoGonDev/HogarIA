@@ -30,3 +30,12 @@
 - Smoke de mejora con IA local: el preflight rechazó continuar porque la configuración existente de privacidad de WebAPI no era segura. No se creó credencial, no se llamó al modelo, no se generó/guardó receta ni se cambió configuración. Limitación documentada; ninguna petición externa fue enviada.
 - Commits atómicos: `08e2499` spec/evidencia, `f79ef8f` drawer, `9486143` i18n diferida, `b79e8b7` integración de recetas. Push no forzado a `origin/feat/household-floorplan`; PR [#47](https://github.com/juanjoGonDev/MiCocinAI/pull/47) verificado abierto y Draft.
 - El árbol completo sigue con cambios ajenos staged/unstaged/sin seguimiento que ya existían al iniciar esta unidad. No se limpiaron ni se incluyeron; todas las rutas de esta unidad quedaron comprometidas.
+
+## Unidad en curso: nivel de cocina y raciones por defecto
+
+- [ ] Las instrucciones siguen una progresión inequívoca: `basic` corresponde a Principiante (más guiado y detallado), `intermediate` a Intermedio y `expert` a Experto (más conciso); etiquetas iguales a Configuración personal.
+- [ ] Al abrir una receta, el nivel seleccionado corresponde al perfil de cocina actual del usuario; una elección manual explícita por receta se conserva según el comportamiento existente.
+- [ ] El control de raciones de la ficha abre con los miembros activos del hogar seleccionado, no con las raciones base guardadas; solo miembros del hogar coincidente cuentan y un hogar ausente/sin miembros activos usa el fallback vigente de `HouseholdService`.
+- [ ] La generación conserva el valor manual del usuario; al cambiar hogar/perfil antes de editar el campo, se actualiza el default correspondiente.
+- [ ] Selector de dificultad mantiene geometría estable en sus estados; controles nuevos/ajustados tienen labels, teclado, foco y targets adecuados.
+- [ ] Pruebas focales TDD y flujo real de receta verifican etiqueta, default de perfil, cambio manual, cambio de hogar, raciones y ausencia de overflow. Capturas sintéticas desktop/tablet/móvil inspeccionadas; limitaciones de IA local quedan documentadas.
