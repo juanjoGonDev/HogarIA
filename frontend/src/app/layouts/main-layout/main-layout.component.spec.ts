@@ -1,23 +1,25 @@
 import { TestBed } from '@angular/core/testing';
-import { Router } from '@angular/router';
+import { NavigationEnd, Router } from '@angular/router';
 import { signal } from '@angular/core';
 import { AuthService } from '../../core/services/auth.service';
 import { ModulesService } from '../../core/services/modules.service';
 import { TasteProfileService } from '../../core/services/taste-profile.service';
 import { HouseholdService } from '../../core/services/household.service';
-import { of } from 'rxjs';
+import { of, Subject } from 'rxjs';
 import { MainLayoutComponent } from './main-layout.component';
 
 describe('MainLayoutComponent mobile drawer keyboard behavior', () => {
   let fixture: ReturnType<typeof TestBed.createComponent<MainLayoutComponent>>;
   let mobileViewport: jasmine.Spy;
   let navigate: jasmine.Spy;
+  let routerEvents: Subject<NavigationEnd>;
   let authLogout: jasmine.Spy;
   let currentUser: ReturnType<typeof signal<{ avatar?: string } | null>>;
   let isPathVisible: jasmine.Spy;
   let memberships: ReturnType<typeof signal<any[]>>;
   let activeHouseholdId: ReturnType<typeof signal<string | null>>;
   let membershipsFailed: ReturnType<typeof signal<boolean>>;
+  let household: ReturnType<typeof signal<any | null>>;
 
   beforeEach(async () => {
     mobileViewport = spyOn(window, 'matchMedia').and.returnValue({
@@ -30,12 +32,17 @@ describe('MainLayoutComponent mobile drawer keyboard behavior', () => {
       removeEventListener: () => undefined,
       dispatchEvent: () => false
     } as MediaQueryList);
-    navigate = jasmine.createSpy('navigate');
+    routerEvents = new Subject<NavigationEnd>();
+    navigate = jasmine.createSpy('navigate').and.callFake(() => {
+      routerEvents.next(new NavigationEnd(1, '/account', '/account'));
+      return Promise.resolve(true);
+    });
     authLogout = jasmine.createSpy('logout');
     currentUser = signal<{ avatar?: string } | null>(null);
     memberships = signal<any[]>([]);
     activeHouseholdId = signal<string | null>(null);
     membershipsFailed = signal(false);
+    household = signal<any | null>(null);
     isPathVisible = jasmine
       .createSpy('isPathVisible')
       .and.callFake((path: string) => path !== '/calendar');
@@ -47,7 +54,7 @@ describe('MainLayoutComponent mobile drawer keyboard behavior', () => {
           provide: AuthService,
           useValue: { userName: signal('Test'), currentUser, logout: authLogout }
         },
-        { provide: Router, useValue: { navigate } },
+        { provide: Router, useValue: { navigate, events: routerEvents } },
         {
           provide: TasteProfileService,
           useValue: { ensureLoaded: jasmine.createSpy('ensureLoaded') }
@@ -58,6 +65,7 @@ describe('MainLayoutComponent mobile drawer keyboard behavior', () => {
             memberships,
             activeHouseholdId,
             membershipsFailed,
+            household,
             loadMemberships: jasmine.createSpy('loadMemberships').and.returnValue(of([])),
             ensureHousehold: jasmine.createSpy('ensureHousehold')
           }
@@ -79,6 +87,7 @@ describe('MainLayoutComponent mobile drawer keyboard behavior', () => {
 
   afterEach(() => {
     fixture?.destroy();
+    routerEvents?.complete();
     document
       .querySelectorAll('.modal-overlay[data-test="drawer-overlay-test"]')
       .forEach((node) => node.remove());
@@ -113,6 +122,78 @@ describe('MainLayoutComponent mobile drawer keyboard behavior', () => {
 
     expect(fixture.componentInstance.isSidebarOpen()).toBeFalse();
     expect(document.activeElement).toBe(trigger);
+  });
+
+  it('locks the page while open and restores pre-existing overflow styles on close', () => {
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousDocumentOverflow = document.documentElement.style.overflow;
+    document.body.style.overflow = 'clip';
+    document.documentElement.style.overflow = 'scroll';
+    const trigger = createFixture();
+
+    trigger.click();
+
+    expect(document.body.style.overflow).toBe('hidden');
+    expect(document.documentElement.style.overflow).toBe('hidden');
+    fixture.componentInstance.closeSidebar();
+    expect(document.body.style.overflow).toBe('clip');
+    expect(document.documentElement.style.overflow).toBe('scroll');
+
+    document.body.style.overflow = previousBodyOverflow;
+    document.documentElement.style.overflow = previousDocumentOverflow;
+  });
+
+  it('returns focus to the trigger when another close path dismisses the drawer', async () => {
+    const trigger = createFixture();
+    trigger.click();
+    fixture.detectChanges();
+
+    const accountButton = fixture.nativeElement.querySelector(
+      '.sidebar__account-main'
+    ) as HTMLButtonElement;
+    accountButton.focus();
+    fixture.componentInstance.closeSidebar();
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+    fixture.detectChanges();
+
+    expect(fixture.componentInstance.isSidebarOpen()).toBeFalse();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('does not steal focus if the drawer reopens before close restores focus', async () => {
+    const trigger = createFixture();
+    trigger.click();
+    fixture.detectChanges();
+    const accountButton = fixture.nativeElement.querySelector(
+      '.sidebar__account-main'
+    ) as HTMLButtonElement;
+    accountButton.focus();
+
+    fixture.componentInstance.closeSidebar();
+    fixture.componentInstance.isSidebarOpen.set(true);
+    await Promise.resolve();
+    fixture.detectChanges();
+
+    expect(fixture.componentInstance.isSidebarOpen()).toBeTrue();
+    expect(document.activeElement).toBe(accountButton);
+  });
+
+  it('does not restore focus to a trigger removed before the close microtask', async () => {
+    const trigger = createFixture();
+    trigger.click();
+    fixture.detectChanges();
+    const accountButton = fixture.nativeElement.querySelector(
+      '.sidebar__account-main'
+    ) as HTMLButtonElement;
+
+    fixture.componentInstance.closeSidebar();
+    trigger.remove();
+    accountButton.focus();
+    await Promise.resolve();
+    fixture.detectChanges();
+
+    expect(fixture.componentInstance.isSidebarOpen()).toBeFalse();
+    expect(document.activeElement).toBe(accountButton);
   });
 
   it('leaves the drawer open when a dialog is above it', () => {
@@ -152,7 +233,7 @@ describe('MainLayoutComponent mobile drawer keyboard behavior', () => {
     expect(fixture.componentInstance.isSidebarOpen()).toBeTrue();
   });
 
-  it('closes the mobile drawer when navigating to the account profile', () => {
+  it('closes the mobile drawer when navigating to the account profile', async () => {
     const trigger = createFixture();
     trigger.click();
     fixture.detectChanges();
@@ -161,32 +242,33 @@ describe('MainLayoutComponent mobile drawer keyboard behavior', () => {
     const accountButton = fixture.nativeElement.querySelector(
       '.sidebar__account-main'
     ) as HTMLButtonElement;
+    accountButton.focus();
     accountButton.click();
     fixture.detectChanges();
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
 
     expect(navigate).toHaveBeenCalledWith(['/account']);
     expect(fixture.componentInstance.isSidebarOpen()).toBeFalse();
+    expect(document.activeElement).toBe(trigger);
     expect(fixture.nativeElement.querySelector('.sidebar-overlay')).toBeNull();
   });
 
-  it('filters desktop and mobile links using the enabled modules', () => {
+  it('filters the shared sidebar links using the enabled modules', () => {
     createFixture();
     const component = fixture.componentInstance;
 
     const desktopPaths = component.visibleNavItems().map((item) => item.path);
-    const mobilePaths = component.visibleMobileNavItems().map((item) => item.path);
 
     expect(desktopPaths).toContain('/dashboard');
     expect(desktopPaths).not.toContain('/calendar');
-    expect(mobilePaths).toContain('/dashboard');
-    expect(mobilePaths).not.toContain('/calendar');
     expect(isPathVisible).toHaveBeenCalledWith('/calendar');
   });
 
   it('shows AI settings only in personal mode or for an active household settings manager', () => {
     createFixture();
     const component = fixture.componentInstance;
-    const aiPathVisible = () => component.visibleNavItems().some((item) => item.path === '/ai-config');
+    const aiPathVisible = () =>
+      component.visibleNavItems().some((item) => item.path === '/ai-config');
 
     expect(aiPathVisible()).toBeTrue();
     memberships.set([
@@ -213,8 +295,42 @@ describe('MainLayoutComponent mobile drawer keyboard behavior', () => {
     expect(aiPathVisible()).toBeFalse();
   });
 
+  it('enables planning actions only for the active household and its matching permission', () => {
+    createFixture();
+    const component = fixture.componentInstance;
+
+    expect(component.canManagePlanningAutomation()).toBeFalse();
+    expect(component.canActivatePlanningAutomation()).toBeFalse();
+
+    household.set({
+      id: 'home-a',
+      myRole: 'member',
+      myPermissions: { settings: false, calendar: { edit: false } }
+    });
+    activeHouseholdId.set('home-b');
+    expect(component.canManagePlanningAutomation()).toBeFalse();
+    expect(component.canActivatePlanningAutomation()).toBeFalse();
+
+    activeHouseholdId.set('home-a');
+    expect(component.canManagePlanningAutomation()).toBeFalse();
+    expect(component.canActivatePlanningAutomation()).toBeFalse();
+
+    household.set({
+      id: 'home-a',
+      myRole: 'member',
+      myPermissions: { settings: true, calendar: { edit: true } }
+    });
+    expect(component.canManagePlanningAutomation()).toBeTrue();
+    expect(component.canActivatePlanningAutomation()).toBeTrue();
+
+    household.set({ id: 'home-a', myRole: 'admin', myPermissions: {} });
+    expect(component.canManagePlanningAutomation()).toBeTrue();
+    expect(component.canActivatePlanningAutomation()).toBeTrue();
+  });
+
   it('returns the current avatar and logs out through the auth service', () => {
     createFixture();
+    expect(fixture.componentInstance.userAvatar()).toBeUndefined();
     currentUser.set({ avatar: 'avatar-data' });
 
     expect(fixture.componentInstance.userAvatar()).toBe('avatar-data');

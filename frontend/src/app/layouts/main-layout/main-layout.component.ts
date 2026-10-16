@@ -1,6 +1,15 @@
-import { Component, computed, HostListener, OnInit, inject, signal } from '@angular/core';
+import {
+  Component,
+  computed,
+  HostListener,
+  OnDestroy,
+  OnInit,
+  NgZone,
+  inject,
+  signal
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { Router, RouterOutlet, RouterLink, RouterLinkActive } from '@angular/router';
+import { NavigationEnd, Router, RouterOutlet, RouterLink, RouterLinkActive } from '@angular/router';
 import { AuthService } from '../../core/services/auth.service';
 import { ModulesService } from '../../core/services/modules.service';
 import { ToastComponent } from '../../shared/components/ui/toast/toast.component';
@@ -15,6 +24,7 @@ import { PageContainerComponent } from '../../shared/components/page-container/p
 import { HouseholdSwitcherComponent } from '../../shared/components/household-switcher.component';
 import { HouseholdPlanningAutomationNoticeComponent } from '../../shared/components/household-planning-automation-notice.component';
 import { HouseholdService } from '../../core/services/household.service';
+import type { DrawerGestureSource } from './mobile-drawer-gesture.controller';
 import type { TranslationKey } from '../../core/i18n';
 
 interface NavItem {
@@ -50,7 +60,7 @@ interface NavItem {
   template: `
     <div class="layout">
       <!-- Mobile Header -->
-      <header class="header">
+      <header class="header" [attr.inert]="isDrawerModal() ? '' : null">
         <button
           type="button"
           class="header__menu"
@@ -81,16 +91,32 @@ interface NavItem {
       </header>
 
       <!-- Sidebar (Desktop) -->
-      <aside id="primary-sidebar" class="sidebar" [class.sidebar--open]="isSidebarOpen()">
+      <aside
+        id="primary-sidebar"
+        class="sidebar"
+        [class.sidebar--open]="isSidebarOpen()"
+        [class.sidebar--dragging]="isDrawerDragging()"
+        [attr.role]="isDrawerModal() ? 'dialog' : null"
+        [attr.aria-modal]="isDrawerModal() ? 'true' : null"
+        [attr.aria-labelledby]="isDrawerModal() ? 'primary-sidebar-title' : null"
+        [attr.aria-hidden]="isMobileViewport() && !isSidebarOpen() ? 'true' : null"
+        [attr.inert]="isMobileViewport() && !isSidebarOpen() ? '' : null"
+        (click.capture)="suppressGestureClick($event)"
+      >
         <div class="sidebar__header">
-          <span class="sidebar__logo">
-            <app-icon name="home" [size]="20" [label]="null" />
-            <span>{{ 'app.name' | t }}</span>
-          </span>
-          <app-receipt-queue *ngIf="hasActiveHousehold()" />
-          <button type="button" class="sidebar__close" (click)="closeSidebar()">
+          <button
+            type="button"
+            class="sidebar__close"
+            [attr.aria-label]="'ui.close_menu' | t"
+            (click)="closeSidebar()"
+          >
             <app-icon name="close" [size]="20" [label]="'ui.close_menu' | t" />
           </button>
+          <span class="sidebar__logo">
+            <app-icon name="home" [size]="20" [label]="null" />
+            <span id="primary-sidebar-title">{{ 'app.name' | t }}</span>
+          </span>
+          <app-receipt-queue *ngIf="hasActiveHousehold()" class="sidebar__receipt-queue" />
         </div>
 
         <app-household-switcher />
@@ -100,8 +126,9 @@ interface NavItem {
             *ngFor="let item of visibleNavItems()"
             [routerLink]="item.path"
             routerLinkActive="sidebar__item--active"
+            ariaCurrentWhenActive="page"
             class="sidebar__item"
-            (click)="closeSidebar()"
+            (click)="closeSidebar(true)"
           >
             <app-icon class="sidebar__icon" [name]="item.icon" [size]="20" [label]="null" />
             <span class="sidebar__label">{{ item.labelKey | t }}</span>
@@ -109,7 +136,13 @@ interface NavItem {
         </nav>
 
         <div class="sidebar__footer">
-          <a routerLink="/settings" class="sidebar__item" (click)="closeSidebar()">
+          <a
+            routerLink="/settings"
+            routerLinkActive="sidebar__item--active"
+            ariaCurrentWhenActive="page"
+            class="sidebar__item"
+            (click)="closeSidebar(true)"
+          >
             <app-icon class="sidebar__icon" name="settings" [size]="20" [label]="null" />
             <span class="sidebar__label">{{ 'nav.settings' | t }}</span>
           </a>
@@ -138,27 +171,31 @@ interface NavItem {
       </aside>
 
       <!-- Overlay for mobile sidebar -->
-      <div *ngIf="isSidebarOpen()" class="sidebar-overlay" (click)="closeSidebar()"></div>
+      <button
+        *ngIf="isMobileViewport()"
+        type="button"
+        class="sidebar-overlay"
+        tabindex="-1"
+        [attr.aria-label]="'ui.close_menu' | t"
+        [class.sidebar-overlay--visible]="isSidebarOpen() || isDrawerDragging()"
+        [class.sidebar-overlay--dragging]="isDrawerDragging()"
+        (click.capture)="suppressGestureClick($event)"
+        (click)="closeSidebar()"
+      ></button>
+
+      <div
+        *ngIf="isMobileViewport() && !isSidebarOpen()"
+        class="sidebar-edge-sensor"
+        aria-hidden="true"
+        [attr.data-gesture-ready]="isDrawerGestureReady() ? 'true' : 'false'"
+      ></div>
 
       <!-- Main Content -->
-      <main class="main">
+      <main class="main" [attr.inert]="isDrawerModal() ? '' : null">
         <app-page-container [bounded]="true">
           <router-outlet></router-outlet>
         </app-page-container>
       </main>
-
-      <!-- Mobile Bottom Navigation -->
-      <nav class="bottom-nav">
-        <a
-          *ngFor="let item of visibleMobileNavItems()"
-          [routerLink]="item.path"
-          routerLinkActive="bottom-nav__item--active"
-          class="bottom-nav__item"
-        >
-          <app-icon class="bottom-nav__icon" [name]="item.icon" [size]="22" [label]="null" />
-          <span class="bottom-nav__label">{{ item.labelKey | t }}</span>
-        </a>
-      </nav>
     </div>
 
     <app-household-planning-automation-notice
@@ -275,6 +312,8 @@ interface NavItem {
         flex-direction: column;
         transform: translateX(-100%);
         transition: transform var(--duration-300) var(--ease-out);
+        touch-action: pan-y;
+        overscroll-behavior-x: contain;
 
         @media (min-width: 1024px) {
           transform: translateX(0);
@@ -283,6 +322,10 @@ interface NavItem {
 
       .sidebar--open {
         transform: translateX(0);
+      }
+
+      .sidebar--dragging {
+        transition: none !important;
       }
 
       .sidebar__header {
@@ -295,6 +338,7 @@ interface NavItem {
       }
 
       .sidebar__logo {
+        order: 0;
         display: inline-flex;
         align-items: center;
         gap: var(--space-2);
@@ -305,6 +349,7 @@ interface NavItem {
       }
 
       .sidebar__close {
+        order: 2;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -320,6 +365,11 @@ interface NavItem {
         @media (min-width: 1024px) {
           display: none;
         }
+      }
+
+      .sidebar__receipt-queue {
+        order: 1;
+        margin-left: auto;
       }
 
       .sidebar__nav {
@@ -428,17 +478,47 @@ interface NavItem {
         position: fixed;
         inset: 0;
         z-index: 150;
+        width: 100%;
+        padding: 0;
+        border: 0;
         background: rgba(0, 0, 0, 0.5);
+        cursor: pointer;
+        visibility: hidden;
+        opacity: 0;
+        pointer-events: none;
+        touch-action: pan-y;
+        overscroll-behavior-x: contain;
+        transition: opacity var(--duration-200) var(--ease-out);
+
+        &:focus-visible {
+          outline: 2px solid var(--primary);
+          outline-offset: -3px;
+        }
 
         @media (min-width: 1024px) {
           display: none;
         }
       }
 
+      .sidebar-overlay--visible {
+        visibility: visible;
+        opacity: 1;
+        pointer-events: auto;
+      }
+
+      .sidebar-edge-sensor {
+        position: fixed;
+        inset: 0 auto 0 0;
+        z-index: 149;
+        width: 16px;
+        touch-action: pan-y;
+        overscroll-behavior-x: contain;
+      }
+
       /* Main Content */
       .main {
         padding-top: 56px;
-        padding-bottom: calc(64px + env(safe-area-inset-bottom));
+        padding-bottom: 0;
         min-height: 100vh;
 
         @media (min-width: 1024px) {
@@ -448,76 +528,67 @@ interface NavItem {
         }
       }
 
-      /* Bottom Navigation */
-      .bottom-nav {
-        position: fixed;
-        bottom: 0;
-        left: 0;
-        right: 0;
-        z-index: 100;
-        display: flex;
-        align-items: center;
-        justify-content: space-around;
-        height: 64px;
-        padding-bottom: env(safe-area-inset-bottom);
-        background: var(--bg-secondary);
-        border-top: 1px solid var(--border-default);
-
-        @media (min-width: 1024px) {
-          display: none;
+      @media (prefers-reduced-motion: reduce) {
+        .sidebar,
+        .sidebar-overlay {
+          transition-duration: 0.01ms;
         }
-      }
-
-      .bottom-nav__item {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: var(--space-1);
-        flex: 1 1 0;
-        min-width: 0;
-        padding: var(--space-2) var(--space-1);
-        color: var(--text-tertiary);
-        text-decoration: none;
-        transition: var(--transition-fast);
-
-        &--active {
-          color: var(--primary);
-        }
-
-        &:hover {
-          color: var(--text-primary);
-        }
-      }
-
-      .bottom-nav__icon {
-        font-size: var(--text-xl);
-      }
-
-      .bottom-nav__label {
-        display: block;
-        width: 100%;
-        font-size: 10px;
-        font-weight: var(--font-medium);
-        overflow: hidden;
-        text-align: center;
-        text-overflow: ellipsis;
-        white-space: nowrap;
       }
     `
   ]
 })
-export class MainLayoutComponent implements OnInit {
+export class MainLayoutComponent implements OnInit, OnDestroy {
   authService = inject(AuthService);
   private readonly router = inject(Router);
   private readonly householdService = inject(HouseholdService);
   private readonly modules = inject(ModulesService);
+  private readonly zone = inject(NgZone);
   private sidebarTrigger: HTMLElement | null = null;
+  private drawerGestureController:
+    import('./mobile-drawer-gesture.controller').MobileDrawerGestureController | null = null;
+  private drawerGestureControllerLoad: Promise<void> | null = null;
+  private destroyed = false;
+  private bodyOverflowBeforeLock: string | null = null;
+  private documentOverflowBeforeLock: string | null = null;
+  private readonly viewportQuery = window.matchMedia('(max-width: 1023px)');
+  private readonly onViewportChange = (event: MediaQueryListEvent): void => {
+    this.isMobileViewport.set(event.matches);
+    if (event.matches) {
+      this.ensureDrawerGestureController();
+    } else {
+      const wasOpen = this.isSidebarOpen();
+      this.sidebarTrigger = null;
+      this.closeSidebar();
+      if (wasOpen) {
+        window.setTimeout(() => {
+          this.sidebarElement()
+            ?.querySelector<HTMLElement>('.sidebar__nav a[aria-current="page"]')
+            ?.focus();
+        }, 0);
+      }
+    }
+  };
   isSidebarOpen = signal(false);
+  readonly isMobileViewport = signal(this.viewportQuery.matches);
+  readonly isDrawerDragging = signal(false);
+  readonly isDrawerGestureReady = signal(false);
+  readonly isDrawerModal = computed(() => this.isMobileViewport() && this.isSidebarOpen());
 
   ngOnInit(): void {
+    this.viewportQuery.addEventListener('change', this.onViewportChange);
+    if (this.isMobileViewport()) this.ensureDrawerGestureController();
     this.householdService
       .loadMemberships()
       .subscribe(() => this.householdService.ensureHousehold());
+  }
+
+  ngOnDestroy(): void {
+    this.destroyed = true;
+    this.viewportQuery.removeEventListener('change', this.onViewportChange);
+    this.drawerGestureController?.destroy();
+    this.drawerGestureController = null;
+    this.cancelGesture();
+    this.unlockBodyScroll();
   }
 
   navItems: NavItem[] = [
@@ -531,15 +602,6 @@ export class MainLayoutComponent implements OnInit {
     { path: '/preferences', labelKey: 'nav.preferences', icon: 'person' },
     { path: '/ai-config', labelKey: 'nav.ai-config', icon: 'smart_toy' },
     { path: '/logs', labelKey: 'nav.logs', icon: 'description' }
-  ];
-
-  mobileNavItems: NavItem[] = [
-    { path: '/dashboard', labelKey: 'nav.dashboard', icon: 'home' },
-    { path: '/pantry', labelKey: 'nav.pantry', icon: 'inventory_2' },
-    { path: '/recipes', labelKey: 'nav.recipes', icon: 'menu_book' },
-    { path: '/calendar', labelKey: 'nav.calendar', icon: 'calendar_today' },
-    { path: '/shopping', labelKey: 'nav.shopping', icon: 'shopping_cart' },
-    { path: '/settings', labelKey: 'nav.settings', icon: 'settings' }
   ];
 
   /** La foto de la persona, si la tiene; si no, `app-avatar` saca la inicial del nombre. */
@@ -587,20 +649,48 @@ export class MainLayoutComponent implements OnInit {
         (item.path !== '/ai-config' || this.canManageAiSettings())
     )
   );
-  readonly visibleMobileNavItems = computed(() =>
-    this.mobileNavItems.filter((item) => this.modules.isPathVisible(item.path))
-  );
-
   toggleSidebar(event: MouseEvent): void {
     const opening = !this.isSidebarOpen();
-    this.sidebarTrigger =
-      opening && event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
-    this.isSidebarOpen.set(opening);
+    if (opening) {
+      this.openSidebar(event.currentTarget instanceof HTMLElement ? event.currentTarget : null);
+    } else {
+      this.closeSidebar();
+    }
   }
 
-  closeSidebar(): void {
+  closeSidebar(waitForNavigation = false): void {
+    this.cancelGesture();
     this.isSidebarOpen.set(false);
+    this.unlockBodyScroll();
+    const trigger = this.sidebarTrigger;
     this.sidebarTrigger = null;
+    if (!trigger) return;
+
+    const restoreFocus = () => {
+      window.setTimeout(() => {
+        if (!this.isSidebarOpen() && trigger.isConnected) trigger.focus();
+      }, 0);
+    };
+    if (waitForNavigation) {
+      // The route outlet can change after the link click and reset document focus.
+      // Restore after NavigationEnd; timeout only covers cancelled/guarded navigation.
+      let timeout: number | null = null;
+      let subscription: { unsubscribe(): void } | null = null;
+      let completed = false;
+      const finish = () => {
+        if (completed) return;
+        completed = true;
+        if (timeout !== null) window.clearTimeout(timeout);
+        subscription?.unsubscribe();
+        restoreFocus();
+      };
+      timeout = window.setTimeout(finish, 750);
+      subscription = this.router.events.subscribe((event) => {
+        if (event instanceof NavigationEnd) finish();
+      });
+    } else {
+      restoreFocus();
+    }
   }
 
   @HostListener('document:keydown.escape', ['$event'])
@@ -619,15 +709,167 @@ export class MainLayoutComponent implements OnInit {
     if (trigger?.isConnected) trigger.focus();
   }
 
+  @HostListener('document:keydown', ['$event'])
+  onDrawerTabKey(event: KeyboardEvent): void {
+    if (!this.isDrawerModal() || event.key !== 'Tab') return;
+    const focusable = this.drawerFocusableElements();
+    if (focusable.length === 0) {
+      event.preventDefault();
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && (document.activeElement === first || !this.sidebarContainsFocus())) {
+      event.preventDefault();
+      last.focus();
+    } else if (
+      !event.shiftKey &&
+      (document.activeElement === last || !this.sidebarContainsFocus())
+    ) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
+  @HostListener('document:focusin', ['$event'])
+  onDrawerFocusIn(event: FocusEvent): void {
+    if (this.isDrawerModal() && !this.sidebarElement()?.contains(event.target as Node)) {
+      this.drawerFocusableElements()[0]?.focus();
+    }
+  }
+
+  suppressGestureClick(event: Event): void {
+    this.drawerGestureController?.suppressGestureClick(event);
+  }
+
   navigateToProfile(): void {
     // El avatar habla de la persona, y desde la ronda 13 tiene pagina propia: /account (nombre,
     // foto, contrasena). Preferencias es del comensal —gustos, alergias, objetivo— y Configuracion
     // de la app (tema, idioma, modulos): tres preguntas distintas, tres sitios.
-    this.closeSidebar();
+    this.closeSidebar(true);
     this.router.navigate(['/account']);
   }
 
   logout(): void {
     this.authService.logout();
+  }
+
+  private openSidebar(trigger: HTMLElement | null): void {
+    this.cancelGesture();
+    const overlay = this.overlayElement();
+    if (overlay) {
+      overlay.style.opacity = '';
+      overlay.style.transition = '';
+    }
+    this.sidebarTrigger = trigger ?? this.sidebarTrigger ?? document.querySelector('.header__menu');
+    this.isSidebarOpen.set(true);
+    if (!this.isMobileViewport()) return;
+    this.lockBodyScroll();
+    window.setTimeout(
+      () =>
+        window.requestAnimationFrame(() => {
+          if (this.isDrawerModal()) this.drawerFocusableElements()[0]?.focus();
+        }),
+      0
+    );
+  }
+
+  private ensureDrawerGestureController(): void {
+    if (this.drawerGestureController || this.drawerGestureControllerLoad) return;
+    this.drawerGestureControllerLoad = import('./mobile-drawer-gesture.controller')
+      .then(({ MobileDrawerGestureController }) => {
+        const controller = this.zone.runOutsideAngular(
+          () =>
+            new MobileDrawerGestureController({
+              isMobileViewport: () => this.isMobileViewport(),
+              isOpen: () => this.isSidebarOpen(),
+              sidebarElement: () => this.sidebarElement(),
+              overlayElement: () => this.overlayElement(),
+              onDragging: (dragging) => this.zone.run(() => this.isDrawerDragging.set(dragging)),
+              onSettle: (open, source) =>
+                this.zone.run(() => this.settleDrawerGesture(open, source))
+            })
+        );
+        if (this.destroyed) {
+          controller.destroy();
+          return;
+        }
+        this.drawerGestureController = controller;
+        this.zone.run(() => this.isDrawerGestureReady.set(true));
+      })
+      .catch((error: unknown) => {
+        this.drawerGestureControllerLoad = null;
+        console.error('Mobile drawer gestures failed to load', error);
+      });
+  }
+
+  private settleDrawerGesture(open: boolean, source: DrawerGestureSource): void {
+    this.isDrawerDragging.set(false);
+    if (open) {
+      if (source === 'edge') this.sidebarTrigger = document.querySelector('.header__menu');
+      this.isSidebarOpen.set(true);
+      this.lockBodyScroll();
+      window.setTimeout(
+        () =>
+          window.requestAnimationFrame(() => {
+            if (this.isDrawerModal()) this.drawerFocusableElements()[0]?.focus();
+          }),
+        0
+      );
+      return;
+    }
+
+    this.isSidebarOpen.set(false);
+    this.unlockBodyScroll();
+    const trigger = this.sidebarTrigger;
+    this.sidebarTrigger = null;
+    window.setTimeout(() => {
+      if (!this.isSidebarOpen() && trigger?.isConnected) trigger.focus();
+    }, 0);
+  }
+
+  private cancelGesture(): void {
+    this.drawerGestureController?.cancel();
+    this.isDrawerDragging.set(false);
+    const sidebar = this.sidebarElement();
+    if (sidebar) {
+      sidebar.style.transform = '';
+      sidebar.style.transition = '';
+    }
+  }
+  private sidebarElement(): HTMLElement | null {
+    return document.getElementById('primary-sidebar');
+  }
+
+  private overlayElement(): HTMLElement | null {
+    return document.querySelector('.sidebar-overlay');
+  }
+
+  private drawerFocusableElements(): HTMLElement[] {
+    return Array.from(
+      this.sidebarElement()?.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      ) ?? []
+    ).filter((element) => element.getClientRects().length > 0 && !element.hasAttribute('inert'));
+  }
+
+  private sidebarContainsFocus(): boolean {
+    return Boolean(this.sidebarElement()?.contains(document.activeElement));
+  }
+
+  private lockBodyScroll(): void {
+    if (this.bodyOverflowBeforeLock !== null) return;
+    this.bodyOverflowBeforeLock = document.body.style.overflow;
+    this.documentOverflowBeforeLock = document.documentElement.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
+  }
+
+  private unlockBodyScroll(): void {
+    if (this.bodyOverflowBeforeLock === null || this.documentOverflowBeforeLock === null) return;
+    document.body.style.overflow = this.bodyOverflowBeforeLock;
+    document.documentElement.style.overflow = this.documentOverflowBeforeLock;
+    this.bodyOverflowBeforeLock = null;
+    this.documentOverflowBeforeLock = null;
   }
 }
