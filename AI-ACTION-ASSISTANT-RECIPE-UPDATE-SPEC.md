@@ -1,6 +1,6 @@
 # Edición segura de recetas desde el asistente
 
-**Estado:** contrato vertical implementado; verificación de hooks/CI pendiente. Subordinado a `SPEC.md` y a `AI-ACTION-ASSISTANT-EXTENSION-SPEC.md`.
+**Estado:** implementación y gates locales completos; CI remota pendiente. Subordinado a `SPEC.md` y a `AI-ACTION-ASSISTANT-EXTENSION-SPEC.md`.
 **Rama/PR:** `feat/household-floorplan` / #47; mantener Draft.
 **Fecha:** 2026-10-17.
 
@@ -36,7 +36,8 @@ Añadir `recipes.update_content` para editar ingredientes, texto de instruccione
 - [x] Playwright full-stack contra app/API reales y SQLite temporal: preview/review/refinar/editar/descartar/cerrar sin escrituras; confirmar tras selección, recargar y verificar persistencia; replay exacto idempotente.
 - [x] Desktop/móvil: matriz de 10 viewports (320×568–1440×900, bordes de breakpoints y horizontal), límites del modal/overflow, teclado, foco, nombre accesible del campo, controles táctiles y reduced-motion; capturas sintéticas guardadas e inspeccionadas.
 - [x] Coverage, `check:ui`, typecheck, build y Prettier pasan sin rebajar umbrales.
-- [ ] Registrar resultado de hooks/push y CI antes de cerrar; `lint` queda limitado por herramientas incompatibles/faltantes documentadas abajo.
+- [x] Hooks de commit/push, formato, `check:ui`, build, typecheck y suites registrados abajo.
+- [ ] Registrar CI remota antes de cerrar; `lint` queda limitado por herramientas incompatibles/faltantes documentadas abajo.
 
 ## Fuera de alcance
 
@@ -49,7 +50,9 @@ Cambiar nombre/propietario/publicación, favoritos, borrar, recalcular nutrició
 - UI y servicio: `frontend/src/app/shared/components/ai-action-assistant-dialog.component.ts`, `frontend/src/app/core/services/recipe.service.ts` y `frontend/src/app/core/services/ai-action-assistant-execution.service.ts`; input con foco mantiene identidad DOM mediante `trackBy`. `tests/e2e/full-stack/ai-action-assistant.spec.ts` verifica aceptar solo tras revisión, descarte explícito, refinamiento de instrucciones y conservación de cantidad manual, sin escritura hasta confirmar.
 - `pnpm --filter @hogaria/server run test:coverage`: 2.040 aprobadas, 1 omitida; coverage 89,68/81,83/95,79/92,63 % S/B/F/L. `pnpm run test:client:coverage`: 1.653 aprobadas; 90,36/80,17/91,96/92,83 % S/B/F/L. Ambos pasan sus gates; los umbrales no se rebajaron.
 - `pnpm run build` y `pnpm run typecheck:e2e`: pasan. `pnpm run check:ui`: 262 ficheros, 21 reglas, sin incidencias. Prettier focal pasa.
+- Commit `53b2f99` y push normal a `origin/feat/household-floorplan`: pasan los hooks sin bypass. Pre-commit: Prettier + `check:ui`. Pre-push: formato de 18 rutas, `check:ui` 262/21, build, typecheck E2E y suite completa: cliente 1.653, servidor 2.040 aprobadas/1 omitida.
+- El build del pre-push conserva avisos existentes: bundle inicial 999,48 kB y estilos del diálogo 10,08 kB (+77 B sobre aviso); no se bajaron presupuestos. CI remota aún pendiente.
 - Playwright full-stack: `node scripts/run-isolated-playwright.mjs --config=playwright.full-stack.config.ts --project=chromium --project=mobile-chrome --grep "edita una receta propia"` — **2/2**. Confirma propuesta sin escritura, descarte explícito, re-propuesta, refinamiento del ámbito de instrucciones con cantidad manual preservada, edición, confirmación, persistencia tras recarga y replay idempotente. Verifica layout/overflow, foco y control accesible en ambos proyectos; DB y proveedor IA son temporales/sintéticos.
 - Limitaciones vistas: `pnpm run lint` no termina porque falta `@angular-eslint/builder:lint`; `pnpm --filter @hogaria/server run lint` usa `eslint src --ext .ts`, incompatible con ESLint 9.17 instalado. No se cambiaron dependencias. Build mantiene avisos de presupuestos de bundle/estilos ya existentes. Proveedores reales y lector de pantalla no se probaron.
 
-Mantener PR #47 Draft hasta cerrar el último E2E, correr los hooks autorizados y registrar CI. El objetivo global de asistente y la auditoría visual global siguen abiertos.
+E2E y hooks/push pasan; registrar CI cuando termine. Mantener PR #47 Draft, sin merge/Ready. El objetivo global de asistente y la auditoría visual global siguen abiertos.
