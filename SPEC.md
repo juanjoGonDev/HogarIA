@@ -7,7 +7,7 @@
 
 - [x] Revalidar en el código y pruebas actuales biblioteca, ficha/subtabs, niveles, alta/edición, propuesta IA revisable y modo cocina; corregir solo defectos demostrados de integración.
 - [x] Estado de cocina pertenece al conjunto de instrucciones seleccionado: ocultar/reabrir la sesión conserva el progreso; cambiar el nivel reinicia paso, checklist y timers para no aplicarlos a instrucciones distintas.
-- [ ] Verificar drawer móvil con gesto desde borde izquierdo: seguimiento progresivo 1:1 al abrir/cerrar, umbrales de distancia/velocidad, gesto parcial/cancelado y swipes rápidos; sin conflicto con scroll/gestos del navegador. Backdrop, botón cerrar, Escape, foco atrapado/restaurado, scroll de fondo bloqueado y semántica accesible permanecen operativos; desktop no cambia. Reauditoría detectó huecos de cobertura para `pointercancel`, límites exactos de umbral y `prefers-reduced-motion`; no marcar completo hasta añadir pruebas reproducibles.
+- [x] Verificar drawer móvil con gesto desde borde izquierdo: seguimiento progresivo 1:1 al abrir/cerrar, umbrales de distancia/velocidad, gesto parcial/cancelado y swipes rápidos; sin conflicto con scroll/gestos del navegador. Backdrop, botón cerrar, Escape, foco atrapado/restaurado, scroll de fondo bloqueado y semántica accesible permanecen operativos; desktop no cambia. Reauditoría completada con cobertura de `pointercancel`, límites exactos y `prefers-reduced-motion`.
 - [ ] Ejecutar Playwright real sobre la app y backend con almacenamiento temporal aislado. Cubrir biblioteca→ficha→cocina y alta/edición; probar generación y guardado con modelo local real si está disponible y seguro. Pruebas repetibles de terceros siguen simuladas; no escribir en la DB normal ni registrar secretos/datos personales.
 - [x] Validar escritorio, tablet y móvil (incluidos 320 px y horizontal), teclado/tacto, reduced-motion, safe-area, estados/error/vacío y ausencia de overflow; inspeccionar y guardar capturas sintéticas PC/tablet/móvil ignoradas por Git.
 - [x] Ejecutar pruebas focales primero y luego gates aplicables: cobertura ≥70 % S/B/F/L en alcance, typecheck, `check:ui`, build y suites requeridas. Registrar comandos, resultados y limitaciones en el contrato activo.
@@ -50,12 +50,13 @@
 
 ## Reauditoría de finalización (2026-10-16)
 
-- El código del drawer sí contempla `pointercancel` y `prefers-reduced-motion`; los tests actuales no prueban esos caminos ni los límites exactos de progreso 50 % y velocidad ±0,45 px/ms. La suite omite el gesto en Playwright WebKit/Safari por falta de CDP; Chromium táctil sí está disponible.
-- El preflight anterior probó una WebAPI con sesión ChatGPT y rechazó su logging; no se debe usar como sustituto de un modelo local. Ollama está instalado; Qwen3.6 existente requiere 22,3 GiB de pesos y el host solo tenía 9,3 GiB libres, así que se evitó cargarlo para no arriesgar OOM. Se descargó Qwen3:8B (5,2 GB) al almacén local para una prueba aislada con menos memoria; no se cargó ni llamó todavía.
-- [ ] Test unitario de `pointercancel`: soltar por cancelación debe terminar sin transform/RAF obsoleto, usando el progreso actual; cubrir lados de ambos lados del 50 %.
-- [ ] Test unitario de límites de release: progreso <50 % cierra y ≥50 % abre; velocidades <+0,45 px/ms no fuerzan abrir, ≥+0,45 abre; >−0,45 no fuerza cerrar, ≤−0,45 cierra.
-- [ ] Test de movimiento reducido: settle mantiene el drawer operable con transición prácticamente instantánea y sin estado intermedio persistente.
-- [ ] Repetir E2E drawer/safe-area con Chromium y prueba móvil de generación→revisión→guardado contra Ollama Qwen3:8B en SQLite temporal; verificar respuesta persistida y capturas sintéticas sin usar WebAPI/credenciales.
+- El skip de gesto táctil auténtico en Playwright WebKit/Safari sigue por falta de CDP; Chromium táctil sí está disponible.
+- Ollama local Qwen3:8B (5,2 GB) se cargó y se usó en la prueba aislada; ocupó 5,6 GB de GPU y el proceso propio se detuvo al terminar. No se usó WebAPI ni proveedor externo.
+- [x] Test unitario de `pointercancel`: ambos lados del 50 % resuelven al estado más cercano y limpian el gesto/RAF.
+- [x] Test unitario de límites de release: progreso y velocidades ±0,45 px/ms verifican inclusión/exclusión de los bordes.
+- [x] Test de movimiento reducido: settle aplica transición prácticamente instantánea sin estado intermedio persistente.
+- [x] E2E drawer/safe-area móvil con Chromium: gestures cancelados y flujos existentes; suite completa termina sin fallos; safe-area **8/8**.
+- [x] E2E local móvil: configuración Ollama→ingredientes de despensa→generación real→revisión→guardado→recarga→ficha; respuesta IA **200**, guardado **201**, receta encontrada tras reload; viewport 393×851, 768×1024 y 1440×900.
 - [ ] Al sustituir el paso 3 del wizard por la propuesta generada, el scroll del cuerpo del modal vuelve al inicio para revisar título y contenido sin quedar desplazado; cubrir con regresión E2E y captura real.
 
-**Hallazgo visual nuevo:** la primera ejecución real con Qwen3:8B completó alta de despensa, generación, revisión, guardado y recarga; la captura móvil mostró que el cuerpo del modal conserva el scroll inferior del wizard, por lo que el título de la propuesta queda parcialmente fuera de vista. Corregir el cambio de contenido antes de marcar QA real completo.
+**Hallazgo visual nuevo:** la primera ejecución real con Qwen3:8B completó alta de despensa, generación, revisión, guardado y recarga; la captura móvil mostró que el cuerpo del modal conserva el scroll inferior del wizard (42 px), por lo que el título de la propuesta queda parcialmente desplazado. La corrección y su regresión E2E quedan pendientes en la unidad siguiente.

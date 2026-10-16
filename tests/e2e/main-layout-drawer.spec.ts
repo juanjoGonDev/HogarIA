@@ -87,6 +87,61 @@ test.describe('authenticated mobile navigation drawer', () => {
     await session.detach();
   });
 
+  test('settles cancelled touch gestures under reduced motion', async ({ page }, testInfo) => {
+    test.skip(testInfo.project.name === 'mobile-safari', 'Gesture test uses Chromium touch input.');
+    await page.setViewportSize({ width: 393, height: 851 });
+    await registerWithHousehold(page, '/dashboard', 'Drawer cancelled touch');
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+
+    const session = await page.context().newCDPSession(page);
+    const touch = async (
+      type: 'touchStart' | 'touchMove' | 'touchEnd' | 'touchCancel',
+      point?: { x: number; y: number }
+    ) => {
+      await session.send('Input.dispatchTouchEvent', {
+        type,
+        touchPoints: point ? [{ ...point, id: 1, force: 1 }] : []
+      });
+    };
+    const menuButton = page.locator('.header__menu');
+    const sidebar = page.locator('.sidebar');
+    const overlay = page.locator('.sidebar-overlay');
+    const edgeSensor = page.locator('.sidebar-edge-sensor');
+    await expect(edgeSensor).toBeVisible();
+    await expect(edgeSensor).toHaveAttribute('data-gesture-ready', 'true');
+    await expect(menuButton).toHaveAttribute('aria-expanded', 'false');
+
+    await touch('touchStart', { x: 3, y: 320 });
+    await touch('touchMove', { x: 100, y: 320 });
+    await expect
+      .poll(() => sidebar.evaluate((element) => element.getBoundingClientRect().left))
+      .toBeGreaterThan(-210);
+    await touch('touchMove', { x: 170, y: 320 });
+    await expect
+      .poll(() => sidebar.evaluate((element) => element.getBoundingClientRect().left))
+      .toBeGreaterThan(-140);
+    await touch('touchCancel');
+    await expect(menuButton).toHaveAttribute('aria-expanded', 'true');
+    await expect
+      .poll(() => sidebar.evaluate((element) => element.getBoundingClientRect().left))
+      .toBe(0);
+    await expect(overlay).toBeVisible();
+
+    await touch('touchStart', { x: 150, y: 320 });
+    await touch('touchMove', { x: 90, y: 320 });
+    await expect
+      .poll(() => sidebar.evaluate((element) => element.getBoundingClientRect().left))
+      .toBeLessThan(-50);
+    await touch('touchMove', { x: 1, y: 320 });
+    await expect
+      .poll(() => sidebar.evaluate((element) => element.getBoundingClientRect().left))
+      .toBeLessThan(-140);
+    await touch('touchCancel');
+    await expect(menuButton).toHaveAttribute('aria-expanded', 'false');
+    await expect(overlay).toBeHidden();
+    await session.detach();
+  });
+
   test('traps focus and locks the page while the mobile drawer is modal', async ({
     page
   }, testInfo) => {
