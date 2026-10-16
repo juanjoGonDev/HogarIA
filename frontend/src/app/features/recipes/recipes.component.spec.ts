@@ -701,6 +701,31 @@ describe('RecipesComponent', () => {
     expect(component.aiOptions.detailLevel).toBe('expert');
   });
 
+  it('provides translated picker options and rejects invalid AI selector values', () => {
+    expect(component.detailLevelOptions).toEqual([
+      { value: 'basic', label: component.detailLevelLabel('basic') },
+      { value: 'intermediate', label: component.detailLevelLabel('intermediate') },
+      { value: 'expert', label: component.detailLevelLabel('expert') }
+    ]);
+    expect(component.difficultyOptions.map(({ value }) => value)).toEqual([
+      'easy',
+      'medium',
+      'hard'
+    ]);
+
+    component.setAiDifficulty('hard');
+    component.setAiDetailLevel('expert');
+    expect(component.aiOptions.difficulty).toBe('hard');
+    expect(component.aiOptions.detailLevel).toBe('expert');
+    component.setAiDifficulty('unsupported');
+    component.setAiDetailLevel('unsupported');
+    expect(component.aiOptions.difficulty).toBe('hard');
+    expect(component.aiOptions.detailLevel).toBe('expert');
+
+    component.setGeneratedPreviewDetailLevel('unsupported');
+    expect(component.generatedPreviewDetailLevel()).not.toBe('unsupported');
+  });
+
   it('waits for cooking confirmation, rejects duplicate clicks, and keeps retry available', () => {
     const owned = { ...RECIPE, author: 'user' as const, authorId: 'synthetic-user' };
     const pending = new Subject<boolean>();

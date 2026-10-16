@@ -56,8 +56,7 @@ const LEGACY = {
     'frontend/src/app/features/ai-config/ai-config.component.ts',
     'frontend/src/app/features/calendar/calendar.component.ts',
     'frontend/src/app/features/logs/logs.component.ts',
-    'frontend/src/app/features/pantry/pantry.component.ts',
-    'frontend/src/app/features/recipes/recipes.component.ts'
+    'frontend/src/app/features/pantry/pantry.component.ts'
   ]
 };
 

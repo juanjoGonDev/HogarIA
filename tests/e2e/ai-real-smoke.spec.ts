@@ -754,9 +754,13 @@ test('recorre los ocho AiJobKind con WebAPI real y ticket sintético editable', 
   await page.locator('[data-test="recipe-ai-next"]').click();
   await expect(page.locator('[data-test="recipe-ai-step-3"]')).toBeVisible();
   const recipeOptions = page.locator('[data-test="recipe-ai-step-3"]');
-  await recipeOptions.locator('#recipe-difficulty').selectOption('hard');
+  const difficultyPicker = recipeOptions.locator('#recipe-difficulty');
+  await difficultyPicker.getByRole('button').click();
+  await difficultyPicker.getByRole('option', { name: /Difícil/ }).click();
   await recipeOptions.locator('#recipe-serving-input').fill('6');
-  await recipeOptions.locator('#recipe-detail-level').selectOption('expert');
+  const detailLevelPicker = recipeOptions.locator('#recipe-detail-level');
+  await detailLevelPicker.getByRole('button').click();
+  await detailLevelPicker.getByRole('option', { name: /Experto/ }).click();
   reportLiveSmokePhase('recipe-options-set');
   const recipeRequestPromise = page.waitForRequest(
     (request) => request.url().includes('/api/ai/generate-recipe') && request.method() === 'POST'
@@ -816,16 +820,19 @@ test('recorre los ocho AiJobKind con WebAPI real y ticket sintético editable', 
     timeout: LIVE_REQUEST_TIMEOUT_MS
   });
   await expect(page.locator('.generated-recipe__title')).not.toBeEmpty();
-  const generatedLevel = page.locator('#generated-recipe-detail-level');
-  await expect(generatedLevel).toHaveValue('expert');
+  const generatedLevel = page.locator('#generated-recipe-detail-level app-picker');
+  const generatedLevelTrigger = generatedLevel.getByRole('button');
+  await expect(generatedLevelTrigger).toHaveAccessibleName('Nivel de detalle: Experto');
   await expect(page.locator('.generated-recipe__steps')).toContainText(
     generatedRecipe.instructionsByLevel.expert[0].instruction
   );
-  await generatedLevel.selectOption('intermediate');
+  await generatedLevelTrigger.click();
+  await generatedLevel.getByRole('option', { name: /Intermedio/ }).click();
   await expect(page.locator('.generated-recipe__steps')).toContainText(
     generatedRecipe.instructionsByLevel.intermediate[0].instruction
   );
-  await generatedLevel.selectOption('basic');
+  await generatedLevelTrigger.click();
+  await generatedLevel.getByRole('option', { name: /Principiante/ }).click();
   await expect(page.locator('.generated-recipe__steps')).toContainText(
     generatedRecipe.instructionsByLevel.basic[0].instruction
   );

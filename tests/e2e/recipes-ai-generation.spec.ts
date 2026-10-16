@@ -696,20 +696,18 @@ test.describe('Generación de recetas IA', () => {
     const dialog = page.getByRole('dialog', { name: 'Generar Receta con IA' });
     await advanceRecipeWizardToOptions(page);
     await expect(dialog.locator('#recipe-serving-input')).toHaveValue('1');
-    await expect(dialog.locator('#recipe-detail-level')).toHaveAccessibleName('Nivel de detalle');
-    await expect(dialog.locator('#recipe-detail-level')).toHaveValue('basic');
-    await expect(dialog.locator('#recipe-detail-level option[value="basic"]')).toHaveText(
-      'Principiante'
-    );
-    await expect(dialog.locator('#recipe-detail-level option[value="intermediate"]')).toHaveText(
-      'Intermedio'
-    );
-    await expect(dialog.locator('#recipe-detail-level option[value="expert"]')).toHaveText(
-      'Experto'
-    );
+    const detailLevel = dialog.locator('#recipe-detail-level');
+    const detailLevelTrigger = detailLevel.getByRole('button');
+    await expect(detailLevelTrigger).toHaveAccessibleName('Nivel de detalle: Principiante');
+    await detailLevelTrigger.click();
+    await expect(detailLevel.getByRole('option', { name: /Principiante/ })).toBeVisible();
+    await expect(detailLevel.getByRole('option', { name: /Intermedio/ })).toBeVisible();
+    await expect(detailLevel.getByRole('option', { name: /Experto/ })).toBeVisible();
+    await page.keyboard.press('Escape');
 
     const difficulty = dialog.locator('#recipe-difficulty');
-    await expect(difficulty).toHaveAccessibleName('Dificultad');
+    const difficultyTrigger = difficulty.getByRole('button');
+    await expect(difficultyTrigger).toHaveAccessibleName('Dificultad: Medio');
     const visualViewports = [
       { name: 'desktop', width: 1440, height: 900 },
       { name: 'tablet', width: 768, height: 1024 },
@@ -717,12 +715,17 @@ test.describe('Generación de recetas IA', () => {
     ] as const;
     for (const visualViewport of visualViewports) {
       await page.setViewportSize(visualViewport);
-      const initialBox = await difficulty.boundingBox();
+      const initialBox = await difficultyTrigger.boundingBox();
       expect(initialBox).not.toBeNull();
-      for (const value of ['easy', 'medium', 'hard']) {
-        await difficulty.selectOption(value);
-        await expect(difficulty).toHaveValue(value);
-        const nextBox = await difficulty.boundingBox();
+      for (const [value, label] of [
+        ['easy', 'Fácil'],
+        ['medium', 'Medio'],
+        ['hard', 'Difícil']
+      ] as const) {
+        await difficultyTrigger.click();
+        await difficulty.getByRole('option', { name: new RegExp(label) }).click();
+        await expect(difficultyTrigger).toHaveAccessibleName(`Dificultad: ${label}`);
+        const nextBox = await difficultyTrigger.boundingBox();
         expect(nextBox).not.toBeNull();
         for (const dimension of ['x', 'y', 'width', 'height'] as const) {
           expect(Math.abs(nextBox![dimension] - initialBox![dimension])).toBeLessThanOrEqual(1);
@@ -782,9 +785,9 @@ test.describe('Generación de recetas IA', () => {
       await expect(recipeDialog).toHaveClass(/modal--full/);
       await expect(recipeDialog.locator('.ai-form')).toBeHidden();
 
-      const generatedSelector = page.locator('.generated-recipe__detail-level select');
-      await expect(generatedSelector).toHaveValue('basic');
-      await expect(generatedSelector).toHaveAccessibleName('Nivel de detalle');
+      const generatedSelector = page.locator('.generated-recipe__detail-level app-picker');
+      const generatedSelectorTrigger = generatedSelector.getByRole('button');
+      await expect(generatedSelectorTrigger).toHaveAccessibleName('Nivel de detalle: Principiante');
       await expect(page.locator('.generated-recipe__steps')).toContainText('Cocer la zanahoria.');
       await expect(recipeDialog.locator('.generated-recipe__meta')).toContainText('4 porciones');
       await expect(recipeDialog.locator('.generated-recipe__meta')).not.toContainText('20 min');
@@ -861,12 +864,12 @@ test.describe('Generación de recetas IA', () => {
       await expect(recipeDialog.locator('.ai-form')).toBeVisible();
       await recipeDialog.getByRole('button', { name: 'Ocultar formulario' }).click();
       await expect(recipeDialog.locator('.ai-form')).toBeHidden();
-      await generatedSelector.focus();
-      await expect(generatedSelector).toBeFocused();
-      await page.keyboard.press('ArrowDown');
-      await expect(generatedSelector).toHaveValue('intermediate');
-      await page.keyboard.press('ArrowDown');
-      await expect(generatedSelector).toHaveValue('expert');
+      await generatedSelectorTrigger.click();
+      await generatedSelector.getByRole('option', { name: /Intermedio/ }).click();
+      await expect(generatedSelectorTrigger).toHaveAccessibleName('Nivel de detalle: Intermedio');
+      await generatedSelectorTrigger.click();
+      await generatedSelector.getByRole('option', { name: /Experto/ }).click();
+      await expect(generatedSelectorTrigger).toHaveAccessibleName('Nivel de detalle: Experto');
       await expect(generatedStepPhoto).toHaveCount(1);
       await expect(page.locator('.generated-recipe__steps')).toContainText(
         'dados uniformes de 2 cm'
@@ -1138,10 +1141,12 @@ test.describe('Generación de recetas IA', () => {
       await expect(generatedOptions).toHaveCount(3);
       const firstOptionLevel = generatedOptions
         .nth(0)
-        .locator('.generated-option__detail-level select');
-      await expect(firstOptionLevel).toHaveAccessibleName('Nivel de detalle');
-      await expect(firstOptionLevel).toHaveValue('basic');
-      await firstOptionLevel.selectOption('expert');
+        .locator('.generated-option__detail-level app-picker');
+      const firstOptionLevelTrigger = firstOptionLevel.getByRole('button');
+      await expect(firstOptionLevelTrigger).toHaveAccessibleName('Nivel de detalle: Principiante');
+      await firstOptionLevelTrigger.click();
+      await firstOptionLevel.getByRole('option', { name: /Experto/ }).click();
+      await expect(firstOptionLevelTrigger).toHaveAccessibleName('Nivel de detalle: Experto');
       await expect(generatedOptions.nth(0).locator('.generated-option__steps')).toContainText(
         'opción 1'
       );
@@ -1198,9 +1203,9 @@ test.describe('Generación de recetas IA', () => {
       await expect(optionPreview).toContainText(
         'Pesa los ingredientes mientras se calienta el agua.'
       );
-      await expect(optionPreview.locator('.generated-recipe__detail-level select')).toHaveValue(
-        'expert'
-      );
+      await expect(
+        optionPreview.locator('.generated-recipe__detail-level app-picker').getByRole('button')
+      ).toHaveAccessibleName('Nivel de detalle: Experto');
       expect(syntheticProvider.requests).toHaveLength(4);
       await recipeDialog.locator('.modal__body').evaluate((body) => {
         body.scrollTop = 0;

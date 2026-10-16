@@ -78,6 +78,7 @@ const RECIPE_MEAL_TYPES: readonly MealType[] = [
   'dessert'
 ];
 const RECIPE_DIFFICULTIES: readonly Difficulty[] = ['easy', 'medium', 'hard'];
+const RECIPE_DETAIL_LEVELS: readonly DetailLevel[] = ['basic', 'intermediate', 'expert'];
 type RecipeDetailSection = 'preparation' | 'ingredients' | 'guidance' | 'storage';
 const RECIPE_DETAIL_SECTIONS: readonly RecipeDetailSection[] = [
   'preparation',
@@ -98,6 +99,10 @@ function mealTypeFromQuery(value: string | null): MealType | null {
 
 function difficultyFromQuery(value: string | null): Difficulty | null {
   return value && RECIPE_DIFFICULTIES.includes(value as Difficulty) ? (value as Difficulty) : null;
+}
+
+function isRecipeDetailLevel(value: string | null): value is DetailLevel {
+  return value !== null && RECIPE_DETAIL_LEVELS.includes(value as DetailLevel);
 }
 
 @Component({
@@ -546,19 +551,15 @@ function difficultyFromQuery(value: string | null): Difficulty | null {
               </div>
               <div class="ai-form__row">
                 <div class="ai-form__field">
-                  <label class="ai-form__label" for="recipe-difficulty">{{
-                    'recipes.dificultad' | t
-                  }}</label>
-                  <select
+                  <span class="ai-form__label">{{ 'recipes.dificultad' | t }}</span>
+                  <app-picker
                     id="recipe-difficulty"
-                    [(ngModel)]="aiOptions.difficulty"
-                    [ngModelOptions]="{ standalone: true }"
-                    class="form-select"
-                  >
-                    <option value="easy">{{ 'recipes.facil' | t }}</option>
-                    <option value="medium">{{ 'recipes.medio' | t }}</option>
-                    <option value="hard">{{ 'recipes.dificil' | t }}</option>
-                  </select>
+                    [options]="difficultyOptions"
+                    [value]="aiOptions.difficulty"
+                    [label]="'recipes.dificultad' | t"
+                    [floatingPanel]="true"
+                    (valueChange)="setAiDifficulty($event)"
+                  />
                 </div>
                 <div class="ai-form__field">
                   <label class="ai-form__label" for="recipe-serving-input">{{
@@ -581,20 +582,15 @@ function difficultyFromQuery(value: string | null): Difficulty | null {
                   </p>
                 </div>
                 <div class="ai-form__field">
-                  <label class="ai-form__label" for="recipe-detail-level">{{
-                    'recipes.detalle' | t
-                  }}</label>
-                  <select
+                  <span class="ai-form__label">{{ 'recipes.detalle' | t }}</span>
+                  <app-picker
                     id="recipe-detail-level"
-                    [ngModel]="aiOptions.detailLevel"
-                    (ngModelChange)="setAiDetailLevel($event)"
-                    [ngModelOptions]="{ standalone: true }"
-                    class="form-select"
-                  >
-                    <option value="basic">{{ detailLevelLabel('basic') | t }}</option>
-                    <option value="intermediate">{{ detailLevelLabel('intermediate') | t }}</option>
-                    <option value="expert">{{ detailLevelLabel('expert') | t }}</option>
-                  </select>
+                    [options]="detailLevelOptions"
+                    [value]="aiOptions.detailLevel"
+                    [label]="'recipes.detalle' | t"
+                    [floatingPanel]="true"
+                    (valueChange)="setAiDetailLevel($event)"
+                  />
                 </div>
               </div>
               <p
@@ -799,19 +795,17 @@ function difficultyFromQuery(value: string | null): Difficulty | null {
                 *ngIf="recipe.instructionsByLevel"
                 class="ai-form__field generated-recipe__detail-level"
               >
-                <label class="ai-form__label" for="generated-recipe-detail-level">
+                <span class="ai-form__label">
                   {{ 'recipes.detalle' | t }}
-                </label>
-                <select
+                </span>
+                <app-picker
                   id="generated-recipe-detail-level"
-                  class="form-select"
-                  [ngModel]="generatedPreviewDetailLevel()"
-                  (ngModelChange)="setGeneratedPreviewDetailLevel($event)"
-                >
-                  <option value="basic">{{ detailLevelLabel('basic') | t }}</option>
-                  <option value="intermediate">{{ detailLevelLabel('intermediate') | t }}</option>
-                  <option value="expert">{{ detailLevelLabel('expert') | t }}</option>
-                </select>
+                  [options]="detailLevelOptions"
+                  [value]="generatedPreviewDetailLevel()"
+                  [label]="'recipes.detalle' | t"
+                  [floatingPanel]="true"
+                  (valueChange)="setGeneratedPreviewDetailLevel($event)"
+                />
               </div>
               <div class="generated-recipe__steps">
                 <div
@@ -950,19 +944,17 @@ function difficultyFromQuery(value: string | null): Difficulty | null {
                   *ngIf="recipe.instructionsByLevel"
                   class="ai-form__field generated-option__detail-level"
                 >
-                  <label class="ai-form__label" [attr.for]="'generated-option-level-' + i">
+                  <span class="ai-form__label">
                     {{ 'recipes.detalle' | t }}
-                  </label>
-                  <select
+                  </span>
+                  <app-picker
                     [id]="'generated-option-level-' + i"
-                    class="form-select"
-                    [ngModel]="generatedRecipeDetailLevel(i)"
-                    (ngModelChange)="setGeneratedRecipeDetailLevel(i, $event)"
-                  >
-                    <option value="basic">{{ detailLevelLabel('basic') | t }}</option>
-                    <option value="intermediate">{{ detailLevelLabel('intermediate') | t }}</option>
-                    <option value="expert">{{ detailLevelLabel('expert') | t }}</option>
-                  </select>
+                    [options]="detailLevelOptions"
+                    [value]="generatedRecipeDetailLevel(i)"
+                    [label]="'recipes.detalle' | t"
+                    [floatingPanel]="true"
+                    (valueChange)="setGeneratedRecipeDetailLevel(i, $event)"
+                  />
                   <ol class="generated-option__steps">
                     <li
                       *ngFor="
@@ -1198,6 +1190,13 @@ export class RecipesComponent implements OnInit {
       { value: 'medium', label: this.i18n.t('recipes.medio') },
       { value: 'hard', label: this.i18n.t('recipes.dificil') }
     ];
+  }
+
+  get detailLevelOptions(): PickerOption[] {
+    return RECIPE_DETAIL_LEVELS.map((level) => ({
+      value: level,
+      label: this.i18n.t(this.detailLevelLabel(level))
+    }));
   }
 
   constructor() {
@@ -1561,7 +1560,14 @@ export class RecipesComponent implements OnInit {
     this.aiOptions.servings = Number(value);
   }
 
-  setAiDetailLevel(value: DetailLevel): void {
+  setAiDifficulty(value: string | null): void {
+    if (value && RECIPE_DIFFICULTIES.includes(value as Difficulty)) {
+      this.aiOptions.difficulty = value as Difficulty;
+    }
+  }
+
+  setAiDetailLevel(value: string | null): void {
+    if (!isRecipeDetailLevel(value)) return;
     this.detailLevelTouched.set(true);
     this.aiOptions.detailLevel = value;
   }
@@ -1600,7 +1606,8 @@ export class RecipesComponent implements OnInit {
       : this.generatedRecipeDetailLevel(optionIndex);
   }
 
-  setGeneratedPreviewDetailLevel(level: DetailLevel): void {
+  setGeneratedPreviewDetailLevel(level: string | null): void {
+    if (!isRecipeDetailLevel(level)) return;
     const optionIndex = this.selectedGeneratedOptionIndex();
     if (optionIndex === null) {
       this.setSingleGeneratedDetailLevel(level);
@@ -1754,7 +1761,8 @@ export class RecipesComponent implements OnInit {
     return this.generatedRecipeLevels()[index] ?? (this.aiOptions.detailLevel as DetailLevel);
   }
 
-  setGeneratedRecipeDetailLevel(index: number, level: DetailLevel): void {
+  setGeneratedRecipeDetailLevel(index: number, level: string | null): void {
+    if (!isRecipeDetailLevel(level)) return;
     this.generatedRecipeLevels.update((levels) => ({ ...levels, [index]: level }));
   }
 
