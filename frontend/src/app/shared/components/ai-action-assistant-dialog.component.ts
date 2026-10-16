@@ -35,6 +35,9 @@ import type {
   AssistantActionRefinementScope,
   AssistantActionStatus,
   AssistantBatchRefinementScope,
+  AssistantRecipeIngredient,
+  AssistantRecipeIngredientChange,
+  AssistantRecipeInstructionChange,
   AssistantRouteHint
 } from '../models/ai-action-assistant.model';
 import type { AIRecipeResponse, AIRecipeIngredient, AIRecipeStep } from '../models/ai-config.model';
@@ -117,8 +120,12 @@ const PANTRY_UNITS = [
 ];
 type AssistantFieldKey =
   | 'name'
+  | 'ingredient_name'
   | 'quantity'
   | 'unit'
+  | 'preparation'
+  | 'substitutes'
+  | 'isOptional'
   | 'category'
   | 'expirationDate'
   | 'location'
@@ -145,13 +152,18 @@ type AssistantFieldKey =
   | 'prepTime'
   | 'cookTime'
   | 'restTime'
+  | 'servings'
   | 'calories'
   | 'tags';
 
 const FIELD_LABELS: Record<AssistantFieldKey, TranslationKey> = {
   name: 'ai_assistant.field.name',
+  ingredient_name: 'ai_assistant.field.ingredient_name',
   quantity: 'ai_assistant.field.quantity',
   unit: 'ai_assistant.field.unit',
+  preparation: 'ai_assistant.field.preparation',
+  substitutes: 'ai_assistant.field.substitutes',
+  isOptional: 'ai_assistant.field.isOptional',
   category: 'ai_assistant.field.category',
   expirationDate: 'ai_assistant.field.expirationDate',
   location: 'ai_assistant.field.location',
@@ -178,6 +190,7 @@ const FIELD_LABELS: Record<AssistantFieldKey, TranslationKey> = {
   prepTime: 'ai_assistant.field.prepTime',
   cookTime: 'ai_assistant.field.cookTime',
   restTime: 'ai_assistant.field.restTime',
+  servings: 'ai_assistant.field.servings',
   calories: 'ai_assistant.field.calories',
   tags: 'ai_assistant.field.tags'
 };
@@ -206,6 +219,7 @@ const ACTION_LABELS: Record<AssistantAction['actionType'], TranslationKey> = {
   plan_meals: 'ai_assistant.action.plan_meals',
   create_event: 'ai_assistant.action.create_event',
   update_event: 'ai_assistant.action.update_event',
+  update_content: 'ai_assistant.action.update_recipe_content',
   create_draft: 'ai_assistant.action.create_draft'
 };
 const EVENT_KINDS: Array<{ value: string; labelKey: TranslationKey }> = [
@@ -540,6 +554,20 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
                             }
                     }}
                   </p>
+                  <p
+                    *ngIf="action.kind === 'recipes.update_content'"
+                    class="assistant__action-summary"
+                    data-test="ai-assistant-recipe-target"
+                  >
+                    {{
+                      'ai_assistant.recipe_target'
+                        | t
+                          : {
+                              name: action.executionTarget.snapshot.name,
+                              servings: action.executionTarget.snapshot.servings
+                            }
+                    }}
+                  </p>
                   <span class="assistant__status-tag" [attr.data-status]="action.status">
                     {{ statusLabel(action.status) | t }}
                   </span>
@@ -725,6 +753,200 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
                               ></textarea>
                             </label>
                           </section>
+                        </fieldset>
+                      </ng-container>
+                      <ng-container *ngIf="action.kind === 'recipes.update_content'">
+                        <fieldset
+                          *ngIf="action.payload.changes.servings !== null"
+                          class="assistant__recipe-section"
+                          data-test="ai-assistant-recipe-servings"
+                        >
+                          <legend>{{ 'ai_assistant.field.servings' | t }}</legend>
+                          <p>
+                            {{ action.executionTarget.snapshot.servings }} →
+                            {{ action.payload.changes.servings }}
+                          </p>
+                          <label class="assistant__field">
+                            <span>{{ 'ai_assistant.field.servings' | t }}</span>
+                            <input
+                              type="number"
+                              min="1"
+                              max="100"
+                              step="1"
+                              [value]="action.payload.changes.servings"
+                              [disabled]="loading()"
+                              (input)="
+                                updateField(
+                                  action.id,
+                                  ['changes', 'servings'],
+                                  $any($event.target).value,
+                                  'number'
+                                )
+                              "
+                            />
+                          </label>
+                          <small
+                            *ngIf="!recipeServingsValid(action)"
+                            class="assistant__field-error"
+                            role="alert"
+                          >
+                            {{ 'ai_assistant.field_invalid' | t }}
+                          </small>
+                          <ul *ngIf="recipeServingsValid(action)">
+                            <li *ngFor="let ingredient of recipeServingsPreview(action)">
+                              {{ ingredient.name }}: {{ ingredient.before }} {{ ingredient.unit }} →
+                              {{ ingredient.after }} {{ ingredient.unit }}
+                            </li>
+                          </ul>
+                        </fieldset>
+                        <fieldset
+                          *ngIf="action.payload.changes.ingredients.length"
+                          class="assistant__recipe-section"
+                          data-test="ai-assistant-recipe-ingredient-changes"
+                        >
+                          <legend>{{ 'ai_assistant.field.ingredients' | t }}</legend>
+                          <article
+                            *ngFor="
+                              let change of action.payload.changes.ingredients;
+                              let index = index;
+                              trackBy: trackRecipeIngredientChange
+                            "
+                            class="assistant__recipe-change"
+                          >
+                            <header>
+                              <strong>{{ recipeIngredientOperationLabel(change) | t }}</strong>
+                              <app-button
+                                variant="ghost"
+                                [touchTarget]="true"
+                                [disabled]="loading()"
+                                (onClick)="removeRecipeIngredientChange(action.id, index)"
+                              >
+                                <app-icon name="close" [size]="18" [label]="null" />
+                                <span>{{ 'ai_assistant.recipe_remove_change' | t }}</span>
+                              </app-button>
+                            </header>
+                            <p>
+                              <span>{{ 'ai_assistant.recipe_before' | t }}:</span>
+                              {{ recipeIngredientBefore(action, change) }}
+                            </p>
+                            <p>
+                              <span>{{ 'ai_assistant.recipe_after' | t }}:</span>
+                              {{ recipeIngredientAfter(action, change) }}
+                            </p>
+                            <label
+                              *ngFor="
+                                let field of recipeIngredientEditFields(action, index);
+                                trackBy: trackField
+                              "
+                              class="assistant__field"
+                            >
+                              <span>{{ field.key | t }}</span>
+                              <app-picker
+                                *ngIf="field.kind === 'select'"
+                                [value]="field.value === null ? null : field.value.toString()"
+                                [options]="field.choices ?? []"
+                                [label]="field.key | t"
+                                [disabled]="loading()"
+                                [floatingPanel]="true"
+                                (valueChange)="updateField(action.id, field.path, $event ?? '')"
+                              ></app-picker>
+                              <input
+                                *ngIf="
+                                  field.kind !== 'select' &&
+                                  field.kind !== 'checkbox' &&
+                                  field.kind !== 'textarea'
+                                "
+                                [type]="field.kind"
+                                [value]="field.value ?? ''"
+                                [required]="field.required || false"
+                                [min]="field.kind === 'number' ? 0.01 : null"
+                                [step]="field.kind === 'number' ? 'any' : null"
+                                [disabled]="loading()"
+                                (input)="
+                                  updateField(
+                                    action.id,
+                                    field.path,
+                                    $any($event.target).value,
+                                    field.kind
+                                  )
+                                "
+                              />
+                              <textarea
+                                *ngIf="field.kind === 'textarea'"
+                                rows="2"
+                                [value]="field.value ?? ''"
+                                [required]="field.required || false"
+                                [disabled]="loading()"
+                                (input)="
+                                  updateField(action.id, field.path, $any($event.target).value)
+                                "
+                              ></textarea>
+                              <input
+                                *ngIf="field.kind === 'checkbox'"
+                                type="checkbox"
+                                [checked]="field.value === true"
+                                [disabled]="loading()"
+                                (change)="
+                                  updateField(action.id, field.path, $any($event.target).checked)
+                                "
+                              />
+                              <small
+                                *ngIf="fieldError(action, field)"
+                                class="assistant__field-error"
+                                role="alert"
+                              >
+                                {{ 'ai_assistant.field_invalid' | t }}
+                              </small>
+                            </label>
+                          </article>
+                        </fieldset>
+                        <fieldset
+                          *ngIf="action.payload.changes.instructions.length"
+                          class="assistant__recipe-section"
+                          data-test="ai-assistant-recipe-instruction-changes"
+                        >
+                          <legend>{{ 'ai_assistant.field.instructionsByLevel' | t }}</legend>
+                          <article
+                            *ngFor="
+                              let change of action.payload.changes.instructions;
+                              let index = index;
+                              trackBy: trackRecipeInstructionChange
+                            "
+                            class="assistant__recipe-change"
+                          >
+                            <p>
+                              {{ levelLabel(change.level) }} ·
+                              {{ 'ai_assistant.field.step' | t: { number: change.stepNumber } }}
+                            </p>
+                            <p>
+                              <span>{{ 'ai_assistant.recipe_before' | t }}:</span>
+                              {{ recipeInstructionBefore(action, change) }}
+                            </p>
+                            <label class="assistant__field">
+                              <span>{{ 'ai_assistant.recipe_after' | t }}</span>
+                              <textarea
+                                rows="2"
+                                [value]="change.instruction"
+                                [disabled]="loading()"
+                                (input)="
+                                  updateField(
+                                    action.id,
+                                    ['changes', 'instructions', index, 'instruction'],
+                                    $any($event.target).value
+                                  )
+                                "
+                              ></textarea>
+                            </label>
+                            <app-button
+                              variant="ghost"
+                              [touchTarget]="true"
+                              [disabled]="loading()"
+                              (onClick)="removeRecipeInstructionChange(action.id, index)"
+                            >
+                              <app-icon name="close" [size]="18" [label]="null" />
+                              <span>{{ 'ai_assistant.recipe_remove_change' | t }}</span>
+                            </app-button>
+                          </article>
                         </fieldset>
                       </ng-container>
                     </div>
@@ -999,6 +1221,20 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
                             }
                     }}
                   </p>
+                  <p
+                    *ngIf="action.kind === 'recipes.update_content'"
+                    class="assistant__action-summary"
+                    data-test="ai-assistant-recipe-target-confirm"
+                  >
+                    {{
+                      'ai_assistant.recipe_target'
+                        | t
+                          : {
+                              name: action.executionTarget.snapshot.name,
+                              servings: action.executionTarget.snapshot.servings
+                            }
+                    }}
+                  </p>
                   <dl class="assistant__confirm-fields" data-test="ai-assistant-confirm-fields">
                     <div
                       *ngFor="let field of editableFields(action); trackBy: trackField"
@@ -1033,6 +1269,18 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
                               {{ step.instruction }}
                             </li>
                           </ol>
+                        </dd>
+                      </div>
+                    </ng-container>
+                    <ng-container *ngIf="action.kind === 'recipes.update_content'">
+                      <div class="assistant__confirm-field">
+                        <dt>{{ 'ai_assistant.recipe_changes' | t }}</dt>
+                        <dd>
+                          <ul data-test="ai-assistant-recipe-change-summary">
+                            <li *ngFor="let line of recipeUpdateSummaryLines(action)">
+                              {{ line }}
+                            </li>
+                          </ul>
                         </dd>
                       </div>
                     </ng-container>
@@ -1606,6 +1854,27 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
         min-width: 0;
       }
 
+      .assistant__recipe-change {
+        display: grid;
+        gap: var(--space-2);
+        min-width: 0;
+        padding: var(--space-3);
+        border: 1px solid var(--border-default);
+        border-radius: var(--radius-md);
+      }
+
+      .assistant__recipe-change > header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-2);
+      }
+
+      .assistant__recipe-change p {
+        margin: 0;
+        overflow-wrap: anywhere;
+      }
+
       .assistant__recipe-level {
         display: grid;
         gap: var(--space-2);
@@ -1678,7 +1947,8 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
 
       @media (max-width: 640px) {
         .assistant__stage-heading,
-        .assistant__action-header {
+        .assistant__action-header,
+        .assistant__recipe-change > header {
           align-items: flex-start;
           flex-direction: column;
         }
@@ -2332,6 +2602,47 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
           })
         }
       );
+    } else if (action.kind === 'recipes.update_content') {
+      paths.unshift(
+        {
+          path: ['changes', 'ingredients'],
+          label: this.i18n.t('ai_assistant.refine_scope_group', {
+            field: this.i18n.t('ai_assistant.field.ingredients')
+          })
+        },
+        {
+          path: ['changes', 'instructions'],
+          label: this.i18n.t('ai_assistant.refine_scope_group', {
+            field: this.i18n.t('ai_assistant.field.instructionsByLevel')
+          })
+        }
+      );
+      if (action.payload.changes.servings !== null) {
+        paths.push({
+          path: ['changes', 'servings'],
+          label: this.i18n.t('ai_assistant.refine_scope_field', {
+            field: this.i18n.t('ai_assistant.field.servings')
+          })
+        });
+      }
+      action.payload.changes.ingredients.forEach((_change, index) => {
+        for (const field of this.recipeIngredientEditFields(action, index)) {
+          paths.push({
+            path: field.path,
+            label: this.i18n.t('ai_assistant.refine_scope_field', {
+              field: this.i18n.t(field.key)
+            })
+          });
+        }
+      });
+      action.payload.changes.instructions.forEach((change, index) => {
+        paths.push({
+          path: ['changes', 'instructions', index, 'instruction'],
+          label: this.i18n.t('ai_assistant.refine_scope_field', {
+            field: this.i18n.t('ai_assistant.field.step', { number: change.stepNumber })
+          })
+        });
+      });
     }
     const seen = new Set<string>();
     for (const { path, label } of paths) {
@@ -2474,17 +2785,22 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
   ): AssistantAction {
     let payload: unknown = replacement.payload;
     const manualFields = current.manualFields ?? [];
+    const retainedManualFields: string[] = [];
     for (const serializedPath of manualFields) {
       const path = JSON.parse(serializedPath) as Array<string | number>;
       if (overrideManualPath && this.pathStartsWith(path, overrideManualPath)) continue;
       const manualValue = this.readPath(current.payload, path);
-      if (manualValue !== undefined) payload = this.writePath(payload, path, manualValue);
+      if (manualValue === undefined) continue;
+      const mapped = this.mapRecipeUpdateManualPath(current, replacement, path);
+      if (mapped) {
+        payload = this.writePath(payload, mapped.path, mapped.value ?? manualValue);
+        retainedManualFields.push(JSON.stringify(mapped.path));
+      } else {
+        payload = this.writePath(payload, path, manualValue);
+        retainedManualFields.push(serializedPath);
+      }
     }
-    const remainingManualFields = manualFields.filter((serializedPath) => {
-      if (!overrideManualPath) return true;
-      const path = JSON.parse(serializedPath) as Array<string | number>;
-      return !this.pathStartsWith(path, overrideManualPath);
-    });
+    const remainingManualFields = [...new Set(retainedManualFields)];
     return {
       ...current,
       ...replacement,
@@ -2497,6 +2813,58 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
       status: 'pending',
       manualFields: remainingManualFields
     } as AssistantAction;
+  }
+
+  private mapRecipeUpdateManualPath(
+    current: AssistantAction,
+    replacement: AssistantActionCandidate,
+    path: Array<string | number>
+  ): { path: Array<string | number>; value?: unknown } | null {
+    if (
+      current.kind !== 'recipes.update_content' ||
+      replacement.kind !== 'recipes.update_content' ||
+      path[0] !== 'changes' ||
+      (path[1] !== 'ingredients' && path[1] !== 'instructions') ||
+      typeof path[2] !== 'number'
+    ) {
+      return null;
+    }
+
+    const index = path[2];
+    if (path[1] === 'ingredients') {
+      const previous = current.payload.changes.ingredients[index];
+      if (!previous) return null;
+      const next = replacement.payload.changes.ingredients;
+      const identity = (change: AssistantRecipeIngredientChange) =>
+        `${change.operation}:${this.comparablePantryName(
+          change.operation === 'add' ? change.ingredient.name : change.targetName
+        )}`;
+      let nextIndex = next.findIndex((change) => identity(change) === identity(previous));
+      if (nextIndex < 0 && previous.operation === 'add' && next[index]?.operation === 'add') {
+        nextIndex = index;
+      }
+      if (nextIndex < 0) {
+        return {
+          path: ['changes', 'ingredients', next.length],
+          value: previous
+        };
+      }
+      return { path: [...path.slice(0, 2), nextIndex, ...path.slice(3)] };
+    }
+
+    const previous = current.payload.changes.instructions[index];
+    if (!previous) return null;
+    const next = replacement.payload.changes.instructions;
+    const nextIndex = next.findIndex(
+      (change) => change.level === previous.level && change.stepNumber === previous.stepNumber
+    );
+    if (nextIndex < 0) {
+      return {
+        path: ['changes', 'instructions', next.length],
+        value: previous
+      };
+    }
+    return { path: [...path.slice(0, 2), nextIndex, ...path.slice(3)] };
   }
 
   editableFields(action: AssistantAction): AssistantField[] {
@@ -2759,6 +3127,8 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
           )
         ];
       }
+      case 'recipes.update_content':
+        return [];
       case 'recipes.create_draft': {
         const recipe = action.payload.recipe;
         return [
@@ -2800,12 +3170,271 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
       : [];
   }
 
+  recipeIngredientEditFields(action: AssistantAction, index: number): AssistantField[] {
+    if (action.kind !== 'recipes.update_content') return [];
+    const change = action.payload.changes.ingredients[index];
+    if (!change || change.operation === 'remove') return [];
+    const basePath = ['changes', 'ingredients', index];
+    const fields: AssistantField[] = [];
+    const addField = (
+      key: AssistantFieldKey,
+      property: string,
+      value: AssistantFieldValue,
+      kind: AssistantFieldKind,
+      required = false,
+      suffix: string[] = []
+    ) => fields.push(this.field(key, [...basePath, ...suffix, property], value, kind, required));
+
+    if (change.operation === 'add') {
+      addField('ingredient_name', 'name', change.ingredient.name, 'text', true, ['ingredient']);
+      addField('quantity', 'quantity', change.ingredient.quantity, 'number', true, ['ingredient']);
+      fields.push(
+        this.field(
+          'unit',
+          [...basePath, 'ingredient', 'unit'],
+          change.ingredient.unit,
+          'select',
+          true,
+          PANTRY_UNITS.map((value) => ({ value, label: value }))
+        )
+      );
+      addField('preparation', 'preparation', change.ingredient.preparation, 'text', false, [
+        'ingredient'
+      ]);
+      addField('isOptional', 'isOptional', change.ingredient.isOptional, 'checkbox', false, [
+        'ingredient'
+      ]);
+      addField(
+        'substitutes',
+        'substitutes',
+        change.ingredient.substitutes.join(', '),
+        'text',
+        false,
+        ['ingredient']
+      );
+      addField('notes', 'notes', change.ingredient.notes, 'textarea', false, ['ingredient']);
+      return fields;
+    }
+
+    const changesPath = ['changes'];
+    const changes = change.changes;
+    if (changes.name !== undefined) {
+      addField('ingredient_name', 'name', changes.name, 'text', true, changesPath);
+    }
+    if (changes.quantity !== undefined) {
+      addField('quantity', 'quantity', changes.quantity, 'number', true, changesPath);
+    }
+    if (changes.unit !== undefined) {
+      fields.push(
+        this.field(
+          'unit',
+          [...basePath, ...changesPath, 'unit'],
+          changes.unit,
+          'select',
+          true,
+          PANTRY_UNITS.map((value) => ({ value, label: value }))
+        )
+      );
+    }
+    if (changes.preparation !== undefined) {
+      addField('preparation', 'preparation', changes.preparation, 'text', false, changesPath);
+    }
+    if (changes.isOptional !== undefined) {
+      addField('isOptional', 'isOptional', changes.isOptional, 'checkbox', false, changesPath);
+    }
+    if (changes.substitutes !== undefined) {
+      addField(
+        'substitutes',
+        'substitutes',
+        changes.substitutes.join(', '),
+        'text',
+        false,
+        changesPath
+      );
+    }
+    if (changes.notes !== undefined) {
+      addField('notes', 'notes', changes.notes, 'textarea', false, changesPath);
+    }
+    return fields;
+  }
+
+  recipeIngredientOperationLabel(change: AssistantRecipeIngredientChange): TranslationKey {
+    return change.operation === 'add'
+      ? 'ai_assistant.recipe_operation.add'
+      : change.operation === 'update'
+        ? 'ai_assistant.recipe_operation.update'
+        : 'ai_assistant.recipe_operation.remove';
+  }
+
+  recipeIngredientBefore(
+    action: Extract<AssistantAction, { kind: 'recipes.update_content' }>,
+    change: AssistantRecipeIngredientChange
+  ): string {
+    if (change.operation === 'add') return '—';
+    const matches = action.executionTarget.snapshot.ingredients.filter(
+      (ingredient) =>
+        this.comparablePantryName(ingredient.name) === this.comparablePantryName(change.targetName)
+    );
+    return matches.length === 1 ? this.formatRecipeIngredient(matches[0]!) : '—';
+  }
+
+  recipeIngredientAfter(
+    action: Extract<AssistantAction, { kind: 'recipes.update_content' }>,
+    change: AssistantRecipeIngredientChange
+  ): string {
+    if (change.operation === 'remove') return '—';
+    if (change.operation === 'add') return this.formatRecipeIngredient(change.ingredient);
+    const before = action.executionTarget.snapshot.ingredients.find(
+      (ingredient) =>
+        this.comparablePantryName(ingredient.name) === this.comparablePantryName(change.targetName)
+    );
+    return before ? this.formatRecipeIngredient({ ...before, ...change.changes }) : '—';
+  }
+
+  recipeInstructionBefore(
+    action: Extract<AssistantAction, { kind: 'recipes.update_content' }>,
+    change: AssistantRecipeInstructionChange
+  ): string {
+    const storedSteps = action.executionTarget.snapshot.steps;
+    const steps = Array.isArray(storedSteps)
+      ? change.level === 'legacy'
+        ? storedSteps
+        : []
+      : change.level === 'legacy'
+        ? []
+        : storedSteps[change.level];
+    const matches = steps.filter((step) => step.stepNumber === change.stepNumber);
+    return matches.length === 1 ? matches[0]!.instruction : '—';
+  }
+
+  recipeServingsPreview(
+    action: AssistantAction
+  ): Array<{ name: string; before: number; after: number; unit: string }> {
+    if (action.kind !== 'recipes.update_content') return [];
+    const { servings } = action.payload.changes;
+    const beforeServings = action.executionTarget.snapshot.servings;
+    if (servings === null || !Number.isInteger(servings) || servings < 1 || beforeServings < 1) {
+      return [];
+    }
+    const scale = servings / beforeServings;
+    return action.executionTarget.snapshot.ingredients.map((ingredient) => ({
+      name: ingredient.name,
+      before: ingredient.quantity,
+      after: Number((ingredient.quantity * scale).toFixed(3)),
+      unit: ingredient.unit
+    }));
+  }
+
+  recipeServingsValid(action: AssistantAction): boolean {
+    if (action.kind !== 'recipes.update_content') return false;
+    const servings = action.payload.changes.servings;
+    return servings !== null && Number.isInteger(servings) && servings >= 1 && servings <= 100;
+  }
+
+  recipeUpdateSummaryLines(action: AssistantAction): string[] {
+    if (action.kind !== 'recipes.update_content') return [];
+    const lines: string[] = [];
+    if (action.payload.changes.servings !== null) {
+      lines.push(
+        this.i18n.t('ai_assistant.recipe_servings_summary', {
+          before: action.executionTarget.snapshot.servings,
+          after: action.payload.changes.servings
+        })
+      );
+      for (const ingredient of this.recipeServingsPreview(action)) {
+        lines.push(
+          this.i18n.t('ai_assistant.recipe_quantity_summary', {
+            name: ingredient.name,
+            before: ingredient.before,
+            after: ingredient.after,
+            unit: ingredient.unit
+          })
+        );
+      }
+    }
+    for (const change of action.payload.changes.ingredients) {
+      lines.push(
+        this.i18n.t('ai_assistant.recipe_change_summary', {
+          operation: this.i18n.t(this.recipeIngredientOperationLabel(change)),
+          before: this.recipeIngredientBefore(action, change),
+          after: this.recipeIngredientAfter(action, change)
+        })
+      );
+    }
+    for (const change of action.payload.changes.instructions) {
+      lines.push(
+        this.i18n.t('ai_assistant.recipe_instruction_summary', {
+          level: this.levelLabel(change.level),
+          number: change.stepNumber,
+          before: this.recipeInstructionBefore(action, change),
+          after: change.instruction
+        })
+      );
+    }
+    return lines;
+  }
+
+  removeRecipeIngredientChange(actionId: string, index: number): void {
+    this.updateActions((actions) =>
+      actions.map((action) => {
+        if (action.id !== actionId || action.kind !== 'recipes.update_content') return action;
+        const ingredients = action.payload.changes.ingredients.filter(
+          (_item, itemIndex) => itemIndex !== index
+        );
+        return {
+          ...action,
+          payload: { ...action.payload, changes: { ...action.payload.changes, ingredients } },
+          manualFields: [
+            ...new Set([...(action.manualFields ?? []), JSON.stringify(['changes', 'ingredients'])])
+          ]
+        };
+      })
+    );
+  }
+
+  removeRecipeInstructionChange(actionId: string, index: number): void {
+    this.updateActions((actions) =>
+      actions.map((action) => {
+        if (action.id !== actionId || action.kind !== 'recipes.update_content') return action;
+        const instructions = action.payload.changes.instructions.filter(
+          (_item, itemIndex) => itemIndex !== index
+        );
+        return {
+          ...action,
+          payload: { ...action.payload, changes: { ...action.payload.changes, instructions } },
+          manualFields: [
+            ...new Set([
+              ...(action.manualFields ?? []),
+              JSON.stringify(['changes', 'instructions'])
+            ])
+          ]
+        };
+      })
+    );
+  }
+
+  private formatRecipeIngredient(ingredient: AssistantRecipeIngredient): string {
+    const parts = [`${ingredient.name} · ${ingredient.quantity} ${ingredient.unit}`];
+    if (ingredient.preparation) parts.push(ingredient.preparation);
+    if (ingredient.isOptional) parts.push(this.i18n.t('ai_assistant.recipe_optional'));
+    if (ingredient.substitutes?.length) {
+      parts.push(
+        `${this.i18n.t('ai_assistant.field.substitutes')}: ${ingredient.substitutes.join(', ')}`
+      );
+    }
+    if (ingredient.notes)
+      parts.push(`${this.i18n.t('ai_assistant.field.notes')}: ${ingredient.notes}`);
+    return parts.join(' · ');
+  }
+
   levelLabel(level: string): string {
-    return level === 'basic'
-      ? this.i18n.t('ai_assistant.level.basic')
-      : level === 'intermediate'
-        ? this.i18n.t('ai_assistant.level.intermediate')
-        : this.i18n.t('ai_assistant.level.expert');
+    return level === 'legacy'
+      ? this.i18n.t('ai_assistant.level.legacy')
+      : level === 'basic'
+        ? this.i18n.t('ai_assistant.level.basic')
+        : level === 'intermediate'
+          ? this.i18n.t('ai_assistant.level.intermediate')
+          : this.i18n.t('ai_assistant.level.expert');
   }
 
   pantryLocationLabel(location: string | null): string {
@@ -3052,6 +3681,9 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
         changed
       );
     }
+    if (action.kind === 'recipes.update_content') {
+      return this.isRecipeUpdateValid(action);
+    }
     if (action.kind === 'recipes.create_draft') {
       const recipe = action.payload.recipe;
       return (
@@ -3090,6 +3722,141 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
       );
     }
     return true;
+  }
+
+  private isRecipeUpdateValid(
+    action: Extract<AssistantAction, { kind: 'recipes.update_content' }>
+  ): boolean {
+    const { changes } = action.payload;
+    const snapshot = action.executionTarget.snapshot;
+    const comparable = (value: string) => this.comparablePantryName(value);
+    const steps = snapshot.steps;
+    if (
+      action.executionTarget.kind !== 'recipe' ||
+      !action.executionTarget.id ||
+      comparable(action.payload.targetName) !== comparable(snapshot.name) ||
+      !Number.isInteger(snapshot.servings) ||
+      snapshot.servings < 1 ||
+      snapshot.ingredients.length < 1 ||
+      (Array.isArray(steps) && steps.length < 1)
+    ) {
+      return false;
+    }
+
+    if (
+      changes.servings !== null &&
+      (!Number.isInteger(changes.servings) ||
+        changes.servings < 1 ||
+        changes.servings > 100 ||
+        changes.ingredients.length > 0 ||
+        this.recipeServingsPreview(action).some(
+          (item) => !Number.isFinite(item.after) || item.after <= 0
+        ))
+    ) {
+      return false;
+    }
+
+    const ingredientTargets = changes.ingredients.map((change) =>
+      comparable(change.operation === 'add' ? change.ingredient.name : change.targetName)
+    );
+    if (new Set(ingredientTargets).size !== ingredientTargets.length) return false;
+    let afterIngredientCount = snapshot.ingredients.length;
+    let changedIngredient = false;
+    for (const change of changes.ingredients) {
+      if (change.operation === 'add') {
+        const ingredient = change.ingredient;
+        if (
+          snapshot.ingredients.some(
+            (current) => comparable(current.name) === comparable(ingredient.name)
+          ) ||
+          !ingredient.name.trim() ||
+          ingredient.name.trim().length > 160 ||
+          !Number.isFinite(ingredient.quantity) ||
+          ingredient.quantity <= 0 ||
+          ingredient.quantity > 100000 ||
+          !PANTRY_UNITS.includes(ingredient.unit) ||
+          (ingredient.preparation !== null && ingredient.preparation.length > 500) ||
+          ingredient.substitutes.length > 12 ||
+          ingredient.substitutes.some((item) => !item.trim() || item.length > 160) ||
+          (ingredient.notes !== null && ingredient.notes.length > 500)
+        ) {
+          return false;
+        }
+        afterIngredientCount += 1;
+        changedIngredient = true;
+        continue;
+      }
+
+      const matches = snapshot.ingredients.filter(
+        (ingredient) => comparable(ingredient.name) === comparable(change.targetName)
+      );
+      if (matches.length !== 1) return false;
+      if (change.operation === 'remove') {
+        afterIngredientCount -= 1;
+        changedIngredient = true;
+        continue;
+      }
+
+      const before = matches[0]!;
+      const entries = Object.entries(change.changes);
+      if (
+        entries.length === 0 ||
+        entries.every(([key, value]) => value === before[key as keyof AssistantRecipeIngredient]) ||
+        (change.changes.name !== undefined &&
+          (!change.changes.name.trim() || change.changes.name.trim().length > 160)) ||
+        (change.changes.quantity !== undefined &&
+          (!Number.isFinite(change.changes.quantity) ||
+            change.changes.quantity <= 0 ||
+            change.changes.quantity > 100000)) ||
+        (change.changes.unit !== undefined && !PANTRY_UNITS.includes(change.changes.unit)) ||
+        (change.changes.preparation !== undefined &&
+          change.changes.preparation !== null &&
+          change.changes.preparation.length > 500) ||
+        (change.changes.substitutes !== undefined &&
+          (change.changes.substitutes.length > 12 ||
+            change.changes.substitutes.some((item) => !item.trim() || item.length > 160))) ||
+        (change.changes.notes !== undefined &&
+          change.changes.notes !== null &&
+          change.changes.notes.length > 500)
+      ) {
+        return false;
+      }
+      changedIngredient = true;
+    }
+    if (afterIngredientCount < 1) return false;
+
+    const instructionTargets = changes.instructions.map(
+      (change) => `${change.level}:${change.stepNumber}`
+    );
+    if (new Set(instructionTargets).size !== instructionTargets.length) return false;
+    let changedInstruction = false;
+    for (const change of changes.instructions) {
+      const availableSteps = Array.isArray(steps)
+        ? change.level === 'legacy'
+          ? steps
+          : []
+        : change.level === 'legacy'
+          ? []
+          : steps[change.level];
+      const matches = availableSteps.filter((step) => step.stepNumber === change.stepNumber);
+      if (
+        !Number.isInteger(change.stepNumber) ||
+        change.stepNumber < 1 ||
+        matches.length !== 1 ||
+        !change.instruction.trim() ||
+        change.instruction.length > 4000 ||
+        matches[0]!.instruction === change.instruction
+      ) {
+        return false;
+      }
+      changedInstruction = true;
+    }
+
+    return (
+      changedIngredient ||
+      changedInstruction ||
+      (changes.servings !== null && changes.servings !== snapshot.servings)
+    );
   }
 
   updateField(
@@ -3252,6 +4019,12 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
         .map((tag) => tag.trim())
         .filter(Boolean);
     }
+    if (path[0] === 'changes' && path.includes('substitutes') && typeof rawValue === 'string') {
+      value = rawValue
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
     const serializedPath = JSON.stringify(path);
     this.updateActions((actions) =>
       actions.map((action) =>
@@ -3298,6 +4071,16 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
 
   trackField(_index: number, field: AssistantField): string {
     return field.path.join('.');
+  }
+
+  trackRecipeIngredientChange(index: number, change: AssistantRecipeIngredientChange): string {
+    return change.operation === 'add'
+      ? `add:${index}`
+      : `${change.operation}:${change.targetName.normalize('NFKC').trim().toLocaleLowerCase()}`;
+  }
+
+  trackRecipeInstructionChange(_index: number, change: AssistantRecipeInstructionChange): string {
+    return `${change.level}:${change.stepNumber}`;
   }
 
   private field(

@@ -374,6 +374,60 @@ function calendarUpdateCandidate(targetTitle: string, targetStartTime: string | 
   });
 }
 
+function recipeUpdateCandidate(
+  targetName: string,
+  quantity = 75,
+  instruction = 'Dora la cebolla a fuego medio.'
+) {
+  return JSON.stringify({
+    summary: 'Editar una receta propia.',
+    questions: [],
+    actions: [
+      {
+        kind: 'recipes.update_content',
+        title: 'Reducir cebolla',
+        summary: 'Reduce cebolla y aclara el primer paso.',
+        payload: {
+          targetName,
+          changes: {
+            servings: null,
+            ingredients: [{ operation: 'update', targetName: 'Cebolla', changes: { quantity } }],
+            instructions: [{ level: 'legacy', stepNumber: 1, instruction }]
+          }
+        },
+        dependsOn: [],
+        warnings: []
+      }
+    ]
+  });
+}
+
+function recipeUpdateRefinementCandidate(
+  targetName: string,
+  quantity: number,
+  instruction: string
+) {
+  return JSON.stringify({
+    summary: 'Aclara las instrucciones de la receta.',
+    replacement: {
+      kind: 'recipes.update_content',
+      title: 'Reducir cebolla',
+      summary: 'Reduce cebolla y aclara el primer paso.',
+      payload: {
+        targetName,
+        changes: {
+          servings: null,
+          ingredients: [{ operation: 'update', targetName: 'Cebolla', changes: { quantity } }],
+          instructions: [{ level: 'legacy', stepNumber: 1, instruction }]
+        }
+      },
+      dependsOn: [],
+      warnings: []
+    },
+    questions: []
+  });
+}
+
 async function startDeterministicAiProvider(initialContent: string) {
   let content = initialContent;
   const requests: string[] = [];
@@ -2118,6 +2172,325 @@ test('asistente global: edita un ingrediente propio solo tras confirmar y proteg
   });
   expect(proposalRequests).toBe(2);
   expect(pageErrors).toEqual([]);
+});
+
+test('asistente global: edita una receta propia tras revisión explícita y protege el replay', async ({
+  page
+}, testInfo) => {
+  const recipeName = 'Lentejas actualización QA';
+  const provider = await startDeterministicAiProvider(recipeUpdateCandidate(recipeName));
+  const assistantWrites: Array<{ body: any; actionId: string | undefined }> = [];
+  const pageErrors: string[] = [];
+  const consoleErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(`${error.name}: ${error.message}`));
+  page.on('console', (message) => {
+    if (message.type() === 'error') consoleErrors.push(message.text());
+  });
+  page.on('request', (request) => {
+    if (
+      request.method() === 'PATCH' &&
+      new URL(request.url()).pathname.startsWith('/api/recipes/') &&
+      new URL(request.url()).pathname.endsWith('/assistant-update')
+    ) {
+      assistantWrites.push({
+        body: request.postDataJSON(),
+        actionId: request.headers()['x-assistant-action-id']
+      });
+    }
+  });
+
+  try {
+    await registerUser(page, 'Asistente edita receta E2E');
+    await createHousehold(page, 'Hogar sintético receta');
+    await page.goto('/dashboard');
+    const token = await tokenOf(page);
+    const authHeaders = { authorization: `Bearer ${token}` };
+    await configureDeterministicAi(page, token, provider.baseUrl);
+
+    const created = await page.request.post('/api/recipes', {
+      headers: authHeaders,
+      data: {
+        name: recipeName,
+        description: 'Receta sintética para pruebas aisladas.',
+        servings: 2,
+        ingredients: [
+          { name: 'Cebolla', quantity: 100, unit: 'g' },
+          { name: 'Lentejas', quantity: 200, unit: 'g' }
+        ],
+        steps: [{ stepNumber: 1, instruction: 'Sofríe la cebolla.' }]
+      }
+    });
+    expect(created.status(), await created.text()).toBe(201);
+    const recipe = (await created.json()).data as {
+      id: string;
+      name: string;
+      servings: number;
+      ingredients: Array<{ name: string; quantity: number; unit: string }>;
+      steps: Array<{ stepNumber: number; instruction: string }>;
+    };
+    const readRecipe = async () => {
+      const response = await page.request.get(`/api/recipes/${recipe.id}`, {
+        headers: authHeaders
+      });
+      expect(response.status(), 'lectura de la receta sintética').toBe(200);
+      return (await response.json()).data;
+    };
+    const before = await readRecipe();
+    expect(before).toMatchObject({
+      servings: 2,
+      ingredients: expect.arrayContaining([
+        expect.objectContaining({ name: 'Cebolla', quantity: 100 })
+      ])
+    });
+
+    await page.locator('[data-test="ai-assistant-open"]').click();
+    await page
+      .locator('[data-test="ai-assistant-prompt"]')
+      .fill('Reduce la cebolla de Lentejas actualización QA y aclara el paso 1.');
+    const proposalResponsePromise = page.waitForResponse((response) => {
+      return (
+        response.request().method() === 'POST' &&
+        new URL(response.url()).pathname === '/api/ai/assistant/proposals'
+      );
+    });
+    await page.locator('[data-test="ai-assistant-submit"] button').click();
+    const proposalResponse = await proposalResponsePromise;
+    const proposalBody = await proposalResponse.text();
+    expect(
+      proposalResponse.status(),
+      `${proposalBody}; proveedor recibió ${provider.requests.length} petición(es)`
+    ).toBe(200);
+    const review = page.locator('[data-test="ai-assistant-review"]');
+    await expect(review).toBeVisible();
+    await expect(review.locator('h2[tabindex="-1"]')).toBeFocused();
+    await expect(review.locator('[data-test="ai-assistant-recipe-target"]')).toContainText(
+      recipeName
+    );
+    expect(await readRecipe()).toMatchObject({
+      servings: 2,
+      ingredients: expect.arrayContaining([
+        expect.objectContaining({ name: 'Cebolla', quantity: 100 })
+      ]),
+      steps: [{ stepNumber: 1, instruction: 'Sofríe la cebolla.' }]
+    });
+    expect(assistantWrites).toEqual([]);
+    expect(provider.requests.at(-1)).not.toContain(recipe.id);
+
+    await page.keyboard.press('Escape');
+    const discardDialog = page.getByRole('dialog', { name: '¿Descartar este borrador?' });
+    await expect(discardDialog).toBeVisible();
+    await discardDialog.getByRole('button', { name: 'Descartar borrador' }).click();
+    await expect(page.locator('.modal[role="dialog"]')).not.toBeVisible();
+    expect(await readRecipe()).toEqual(before);
+    expect(assistantWrites).toEqual([]);
+
+    await page.locator('[data-test="ai-assistant-open"]').click();
+    await page
+      .locator('[data-test="ai-assistant-prompt"]')
+      .fill('Reduce la cebolla de Lentejas actualización QA y aclara el paso 1.');
+    const retryProposalResponsePromise = page.waitForResponse((response) => {
+      return (
+        response.request().method() === 'POST' &&
+        new URL(response.url()).pathname === '/api/ai/assistant/proposals'
+      );
+    });
+    await page.locator('[data-test="ai-assistant-submit"] button').click();
+    expect((await retryProposalResponsePromise).status()).toBe(200);
+    await expect(review).toBeVisible();
+    expect(provider.requests).toHaveLength(2);
+
+    const details = review.locator('details.assistant__details').first();
+    await details.locator('summary').click();
+    const ingredientChange = details.locator(
+      '[data-test="ai-assistant-recipe-ingredient-changes"]'
+    );
+    await expect(ingredientChange).toContainText('Cebolla · 100 g');
+    await expect(ingredientChange).toContainText('Cebolla · 75 g');
+    const originalViewport = page.viewportSize();
+    expect(originalViewport).not.toBeNull();
+    for (const viewport of [
+      { width: 1440, height: 900 },
+      { width: 1024, height: 768 },
+      { width: 1023, height: 768 },
+      { width: 767, height: 768 },
+      { width: 640, height: 800 },
+      { width: 639, height: 800 },
+      { width: 480, height: 800 },
+      { width: 393, height: 851 },
+      { width: 320, height: 568 },
+      { width: 568, height: 320 }
+    ]) {
+      await page.setViewportSize(viewport);
+      const geometry = await page.evaluate(() => {
+        const modal = document.querySelector<HTMLElement>('.modal[role="dialog"]');
+        const body = modal?.querySelector<HTMLElement>('.modal__body');
+        const rect = modal?.getBoundingClientRect();
+        return {
+          viewportWidth: window.innerWidth,
+          viewportHeight: window.innerHeight,
+          documentWidth: document.documentElement.scrollWidth,
+          modalLeft: rect?.left ?? -1,
+          modalRight: rect?.right ?? Infinity,
+          modalTop: rect?.top ?? -1,
+          modalBottom: rect?.bottom ?? Infinity,
+          bodyWidth: body?.clientWidth ?? 0,
+          bodyScrollWidth: body?.scrollWidth ?? Infinity,
+          overflowingChildren: Array.from(body?.querySelectorAll<HTMLElement>('*') ?? [])
+            .map((element) => ({
+              tag: element.tagName.toLowerCase(),
+              className: String(element.className),
+              text: element.textContent?.trim().slice(0, 40),
+              width: Math.round(element.getBoundingClientRect().width),
+              scrollWidth: element.scrollWidth,
+              clientWidth: element.clientWidth
+            }))
+            .filter((element) => element.scrollWidth > element.clientWidth + 1)
+            .slice(0, 30)
+        };
+      });
+      expect(
+        geometry.documentWidth,
+        `sin overflow en ${viewport.width}×${viewport.height}`
+      ).toBeLessThanOrEqual(geometry.viewportWidth + 1);
+      expect(geometry.modalLeft).toBeGreaterThanOrEqual(0);
+      expect(geometry.modalRight).toBeLessThanOrEqual(geometry.viewportWidth + 1);
+      expect(geometry.modalTop).toBeGreaterThanOrEqual(0);
+      expect(geometry.modalBottom).toBeLessThanOrEqual(geometry.viewportHeight + 1);
+      expect(
+        geometry.bodyScrollWidth,
+        `sin overflow interno en ${viewport.width}×${viewport.height}: ${JSON.stringify(geometry.overflowingChildren)}`
+      ).toBeLessThanOrEqual(geometry.bodyWidth + 1);
+    }
+    await page.setViewportSize(originalViewport!);
+    const quantity = ingredientChange.locator('input[type="number"]');
+    await expect(quantity).toHaveAccessibleName('Cantidad');
+    await quantity.scrollIntoViewIfNeeded();
+    await quantity.fill('80');
+    await expect(quantity).toHaveValue('80');
+    await expect(ingredientChange).toContainText('Cebolla · 80 g');
+    await expect(details.locator('textarea')).toHaveValue('Dora la cebolla a fuego medio.');
+    await details.locator('textarea').fill('Dora la cebolla despacio.');
+    expect(await readRecipe()).toMatchObject({
+      ingredients: expect.arrayContaining([
+        expect.objectContaining({ name: 'Cebolla', quantity: 100 })
+      ]),
+      steps: [{ stepNumber: 1, instruction: 'Sofríe la cebolla.' }]
+    });
+    expect(assistantWrites).toEqual([]);
+
+    provider.setContent(
+      recipeUpdateRefinementCandidate(recipeName, 80, 'Dora la cebolla lentamente.')
+    );
+    await page.locator('[data-test="ai-assistant-refine"] button').click();
+    await expect(page.locator('[data-test="ai-assistant-refine-stage"]')).toBeVisible();
+    await page.getByRole('button', { name: 'Ámbito de la revisión: Acción completa' }).click();
+    await page.getByRole('option', { name: 'Sección: Instrucciones' }).click();
+    await page.locator('#ai-assistant-refine-input').fill('Aclara solo el primer paso.');
+    const refinementResponsePromise = page.waitForResponse((response) => {
+      return (
+        response.request().method() === 'POST' &&
+        new URL(response.url()).pathname === '/api/ai/assistant/refine'
+      );
+    });
+    await page.getByRole('button', { name: 'Actualizar propuestas' }).click();
+    const refinementResponse = await refinementResponsePromise;
+    expect(refinementResponse.status(), await refinementResponse.text()).toBe(200);
+    await expect(review).toBeVisible();
+    await expect(ingredientChange.locator('input[type="number"]')).toHaveValue('80');
+    await expect(details.locator('textarea')).toHaveValue('Dora la cebolla lentamente.');
+    expect(provider.requests).toHaveLength(3);
+    expect(await readRecipe()).toEqual(before);
+    expect(assistantWrites).toEqual([]);
+
+    await details.locator('textarea').evaluate((element: HTMLTextAreaElement) => element.blur());
+    await review.evaluate((element) =>
+      element.closest<HTMLElement>('.modal__body')?.scrollTo(0, 0)
+    );
+    await capture(page, testInfo, 'recipe-update-review');
+    if (testInfo.project.name === 'mobile-chrome') {
+      await ingredientChange.scrollIntoViewIfNeeded();
+      await capture(page, testInfo, 'recipe-update-review-fields-mobile');
+      await review.evaluate((element) =>
+        element.closest<HTMLElement>('.modal__body')?.scrollTo(0, 0)
+      );
+    }
+
+    await page.getByRole('button', { name: 'Seleccionar todas' }).click();
+    await page.locator('[data-test="ai-assistant-continue"] button').click();
+    const confirmation = page.locator('[data-test="ai-assistant-confirm"]');
+    await expect(confirmation).toContainText(recipeName);
+    await expect(confirmation).toContainText('Cebolla · 100 g');
+    await expect(confirmation).toContainText('Cebolla · 80 g');
+    await expect(confirmation).toContainText('Dora la cebolla lentamente.');
+    expect(await readRecipe()).toMatchObject({
+      ingredients: expect.arrayContaining([
+        expect.objectContaining({ name: 'Cebolla', quantity: 100 })
+      ])
+    });
+    expect(assistantWrites).toEqual([]);
+    await capture(page, testInfo, 'recipe-update-confirm');
+
+    const saveResponsePromise = page.waitForResponse((response) => {
+      return (
+        response.request().method() === 'PATCH' &&
+        new URL(response.url()).pathname === `/api/recipes/${recipe.id}/assistant-update`
+      );
+    });
+    await page.locator('[data-test="ai-assistant-confirm-submit"] button').click();
+    const saveResponse = await saveResponsePromise;
+    expect(saveResponse.status(), await saveResponse.text()).toBe(200);
+    const savedAction = assistantWrites[0];
+    expect(savedAction?.actionId).toBeTruthy();
+    if (!savedAction?.actionId) throw new Error('No se capturó la acción confirmada.');
+    expect(savedAction?.body).toMatchObject({
+      changes: {
+        ingredients: [{ operation: 'update', targetName: 'Cebolla', changes: { quantity: 80 } }],
+        instructions: [
+          { level: 'legacy', stepNumber: 1, instruction: 'Dora la cebolla lentamente.' }
+        ]
+      },
+      assistantAction: { targetId: recipe.id }
+    });
+    expect(savedAction?.body.assistantAction.before).toMatchObject({
+      name: recipeName,
+      servings: 2,
+      ingredients: expect.arrayContaining([
+        expect.objectContaining({ name: 'Cebolla', quantity: 100 })
+      ])
+    });
+    await expect(confirmation.locator('.assistant__confirm-status')).toHaveText('Completada');
+    expect(await readRecipe()).toMatchObject({
+      servings: 2,
+      ingredients: expect.arrayContaining([
+        expect.objectContaining({ name: 'Cebolla', quantity: 80 }),
+        expect.objectContaining({ name: 'Lentejas', quantity: 200 })
+      ]),
+      steps: [{ stepNumber: 1, instruction: 'Dora la cebolla lentamente.' }]
+    });
+
+    await page.reload();
+    expect(await readRecipe()).toMatchObject({
+      ingredients: expect.arrayContaining([
+        expect.objectContaining({ name: 'Cebolla', quantity: 80 })
+      ]),
+      steps: [{ stepNumber: 1, instruction: 'Dora la cebolla lentamente.' }]
+    });
+    const replay = await page.request.patch(`/api/recipes/${recipe.id}/assistant-update`, {
+      headers: { ...authHeaders, 'x-assistant-action-id': savedAction.actionId },
+      data: savedAction!.body
+    });
+    expect(replay.status(), await replay.text()).toBe(200);
+    expect(await replay.json()).toMatchObject({ success: true, idempotent: true });
+    expect((await readRecipe()).ingredients).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: 'Cebolla', quantity: 80 })])
+    );
+    if (testInfo.project.name === 'mobile-chrome') {
+      expect(pageErrors).toEqual([]);
+      expect(consoleErrors).toEqual([]);
+    }
+  } finally {
+    await provider.close();
+  }
 });
 
 test('asistente global: preimagen obsoleta del inventario no pisa el cambio concurrente', async ({

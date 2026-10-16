@@ -1,10 +1,12 @@
 import { Hono } from 'hono';
 import { nanoid } from 'nanoid';
+import { isDeepStrictEqual } from 'node:util';
 import { getDatabase } from '../config/database.js';
 import { authMiddleware } from '../middleware/auth.middleware.js';
 import { assistantHouseholdContextMiddleware } from '../utils/ai-assistant-household-context.js';
 import {
   ASSISTANT_ACTION_ID_HEADER,
+  isAssistantActionId,
   withAssistantActionIdempotency
 } from '../utils/assistant-action-idempotency.js';
 import { recipeContentBodyLimit } from '../middleware/recipe-content-body-limit.middleware.js';
@@ -15,6 +17,11 @@ import {
   recipeFilterSchema,
   adjustServingsSchema
 } from '../schemas/recipe.schema.js';
+import {
+  applyAssistantRecipeContentChanges,
+  assistantRecipeContentSnapshotSchema,
+  assistantRecipeContentUpdateRequestSchema
+} from '../schemas/ai-assistant-recipe-update.schema.js';
 import { recipeStepPhotoProvider } from '../utils/recipe-step-photos.js';
 import {
   recipeStepVideoProvider,
@@ -691,6 +698,153 @@ recipeRoutes.post('/', recipeContentBodyLimit(), async (c) => {
       };
     }
   );
+  if ('error' in result) {
+    return result.error === 'invalid_action_id'
+      ? c.json({ success: false, code: 'ASSISTANT_ACTION_ID_INVALID' }, 400)
+      : c.json({ success: false, code: 'ASSISTANT_ACTION_ID_CONFLICT' }, 409);
+  }
+  return c.json(result.body, result.status);
+});
+
+recipeRoutes.patch('/:id/assistant-update', recipeContentBodyLimit(), async (c) => {
+  const actionId = c.req.header(ASSISTANT_ACTION_ID_HEADER);
+  if (!actionId) return c.json({ success: false, code: 'ASSISTANT_ACTION_ID_REQUIRED' }, 400);
+  if (!isAssistantActionId(actionId)) {
+    return c.json({ success: false, code: 'ASSISTANT_ACTION_ID_INVALID' }, 400);
+  }
+
+  const rawBody = await c.req.json().catch(() => null);
+  const parsed = assistantRecipeContentUpdateRequestSchema.safeParse(rawBody);
+  if (!parsed.success) {
+    return c.json({ success: false, code: 'INVALID_ASSISTANT_RECIPE_UPDATE' }, 400);
+  }
+
+  const targetId = c.req.param('id');
+  const { assistantAction, changes } = parsed.data;
+  if (assistantAction.targetId !== targetId) {
+    return c.json({ success: false, code: 'ASSISTANT_ACTION_TARGET_MISMATCH' }, 400);
+  }
+
+  const db = getDatabase();
+  const userId = c.get('userId');
+  const result = withAssistantActionIdempotency(
+    db,
+    userId,
+    actionId,
+    {
+      operation: 'recipes.update_content',
+      targetId,
+      before: assistantAction.before,
+      changes
+    },
+    () => {
+      const existing = db.prepare('SELECT * FROM recipes WHERE id = ?').get(targetId) as
+        Record<string, unknown> | undefined;
+      if (!existing) {
+        return {
+          body: { success: false, message: 'Recipe not found' },
+          status: 404,
+          record: false
+        };
+      }
+      if (!isOwnedEditableRecipe(existing, userId)) {
+        return {
+          body: { success: false, message: 'Recipe is read-only' },
+          status: 403,
+          record: false
+        };
+      }
+
+      let current: ReturnType<typeof assistantRecipeContentSnapshotSchema.parse>;
+      try {
+        current = assistantRecipeContentSnapshotSchema.parse({
+          name: existing.name,
+          servings: Number(existing.servings),
+          ingredients: JSON.parse(String(existing.ingredients ?? '[]')),
+          steps: JSON.parse(String(existing.steps ?? '[]'))
+        });
+      } catch {
+        return {
+          body: { success: false, code: 'ASSISTANT_RECIPE_CONTENT_INVALID' },
+          status: 409,
+          record: false
+        };
+      }
+
+      if (!isDeepStrictEqual(current, assistantAction.before)) {
+        return {
+          body: { success: false, code: 'ASSISTANT_RECIPE_STALE' },
+          status: 409,
+          record: false
+        };
+      }
+
+      let updated: typeof current;
+      try {
+        updated = applyAssistantRecipeContentChanges(current, changes);
+      } catch (error) {
+        const code = error instanceof Error ? error.message : 'ASSISTANT_RECIPE_PATCH_INVALID';
+        const conflict =
+          code === 'ASSISTANT_RECIPE_LAST_INGREDIENT' ||
+          code === 'ASSISTANT_RECIPE_INGREDIENT_NOT_FOUND' ||
+          code === 'ASSISTANT_RECIPE_INGREDIENT_AMBIGUOUS' ||
+          code === 'ASSISTANT_RECIPE_INSTRUCTION_LEVEL_NOT_FOUND' ||
+          code === 'ASSISTANT_RECIPE_INSTRUCTION_STEP_NOT_FOUND' ||
+          code === 'ASSISTANT_RECIPE_INSTRUCTION_STEP_AMBIGUOUS' ||
+          code === 'ASSISTANT_RECIPE_NO_CHANGE';
+        return {
+          body: { success: false, code },
+          status: conflict ? 409 : 400,
+          record: false
+        };
+      }
+
+      const updates: string[] = [];
+      const values: unknown[] = [];
+      if (updated.servings !== current.servings) {
+        updates.push('servings = ?');
+        values.push(updated.servings);
+      }
+      if (!isDeepStrictEqual(updated.ingredients, current.ingredients)) {
+        updates.push('ingredients = ?');
+        values.push(JSON.stringify(updated.ingredients));
+      }
+      if (!isDeepStrictEqual(updated.steps, current.steps)) {
+        updates.push('steps = ?');
+        values.push(JSON.stringify(updated.steps));
+      }
+      if (updates.length === 0) {
+        return {
+          body: { success: false, code: 'ASSISTANT_RECIPE_NO_CHANGE' },
+          status: 409,
+          record: false
+        };
+      }
+
+      updates.push('updated_at = CURRENT_TIMESTAMP');
+      values.push(targetId, userId);
+      const saved = db
+        .prepare(
+          `UPDATE recipes SET ${updates.join(', ')}
+             WHERE id = ? AND author_id = ? AND author <> 'catalog'`
+        )
+        .run(...values);
+      if (saved.changes !== 1) {
+        return {
+          body: { success: false, code: 'ASSISTANT_RECIPE_STALE' },
+          status: 409,
+          record: false
+        };
+      }
+
+      const recipe = getReadableRecipe(db, targetId, userId);
+      return {
+        body: { success: true, data: mapRecipe(recipe as Record<string, unknown>) },
+        status: 200
+      };
+    }
+  );
+
   if ('error' in result) {
     return result.error === 'invalid_action_id'
       ? c.json({ success: false, code: 'ASSISTANT_ACTION_ID_INVALID' }, 400)

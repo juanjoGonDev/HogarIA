@@ -6,7 +6,7 @@
 
 ## Decisión de integración
 
-La capacidad inicial del asistente crea seis tipos de registro. Esta extensión incorpora edición segura y acotada de tareas domésticas (Unidad A), planificación de comidas (Unidad B), despensa y calendario (unidades verticales documentadas por separado). Las ediciones de compras y recetas y la prioridad de tareas siguen pendientes: no se habilita un `update_*` genérico; cada dominio debe resolver sus targets desde datos de la app, rechazar cambios concurrentes e implementar idempotencia.
+La capacidad inicial del asistente crea seis tipos de registro. Esta extensión incorpora edición segura y acotada de tareas domésticas (Unidad A), planificación de comidas (Unidad B), despensa/calendario (unidades verticales documentadas por separado) y, con autorización explícita del usuario, contenido de recetas (`recipes.update_content`; contrato y evidencia en `AI-ACTION-ASSISTANT-RECIPE-UPDATE-SPEC.md`). Las ediciones de compras y la prioridad de tareas siguen pendientes: no se habilita un `update_*` genérico; cada dominio debe resolver sus targets desde datos de la app, rechazar cambios concurrentes e implementar idempotencia.
 
 ### Unidad A — editar una tarea doméstica existente
 
@@ -30,8 +30,8 @@ La capacidad inicial del asistente crea seis tipos de registro. Esta extensión 
 
 ### Otras ediciones de registros
 
-- Los endpoints genéricos de despensa, compras, calendario y recetas tienen distintos riesgos; la extensión no los usa como autorización para el asistente. Despensa y calendario ya tienen operaciones de asistente específicas con resolución, preimagen, permisos y protección contra reintentos, descritas en sus specs verticales. Compras aún necesita CAS atómico/idempotencia y recetas preimagen/versión antes de habilitar sus ediciones.
-- Mantener compras y recetas fuera del registro ejecutable hasta implementar y probar CAS/preimagen, ledger idempotente, autorización, datos obsoletos, reintento y ausencia de escrituras parciales. El objetivo global sigue abierto; esta decisión no lo marca como completado.
+- Los endpoints genéricos de despensa, compras, calendario y recetas tienen distintos riesgos; la extensión no los usa como autorización para el asistente. Despensa, calendario y contenido de recetas usan operaciones de asistente específicas con resolución, preimagen, permisos y protección contra reintentos, documentadas en sus specs verticales. Compras aún necesita CAS atómico/idempotencia antes de habilitar sus ediciones.
+- Mantener compras fuera del registro ejecutable hasta implementar y probar CAS/preimagen, ledger idempotente, autorización, datos obsoletos, reintento y ausencia de escrituras parciales. El objetivo global sigue abierto; esta decisión no lo marca como completado.
 
 ## Checklist de aceptación
 
@@ -41,7 +41,7 @@ La capacidad inicial del asistente crea seis tipos de registro. Esta extensión 
 - [x] Reintento exacto de edición produce una persistencia; misma clave con parche distinto, dato obsoleto o target ajeno falla sin mutar.
 - [x] E2E Playwright con servidor/API reales y SQLite temporal: preview, refinar, editar localmente y descartar no escriben; aprobación modifica solo el target y persiste al recargar; conflictos/reintentos son seguros.
 - [x] Unidad de comidas usa proveedor transitorio; participantes se eligen expresamente; preview/refinamiento/descarte tienen cero escrituras; confirmar comidas y aprobar compras son pasos separados.
-- [x] Despensa/calendario usan unidades verticales seguras; compras/recetas y prioridad permanecen pendientes hasta cumplir sus condiciones de seguridad.
+- [x] Despensa/calendario usan unidades verticales seguras; recetas tienen contrato vertical seguro separado; compras y prioridad permanecen pendientes.
 - [x] Desktop/móvil, accesibilidad, cobertura mínima de repo, build/typecheck/check:ui, capturas sintéticas y limitaciones quedan documentados en `SPEC.md` antes de cerrar las unidades A/B; la auditoría visual global del shell y las funciones de edición pendientes siguen abiertas en `SPEC.md`.
 
 ## Evidencia de la unidad A (2026-10-16)
@@ -72,4 +72,10 @@ La capacidad inicial del asistente crea seis tipos de registro. Esta extensión 
 - `pnpm run build`, `pnpm run typecheck:e2e`, `pnpm run check:ui` (**262 ficheros/21 reglas**) y Prettier pasan. Build mantiene warnings de estilos y del bundle inicial (**995,25 kB raw**, sobre el aviso de 500 kB pero bajo el error existente de 1 MB); no se rebajaron budgets.
 - Playwright full-stack contra build de producción, backend/API reales y SQLite temporal, con solo las respuestas IA deterministas interceptadas: `node scripts/run-isolated-playwright.mjs --config=playwright.full-stack.config.ts --project=chromium --project=mobile-chrome tests/e2e/full-stack/ai-action-assistant.spec.ts` — **10/10**. La primera prueba verifica 1440×900, 1024×768/1023×768, 767×768, 640×800/639×800, 480×800, 393×851, 320×568 y 568×320, scroll/overflow, diálogo, foco, teclado, reduced-motion, target táctil y persistencia selectiva.
 - Capturas sintéticas inspeccionadas PC/móvil: `C:\Users\juanj\.codex\visualizations\2026\10\16\01a144e3-1d9b-78e3-a440-0f38ab3e1e80\ai-action-assistant\chromium\meal-plan-confirm.png`, `...\chromium\meal-plan-saved.png`, `...\mobile-chrome\meal-plan-confirm.png` y `...\mobile-chrome\meal-plan-saved.png`. Los artefactos están fuera del repositorio.
-- Limitaciones: los proveedores externos se simularon en las suites; no se ejecutó un smoke real de Ollama ni micrófono. Las ediciones de compras/recetas y prioridad siguen fuera del registro hasta garantías verticales por dominio; la auditoría visual global continúa abierta. El Draft PR #47 no se mergea ni cambia a Ready.
+- Limitaciones: los proveedores externos se simularon en las suites; no se ejecutó un smoke real de Ollama ni micrófono. Las ediciones de compras y prioridad siguen fuera del registro hasta garantías verticales por dominio; la auditoría visual global continúa abierta. El Draft PR #47 no se mergea ni cambia a Ready.
+
+## Evidencia de la extensión de recetas (2026-10-17)
+
+- El usuario autorizó ampliar PR #47. `recipes.update_content` queda limitado a ingredientes, pasos y raciones base, con revisión humana y PATCH específico protegido por preimagen/CAS e idempotencia; no se abre edición genérica, publicación ni borrado. Ver contrato detallado y pendientes de gate en `AI-ACTION-ASSISTANT-RECIPE-UPDATE-SPEC.md`.
+- Las suites de cobertura completa más recientes pasan: cliente 1.653 pruebas, 90,36/80,17/91,96/92,83 % S/B/F/L; servidor 2.040 pruebas y 1 omitida, 89,68/81,83/95,79/92,63 % S/B/F/L. `pnpm run build`, `pnpm run typecheck:e2e` y `pnpm run check:ui` también pasan.
+- Limitación del entorno: Angular lint no encuentra `@angular-eslint/builder:lint`; lint de servidor invoca `eslint --ext` incompatible con ESLint 9.17. No se cambió configuración ni dependencia para ocultarlo. Los proveedores reales no se probaron; compras, prioridad y auditoría global siguen pendientes. PR #47 permanece Draft y sin merge.

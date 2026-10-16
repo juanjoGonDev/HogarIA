@@ -559,6 +559,86 @@ describe('AiActionAssistantExecutionService', () => {
     ).toBeRejected();
     http.expectNone(() => true);
   });
+
+  it('sends a reviewed recipe edit only to the dedicated preimage endpoint', async () => {
+    const before = {
+      name: 'Lentejas',
+      servings: 2,
+      ingredients: [
+        {
+          ingredientId: null,
+          name: 'Cebolla',
+          quantity: 100,
+          unit: 'g',
+          preparation: null,
+          isOptional: false,
+          substitutes: [],
+          notes: null
+        },
+        {
+          ingredientId: null,
+          name: 'Lentejas',
+          quantity: 200,
+          unit: 'g',
+          preparation: null,
+          isOptional: false,
+          substitutes: [],
+          notes: null
+        }
+      ],
+      steps: [
+        {
+          stepNumber: 1,
+          instruction: 'Sofríe la cebolla.',
+          duration: null,
+          temperature: null,
+          timerRequired: false,
+          timerDuration: null,
+          tips: null,
+          warning: null,
+          image: null,
+          illustration: null
+        }
+      ]
+    };
+    const action = {
+      ...actionBase('recipes.update_content', 'recipes', 'update_content'),
+      payload: {
+        targetName: 'Lentejas',
+        changes: {
+          servings: null,
+          ingredients: [{ operation: 'update', targetName: 'Cebolla', changes: { quantity: 75 } }],
+          instructions: []
+        }
+      },
+      executionTarget: { kind: 'recipe', id: 'recipe-1', snapshot: before }
+    } as unknown as Extract<AssistantAction, { kind: 'recipes.update_content' }>;
+
+    const execution = service.execute(action, null);
+    const request = http.expectOne('/api/recipes/recipe-1/assistant-update');
+    expect(request.request.method).toBe('PATCH');
+    expect(request.request.headers.get('x-assistant-action-id')).toBe(action.id);
+    expect(request.request.body).toEqual({
+      changes: action.payload.changes,
+      assistantAction: {
+        operation: 'update_recipe_content',
+        targetId: 'recipe-1',
+        before
+      }
+    });
+    request.flush({
+      success: true,
+      data: {
+        id: 'recipe-1',
+        name: 'Lentejas',
+        servings: 2,
+        ingredients: before.ingredients,
+        steps: before.steps
+      }
+    });
+    await expectAsync(execution).toBeResolvedTo(undefined);
+    http.expectNone('/api/recipes/recipe-1');
+  });
 });
 
 function actionBase<K extends AssistantAction['kind']>(

@@ -1,5 +1,5 @@
 import { DestroyRef, Injectable, inject, signal } from '@angular/core';
-import { HttpClient, HttpParams, HttpContext } from '@angular/common/http';
+import { HttpClient, HttpHeaders, HttpParams, HttpContext } from '@angular/common/http';
 import { Observable, tap, catchError, map, of, shareReplay, throwError } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { Recipe, RecipeFilter, RecipeUpdateInput } from '../../shared/models/recipe.model';
@@ -8,6 +8,10 @@ import {
   RecipeStepVideoCandidate,
   RecipeStepVideoScene
 } from '../../shared/models/recipe-step-video';
+import type {
+  AssistantRecipeContentSnapshot,
+  AssistantRecipeUpdatePayload
+} from '../../shared/models/ai-action-assistant.model';
 import { SILENT_TOAST } from '../interceptors/error.interceptor';
 import { LatestRequest } from '../utils/latest-request';
 
@@ -367,5 +371,31 @@ export class RecipeService {
       }),
       catchError(() => of(false))
     );
+  }
+
+  updateRecipeWithAssistant(
+    id: string,
+    actionId: string,
+    payload: AssistantRecipeUpdatePayload,
+    before: AssistantRecipeContentSnapshot
+  ): Observable<Recipe> {
+    return this.http
+      .patch<{ data: Recipe }>(
+        `${this.apiUrl}/${encodeURIComponent(id)}/assistant-update`,
+        {
+          changes: payload.changes,
+          assistantAction: { operation: 'update_recipe_content', targetId: id, before }
+        },
+        { headers: new HttpHeaders({ 'x-assistant-action-id': actionId }) }
+      )
+      .pipe(
+        map((response) => normalizeRecipe(response.data)),
+        tap((updated) => {
+          this.recipesSignal.update((recipes) =>
+            recipes.map((current) => (current.id === id ? updated : current))
+          );
+          if (this.currentRecipeSignal()?.id === id) this.currentRecipeSignal.set(updated);
+        })
+      );
   }
 }

@@ -1343,6 +1343,231 @@ describe('AiActionAssistantDialogComponent', () => {
     expect(options.map((option) => option.label)).toContain('Campo: Dificultad');
   });
 
+  it('shows and edits recipe preimages, then carries only reviewed edits to confirmation', () => {
+    const action = recipeUpdateAction();
+    component.plan.set({ id: 'recipe-update-plan', summary: '', actions: [action], questions: [] });
+    component.stage.set('review');
+    fixture.detectChanges();
+
+    const target = fixture.nativeElement.querySelector('[data-test="ai-assistant-recipe-target"]');
+    expect(target.textContent).toContain('Lentejas de la abuela');
+    const details = fixture.nativeElement.querySelector(
+      '.assistant__details'
+    ) as HTMLDetailsElement;
+    details.open = true;
+    fixture.detectChanges();
+    const ingredientChanges = fixture.nativeElement.querySelector(
+      '[data-test="ai-assistant-recipe-ingredient-changes"]'
+    );
+    expect(ingredientChanges.textContent).toContain('Cebolla · 100 g');
+    expect(ingredientChanges.textContent).toContain('Cebolla · 75 g');
+
+    const quantityInput = ingredientChanges.querySelector(
+      'input[type="number"]'
+    ) as HTMLInputElement;
+    quantityInput.dispatchEvent(new Event('click', { bubbles: true }));
+    fixture.detectChanges();
+    expect(ingredientChanges.querySelector('input[type="number"]'))
+      .withContext('la detección de cambios no debe reemplazar el campo con foco')
+      .toBe(quantityInput);
+
+    quantityInput.value = '90';
+    quantityInput.dispatchEvent(new Event('input', { bubbles: true }));
+    fixture.detectChanges();
+    const edited = component.plan()?.actions[0];
+    expect(edited?.kind).toBe('recipes.update_content');
+    if (edited?.kind !== 'recipes.update_content') throw new Error('Expected recipe update');
+    expect(edited.payload.changes.ingredients[0]).toEqual(
+      jasmine.objectContaining({
+        operation: 'update',
+        targetName: 'Cebolla',
+        changes: { quantity: 90 }
+      })
+    );
+
+    component.setSelected(action.id, true);
+    component.goToConfirmation();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('[data-test="ai-assistant-confirm"]')).toBeTruthy();
+    expect(
+      fixture.nativeElement.querySelector('[data-test="ai-assistant-recipe-change-summary"]')
+        .textContent
+    ).toContain('90');
+    expect(execution.execute).not.toHaveBeenCalled();
+  });
+
+  it('previews every scaled recipe quantity before confirmation', () => {
+    const action = recipeUpdateAction(4);
+    component.plan.set({
+      id: 'recipe-servings-plan',
+      summary: '',
+      actions: [action],
+      questions: []
+    });
+    component.stage.set('review');
+    fixture.detectChanges();
+
+    const preview = fixture.nativeElement.querySelector(
+      '[data-test="ai-assistant-recipe-servings"]'
+    );
+    expect(preview.textContent).toContain('2 → 4');
+    expect(preview.textContent).toContain('Cebolla: 100 g → 200 g');
+    expect(preview.textContent).toContain('Lentejas: 200 g → 400 g');
+    expect(component.isActionValid(action)).toBeTrue();
+  });
+
+  it('validates recipe additions, removals, no-ops, and stale instruction targets', () => {
+    const added = recipeUpdateAction();
+    added.payload.changes = {
+      servings: null,
+      ingredients: [
+        {
+          operation: 'add',
+          ingredient: {
+            name: 'Comino',
+            quantity: 1,
+            unit: 'g',
+            preparation: null,
+            isOptional: true,
+            substitutes: [],
+            notes: null
+          }
+        }
+      ],
+      instructions: []
+    };
+    expect(component.isActionValid(added)).toBeTrue();
+
+    const removed = recipeUpdateAction();
+    removed.payload.changes = {
+      servings: null,
+      ingredients: [{ operation: 'remove', targetName: 'Lentejas' }],
+      instructions: []
+    };
+    expect(component.isActionValid(removed)).toBeTrue();
+
+    const emptyAfterRemoval = recipeUpdateAction();
+    emptyAfterRemoval.payload.changes = {
+      servings: null,
+      ingredients: [
+        { operation: 'remove', targetName: 'Cebolla' },
+        { operation: 'remove', targetName: 'Lentejas' }
+      ],
+      instructions: []
+    };
+    expect(component.isActionValid(emptyAfterRemoval)).toBeFalse();
+
+    const duplicateTarget = recipeUpdateAction();
+    duplicateTarget.payload.changes.ingredients = [
+      { operation: 'remove', targetName: 'Cebolla' },
+      { operation: 'remove', targetName: 'cebolla' }
+    ];
+    expect(component.isActionValid(duplicateTarget)).toBeFalse();
+
+    const unchanged = recipeUpdateAction();
+    unchanged.payload.changes.ingredients = [
+      { operation: 'update', targetName: 'Cebolla', changes: { quantity: 100 } }
+    ];
+    unchanged.payload.changes.instructions = [];
+    expect(component.isActionValid(unchanged)).toBeFalse();
+
+    const missingInstruction = recipeUpdateAction();
+    missingInstruction.payload.changes.ingredients = [];
+    missingInstruction.payload.changes.instructions = [
+      { level: 'basic', stepNumber: 2, instruction: 'Añade el comino.' }
+    ];
+    expect(component.isActionValid(missingInstruction)).toBeFalse();
+
+    const unchangedInstruction = recipeUpdateAction();
+    unchangedInstruction.payload.changes.ingredients = [];
+    unchangedInstruction.payload.changes.instructions = [
+      { level: 'basic', stepNumber: 1, instruction: 'Sofríe la cebolla.' }
+    ];
+    expect(component.isActionValid(unchangedInstruction)).toBeFalse();
+  });
+
+  it('rejects an invalid recipe serving scale and duplicate instruction edits', () => {
+    const conflictingServings = recipeUpdateAction(4);
+    conflictingServings.payload.changes.ingredients = [
+      { operation: 'update', targetName: 'Cebolla', changes: { quantity: 80 } }
+    ];
+    expect(component.isActionValid(conflictingServings)).toBeFalse();
+
+    const duplicateInstructions = recipeUpdateAction();
+    duplicateInstructions.payload.changes.ingredients = [];
+    duplicateInstructions.payload.changes.instructions = [
+      { level: 'basic', stepNumber: 1, instruction: 'Dora la cebolla.' },
+      { level: 'basic', stepNumber: 1, instruction: 'Añade las lentejas.' }
+    ];
+    expect(component.isActionValid(duplicateInstructions)).toBeFalse();
+
+    const staleTarget = recipeUpdateAction();
+    staleTarget.payload.targetName = 'Otra receta';
+    expect(component.isActionValid(staleTarget)).toBeFalse();
+  });
+
+  it('preserves manually edited recipe fields by ingredient identity across refinement reordering', () => {
+    const action = recipeUpdateAction();
+    const replacement: AssistantActionCandidate = {
+      kind: 'recipes.update_content',
+      title: action.title,
+      summary: 'Se revisaron cantidades.',
+      payload: {
+        targetName: 'Lentejas de la abuela',
+        changes: {
+          servings: null,
+          ingredients: [
+            { operation: 'update', targetName: 'Lentejas', changes: { quantity: 250 } },
+            { operation: 'update', targetName: 'Cebolla', changes: { quantity: 70 } }
+          ],
+          instructions: action.payload.changes.instructions
+        }
+      },
+      dependsOn: [],
+      warnings: []
+    };
+    assistant.refine.and.returnValue(
+      of({ actionId: action.id, summary: 'Se revisaron cantidades.', replacement, questions: [] })
+    );
+    component.plan.set({ id: 'recipe-refine-plan', summary: '', actions: [action], questions: [] });
+    component.updateField(
+      action.id,
+      ['changes', 'ingredients', 1, 'changes', 'quantity'],
+      220,
+      'number'
+    );
+    component.beginRefine(action.id);
+    component.refinementPrompt.set('Revisa las cantidades');
+    component.refineCurrentAction();
+
+    const refined = component.plan()?.actions[0];
+    expect(refined?.kind).toBe('recipes.update_content');
+    if (refined?.kind !== 'recipes.update_content') throw new Error('Expected recipe update');
+    expect(refined.payload.changes.ingredients[0]).toEqual(
+      jasmine.objectContaining({
+        targetName: 'Lentejas',
+        changes: { quantity: 220 }
+      })
+    );
+    expect(refined.manualFields).toContain(
+      JSON.stringify(['changes', 'ingredients', 0, 'changes', 'quantity'])
+    );
+  });
+
+  it('offers recipe ingredient and instruction patch scopes', () => {
+    const options = component.refinementScopeOptions(recipeUpdateAction());
+
+    expect(options.map((option) => option.value)).toContain(
+      JSON.stringify(['changes', 'ingredients'])
+    );
+    expect(options.map((option) => option.value)).toContain(
+      JSON.stringify(['changes', 'instructions'])
+    );
+    expect(options.map((option) => option.value)).toContain(
+      JSON.stringify(['changes', 'ingredients', 0, 'changes', 'quantity'])
+    );
+  });
+
   it('exposes optional pause/resume and aborts recognition on cancel', () => {
     const recognitions = mountWithSpeech(FakeSpeechRecognition);
     component.voiceConsent.set(true);
@@ -1677,5 +1902,71 @@ function recipeAction(): AssistantAction {
     warnings: [],
     selected: false,
     status: 'pending'
+  };
+}
+
+function recipeUpdateAction(
+  servings: number | null = null
+): Extract<AssistantAction, { kind: 'recipes.update_content' }> {
+  const snapshot = {
+    name: 'Lentejas de la abuela',
+    servings: 2,
+    ingredients: [
+      {
+        ingredientId: null,
+        name: 'Cebolla',
+        quantity: 100,
+        unit: 'g' as const,
+        preparation: null,
+        isOptional: false,
+        substitutes: [],
+        notes: null
+      },
+      {
+        ingredientId: null,
+        name: 'Lentejas',
+        quantity: 200,
+        unit: 'g' as const,
+        preparation: null,
+        isOptional: false,
+        substitutes: [],
+        notes: null
+      }
+    ],
+    steps: {
+      basic: [{ stepNumber: 1, instruction: 'Sofríe la cebolla.' }],
+      intermediate: [{ stepNumber: 1, instruction: 'Añade las lentejas.' }],
+      expert: [{ stepNumber: 1, instruction: 'Ajusta el punto de cocción.' }]
+    }
+  };
+  return {
+    id: 'recipe-update-action',
+    kind: 'recipes.update_content',
+    domain: 'recipes',
+    actionType: 'update_content',
+    title: 'Editar lentejas',
+    summary: 'Reduce cebolla y aclara el primer paso.',
+    payload: {
+      targetName: snapshot.name,
+      changes: {
+        servings,
+        ingredients:
+          servings === null
+            ? [
+                { operation: 'update', targetName: 'Cebolla', changes: { quantity: 75 } },
+                { operation: 'update', targetName: 'Lentejas', changes: { quantity: 240 } }
+              ]
+            : [],
+        instructions:
+          servings === null
+            ? [{ level: 'basic', stepNumber: 1, instruction: 'Dora la cebolla a fuego medio.' }]
+            : []
+      }
+    },
+    dependsOn: [],
+    warnings: [],
+    selected: false,
+    status: 'pending',
+    executionTarget: { kind: 'recipe', id: 'recipe-owned', snapshot }
   };
 }

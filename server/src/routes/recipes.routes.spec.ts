@@ -19,12 +19,19 @@ let otherUserId: string;
 let otherToken: string;
 let ensureRecipeBookCatalog: (database: Sql) => number;
 
-async function callAs(requestToken: string, method: string, path: string, body?: unknown) {
+async function callAs(
+  requestToken: string,
+  method: string,
+  path: string,
+  body?: unknown,
+  extraHeaders: Record<string, string> = {}
+) {
   const response = await app.request(`/api/recipes${path}`, {
     method,
     headers: {
       authorization: `Bearer ${requestToken}`,
-      ...(body === undefined ? {} : { 'content-type': 'application/json' })
+      ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+      ...extraHeaders
     },
     body: body === undefined ? undefined : JSON.stringify(body)
   });
@@ -38,7 +45,12 @@ async function callAs(requestToken: string, method: string, path: string, body?:
   return { status: response.status, payload };
 }
 
-const call = (method: string, path: string, body?: unknown) => callAs(token, method, path, body);
+const call = (
+  method: string,
+  path: string,
+  body?: unknown,
+  extraHeaders: Record<string, string> = {}
+) => callAs(token, method, path, body, extraHeaders);
 
 const instructionsByLevel = {
   basic: [{ stepNumber: 1, instruction: 'Cocer.', timerRequired: false }],
@@ -494,6 +506,299 @@ describe('POST /api/recipes recipe instruction storage', () => {
         }
       ).count
     ).toBe(0);
+  });
+});
+
+describe('PATCH /api/recipes/:id/assistant-update', () => {
+  it('applies a reviewed content patch once and returns the stored recipe on exact replay', async () => {
+    const created = await call('POST', '', {
+      name: 'Lentejas de prueba',
+      servings: 2,
+      ingredients: [
+        { name: 'Cebolla', quantity: 100, unit: 'g' },
+        { name: 'Lentejas', quantity: 200, unit: 'g' }
+      ],
+      steps: [
+        { stepNumber: 1, instruction: 'Corta la cebolla.', tips: 'Usa un cuchillo afilado.' },
+        { stepNumber: 2, instruction: 'Cuece las lentejas.', duration: 30 }
+      ]
+    });
+    const recipe = created.payload.data as Record<string, any>;
+    const targetId = String(recipe.id);
+    const before = {
+      name: recipe.name,
+      servings: recipe.servings,
+      ingredients: recipe.ingredients,
+      steps: recipe.steps
+    };
+    const request = {
+      changes: {
+        servings: null,
+        ingredients: [{ operation: 'update', targetName: 'Cebolla', changes: { quantity: 75 } }],
+        instructions: [{ level: 'legacy', stepNumber: 2, instruction: 'Cocina a fuego lento.' }]
+      },
+      assistantAction: { operation: 'update_recipe_content', targetId, before }
+    };
+    const headers = { 'x-assistant-action-id': '8c4508e8-0a26-42f2-936a-7ccf2204d9e2' };
+
+    const first = await call('PATCH', `/${targetId}/assistant-update`, request, headers);
+    expect(first.status).toBe(200);
+    expect(first.payload).toMatchObject({
+      success: true,
+      data: {
+        steps: [
+          { instruction: 'Corta la cebolla.', tips: 'Usa un cuchillo afilado.' },
+          { instruction: 'Cocina a fuego lento.', duration: 30 }
+        ]
+      }
+    });
+    expect(first.payload.data.ingredients).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'Cebolla', quantity: 75 }),
+        expect.objectContaining({ name: 'Lentejas', quantity: 200 })
+      ])
+    );
+
+    const replay = await call('PATCH', `/${targetId}/assistant-update`, request, headers);
+    expect(replay.status).toBe(200);
+    expect(replay.payload).toMatchObject({ success: true, idempotent: true });
+    expect((await call('GET', `/${targetId}`)).payload.data.ingredients[0].quantity).toBe(75);
+
+    const conflictingReplay = await call(
+      'PATCH',
+      `/${targetId}/assistant-update`,
+      {
+        ...request,
+        changes: {
+          ...request.changes,
+          ingredients: [{ operation: 'update', targetName: 'Cebolla', changes: { quantity: 80 } }]
+        }
+      },
+      headers
+    );
+    expect(conflictingReplay.status).toBe(409);
+    expect(conflictingReplay.payload.code).toBe('ASSISTANT_ACTION_ID_CONFLICT');
+    expect((await call('GET', `/${targetId}`)).payload.data.ingredients[0].quantity).toBe(75);
+  });
+
+  it('scales stored ingredient quantities for serving changes and rejects stale preimages', async () => {
+    const created = await call('POST', '', {
+      name: 'Arroz de prueba',
+      servings: 2,
+      ingredients: [
+        { name: 'Arroz', quantity: 80, unit: 'g' },
+        { name: 'Agua', quantity: 160, unit: 'ml' }
+      ],
+      steps: [{ stepNumber: 1, instruction: 'Cuece el arroz.' }]
+    });
+    const recipe = created.payload.data as Record<string, any>;
+    const targetId = String(recipe.id);
+    const before = {
+      name: recipe.name,
+      servings: recipe.servings,
+      ingredients: recipe.ingredients,
+      steps: recipe.steps
+    };
+    const request = {
+      changes: { servings: 4, ingredients: [], instructions: [] },
+      assistantAction: { operation: 'update_recipe_content', targetId, before }
+    };
+    const headers = { 'x-assistant-action-id': 'eb314cc9-91a4-409a-a62c-037ae8886cf3' };
+
+    const response = await call('PATCH', `/${targetId}/assistant-update`, request, headers);
+    expect(response.status).toBe(200);
+    expect(response.payload.data).toMatchObject({
+      servings: 4,
+      ingredients: [
+        { name: 'Arroz', quantity: 160 },
+        { name: 'Agua', quantity: 320 }
+      ]
+    });
+
+    const stale = await call('PATCH', `/${targetId}/assistant-update`, request, {
+      'x-assistant-action-id': '1ce571f4-6de2-4658-a9f4-ad0cd87601ab'
+    });
+    expect(stale.status).toBe(409);
+    expect(stale.payload.code).toBe('ASSISTANT_RECIPE_STALE');
+    expect((await call('GET', `/${targetId}`)).payload.data.servings).toBe(4);
+  });
+
+  it('adds and removes ingredients while editing a nested instruction without losing metadata', async () => {
+    const created = await call('POST', '', {
+      name: 'Guiso por niveles',
+      servings: 2,
+      ingredients: [
+        { name: 'Cebolla', quantity: 100, unit: 'g' },
+        { name: 'Lentejas', quantity: 200, unit: 'g' }
+      ],
+      instructionsByLevel: {
+        basic: [{ stepNumber: 1, instruction: 'Sofríe.', duration: 5, timerRequired: false }],
+        intermediate: [{ stepNumber: 1, instruction: 'Añade lentejas.', timerRequired: false }],
+        expert: [{ stepNumber: 1, instruction: 'Ajusta el fuego.', timerRequired: false }]
+      }
+    });
+    const recipe = created.payload.data as Record<string, any>;
+    const targetId = String(recipe.id);
+    const before = {
+      name: recipe.name,
+      servings: recipe.servings,
+      ingredients: recipe.ingredients,
+      steps: recipe.steps ?? recipe.instructionsByLevel
+    };
+    const response = await call(
+      'PATCH',
+      `/${targetId}/assistant-update`,
+      {
+        changes: {
+          servings: null,
+          ingredients: [
+            { operation: 'remove', targetName: 'Cebolla' },
+            {
+              operation: 'add',
+              ingredient: {
+                name: 'Ajo',
+                quantity: 2,
+                unit: 'piece',
+                preparation: null,
+                isOptional: false,
+                substitutes: [],
+                notes: null
+              }
+            }
+          ],
+          instructions: [{ level: 'basic', stepNumber: 1, instruction: 'Dora el ajo.' }]
+        },
+        assistantAction: { operation: 'update_recipe_content', targetId, before }
+      },
+      { 'x-assistant-action-id': 'd7f66d02-4695-4ae0-946c-3ee153b8f7c4' }
+    );
+
+    expect(response.status, JSON.stringify(response.payload)).toBe(200);
+    const stored = db
+      .prepare('SELECT ingredients, steps FROM recipes WHERE id = ?')
+      .get(targetId) as {
+      ingredients: string;
+      steps: string;
+    };
+    expect(JSON.parse(stored.ingredients)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'Lentejas', quantity: 200 }),
+        expect.objectContaining({ name: 'Ajo', quantity: 2 })
+      ])
+    );
+    expect(JSON.parse(stored.ingredients)).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: 'Cebolla' })])
+    );
+    expect(JSON.parse(stored.steps).basic[0]).toMatchObject({
+      instruction: 'Dora el ajo.',
+      duration: 5,
+      timerRequired: false
+    });
+  });
+
+  it('rejects missing action keys, another owner, stale references and last-ingredient removal without mutation', async () => {
+    const created = await call('POST', '', {
+      name: 'Receta propia protegida',
+      servings: 1,
+      ingredients: [{ name: 'Ajo', quantity: 1, unit: 'piece' }],
+      steps: [{ stepNumber: 1, instruction: 'Pela el ajo.' }]
+    });
+    const recipe = created.payload.data as Record<string, any>;
+    const targetId = String(recipe.id);
+    const before = {
+      name: recipe.name,
+      servings: recipe.servings,
+      ingredients: recipe.ingredients,
+      steps: recipe.steps
+    };
+    const body = {
+      changes: { servings: null, ingredients: [], instructions: [] },
+      assistantAction: { operation: 'update_recipe_content', targetId, before }
+    };
+    expect((await call('PATCH', `/${targetId}/assistant-update`, body)).status).toBe(400);
+    expect(
+      (
+        await call('PATCH', `/${targetId}/assistant-update`, body, {
+          'x-assistant-action-id': 'not-a-uuid'
+        })
+      ).status
+    ).toBe(400);
+
+    const foreign = await callAs(
+      otherToken,
+      'PATCH',
+      `/${targetId}/assistant-update`,
+      {
+        ...body,
+        changes: {
+          servings: null,
+          ingredients: [{ operation: 'remove', targetName: 'Ajo' }],
+          instructions: []
+        }
+      },
+      { 'x-assistant-action-id': 'dd5d3eb1-c9d0-4161-95aa-767090a1f0d2' }
+    );
+    expect(foreign.status).toBe(403);
+
+    const lastIngredient = await call(
+      'PATCH',
+      `/${targetId}/assistant-update`,
+      {
+        ...body,
+        changes: {
+          servings: null,
+          ingredients: [{ operation: 'remove', targetName: 'Ajo' }],
+          instructions: []
+        }
+      },
+      { 'x-assistant-action-id': '5ca04bd3-a51b-4be8-a27a-ade8b7e79cf8' }
+    );
+    expect(lastIngredient.status, JSON.stringify(lastIngredient.payload)).toBe(409);
+    expect(lastIngredient.payload.code).toBe('ASSISTANT_RECIPE_LAST_INGREDIENT');
+    const unchanged = db
+      .prepare('SELECT ingredients, steps FROM recipes WHERE id = ?')
+      .get(targetId) as {
+      ingredients: string;
+      steps: string;
+    };
+    expect(JSON.parse(unchanged.ingredients)).toEqual(before.ingredients);
+    expect(JSON.parse(unchanged.steps)).toEqual(before.steps);
+  });
+
+  it('rejects a missing second ingredient target without partially applying a valid first change', async () => {
+    const created = await call('POST', '', {
+      name: 'Receta parche atómico',
+      ingredients: [{ name: 'Cebolla', quantity: 100, unit: 'g' }],
+      steps: [{ stepNumber: 1, instruction: 'Corta la cebolla.' }]
+    });
+    const recipe = created.payload.data as Record<string, any>;
+    const targetId = String(recipe.id);
+    const before = {
+      name: recipe.name,
+      servings: recipe.servings,
+      ingredients: recipe.ingredients,
+      steps: recipe.steps
+    };
+    const response = await call(
+      'PATCH',
+      `/${targetId}/assistant-update`,
+      {
+        changes: {
+          servings: null,
+          ingredients: [
+            { operation: 'update', targetName: 'Cebolla', changes: { quantity: 75 } },
+            { operation: 'update', targetName: 'Ingrediente ausente', changes: { quantity: 2 } }
+          ],
+          instructions: []
+        },
+        assistantAction: { operation: 'update_recipe_content', targetId, before }
+      },
+      { 'x-assistant-action-id': '49f72b92-9ee4-4856-9d16-6461e0498d39' }
+    );
+
+    expect(response.status).toBe(409);
+    expect(response.payload.code).toBe('ASSISTANT_RECIPE_INGREDIENT_NOT_FOUND');
+    expect((await call('GET', `/${targetId}`)).payload.data.ingredients[0].quantity).toBe(100);
   });
 });
 

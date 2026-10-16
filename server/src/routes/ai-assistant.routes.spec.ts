@@ -177,6 +177,89 @@ function calendarUpdateCandidate(): object {
   };
 }
 
+function recipeUpdateCandidate(targetName = 'Lentejas de la abuela'): object {
+  return {
+    summary: 'Actualiza una receta existente.',
+    actions: [
+      {
+        kind: 'recipes.update_content',
+        title: 'Editar lentejas',
+        summary: 'Reduce la cantidad de cebolla y aclara el primer paso.',
+        payload: {
+          targetName,
+          changes: {
+            servings: null,
+            ingredients: [
+              { operation: 'update', targetName: 'Cebolla', changes: { quantity: 75 } }
+            ],
+            instructions: [
+              { level: 'legacy', stepNumber: 1, instruction: 'Sofríe la cebolla hasta dorarla.' }
+            ]
+          }
+        },
+        dependsOn: [],
+        warnings: []
+      }
+    ],
+    questions: []
+  };
+}
+
+function addOwnedRecipe(id = 'assistant-owned-recipe', name = 'Lentejas de la abuela') {
+  const snapshot = {
+    name,
+    servings: 2,
+    ingredients: [
+      {
+        ingredientId: null,
+        name: 'Cebolla',
+        quantity: 100,
+        unit: 'g',
+        preparation: null,
+        isOptional: false,
+        substitutes: [],
+        notes: null
+      },
+      {
+        ingredientId: null,
+        name: 'Lentejas',
+        quantity: 200,
+        unit: 'g',
+        preparation: null,
+        isOptional: false,
+        substitutes: [],
+        notes: null
+      }
+    ],
+    steps: [
+      {
+        stepNumber: 1,
+        instruction: 'Sofríe la cebolla.',
+        duration: null,
+        temperature: null,
+        timerRequired: false,
+        timerDuration: null,
+        tips: null,
+        warning: null,
+        image: null,
+        illustration: null
+      }
+    ]
+  };
+  db.prepare(
+    `INSERT INTO recipes (id, name, servings, ingredients, steps, author, author_id, is_public)
+     VALUES (?, ?, ?, ?, ?, 'user', ?, 0)`
+  ).run(
+    id,
+    name,
+    snapshot.servings,
+    JSON.stringify(snapshot.ingredients),
+    JSON.stringify(snapshot.steps),
+    alice.id
+  );
+  return snapshot;
+}
+
 function mealRecipe(name = 'Arroz con verduras') {
   const step = (instruction: string) => ({
     stepNumber: 1,
@@ -358,6 +441,93 @@ describe('POST /api/ai/assistant/proposals', () => {
     expect(body.data.actions[0].id).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(persistedCounts()).toEqual(before);
+  });
+
+  it('resolves a private recipe target server-side and returns its exact preimage without writes', async () => {
+    addConfig(alice);
+    const snapshot = addOwnedRecipe();
+    const before = persistedSnapshot();
+    const fetchMock = stubProvider(JSON.stringify(recipeUpdateCandidate()));
+
+    const response = await call(
+      'POST',
+      '/proposals',
+      { prompt: 'Reduce la cebolla de Lentejas de la abuela y aclara el paso 1.' },
+      alice.token,
+      { 'x-assistant-household-id': '' }
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { data: any };
+    expect(body.data.actions[0]).toMatchObject({
+      kind: 'recipes.update_content',
+      executionTarget: { kind: 'recipe', id: 'assistant-owned-recipe', snapshot }
+    });
+    const providerRequest = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
+    expect(JSON.stringify(providerRequest)).not.toContain('assistant-owned-recipe');
+    expect(JSON.stringify(providerRequest)).not.toContain('ingredientId');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(persistedSnapshot()).toEqual(before);
+  });
+
+  it('converts missing and ambiguous recipe names into questions with no executable action', async () => {
+    addConfig(alice);
+    addOwnedRecipe('assistant-recipe-one');
+    addOwnedRecipe('assistant-recipe-two');
+    const before = persistedSnapshot();
+    stubProvider(JSON.stringify(recipeUpdateCandidate()));
+
+    const response = await call(
+      'POST',
+      '/proposals',
+      { prompt: 'Reduce la cebolla de Lentejas de la abuela.' },
+      alice.token,
+      { 'x-assistant-household-id': '' }
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { data: any };
+    expect(body.data.actions).toEqual([]);
+    expect(body.data.questions).toEqual(
+      expect.arrayContaining([expect.stringContaining('más de una receta')])
+    );
+    expect(persistedSnapshot()).toEqual(before);
+  });
+
+  it('does not resolve public or other-user recipes as editable assistant targets', async () => {
+    addConfig(alice);
+    db.prepare('INSERT INTO users (id, email, name, password_hash) VALUES (?, ?, ?, ?)').run(
+      'assistant-other-user',
+      'assistant-other-user@test.local',
+      'Other user',
+      'hash'
+    );
+    db.prepare(
+      `INSERT INTO recipes (id, name, servings, ingredients, steps, author, author_id, is_public)
+       VALUES (?, ?, 2, ?, ?, 'user', ?, 1)`
+    ).run(
+      'assistant-other-public-recipe',
+      'Lentejas de la abuela',
+      JSON.stringify([{ name: 'Cebolla', quantity: 100, unit: 'g' }]),
+      JSON.stringify([{ stepNumber: 1, instruction: 'Sofríe.' }]),
+      'assistant-other-user'
+    );
+    stubProvider(JSON.stringify(recipeUpdateCandidate()));
+
+    const response = await call(
+      'POST',
+      '/proposals',
+      { prompt: 'Reduce la cebolla de Lentejas de la abuela.' },
+      alice.token,
+      { 'x-assistant-household-id': '' }
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { data: any };
+    expect(body.data.actions).toEqual([]);
+    expect(body.data.questions).toEqual(
+      expect.arrayContaining([expect.stringContaining('No encontré una receta')])
+    );
   });
 
   it('resolves update-task targets server-side and returns the stored preimage/version', async () => {
@@ -1617,6 +1787,82 @@ describe('POST /api/ai/assistant/refine', () => {
       {
         actionId: 'shopping-action-1',
         instruction: 'Cambia a otra lista',
+        action,
+        scope: { kind: 'action' }
+      },
+      alice.token,
+      { 'x-assistant-household-id': '' }
+    );
+
+    expect(response.status).toBe(502);
+    expect(await response.json()).toMatchObject({ success: false, code: 'INVALID_AI_RESULT' });
+  });
+
+  it('preserves a recipe target while refining its typed content patch without writes', async () => {
+    addConfig(alice);
+    addOwnedRecipe();
+    const before = persistedSnapshot();
+    const action = (recipeUpdateCandidate() as any).actions[0];
+    const replacement = {
+      ...action,
+      payload: {
+        ...action.payload,
+        changes: {
+          ...action.payload.changes,
+          instructions: [
+            { level: 'legacy', stepNumber: 1, instruction: 'Cocina las lentejas a fuego lento.' }
+          ]
+        }
+      }
+    };
+    const fetchMock = stubProvider(
+      JSON.stringify({ summary: 'Paso ajustado.', replacement, questions: [] })
+    );
+
+    const response = await call(
+      'POST',
+      '/refine',
+      {
+        actionId: 'recipe-action-1',
+        instruction: 'Aclara el paso',
+        action,
+        scope: { kind: 'action' }
+      },
+      alice.token,
+      { 'x-assistant-household-id': '' }
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { data: any };
+    expect(body.data.replacement.payload).toMatchObject({
+      targetName: 'Lentejas de la abuela',
+      changes: { instructions: [{ instruction: 'Cocina las lentejas a fuego lento.' }] }
+    });
+    const providerRequest = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
+    expect(providerRequest.messages[0].content).toContain('conserva targetName exactamente');
+    expect(persistedSnapshot()).toEqual(before);
+  });
+
+  it('rejects a recipe refinement that changes its resolved target name', async () => {
+    addConfig(alice);
+    const action = (recipeUpdateCandidate() as any).actions[0];
+    stubProvider(
+      JSON.stringify({
+        summary: 'Otra receta.',
+        replacement: {
+          ...action,
+          payload: { ...action.payload, targetName: 'Otra receta' }
+        },
+        questions: []
+      })
+    );
+
+    const response = await call(
+      'POST',
+      '/refine',
+      {
+        actionId: 'recipe-action-2',
+        instruction: 'Usa otra receta',
         action,
         scope: { kind: 'action' }
       },

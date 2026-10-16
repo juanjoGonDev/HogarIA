@@ -1,4 +1,74 @@
 import type { AIRecipeResponse } from './ai-config.model';
+import type { RecipeStep } from './recipe.model';
+
+export type AssistantRecipeInstructionLevel = 'legacy' | 'basic' | 'intermediate' | 'expert';
+
+export interface AssistantRecipeIngredient {
+  ingredientId?: string | null;
+  name: string;
+  quantity: number;
+  unit: 'g' | 'kg' | 'ml' | 'l' | 'cup' | 'tbsp' | 'tsp' | 'unit' | 'bunch' | 'slice' | 'piece';
+  preparation?: string | null;
+  isOptional?: boolean;
+  substitutes?: string[];
+  notes?: string | null;
+}
+
+export interface AssistantRecipeContentSnapshot {
+  name: string;
+  servings: number;
+  ingredients: AssistantRecipeIngredient[];
+  steps:
+    | RecipeStep[]
+    | {
+        basic: RecipeStep[];
+        intermediate: RecipeStep[];
+        expert: RecipeStep[];
+      };
+}
+
+export type AssistantRecipeIngredientChange =
+  | {
+      operation: 'add';
+      ingredient: {
+        name: string;
+        quantity: number;
+        unit: AssistantRecipeIngredient['unit'];
+        preparation: string | null;
+        isOptional: boolean;
+        substitutes: string[];
+        notes: string | null;
+      };
+    }
+  | {
+      operation: 'update';
+      targetName: string;
+      changes: Partial<Omit<AssistantRecipeIngredient, 'ingredientId'>>;
+    }
+  | { operation: 'remove'; targetName: string };
+
+export interface AssistantRecipeInstructionChange {
+  level: AssistantRecipeInstructionLevel;
+  stepNumber: number;
+  instruction: string;
+}
+
+export interface AssistantRecipeContentChanges {
+  servings: number | null;
+  ingredients: AssistantRecipeIngredientChange[];
+  instructions: AssistantRecipeInstructionChange[];
+}
+
+export interface AssistantRecipeUpdatePayload {
+  targetName: string;
+  changes: AssistantRecipeContentChanges;
+}
+
+export interface AssistantRecipeUpdateExecutionTarget {
+  kind: 'recipe';
+  id: string;
+  snapshot: AssistantRecipeContentSnapshot;
+}
 
 export type AssistantActionDomain = 'pantry' | 'shopping' | 'household' | 'calendar' | 'recipes';
 export type AssistantActionStatus = 'pending' | 'succeeded' | 'failed' | 'blocked';
@@ -25,7 +95,8 @@ interface AssistantActionBase<
     | AssistantTaskUpdateExecutionTarget
     | AssistantShoppingListUpdateExecutionTarget
     | AssistantPantryIngredientUpdateExecutionTarget
-    | AssistantCalendarEventUpdateExecutionTarget;
+    | AssistantCalendarEventUpdateExecutionTarget
+    | AssistantRecipeUpdateExecutionTarget;
 }
 
 export interface PantryIngredientPayload {
@@ -214,6 +285,7 @@ export type AssistantActionCandidate =
   | AssistantActionCandidateBase<'household.update_task', HouseholdTaskUpdatePayload>
   | AssistantActionCandidateBase<'calendar.create_event', CalendarEventPayload>
   | AssistantActionCandidateBase<'calendar.update_event', CalendarEventUpdatePayload>
+  | AssistantActionCandidateBase<'recipes.update_content', AssistantRecipeUpdatePayload>
   | AssistantActionCandidateBase<'recipes.create_draft', { recipe: AIRecipeResponse }>;
 
 export type AssistantAction =
@@ -284,6 +356,15 @@ export type AssistantAction =
     > & {
       dependsOn: string[];
       executionTarget: AssistantCalendarEventUpdateExecutionTarget;
+    })
+  | (AssistantActionBase<
+      'recipes.update_content',
+      'recipes',
+      'update_content',
+      AssistantRecipeUpdatePayload
+    > & {
+      dependsOn: string[];
+      executionTarget: AssistantRecipeUpdateExecutionTarget;
     })
   | (AssistantActionBase<
       'recipes.create_draft',

@@ -1,8 +1,8 @@
 # Edición segura de recetas desde el asistente
 
-**Estado:** contrato vertical activo, previo a implementación; subordinado a `SPEC.md` y a `AI-ACTION-ASSISTANT-EXTENSION-SPEC.md`.
+**Estado:** contrato vertical implementado; verificación de hooks/CI pendiente. Subordinado a `SPEC.md` y a `AI-ACTION-ASSISTANT-EXTENSION-SPEC.md`.
 **Rama/PR:** `feat/household-floorplan` / #47; mantener Draft.
-**Fecha:** 2026-10-16.
+**Fecha:** 2026-10-17.
 
 ## Decisión
 
@@ -27,19 +27,29 @@ Añadir `recipes.update_content` para editar ingredientes, texto de instruccione
 
 ## Checklist de aceptación
 
-- [ ] Esquema estricto del candidato y parche; rechaza campos desconocidos, IDs, cantidades/unidades inválidas, cambios vacíos y objetivos duplicados; cambio de raciones escala las cantidades una sola vez.
-- [ ] Target solo de receta propia exacta; cero/múltiples coincidencias, catálogo, receta ajena, inyección de IDs y contenido corrupto no crean una acción ejecutable.
-- [ ] Generación/refinamiento usan transporte efímero/cancelable; propuesta, edición, rechazo, cierre y fallo no cambian recetas ni `ai_jobs`.
-- [ ] UI revisa valores anterior/nuevo; cambios locales se preservan al refinar fuera de su alcance; solo la acción seleccionada y confirmada se envía.
-- [ ] Endpoint dedicado vuelve a validar propiedad y preimagen; CAS obsoleto, mismo ID con otro payload, datos inválidos y referencias ambiguas dan error sin escritura parcial; replay exacto no duplica.
-- [ ] TDD de alta/edición/eliminación de ingrediente, reemplazo de instrucción en receta plana y por nivel, cambio de raciones/cantidades, límite de último ingrediente/paso, error/cancelación, no coincidencia/ambigüedad, permisos, doble submit y fallo/reintento parcial.
-- [ ] Playwright full-stack contra app/API reales y SQLite temporal: preview/review/refinar/editar/rechazar/cerrar con cero escrituras; confirmar solo selección, recargar y verificar persistencia; replay y conflicto obsoleto seguros.
-- [ ] Verificar escritorio y móvil, teclado/foco/lectores, overflow y targets; guardar e inspeccionar capturas sintéticas comparables. Ejecutar cobertura requerida, `check:ui`, typecheck, build y hooks; registrar comandos, resultados y límites antes de marcar casillas.
+- [x] Esquema estricto del candidato y parche; rechaza campos desconocidos, IDs, cantidades/unidades inválidas, cambios vacíos y objetivos duplicados; cambio de raciones escala las cantidades una sola vez.
+- [x] Target solo de receta propia exacta; cero/múltiples coincidencias, catálogo, receta ajena, inyección de IDs y contenido corrupto no crean una acción ejecutable.
+- [x] Generación/refinamiento usan transporte efímero/cancelable; propuesta, edición, rechazo, cierre y fallo no cambian recetas ni `ai_jobs`.
+- [x] UI revisa valores anterior/nuevo; cambios locales se preservan al refinar fuera de su alcance; solo la acción seleccionada y confirmada se envía.
+- [x] Endpoint dedicado vuelve a validar propiedad y preimagen; CAS obsoleto, mismo ID con otro payload, datos inválidos y referencias ambiguas dan error sin escritura parcial; replay exacto no duplica.
+- [x] Pruebas de alta/edición/eliminación de ingrediente, reemplazo de instrucción en receta plana y por nivel, cambio de raciones/cantidades, último ingrediente, error/cancelación, no coincidencia/ambigüedad, permisos, reintento y fallo parcial.
+- [x] Playwright full-stack contra app/API reales y SQLite temporal: preview/review/refinar/editar/descartar/cerrar sin escrituras; confirmar tras selección, recargar y verificar persistencia; replay exacto idempotente.
+- [x] Desktop/móvil: matriz de 10 viewports (320×568–1440×900, bordes de breakpoints y horizontal), límites del modal/overflow, teclado, foco, nombre accesible del campo, controles táctiles y reduced-motion; capturas sintéticas guardadas e inspeccionadas.
+- [x] Coverage, `check:ui`, typecheck, build y Prettier pasan sin rebajar umbrales.
+- [ ] Registrar resultado de hooks/push y CI antes de cerrar; `lint` queda limitado por herramientas incompatibles/faltantes documentadas abajo.
 
 ## Fuera de alcance
 
 Cambiar nombre/propietario/publicación, favoritos, borrar, recalcular nutrición, editar medios, modificar listas de compra desde recetas o añadir capacidades que el contrato vigente no soporte. Proveedores reales, micrófono y auditoría global del shell siguen sujetos a los gates de `SPEC.md`.
 
-## Evidencia de implementación
+## Evidencia de implementación (2026-10-17)
 
-Pendiente: actualizar PR #47 con este ajuste al contrato antes de implementar. Completar cada casilla solo con evidencia reproducible; el objetivo global permanece abierto.
+- Esquema/candidato en `server/src/schemas/ai-assistant-recipe-update.schema.ts`; resolución y refinamiento de destino en `server/src/routes/ai-assistant.routes.ts`; escritura protegida en `server/src/routes/recipes.routes.ts`; el endpoint PATCH genérico no se usa.
+- Pruebas focales servidor: `server/src/routes/ai-assistant.routes.spec.ts`, `server/src/routes/recipes.routes.spec.ts` y `server/src/schemas/ai-assistant-recipe-update.schema.spec.ts`. Cubren destino propio exacto, cero/ambigüedad, no propietario/catálogo, no escritura de propuesta, parches por nombre/nivel, escala de cantidades, último ingrediente, preimagen obsoleta, clave idempotente/replay y conflicto de payload.
+- UI y servicio: `frontend/src/app/shared/components/ai-action-assistant-dialog.component.ts`, `frontend/src/app/core/services/recipe.service.ts` y `frontend/src/app/core/services/ai-action-assistant-execution.service.ts`; input con foco mantiene identidad DOM mediante `trackBy`. `tests/e2e/full-stack/ai-action-assistant.spec.ts` verifica aceptar solo tras revisión, descarte explícito, refinamiento de instrucciones y conservación de cantidad manual, sin escritura hasta confirmar.
+- `pnpm --filter @hogaria/server run test:coverage`: 2.040 aprobadas, 1 omitida; coverage 89,68/81,83/95,79/92,63 % S/B/F/L. `pnpm run test:client:coverage`: 1.653 aprobadas; 90,36/80,17/91,96/92,83 % S/B/F/L. Ambos pasan sus gates; los umbrales no se rebajaron.
+- `pnpm run build` y `pnpm run typecheck:e2e`: pasan. `pnpm run check:ui`: 262 ficheros, 21 reglas, sin incidencias. Prettier focal pasa.
+- Playwright full-stack: `node scripts/run-isolated-playwright.mjs --config=playwright.full-stack.config.ts --project=chromium --project=mobile-chrome --grep "edita una receta propia"` — **2/2**. Confirma propuesta sin escritura, descarte explícito, re-propuesta, refinamiento del ámbito de instrucciones con cantidad manual preservada, edición, confirmación, persistencia tras recarga y replay idempotente. Verifica layout/overflow, foco y control accesible en ambos proyectos; DB y proveedor IA son temporales/sintéticos.
+- Limitaciones vistas: `pnpm run lint` no termina porque falta `@angular-eslint/builder:lint`; `pnpm --filter @hogaria/server run lint` usa `eslint src --ext .ts`, incompatible con ESLint 9.17 instalado. No se cambiaron dependencias. Build mantiene avisos de presupuestos de bundle/estilos ya existentes. Proveedores reales y lector de pantalla no se probaron.
+
+Mantener PR #47 Draft hasta cerrar el último E2E, correr los hooks autorizados y registrar CI. El objetivo global de asistente y la auditoría visual global siguen abiertos.

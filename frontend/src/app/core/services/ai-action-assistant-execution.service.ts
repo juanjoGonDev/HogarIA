@@ -10,6 +10,7 @@ import { HouseholdMealProposalService } from './household-meal-proposal.service'
 import type { HouseholdMealProposal } from './household-meal-proposal.service';
 import type { HouseholdTaskOccurrence } from '../../shared/models/household-task.model';
 import type { AssistantAction } from '../../shared/models/ai-action-assistant.model';
+import { RecipeService } from './recipe.service';
 
 interface ApiEnvelope<T> {
   success: boolean;
@@ -28,6 +29,7 @@ export class AiActionAssistantExecutionService {
   private readonly householdPlan = inject(HouseholdPlanService);
   private readonly householdTasks = inject(HouseholdTasksService);
   private readonly mealProposals = inject(HouseholdMealProposalService);
+  private readonly recipes = inject(RecipeService);
   private readonly apiUrl = environment.apiUrl;
   private readonly silentContext = new HttpContext().set(SILENT_TOAST, true);
   private readonly attemptedActionPayloads = new Map<string, string>();
@@ -229,6 +231,28 @@ export class AiActionAssistantExecutionService {
           },
           expectedHouseholdId,
           action.id
+        );
+        return;
+      }
+
+      case 'recipes.update_content': {
+        const target = action.executionTarget;
+        const comparableName = (value: string) =>
+          value.normalize('NFC').replace(/\s+/g, ' ').trim().toLocaleLowerCase();
+        if (
+          target.kind !== 'recipe' ||
+          !target.id ||
+          comparableName(action.payload.targetName) !== comparableName(target.snapshot.name)
+        ) {
+          throw new Error('ASSISTANT_RECIPE_TARGET_INVALID');
+        }
+        await firstValueFrom(
+          this.recipes.updateRecipeWithAssistant(
+            target.id,
+            action.id,
+            action.payload,
+            target.snapshot
+          )
         );
         return;
       }

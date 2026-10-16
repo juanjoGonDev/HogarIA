@@ -122,6 +122,10 @@ import {
   assistantActionRefinementCandidateSchema
 } from './ai-assistant.schema.js';
 import { assistantUpdateIngredientSchema } from './ai-assistant-pantry-update.schema.js';
+import {
+  assistantRecipeContentSnapshotSchema,
+  assistantRecipeContentUpdateRequestSchema
+} from './ai-assistant-recipe-update.schema.js';
 
 /**
  * EL CONTRATO DE LOS FORMULARIOS: lo opcional tiene que poder no llegar.
@@ -823,6 +827,37 @@ const ROWS: Row[] = [
           location: 'fridge',
           notes: null,
           updatedAt: null
+        }
+      }
+    }
+  },
+  {
+    name: 'assistantRecipeContentSnapshotSchema',
+    schema: assistantRecipeContentSnapshotSchema,
+    required: {
+      name: 'Lentejas',
+      servings: 2,
+      ingredients: [{ name: 'Lentejas', quantity: 100, unit: 'g' }],
+      steps: [{ stepNumber: 1, instruction: 'Cuece las lentejas.' }]
+    }
+  },
+  {
+    name: 'assistantRecipeContentUpdateRequestSchema',
+    schema: assistantRecipeContentUpdateRequestSchema,
+    required: {
+      changes: {
+        servings: null,
+        ingredients: [{ operation: 'update', targetName: 'Lentejas', changes: { quantity: 80 } }],
+        instructions: []
+      },
+      assistantAction: {
+        operation: 'update_recipe_content',
+        targetId: 'recipe-1',
+        before: {
+          name: 'Lentejas',
+          servings: 2,
+          ingredients: [{ name: 'Lentejas', quantity: 100, unit: 'g' }],
+          steps: [{ stepNumber: 1, instruction: 'Cuece las lentejas.' }]
         }
       }
     }

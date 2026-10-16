@@ -58,6 +58,7 @@ const COVERED = [
   'src/schemas/household-task.schema.ts',
   'src/schemas/household-task-proposal.schema.ts',
   'src/schemas/ai-assistant.schema.ts',
+  'src/schemas/ai-assistant-recipe-update.schema.ts',
   'src/schemas/ai-assistant-pantry-update.schema.ts',
   'src/utils/product-key.ts',
   'src/utils/pantry-categories.ts',
