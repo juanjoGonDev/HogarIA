@@ -181,6 +181,7 @@ export class TimerComponent implements OnInit, OnDestroy {
   progress = 0;
 
   private intervalId: ReturnType<typeof setInterval> | null = null;
+  private deadline: number | null = null;
 
   ngOnInit(): void {
     this.currentTime = this.duration;
@@ -201,27 +202,27 @@ export class TimerComponent implements OnInit, OnDestroy {
     }
 
     this.state = 'running';
+    this.deadline = Date.now() + this.currentTime * 1000;
     this.timerStart.emit();
 
     this.intervalId = setInterval(() => {
-      this.currentTime--;
-      this.calculateProgress();
-      this.timerTick.emit(this.currentTime);
-
-      if (this.currentTime <= 0) {
-        this.complete();
-      }
+      this.updateFromClock();
     }, 1000);
   }
 
   pause(): void {
+    if (this.state === 'running') {
+      if (this.updateFromClock()) return;
+    }
     this.state = 'paused';
+    this.deadline = null;
     this.stopInterval();
     this.timerPause.emit();
   }
 
   reset(): void {
     this.stopInterval();
+    this.deadline = null;
     this.currentTime = this.duration;
     this.state = 'idle';
     this.calculateProgress();
@@ -230,6 +231,7 @@ export class TimerComponent implements OnInit, OnDestroy {
 
   complete(): void {
     this.stopInterval();
+    this.deadline = null;
     this.state = 'finished';
     this.progress = 100;
     this.timerComplete.emit();
@@ -251,6 +253,21 @@ export class TimerComponent implements OnInit, OnDestroy {
       return;
     }
     this.progress = ((this.duration - this.currentTime) / this.duration) * 100;
+  }
+
+  private updateFromClock(): boolean {
+    if (this.deadline === null || this.state !== 'running') return false;
+    const remaining = Math.max(0, Math.ceil((this.deadline - Date.now()) / 1000));
+    if (remaining === this.currentTime) return false;
+
+    this.currentTime = remaining;
+    this.calculateProgress();
+    this.timerTick.emit(this.currentTime);
+    if (remaining === 0) {
+      this.complete();
+      return true;
+    }
+    return false;
   }
 
   private stopInterval(): void {

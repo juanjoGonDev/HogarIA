@@ -113,6 +113,22 @@ describe('TimerComponent', () => {
     expect(component.currentTime).toBe(0);
   }));
 
+  it('completes after a background-tab clock jump despite delayed interval ticks', fakeAsync(() => {
+    component.duration = 60;
+    component.currentTime = 60;
+    const startedAt = Date.now();
+    const now = spyOn(Date, 'now').and.returnValue(startedAt);
+    const completed = spyOn(component.timerComplete, 'emit');
+
+    component.start();
+    now.and.returnValue(startedAt + 61_000);
+    tick(1_000);
+
+    expect(component.state).toBe('finished');
+    expect(component.currentTime).toBe(0);
+    expect(completed).toHaveBeenCalledTimes(1);
+  }));
+
   it('restarts a completed timer from its full duration', fakeAsync(() => {
     component.duration = 1;
     component.currentTime = 1;

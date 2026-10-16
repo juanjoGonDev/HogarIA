@@ -2,7 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { expect, test } from './fixtures';
-import { registerAndGoto } from './helpers/auth';
+import { registerWithHousehold } from './helpers/auth';
 import { createSyntheticRecipe, deleteSyntheticRecipe } from './helpers/recipe-fixtures';
 import { mockRecipeStepPhotos } from './helpers/recipe-step-photos';
 
@@ -29,7 +29,7 @@ test('temporizador del paso inicia, pausa, reanuda, termina y reinicia', async (
       : { width: 393, height: 851 };
   await page.setViewportSize(viewport);
   await mockRecipeStepPhotos(page);
-  await registerAndGoto(page, '/recipes', 'qa-recipe-timer-controls');
+  await registerWithHousehold(page, '/recipes', 'qa-recipe-timer-controls');
 
   const recipe = await createSyntheticRecipe(page, {
     name: 'Receta QA temporizador',
@@ -42,7 +42,8 @@ test('temporizador del paso inicia, pausa, reanuda, termina y reinicia', async (
 
   try {
     await page.goto(`/recipes?collection=all&page=1&recipe=${recipe.id}`);
-    const timer = page.locator('app-timer .timer');
+    await page.getByRole('button', { name: 'Empezar a cocinar' }).click();
+    const timer = page.locator('[data-test="cooking-timer-step-1"] app-timer .timer');
     const display = timer.locator('.timer__display');
     await expect(timer).toBeVisible();
     await expect(display).toHaveText('01:00');
@@ -107,7 +108,7 @@ test('temporizador del paso inicia, pausa, reanuda, termina y reinicia', async (
     await expect(display).toHaveText('00:58');
 
     await accessibleTimer.getByRole('button', { name: 'Reanudar' }).click();
-    await page.clock.runFor(58_000);
+    await page.clock.fastForward(58_000);
     await expect(display).toHaveText('00:00');
     await expect(accessibleTimer).toHaveClass(/timer--finished/);
     await page.screenshot({ path: join(screenshotDir, `${testInfo.project.name}-finished.png`) });

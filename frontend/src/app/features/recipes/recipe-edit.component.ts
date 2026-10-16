@@ -143,7 +143,6 @@ type RecipeEditorTab =
           <app-button
             class="recipe-editor__improve-trigger"
             variant="outline"
-            [fullWidth]="true"
             [type]="'button'"
             [disabled]="saving"
             data-test="recipe-improve-open"
@@ -187,544 +186,1081 @@ type RecipeEditorTab =
           </button>
         </nav>
 
-        <section
-          [hidden]="activeTab !== 'basics'"
-          id="editor-panel-basics"
-          role="tabpanel"
-          tabindex="0"
-          aria-labelledby="recipe-editor-tab-basics"
-          data-test="editor-panel-basics"
-          class="editor-section"
-        >
-          <h2 id="editor-basics-title">{{ 'recipes.editor.section_basics' | t }}</h2>
-          <div class="editor-grid">
-            <div class="editor-field editor-field--wide">
-              <label for="editor-name">{{ 'recipes.editor.name' | t }}</label>
-              <input
-                id="editor-name"
-                class="form-input"
-                name="name"
-                [(ngModel)]="form.name"
-                required
-              />
-            </div>
-            <div class="editor-field editor-field--wide">
-              <label for="editor-description">{{ 'recipes.editor.description' | t }}</label>
-              <textarea
-                id="editor-description"
-                class="form-input editor-textarea"
-                name="description"
-                [(ngModel)]="form.description"
-                rows="3"
-              ></textarea>
-            </div>
-            <div class="editor-field">
-              <span>{{ 'recipes.editor.difficulty' | t }}</span>
-              <app-picker
-                id="editor-difficulty"
-                [options]="difficultyOptions"
-                [value]="form.difficulty"
-                [label]="'recipes.editor.difficulty' | t"
-                (valueChange)="setDifficulty(form, $event)"
-              />
-            </div>
-            <div class="editor-field">
-              <label for="editor-cuisine">{{ 'recipes.editor.cuisine' | t }}</label>
-              <input
-                id="editor-cuisine"
-                class="form-input"
-                name="cuisine"
-                [(ngModel)]="form.cuisine"
-              />
-            </div>
-            <div class="editor-field">
-              <label for="editor-country">{{ 'recipes.editor.country' | t }}</label>
-              <input
-                id="editor-country"
-                class="form-input"
-                name="countryCode"
-                [(ngModel)]="form.countryCode"
-                maxlength="2"
-                autocomplete="off"
-              />
-            </div>
-            <div class="editor-field editor-field--wide">
-              <fieldset class="editor-choice-group">
-                <legend>{{ 'recipes.editor.meal_types' | t }}</legend>
-                <label *ngFor="let meal of mealTypes" class="editor-check">
-                  <input
-                    type="checkbox"
-                    [checked]="form.mealType.includes(meal)"
-                    (change)="toggleMealType(form, meal, $event)"
-                  />
-                  <span>{{ mealTypeLabel(meal) }}</span>
-                </label>
-              </fieldset>
-            </div>
-            <div class="editor-field">
-              <label for="editor-total-time">{{ 'recipes.editor.total_time' | t }}</label>
-              <input
-                id="editor-total-time"
-                class="form-input"
-                type="number"
-                min="1"
-                step="1"
-                name="totalTime"
-                [(ngModel)]="form.totalTime"
-              />
-            </div>
-            <div class="editor-field">
-              <label for="editor-prep-time">{{ 'recipes.editor.prep_time' | t }}</label>
-              <input
-                id="editor-prep-time"
-                class="form-input"
-                type="number"
-                min="1"
-                step="1"
-                name="prepTime"
-                [(ngModel)]="form.prepTime"
-              />
-            </div>
-            <div class="editor-field">
-              <label for="editor-cook-time">{{ 'recipes.editor.cook_time' | t }}</label>
-              <input
-                id="editor-cook-time"
-                class="form-input"
-                type="number"
-                min="0"
-                step="1"
-                name="cookTime"
-                [(ngModel)]="form.cookTime"
-              />
-            </div>
-            <div class="editor-field">
-              <label for="editor-rest-time">{{ 'recipes.editor.rest_time' | t }}</label>
-              <input
-                id="editor-rest-time"
-                class="form-input"
-                type="number"
-                min="0"
-                step="1"
-                name="restTime"
-                [(ngModel)]="form.restTime"
-              />
-            </div>
-            <div class="editor-field">
-              <label for="editor-servings">{{ 'recipes.editor.servings' | t }}</label>
-              <input
-                id="editor-servings"
-                class="form-input"
-                type="number"
-                min="1"
-                step="1"
-                name="servings"
-                [(ngModel)]="form.servings"
-                required
-              />
-            </div>
-            <div *ngIf="!form.nutritionEnabled" class="editor-field">
-              <label for="editor-calories">{{ 'recipes.editor.calories' | t }}</label>
-              <input
-                id="editor-calories"
-                class="form-input"
-                type="number"
-                min="0"
-                step="any"
-                name="calories"
-                [(ngModel)]="form.calories"
-              />
-            </div>
-            <div class="editor-field editor-field--wide">
-              <label for="editor-tags">{{ 'recipes.editor.tags' | t }}</label>
-              <input id="editor-tags" class="form-input" name="tags" [(ngModel)]="form.tagsText" />
-            </div>
-          </div>
-        </section>
-
-        <section
-          [hidden]="activeTab !== 'ingredients'"
-          id="editor-panel-ingredients"
-          role="tabpanel"
-          tabindex="0"
-          aria-labelledby="recipe-editor-tab-ingredients"
-          data-test="editor-panel-ingredients"
-          class="editor-section"
-        >
-          <div class="editor-section__heading">
-            <h2 id="editor-ingredients-title">{{ 'recipes.editor.section_ingredients' | t }}</h2>
-            <app-button variant="outline" (onClick)="addIngredient(form)">
-              <app-icon name="add" [size]="18" [label]="null" />
-              {{ 'recipes.editor.add_ingredient' | t }}
-            </app-button>
-          </div>
-          <article
-            *ngFor="let ingredient of form.ingredients; let index = index; trackBy: trackIndex"
-            class="editor-item"
-          >
-            <div class="editor-item__heading">
-              <h3>{{ 'recipes.editor.ingredient_name' | t }} {{ index + 1 }}</h3>
-              <div class="editor-item__actions">
-                <button
-                  type="button"
-                  class="editor-icon-button"
-                  [disabled]="index === 0"
-                  [attr.aria-label]="'recipes.editor.move_up' | t"
-                  (click)="moveIngredient(form, index, -1)"
-                >
-                  ↑
-                </button>
-                <button
-                  type="button"
-                  class="editor-icon-button"
-                  [disabled]="index === form.ingredients.length - 1"
-                  [attr.aria-label]="'recipes.editor.move_down' | t"
-                  (click)="moveIngredient(form, index, 1)"
-                >
-                  ↓
-                </button>
-                <button
-                  type="button"
-                  class="editor-icon-button editor-icon-button--danger"
-                  [attr.aria-label]="'recipes.editor.remove_ingredient' | t"
-                  (click)="removeIngredient(form, index)"
-                >
-                  ×
-                </button>
-              </div>
-            </div>
-            <div class="editor-grid">
-              <div class="editor-field">
-                <label [for]="'ingredient-name-' + index">{{
-                  'recipes.editor.ingredient_name' | t
-                }}</label>
-                <input
-                  [id]="'ingredient-name-' + index"
-                  class="form-input"
-                  [name]="'ingredient-name-' + index"
-                  [(ngModel)]="ingredient.name"
-                  required
-                />
-              </div>
-              <div class="editor-field">
-                <label [for]="'ingredient-quantity-' + index">{{
-                  'recipes.editor.quantity' | t
-                }}</label>
-                <input
-                  [id]="'ingredient-quantity-' + index"
-                  class="form-input"
-                  type="number"
-                  min="0"
-                  step="any"
-                  [name]="'ingredient-quantity-' + index"
-                  [(ngModel)]="ingredient.quantityText"
-                  required
-                />
-              </div>
-              <div class="editor-field">
-                <label [for]="'ingredient-unit-' + index">{{ 'recipes.editor.unit' | t }}</label>
-                <app-picker
-                  [id]="'ingredient-unit-' + index"
-                  [options]="unitOptions"
-                  [value]="ingredient.unit"
-                  [label]="('recipes.editor.unit' | t) + ' ' + (index + 1)"
-                  (valueChange)="setIngredientUnit(ingredient, $event)"
-                />
-              </div>
-              <div class="editor-field">
-                <label [for]="'ingredient-preparation-' + index">{{
-                  'recipes.editor.preparation' | t
-                }}</label>
-                <input
-                  [id]="'ingredient-preparation-' + index"
-                  class="form-input"
-                  [name]="'ingredient-preparation-' + index"
-                  [(ngModel)]="ingredient.preparation"
-                />
-              </div>
-              <div class="editor-field editor-field--wide">
-                <label [for]="'ingredient-substitutes-' + index">{{
-                  'recipes.editor.substitutes' | t
-                }}</label>
-                <input
-                  [id]="'ingredient-substitutes-' + index"
-                  class="form-input"
-                  [name]="'ingredient-substitutes-' + index"
-                  [(ngModel)]="ingredient.substitutesText"
-                />
-              </div>
-              <div class="editor-field editor-field--wide">
-                <label [for]="'ingredient-notes-' + index">{{ 'recipes.editor.notes' | t }}</label>
-                <input
-                  [id]="'ingredient-notes-' + index"
-                  class="form-input"
-                  [name]="'ingredient-notes-' + index"
-                  [(ngModel)]="ingredient.notes"
-                />
-              </div>
-              <label class="editor-check editor-field--wide">
-                <input
-                  type="checkbox"
-                  [name]="'ingredient-optional-' + index"
-                  [(ngModel)]="ingredient.isOptional"
-                />
-                <span>{{ 'recipes.editor.optional' | t }}</span>
-              </label>
-            </div>
-          </article>
-        </section>
-
-        <section
-          [hidden]="activeTab !== 'instructions'"
-          id="editor-panel-instructions"
-          role="tabpanel"
-          tabindex="0"
-          aria-labelledby="recipe-editor-tab-instructions"
-          data-test="editor-panel-instructions"
-          class="editor-section"
-        >
-          <h2 id="editor-instructions-title">{{ 'recipes.editor.section_instructions' | t }}</h2>
-          <p *ngIf="!form.instructionsByLevel" class="editor-hint">
-            {{ 'recipes.editor.legacy_note' | t }}
-          </p>
-
-          <ng-container *ngIf="form.instructionsByLevel; else legacyInstructions">
-            <nav
-              class="recipe-editor__level-tabs"
-              role="tablist"
-              [attr.aria-label]="'recipes.editor.levels_label' | t"
-            >
-              <button
-                *ngFor="let level of detailLevels; let index = index"
-                type="button"
-                role="tab"
-                class="recipe-editor__level-tab"
-                [id]="'editor-level-tab-' + level"
-                [attr.aria-controls]="'editor-level-panel-' + level"
-                [attr.aria-selected]="activeDetailLevel === level"
-                [attr.tabindex]="activeDetailLevel === level ? 0 : -1"
-                [class.is-active]="activeDetailLevel === level"
-                (click)="setActiveDetailLevel(level)"
-                (keydown)="onDetailTabKeydown($event, index)"
-              >
-                {{ detailLevelLabel(level) }}
-              </button>
-            </nav>
+        <div class="recipe-editor__layout" data-test="recipe-editor-layout">
+          <div class="recipe-editor__main" data-test="recipe-editor-main">
             <section
-              *ngFor="let level of detailLevels"
-              [hidden]="activeDetailLevel !== level"
-              [id]="'editor-level-panel-' + level"
+              [hidden]="activeTab !== 'basics'"
+              id="editor-panel-basics"
               role="tabpanel"
               tabindex="0"
-              class="editor-level"
-              [attr.aria-labelledby]="'editor-level-tab-' + level"
+              aria-labelledby="recipe-editor-tab-basics"
+              data-test="editor-panel-basics"
+              class="editor-section"
             >
-              <div class="editor-section__heading">
-                <h3 [id]="'editor-level-' + level">{{ detailLevelLabel(level) }}</h3>
-                <app-button variant="outline" (onClick)="addStep(form, level)">
-                  <app-icon name="add" [size]="18" [label]="null" />
-                  {{ 'recipes.editor.add_step' | t }}
-                </app-button>
-              </div>
-              <ng-container
-                *ngTemplateOutlet="
-                  stepList;
-                  context: { $implicit: stepsFor(form, level), group: level, draft: form }
-                "
-              ></ng-container>
-            </section>
-          </ng-container>
-          <ng-template #legacyInstructions>
-            <div class="editor-section__heading">
-              <h3>{{ 'recipes.editor.basic' | t }}</h3>
-              <app-button variant="outline" (onClick)="addStep(form)">
-                <app-icon name="add" [size]="18" [label]="null" />
-                {{ 'recipes.editor.add_step' | t }}
-              </app-button>
-            </div>
-            <ng-container
-              *ngTemplateOutlet="
-                stepList;
-                context: { $implicit: stepsFor(form), group: 'legacy', draft: form }
-              "
-            ></ng-container>
-          </ng-template>
-
-          <ng-template #stepList let-steps let-group="group" let-draft="draft">
-            <article
-              *ngFor="let step of steps; let index = index; trackBy: trackIndex"
-              class="editor-item editor-step"
-            >
-              <div class="editor-item__heading">
-                <h4>{{ 'recipes.paso_n' | t: { n: index + 1 } }}</h4>
-                <div class="editor-item__actions">
-                  <button
-                    type="button"
-                    class="editor-icon-button"
-                    [disabled]="index === 0"
-                    [attr.aria-label]="'recipes.editor.move_up' | t"
-                    (click)="moveStep(draft, group === 'legacy' ? undefined : group, index, -1)"
-                  >
-                    ↑
-                  </button>
-                  <button
-                    type="button"
-                    class="editor-icon-button"
-                    [disabled]="index === steps.length - 1"
-                    [attr.aria-label]="'recipes.editor.move_down' | t"
-                    (click)="moveStep(draft, group === 'legacy' ? undefined : group, index, 1)"
-                  >
-                    ↓
-                  </button>
-                  <button
-                    type="button"
-                    class="editor-icon-button editor-icon-button--danger"
-                    [attr.aria-label]="'recipes.editor.remove_step' | t"
-                    (click)="removeStep(draft, group === 'legacy' ? undefined : group, index)"
-                  >
-                    ×
-                  </button>
-                </div>
-              </div>
+              <h2 id="editor-basics-title">{{ 'recipes.editor.section_basics' | t }}</h2>
               <div class="editor-grid">
                 <div class="editor-field editor-field--wide">
-                  <label [for]="'step-instruction-' + group + '-' + index">{{
-                    'recipes.editor.step_instruction' | t
-                  }}</label>
-                  <textarea
-                    [id]="'step-instruction-' + group + '-' + index"
-                    class="form-input editor-textarea"
-                    [name]="'step-instruction-' + group + '-' + index"
-                    [(ngModel)]="step.instruction"
-                    rows="3"
+                  <label for="editor-name">{{ 'recipes.editor.name' | t }}</label>
+                  <input
+                    id="editor-name"
+                    class="form-input"
+                    name="name"
+                    [(ngModel)]="form.name"
                     required
+                  />
+                </div>
+                <div class="editor-field editor-field--wide">
+                  <label for="editor-description">{{ 'recipes.editor.description' | t }}</label>
+                  <textarea
+                    id="editor-description"
+                    class="form-input editor-textarea"
+                    name="description"
+                    [(ngModel)]="form.description"
+                    rows="3"
                   ></textarea>
                 </div>
                 <div class="editor-field">
-                  <label [for]="'step-duration-' + group + '-' + index">{{
-                    'recipes.editor.step_duration' | t
-                  }}</label>
+                  <span>{{ 'recipes.editor.difficulty' | t }}</span>
+                  <app-picker
+                    id="editor-difficulty"
+                    [options]="difficultyOptions"
+                    [value]="form.difficulty"
+                    [label]="'recipes.editor.difficulty' | t"
+                    (valueChange)="setDifficulty(form, $event)"
+                  />
+                </div>
+                <div class="editor-field">
+                  <label for="editor-cuisine">{{ 'recipes.editor.cuisine' | t }}</label>
                   <input
-                    [id]="'step-duration-' + group + '-' + index"
+                    id="editor-cuisine"
+                    class="form-input"
+                    name="cuisine"
+                    [(ngModel)]="form.cuisine"
+                  />
+                </div>
+                <div class="editor-field">
+                  <label for="editor-country">{{ 'recipes.editor.country' | t }}</label>
+                  <input
+                    id="editor-country"
+                    class="form-input"
+                    name="countryCode"
+                    [(ngModel)]="form.countryCode"
+                    maxlength="2"
+                    autocomplete="off"
+                  />
+                </div>
+                <div class="editor-field editor-field--wide">
+                  <fieldset class="editor-choice-group">
+                    <legend>{{ 'recipes.editor.meal_types' | t }}</legend>
+                    <label *ngFor="let meal of mealTypes" class="editor-check">
+                      <input
+                        type="checkbox"
+                        [checked]="form.mealType.includes(meal)"
+                        (change)="toggleMealType(form, meal, $event)"
+                      />
+                      <span>{{ mealTypeLabel(meal) }}</span>
+                    </label>
+                  </fieldset>
+                </div>
+                <div class="editor-field">
+                  <label for="editor-total-time">{{ 'recipes.editor.total_time' | t }}</label>
+                  <input
+                    id="editor-total-time"
                     class="form-input"
                     type="number"
                     min="1"
                     step="1"
-                    [name]="'step-duration-' + group + '-' + index"
-                    [(ngModel)]="step.durationText"
+                    name="totalTime"
+                    [(ngModel)]="form.totalTime"
                   />
                 </div>
-                <div class="editor-field editor-field--wide editor-temperature-field">
-                  <ng-container *ngIf="step.temperatureEnabled; else addTemperature">
-                    <label [for]="'step-temperature-' + group + '-' + index">{{
-                      'recipes.editor.step_temperature' | t
+                <div class="editor-field">
+                  <label for="editor-prep-time">{{ 'recipes.editor.prep_time' | t }}</label>
+                  <input
+                    id="editor-prep-time"
+                    class="form-input"
+                    type="number"
+                    min="1"
+                    step="1"
+                    name="prepTime"
+                    [(ngModel)]="form.prepTime"
+                  />
+                </div>
+                <div class="editor-field">
+                  <label for="editor-cook-time">{{ 'recipes.editor.cook_time' | t }}</label>
+                  <input
+                    id="editor-cook-time"
+                    class="form-input"
+                    type="number"
+                    min="0"
+                    step="1"
+                    name="cookTime"
+                    [(ngModel)]="form.cookTime"
+                  />
+                </div>
+                <div class="editor-field">
+                  <label for="editor-rest-time">{{ 'recipes.editor.rest_time' | t }}</label>
+                  <input
+                    id="editor-rest-time"
+                    class="form-input"
+                    type="number"
+                    min="0"
+                    step="1"
+                    name="restTime"
+                    [(ngModel)]="form.restTime"
+                  />
+                </div>
+                <div class="editor-field">
+                  <label for="editor-servings">{{ 'recipes.editor.servings' | t }}</label>
+                  <input
+                    id="editor-servings"
+                    class="form-input"
+                    type="number"
+                    min="1"
+                    step="1"
+                    name="servings"
+                    [(ngModel)]="form.servings"
+                    required
+                  />
+                </div>
+                <div *ngIf="!form.nutritionEnabled" class="editor-field">
+                  <label for="editor-calories">{{ 'recipes.editor.calories' | t }}</label>
+                  <input
+                    id="editor-calories"
+                    class="form-input"
+                    type="number"
+                    min="0"
+                    step="any"
+                    name="calories"
+                    [(ngModel)]="form.calories"
+                  />
+                </div>
+                <div class="editor-field editor-field--wide">
+                  <label for="editor-tags">{{ 'recipes.editor.tags' | t }}</label>
+                  <input
+                    id="editor-tags"
+                    class="form-input"
+                    name="tags"
+                    [(ngModel)]="form.tagsText"
+                  />
+                </div>
+              </div>
+              <div *ngIf="isCreateMode" class="recipe-editor__mobile-cover">
+                <button
+                  type="button"
+                  class="recipe-editor__mobile-cover-action"
+                  data-test="recipe-editor-mobile-cover-edit"
+                  (click)="openCoverEditor()"
+                >
+                  <app-icon name="add" [size]="18" [label]="null" />
+                  {{ 'recipes.editor.cover_image' | t }}
+                </button>
+                <p class="editor-hint">{{ 'recipes.editor.cover_image_hint' | t }}</p>
+              </div>
+            </section>
+
+            <section
+              [hidden]="activeTab !== 'ingredients'"
+              id="editor-panel-ingredients"
+              role="tabpanel"
+              tabindex="0"
+              aria-labelledby="recipe-editor-tab-ingredients"
+              data-test="editor-panel-ingredients"
+              class="editor-section"
+            >
+              <div class="editor-section__heading">
+                <h2 id="editor-ingredients-title">
+                  {{ 'recipes.editor.section_ingredients' | t }}
+                </h2>
+                <app-button variant="outline" (onClick)="addIngredient(form)">
+                  <app-icon name="add" [size]="18" [label]="null" />
+                  {{ 'recipes.editor.add_ingredient' | t }}
+                </app-button>
+              </div>
+              <article
+                *ngFor="let ingredient of form.ingredients; let index = index; trackBy: trackIndex"
+                class="editor-item"
+              >
+                <div class="editor-item__heading">
+                  <h3>{{ 'recipes.editor.ingredient_name' | t }} {{ index + 1 }}</h3>
+                  <div class="editor-item__actions">
+                    <button
+                      type="button"
+                      class="editor-icon-button"
+                      [disabled]="index === 0"
+                      [attr.aria-label]="'recipes.editor.move_up' | t"
+                      (click)="moveIngredient(form, index, -1)"
+                    >
+                      ↑
+                    </button>
+                    <button
+                      type="button"
+                      class="editor-icon-button"
+                      [disabled]="index === form.ingredients.length - 1"
+                      [attr.aria-label]="'recipes.editor.move_down' | t"
+                      (click)="moveIngredient(form, index, 1)"
+                    >
+                      ↓
+                    </button>
+                    <button
+                      type="button"
+                      class="editor-icon-button editor-icon-button--danger"
+                      [attr.aria-label]="'recipes.editor.remove_ingredient' | t"
+                      (click)="removeIngredient(form, index)"
+                    >
+                      ×
+                    </button>
+                  </div>
+                </div>
+                <div class="editor-grid">
+                  <div class="editor-field">
+                    <label [for]="'ingredient-name-' + index">{{
+                      'recipes.editor.ingredient_name' | t
                     }}</label>
-                    <div class="editor-inline-inputs">
-                      <input
-                        [id]="'step-temperature-' + group + '-' + index"
-                        class="form-input"
-                        type="number"
-                        step="any"
-                        [name]="'step-temperature-' + group + '-' + index"
-                        [(ngModel)]="step.temperatureText"
-                      />
-                      <app-picker
-                        class="editor-unit"
-                        [options]="temperatureUnitOptions"
-                        [value]="step.temperatureUnit"
-                        [label]="
-                          ('recipes.editor.step_temperature' | t) + ' ' + group + ' ' + (index + 1)
-                        "
-                        (valueChange)="setTemperatureUnit(step, $event)"
-                      />
+                    <input
+                      [id]="'ingredient-name-' + index"
+                      class="form-input"
+                      [name]="'ingredient-name-' + index"
+                      [(ngModel)]="ingredient.name"
+                      required
+                    />
+                  </div>
+                  <div class="editor-field">
+                    <label [for]="'ingredient-quantity-' + index">{{
+                      'recipes.editor.quantity' | t
+                    }}</label>
+                    <input
+                      [id]="'ingredient-quantity-' + index"
+                      class="form-input"
+                      type="number"
+                      min="0"
+                      step="any"
+                      [name]="'ingredient-quantity-' + index"
+                      [(ngModel)]="ingredient.quantityText"
+                      required
+                    />
+                  </div>
+                  <div class="editor-field">
+                    <label [for]="'ingredient-unit-' + index">{{
+                      'recipes.editor.unit' | t
+                    }}</label>
+                    <app-picker
+                      [id]="'ingredient-unit-' + index"
+                      [options]="unitOptions"
+                      [value]="ingredient.unit"
+                      [label]="('recipes.editor.unit' | t) + ' ' + (index + 1)"
+                      (valueChange)="setIngredientUnit(ingredient, $event)"
+                    />
+                  </div>
+                  <div class="editor-field">
+                    <label [for]="'ingredient-preparation-' + index">{{
+                      'recipes.editor.preparation' | t
+                    }}</label>
+                    <input
+                      [id]="'ingredient-preparation-' + index"
+                      class="form-input"
+                      [name]="'ingredient-preparation-' + index"
+                      [(ngModel)]="ingredient.preparation"
+                    />
+                  </div>
+                  <div class="editor-field editor-field--wide">
+                    <label [for]="'ingredient-substitutes-' + index">{{
+                      'recipes.editor.substitutes' | t
+                    }}</label>
+                    <input
+                      [id]="'ingredient-substitutes-' + index"
+                      class="form-input"
+                      [name]="'ingredient-substitutes-' + index"
+                      [(ngModel)]="ingredient.substitutesText"
+                    />
+                  </div>
+                  <div class="editor-field editor-field--wide">
+                    <label [for]="'ingredient-notes-' + index">{{
+                      'recipes.editor.notes' | t
+                    }}</label>
+                    <input
+                      [id]="'ingredient-notes-' + index"
+                      class="form-input"
+                      [name]="'ingredient-notes-' + index"
+                      [(ngModel)]="ingredient.notes"
+                    />
+                  </div>
+                  <label class="editor-check editor-field--wide">
+                    <input
+                      type="checkbox"
+                      [name]="'ingredient-optional-' + index"
+                      [(ngModel)]="ingredient.isOptional"
+                    />
+                    <span>{{ 'recipes.editor.optional' | t }}</span>
+                  </label>
+                </div>
+              </article>
+            </section>
+
+            <section
+              [hidden]="activeTab !== 'instructions'"
+              id="editor-panel-instructions"
+              role="tabpanel"
+              tabindex="0"
+              aria-labelledby="recipe-editor-tab-instructions"
+              data-test="editor-panel-instructions"
+              class="editor-section"
+            >
+              <h2 id="editor-instructions-title">
+                {{ 'recipes.editor.section_instructions' | t }}
+              </h2>
+              <p *ngIf="!form.instructionsByLevel" class="editor-hint">
+                {{ 'recipes.editor.legacy_note' | t }}
+              </p>
+
+              <ng-container *ngIf="form.instructionsByLevel; else legacyInstructions">
+                <nav
+                  class="recipe-editor__level-tabs"
+                  role="tablist"
+                  [attr.aria-label]="'recipes.editor.levels_label' | t"
+                >
+                  <button
+                    *ngFor="let level of detailLevels; let index = index"
+                    type="button"
+                    role="tab"
+                    class="recipe-editor__level-tab"
+                    [id]="'editor-level-tab-' + level"
+                    [attr.aria-controls]="'editor-level-panel-' + level"
+                    [attr.aria-selected]="activeDetailLevel === level"
+                    [attr.tabindex]="activeDetailLevel === level ? 0 : -1"
+                    [class.is-active]="activeDetailLevel === level"
+                    (click)="setActiveDetailLevel(level)"
+                    (keydown)="onDetailTabKeydown($event, index)"
+                  >
+                    {{ detailLevelLabel(level) }}
+                  </button>
+                </nav>
+                <section
+                  *ngFor="let level of detailLevels"
+                  [hidden]="activeDetailLevel !== level"
+                  [id]="'editor-level-panel-' + level"
+                  role="tabpanel"
+                  tabindex="0"
+                  class="editor-level"
+                  [attr.aria-labelledby]="'editor-level-tab-' + level"
+                >
+                  <div class="editor-section__heading">
+                    <h3 [id]="'editor-level-' + level">{{ detailLevelLabel(level) }}</h3>
+                    <app-button variant="outline" (onClick)="addStep(form, level)">
+                      <app-icon name="add" [size]="18" [label]="null" />
+                      {{ 'recipes.editor.add_step' | t }}
+                    </app-button>
+                  </div>
+                  <ng-container
+                    *ngTemplateOutlet="
+                      stepList;
+                      context: { $implicit: stepsFor(form, level), group: level, draft: form }
+                    "
+                  ></ng-container>
+                </section>
+              </ng-container>
+              <ng-template #legacyInstructions>
+                <div class="editor-section__heading">
+                  <h3>{{ 'recipes.editor.basic' | t }}</h3>
+                  <app-button variant="outline" (onClick)="addStep(form)">
+                    <app-icon name="add" [size]="18" [label]="null" />
+                    {{ 'recipes.editor.add_step' | t }}
+                  </app-button>
+                </div>
+                <ng-container
+                  *ngTemplateOutlet="
+                    stepList;
+                    context: { $implicit: stepsFor(form), group: 'legacy', draft: form }
+                  "
+                ></ng-container>
+              </ng-template>
+
+              <ng-template #stepList let-steps let-group="group" let-draft="draft">
+                <article
+                  *ngFor="let step of steps; let index = index; trackBy: trackIndex"
+                  class="editor-item editor-step"
+                >
+                  <div class="editor-item__heading">
+                    <h4>{{ 'recipes.paso_n' | t: { n: index + 1 } }}</h4>
+                    <div class="editor-item__actions">
                       <button
                         type="button"
                         class="editor-icon-button"
-                        [attr.data-test]="'step-temperature-remove-' + group + '-' + index"
-                        [attr.aria-label]="'recipes.editor.remove_temperature' | t"
-                        (click)="removeTemperature(step)"
+                        [disabled]="index === 0"
+                        [attr.aria-label]="'recipes.editor.move_up' | t"
+                        (click)="moveStep(draft, group === 'legacy' ? undefined : group, index, -1)"
+                      >
+                        ↑
+                      </button>
+                      <button
+                        type="button"
+                        class="editor-icon-button"
+                        [disabled]="index === steps.length - 1"
+                        [attr.aria-label]="'recipes.editor.move_down' | t"
+                        (click)="moveStep(draft, group === 'legacy' ? undefined : group, index, 1)"
+                      >
+                        ↓
+                      </button>
+                      <button
+                        type="button"
+                        class="editor-icon-button editor-icon-button--danger"
+                        [attr.aria-label]="'recipes.editor.remove_step' | t"
+                        (click)="removeStep(draft, group === 'legacy' ? undefined : group, index)"
                       >
                         ×
                       </button>
                     </div>
-                  </ng-container>
-                  <ng-template #addTemperature>
-                    <button
-                      type="button"
-                      class="editor-text-button editor-temperature-add"
-                      [attr.data-test]="'step-temperature-add-' + group + '-' + index"
-                      (click)="enableTemperature(step)"
+                  </div>
+                  <div class="editor-grid">
+                    <div class="editor-field editor-field--wide">
+                      <label [for]="'step-instruction-' + group + '-' + index">{{
+                        'recipes.editor.step_instruction' | t
+                      }}</label>
+                      <textarea
+                        [id]="'step-instruction-' + group + '-' + index"
+                        class="form-input editor-textarea"
+                        [name]="'step-instruction-' + group + '-' + index"
+                        [(ngModel)]="step.instruction"
+                        rows="3"
+                        required
+                      ></textarea>
+                    </div>
+                    <div class="editor-field">
+                      <label [for]="'step-duration-' + group + '-' + index">{{
+                        'recipes.editor.step_duration' | t
+                      }}</label>
+                      <input
+                        [id]="'step-duration-' + group + '-' + index"
+                        class="form-input"
+                        type="number"
+                        min="1"
+                        step="1"
+                        [name]="'step-duration-' + group + '-' + index"
+                        [(ngModel)]="step.durationText"
+                      />
+                    </div>
+                    <div class="editor-field editor-field--wide editor-temperature-field">
+                      <ng-container *ngIf="step.temperatureEnabled; else addTemperature">
+                        <label [for]="'step-temperature-' + group + '-' + index">{{
+                          'recipes.editor.step_temperature' | t
+                        }}</label>
+                        <div class="editor-inline-inputs">
+                          <input
+                            [id]="'step-temperature-' + group + '-' + index"
+                            class="form-input"
+                            type="number"
+                            step="any"
+                            [name]="'step-temperature-' + group + '-' + index"
+                            [(ngModel)]="step.temperatureText"
+                          />
+                          <app-picker
+                            class="editor-unit"
+                            [options]="temperatureUnitOptions"
+                            [value]="step.temperatureUnit"
+                            [label]="
+                              ('recipes.editor.step_temperature' | t) +
+                              ' ' +
+                              group +
+                              ' ' +
+                              (index + 1)
+                            "
+                            (valueChange)="setTemperatureUnit(step, $event)"
+                          />
+                          <button
+                            type="button"
+                            class="editor-icon-button"
+                            [attr.data-test]="'step-temperature-remove-' + group + '-' + index"
+                            [attr.aria-label]="'recipes.editor.remove_temperature' | t"
+                            (click)="removeTemperature(step)"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      </ng-container>
+                      <ng-template #addTemperature>
+                        <button
+                          type="button"
+                          class="editor-text-button editor-temperature-add"
+                          [attr.data-test]="'step-temperature-add-' + group + '-' + index"
+                          (click)="enableTemperature(step)"
+                        >
+                          + {{ 'recipes.editor.add_temperature' | t }}
+                        </button>
+                      </ng-template>
+                    </div>
+                    <label class="editor-check editor-field--wide">
+                      <input
+                        type="checkbox"
+                        [name]="'step-timer-' + group + '-' + index"
+                        [(ngModel)]="step.timerRequired"
+                      />
+                      <span>{{ 'recipes.editor.timer_required' | t }}</span>
+                    </label>
+                    <div *ngIf="step.timerRequired" class="editor-field">
+                      <label [for]="'step-timer-duration-' + group + '-' + index">{{
+                        'recipes.editor.timer_duration' | t
+                      }}</label>
+                      <input
+                        [id]="'step-timer-duration-' + group + '-' + index"
+                        class="form-input"
+                        type="number"
+                        min="1"
+                        step="1"
+                        [name]="'step-timer-duration-' + group + '-' + index"
+                        [(ngModel)]="step.timerDurationText"
+                      />
+                    </div>
+                    <div class="editor-field editor-field--wide">
+                      <label [for]="'step-tips-' + group + '-' + index">{{
+                        'recipes.editor.step_tips' | t
+                      }}</label>
+                      <textarea
+                        [id]="'step-tips-' + group + '-' + index"
+                        class="form-input editor-textarea"
+                        [name]="'step-tips-' + group + '-' + index"
+                        [(ngModel)]="step.tips"
+                        rows="2"
+                      ></textarea>
+                    </div>
+                    <div class="editor-field editor-field--wide">
+                      <label [for]="'step-warning-' + group + '-' + index">{{
+                        'recipes.editor.step_warning' | t
+                      }}</label>
+                      <textarea
+                        [id]="'step-warning-' + group + '-' + index"
+                        class="form-input editor-textarea"
+                        [name]="'step-warning-' + group + '-' + index"
+                        [(ngModel)]="step.warning"
+                        rows="2"
+                      ></textarea>
+                    </div>
+                    <div class="editor-field editor-field--wide">
+                      <label [for]="'step-image-' + group + '-' + index">{{
+                        'recipes.editor.step_image' | t
+                      }}</label>
+                      <input
+                        [id]="'step-image-' + group + '-' + index"
+                        class="form-input"
+                        type="text"
+                        inputmode="url"
+                        [name]="'step-image-' + group + '-' + index"
+                        [(ngModel)]="step.imageUrl"
+                        (ngModelChange)="onStepImageChange(step, $event)"
+                      />
+                      <p class="editor-hint">{{ 'recipes.editor.step_image_hint' | t }}</p>
+                      <figure
+                        *ngIf="step.imageUrl"
+                        class="editor-cover-preview editor-step-preview"
+                      >
+                        <img
+                          [src]="step.imageUrl"
+                          [alt]="step.imageAttribution?.altText || step.instruction"
+                          loading="lazy"
+                        />
+                        <figcaption *ngIf="step.imageAttribution as credit">
+                          <span>{{
+                            'recipes.step_photo_credit' | t: { author: credit.author }
+                          }}</span>
+                          <a [href]="credit.licenseUrl" target="_blank" rel="noopener noreferrer">{{
+                            credit.licenseName
+                          }}</a>
+                          <a [href]="credit.sourceUrl" target="_blank" rel="noopener noreferrer">{{
+                            'recipes.step_photo_source' | t
+                          }}</a>
+                        </figcaption>
+                      </figure>
+                      <button
+                        *ngIf="step.imageUrl"
+                        type="button"
+                        class="editor-text-button"
+                        (click)="clearStepPhoto(step)"
+                      >
+                        {{ 'recipes.editor.remove_step_photo' | t }}
+                      </button>
+                    </div>
+                    <div class="editor-field editor-field--wide editor-step-media-search">
+                      <div class="editor-step-media-search__toolbar">
+                        <span>{{ 'recipes.editor.step_video_heading' | t }}</span>
+                        <app-button
+                          variant="outline"
+                          [disabled]="isSearchingStepMedia"
+                          [attr.data-test]="'recipe-step-media-search-' + group + '-' + index"
+                          (onClick)="searchStepMedia(step)"
+                        >
+                          <app-icon name="search" [size]="16" [label]="null" />
+                          {{
+                            (stepMediaState(step) === 'loading'
+                              ? 'recipes.editor.step_media_searching'
+                              : 'recipes.editor.step_media_search'
+                            ) | t
+                          }}
+                        </app-button>
+                      </div>
+                      <p
+                        *ngIf="stepMediaState(step) === 'loading'"
+                        class="editor-hint"
+                        role="status"
+                        aria-live="polite"
+                      >
+                        {{ 'recipes.editor.step_media_searching' | t }}
+                      </p>
+                      <div
+                        *ngIf="stepMediaState(step) === 'error'"
+                        class="editor-photo-search__error"
+                        role="alert"
+                      >
+                        <span>{{ 'recipes.editor.step_media_search_failed' | t }}</span>
+                        <button
+                          type="button"
+                          class="editor-text-button"
+                          (click)="searchStepMedia(step, true)"
+                        >
+                          {{ 'recipes.editor.step_media_search_retry' | t }}
+                        </button>
+                      </div>
+                      <p
+                        *ngIf="stepMediaState(step) === 'empty'"
+                        class="editor-hint"
+                        role="status"
+                        aria-live="polite"
+                      >
+                        {{ 'recipes.editor.step_media_search_empty' | t }}
+                      </p>
+                      <p
+                        *ngIf="stepMediaResult(step)?.failed && stepMediaState(step) === 'results'"
+                        class="editor-hint"
+                        role="status"
+                      >
+                        {{ 'recipes.editor.step_media_search_failed' | t }}
+                      </p>
+                      <figure
+                        *ngIf="stepMediaResult(step)?.photo as photo"
+                        class="editor-step-media-search__photo"
+                      >
+                        <img [src]="photo.previewUrl" [alt]="photo.altText" loading="lazy" />
+                        <figcaption>
+                          <span>{{ photo.author }} · {{ photo.licenseName }}</span>
+                          <a [href]="photo.licenseUrl" target="_blank" rel="noopener noreferrer">{{
+                            photo.licenseName
+                          }}</a>
+                          <button
+                            type="button"
+                            class="editor-text-button"
+                            (click)="selectStepPhoto(step, photo)"
+                          >
+                            {{
+                              (step.imagePhotoId === photo.id
+                                ? 'recipes.editor.image_search_selected'
+                                : 'recipes.editor.image_search_select'
+                              ) | t
+                            }}
+                          </button>
+                        </figcaption>
+                      </figure>
+                      <div
+                        *ngIf="stepMediaResult(step)?.videos?.length"
+                        class="editor-video-results"
+                      >
+                        <article
+                          *ngFor="let video of stepMediaResult(step)?.videos; trackBy: trackVideo"
+                          class="editor-video-result"
+                          [attr.data-test]="'recipe-step-video-result-' + group + '-' + index"
+                          [class.editor-video-result--selected]="step.videoId === video.id"
+                        >
+                          <img [src]="video.thumbnailUrl" alt="" loading="lazy" />
+                          <div class="editor-video-result__copy">
+                            <strong>{{ video.title }}</strong>
+                            <span>{{ video.author }} · {{ video.licenseName }}</span>
+                            <span>{{
+                              'recipes.editor.step_video_duration'
+                                | t: { seconds: video.durationSeconds }
+                            }}</span>
+                            <a
+                              [href]="video.licenseUrl"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              >{{ video.licenseName }}</a
+                            >
+                            <a [href]="video.sourceUrl" target="_blank" rel="noopener noreferrer">{{
+                              'recipes.step_photo_source' | t
+                            }}</a>
+                          </div>
+                          <app-button
+                            variant="outline"
+                            [disabled]="step.videoId === video.id"
+                            (onClick)="selectStepVideo(step, video)"
+                          >
+                            {{
+                              (step.videoId === video.id
+                                ? 'recipes.editor.step_video_selected'
+                                : 'recipes.editor.step_video_select'
+                              ) | t
+                            }}
+                          </app-button>
+                        </article>
+                      </div>
+                      <div *ngIf="step.video as selectedVideo" class="editor-selected-video">
+                        <img [src]="selectedVideo.thumbnailUrl" alt="" loading="lazy" />
+                        <span
+                          >{{ selectedVideo.title }} · {{ selectedVideo.author }} ·
+                          {{ selectedVideo.licenseName }}</span
+                        >
+                        <button
+                          type="button"
+                          class="editor-text-button"
+                          (click)="clearStepVideo(step)"
+                        >
+                          {{ 'recipes.editor.step_video_remove' | t }}
+                        </button>
+                      </div>
+                    </div>
+                    <div
+                      class="editor-field editor-field--wide editor-photo-search"
+                      [attr.data-test]="'recipe-step-photo-search-' + group + '-' + index"
                     >
-                      + {{ 'recipes.editor.add_temperature' | t }}
-                    </button>
-                  </ng-template>
+                      <label [for]="'step-photo-search-' + group + '-' + index">{{
+                        'recipes.editor.step_image_search_label' | t
+                      }}</label>
+                      <input
+                        [id]="'step-photo-search-' + group + '-' + index"
+                        class="form-input"
+                        type="search"
+                        [name]="'step-photo-search-' + group + '-' + index"
+                        [(ngModel)]="step.photoSearchQuery"
+                        (ngModelChange)="searchStepPhotos(step, $event)"
+                        [placeholder]="'recipes.editor.step_image_search_placeholder' | t"
+                        maxlength="80"
+                        autocomplete="off"
+                        [attr.aria-describedby]="'step-photo-search-hint-' + group + '-' + index"
+                      />
+                      <p [id]="'step-photo-search-hint-' + group + '-' + index" class="editor-hint">
+                        {{ 'recipes.editor.step_image_search_hint' | t }}
+                      </p>
+                      <p
+                        *ngIf="stepPhotoState(step) === 'loading'"
+                        class="editor-hint"
+                        role="status"
+                        aria-live="polite"
+                      >
+                        {{ 'recipes.editor.image_search_loading' | t }}
+                      </p>
+                      <p
+                        *ngIf="stepPhotoState(step) === 'empty'"
+                        class="editor-hint"
+                        role="status"
+                        aria-live="polite"
+                      >
+                        {{ 'recipes.editor.image_search_empty' | t }}
+                      </p>
+                      <div
+                        *ngIf="stepPhotoState(step) === 'error'"
+                        class="editor-photo-search__error"
+                        role="alert"
+                      >
+                        <span>{{ 'recipes.editor.image_search_failed' | t }}</span>
+                        <button
+                          type="button"
+                          class="editor-text-button"
+                          (click)="searchStepPhotos(step, step.photoSearchQuery, true)"
+                        >
+                          {{ 'recipes.editor.image_search_retry' | t }}
+                        </button>
+                      </div>
+                      <div
+                        *ngIf="stepPhotoResults(step).length > 0"
+                        class="editor-photo-results"
+                        [attr.data-test]="'recipe-step-photo-results-' + group + '-' + index"
+                      >
+                        <button
+                          *ngFor="let photo of stepPhotoResults(step); trackBy: trackPhoto"
+                          type="button"
+                          class="editor-photo-result"
+                          [class.editor-photo-result--selected]="step.imagePhotoId === photo.id"
+                          [attr.aria-pressed]="step.imagePhotoId === photo.id"
+                          (click)="selectStepPhoto(step, photo)"
+                        >
+                          <img [src]="photo.previewUrl" [alt]="photo.altText" loading="lazy" />
+                          <span class="editor-photo-result__author">{{ photo.author }}</span>
+                          <span>{{ photo.licenseName }}</span>
+                          <span class="editor-photo-result__action">{{
+                            (step.imagePhotoId === photo.id
+                              ? 'recipes.editor.image_search_selected'
+                              : 'recipes.editor.image_search_select'
+                            ) | t
+                          }}</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+              </ng-template>
+            </section>
+
+            <section
+              [hidden]="activeTab !== 'guidance'"
+              id="editor-panel-guidance"
+              role="tabpanel"
+              tabindex="0"
+              aria-labelledby="recipe-editor-tab-guidance"
+              class="editor-section"
+            >
+              <h2 id="editor-equipment-title">{{ 'recipes.editor.section_equipment' | t }}</h2>
+              <div class="editor-grid">
+                <div class="editor-field">
+                  <label for="editor-utensils">{{ 'recipes.utensils' | t }}</label>
+                  <textarea
+                    id="editor-utensils"
+                    class="form-input editor-textarea"
+                    name="utensils"
+                    [(ngModel)]="form.utensilsText"
+                    rows="4"
+                  ></textarea>
                 </div>
-                <label class="editor-check editor-field--wide">
-                  <input
-                    type="checkbox"
-                    [name]="'step-timer-' + group + '-' + index"
-                    [(ngModel)]="step.timerRequired"
-                  />
-                  <span>{{ 'recipes.editor.timer_required' | t }}</span>
-                </label>
-                <div *ngIf="step.timerRequired" class="editor-field">
-                  <label [for]="'step-timer-duration-' + group + '-' + index">{{
-                    'recipes.editor.timer_duration' | t
-                  }}</label>
-                  <input
-                    [id]="'step-timer-duration-' + group + '-' + index"
+                <div class="editor-field">
+                  <label for="editor-appliances">{{ 'recipes.editor.appliances' | t }}</label>
+                  <textarea
+                    id="editor-appliances"
+                    class="form-input editor-textarea"
+                    name="appliances"
+                    [(ngModel)]="form.appliancesText"
+                    rows="4"
+                  ></textarea>
+                </div>
+              </div>
+              <div class="editor-subsection">
+                <h2 id="editor-guidance-title">{{ 'recipes.editor.section_guidance' | t }}</h2>
+                <div class="editor-grid">
+                  <div class="editor-field">
+                    <label for="editor-parallel">{{ 'recipes.editor.parallel_tasks' | t }}</label>
+                    <textarea
+                      id="editor-parallel"
+                      class="form-input editor-textarea"
+                      name="parallelTasks"
+                      [(ngModel)]="form.parallelTasksText"
+                      rows="4"
+                    ></textarea>
+                  </div>
+                  <div class="editor-field">
+                    <label for="editor-guidance-tips">{{
+                      'recipes.editor.tips_variations' | t
+                    }}</label>
+                    <textarea
+                      id="editor-guidance-tips"
+                      class="form-input editor-textarea"
+                      name="guidanceTips"
+                      [(ngModel)]="form.tipsAndVariationsText"
+                      rows="4"
+                    ></textarea>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section
+              [hidden]="activeTab !== 'nutrition'"
+              id="editor-panel-nutrition"
+              role="tabpanel"
+              tabindex="0"
+              aria-labelledby="recipe-editor-tab-nutrition"
+              class="editor-section"
+            >
+              <h2 id="editor-nutrition-title">{{ 'recipes.editor.section_nutrition' | t }}</h2>
+              <label class="editor-check editor-check--section">
+                <input
+                  type="checkbox"
+                  name="nutritionEnabled"
+                  [(ngModel)]="form.nutritionEnabled"
+                />
+                <span>{{ 'recipes.editor.enable_nutrition' | t }}</span>
+              </label>
+              <div *ngIf="form.nutritionEnabled" class="editor-grid editor-grid--details">
+                <div class="editor-field">
+                  <label for="nutrition-calories">{{ 'recipes.editor.calories' | t }}</label
+                  ><input
+                    id="nutrition-calories"
                     class="form-input"
                     type="number"
-                    min="1"
-                    step="1"
-                    [name]="'step-timer-duration-' + group + '-' + index"
-                    [(ngModel)]="step.timerDurationText"
+                    min="0"
+                    step="any"
+                    name="nutritionCalories"
+                    [(ngModel)]="form.nutrition.calories"
                   />
                 </div>
-                <div class="editor-field editor-field--wide">
-                  <label [for]="'step-tips-' + group + '-' + index">{{
-                    'recipes.editor.step_tips' | t
-                  }}</label>
-                  <textarea
-                    [id]="'step-tips-' + group + '-' + index"
-                    class="form-input editor-textarea"
-                    [name]="'step-tips-' + group + '-' + index"
-                    [(ngModel)]="step.tips"
-                    rows="2"
-                  ></textarea>
+                <div class="editor-field">
+                  <label for="nutrition-protein">{{ 'recipes.editor.protein' | t }}</label
+                  ><input
+                    id="nutrition-protein"
+                    class="form-input"
+                    type="number"
+                    min="0"
+                    step="any"
+                    name="nutritionProtein"
+                    [(ngModel)]="form.nutrition.protein"
+                  />
                 </div>
-                <div class="editor-field editor-field--wide">
-                  <label [for]="'step-warning-' + group + '-' + index">{{
-                    'recipes.editor.step_warning' | t
-                  }}</label>
-                  <textarea
-                    [id]="'step-warning-' + group + '-' + index"
-                    class="form-input editor-textarea"
-                    [name]="'step-warning-' + group + '-' + index"
-                    [(ngModel)]="step.warning"
-                    rows="2"
-                  ></textarea>
+                <div class="editor-field">
+                  <label for="nutrition-carbs">{{ 'recipes.editor.carbs' | t }}</label
+                  ><input
+                    id="nutrition-carbs"
+                    class="form-input"
+                    type="number"
+                    min="0"
+                    step="any"
+                    name="nutritionCarbs"
+                    [(ngModel)]="form.nutrition.carbs"
+                  />
                 </div>
+                <div class="editor-field">
+                  <label for="nutrition-fat">{{ 'recipes.editor.fat' | t }}</label
+                  ><input
+                    id="nutrition-fat"
+                    class="form-input"
+                    type="number"
+                    min="0"
+                    step="any"
+                    name="nutritionFat"
+                    [(ngModel)]="form.nutrition.fat"
+                  />
+                </div>
+                <div class="editor-field">
+                  <label for="nutrition-fiber">{{ 'recipes.editor.fiber' | t }}</label
+                  ><input
+                    id="nutrition-fiber"
+                    class="form-input"
+                    type="number"
+                    min="0"
+                    step="any"
+                    name="nutritionFiber"
+                    [(ngModel)]="form.nutrition.fiber"
+                  />
+                </div>
+                <div class="editor-field">
+                  <label for="nutrition-sugar">{{ 'recipes.editor.sugar' | t }}</label
+                  ><input
+                    id="nutrition-sugar"
+                    class="form-input"
+                    type="number"
+                    min="0"
+                    step="any"
+                    name="nutritionSugar"
+                    [(ngModel)]="form.nutrition.sugar"
+                  />
+                </div>
+                <div class="editor-field">
+                  <label for="nutrition-sodium">{{ 'recipes.editor.sodium' | t }}</label
+                  ><input
+                    id="nutrition-sodium"
+                    class="form-input"
+                    type="number"
+                    min="0"
+                    step="any"
+                    name="nutritionSodium"
+                    [(ngModel)]="form.nutrition.sodium"
+                  />
+                </div>
+              </div>
+              <div class="editor-subsection">
+                <h2 id="editor-storage-title">{{ 'recipes.editor.section_storage' | t }}</h2>
+                <label class="editor-check editor-check--section">
+                  <input type="checkbox" name="storageEnabled" [(ngModel)]="form.storageEnabled" />
+                  <span>{{ 'recipes.editor.enable_storage' | t }}</span>
+                </label>
+                <div *ngIf="form.storageEnabled" class="editor-grid editor-grid--details">
+                  <div class="editor-field">
+                    <label for="storage-method">{{ 'recipes.editor.storage_method' | t }}</label
+                    ><input
+                      id="storage-method"
+                      class="form-input"
+                      name="storageMethod"
+                      [(ngModel)]="form.storage.method"
+                      required
+                    />
+                  </div>
+                  <div class="editor-field">
+                    <label for="storage-container">{{
+                      'recipes.editor.storage_container' | t
+                    }}</label
+                    ><input
+                      id="storage-container"
+                      class="form-input"
+                      name="storageContainer"
+                      [(ngModel)]="form.storage.container"
+                    />
+                  </div>
+                  <div class="editor-field">
+                    <label for="storage-duration">{{ 'recipes.editor.storage_duration' | t }}</label
+                    ><input
+                      id="storage-duration"
+                      class="form-input"
+                      name="storageDuration"
+                      [(ngModel)]="form.storage.duration"
+                      required
+                    />
+                  </div>
+                  <div class="editor-field">
+                    <label for="storage-reheating">{{
+                      'recipes.editor.storage_reheating' | t
+                    }}</label
+                    ><textarea
+                      id="storage-reheating"
+                      class="form-input editor-textarea"
+                      name="storageReheating"
+                      [(ngModel)]="form.storage.reheatingInstructions"
+                      rows="2"
+                    ></textarea>
+                  </div>
+                  <label class="editor-check editor-field--wide"
+                    ><input
+                      type="checkbox"
+                      name="storageFreezing"
+                      [(ngModel)]="form.storage.freezingPossible"
+                    /><span>{{ 'recipes.editor.storage_freezing' | t }}</span></label
+                  >
+                  <div *ngIf="form.storage.freezingPossible" class="editor-field">
+                    <label for="storage-freezing-duration">{{
+                      'recipes.editor.storage_freezing_duration' | t
+                    }}</label
+                    ><input
+                      id="storage-freezing-duration"
+                      class="form-input"
+                      name="storageFreezingDuration"
+                      [(ngModel)]="form.storage.freezingDuration"
+                    />
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section
+              [hidden]="activeTab !== 'media'"
+              id="editor-panel-media"
+              role="tabpanel"
+              tabindex="0"
+              aria-labelledby="recipe-editor-tab-media"
+              data-test="editor-panel-media"
+              class="editor-section"
+            >
+              <h2 id="editor-media-title">{{ 'recipes.editor.section_media' | t }}</h2>
+              <div class="editor-grid">
                 <div class="editor-field editor-field--wide">
-                  <label [for]="'step-image-' + group + '-' + index">{{
-                    'recipes.editor.step_image' | t
-                  }}</label>
+                  <label for="editor-image">{{ 'recipes.editor.cover_image' | t }}</label>
                   <input
-                    [id]="'step-image-' + group + '-' + index"
+                    id="editor-image"
                     class="form-input"
                     type="text"
+                    name="image"
+                    [ngModel]="form.image"
+                    (ngModelChange)="onCoverImageChange(form, $event)"
                     inputmode="url"
-                    [name]="'step-image-' + group + '-' + index"
-                    [(ngModel)]="step.imageUrl"
-                    (ngModelChange)="onStepImageChange(step, $event)"
                   />
-                  <p class="editor-hint">{{ 'recipes.editor.step_image_hint' | t }}</p>
-                  <figure *ngIf="step.imageUrl" class="editor-cover-preview editor-step-preview">
+                  <p class="editor-hint">{{ 'recipes.editor.cover_image_hint' | t }}</p>
+                  <figure *ngIf="form.image" class="editor-cover-preview">
                     <img
-                      [src]="step.imageUrl"
-                      [alt]="step.imageAttribution?.altText || step.instruction"
+                      [src]="form.image"
+                      [alt]="form.imageAttribution?.altText || form.name"
                       loading="lazy"
                     />
-                    <figcaption *ngIf="step.imageAttribution as credit">
+                    <figcaption *ngIf="form.imageAttribution as credit">
                       <span>{{ 'recipes.step_photo_credit' | t: { author: credit.author } }}</span>
                       <a [href]="credit.licenseUrl" target="_blank" rel="noopener noreferrer">{{
                         credit.licenseName
@@ -734,165 +1270,31 @@ type RecipeEditorTab =
                       }}</a>
                     </figcaption>
                   </figure>
-                  <button
-                    *ngIf="step.imageUrl"
-                    type="button"
-                    class="editor-text-button"
-                    (click)="clearStepPhoto(step)"
-                  >
-                    {{ 'recipes.editor.remove_step_photo' | t }}
-                  </button>
-                </div>
-                <div class="editor-field editor-field--wide editor-step-media-search">
-                  <div class="editor-step-media-search__toolbar">
-                    <span>{{ 'recipes.editor.step_video_heading' | t }}</span>
-                    <app-button
-                      variant="outline"
-                      [disabled]="isSearchingStepMedia"
-                      [attr.data-test]="'recipe-step-media-search-' + group + '-' + index"
-                      (onClick)="searchStepMedia(step)"
-                    >
-                      <app-icon name="search" [size]="16" [label]="null" />
-                      {{
-                        (stepMediaState(step) === 'loading'
-                          ? 'recipes.editor.step_media_searching'
-                          : 'recipes.editor.step_media_search'
-                        ) | t
-                      }}
-                    </app-button>
-                  </div>
-                  <p
-                    *ngIf="stepMediaState(step) === 'loading'"
-                    class="editor-hint"
-                    role="status"
-                    aria-live="polite"
-                  >
-                    {{ 'recipes.editor.step_media_searching' | t }}
-                  </p>
-                  <div
-                    *ngIf="stepMediaState(step) === 'error'"
-                    class="editor-photo-search__error"
-                    role="alert"
-                  >
-                    <span>{{ 'recipes.editor.step_media_search_failed' | t }}</span>
-                    <button
-                      type="button"
-                      class="editor-text-button"
-                      (click)="searchStepMedia(step, true)"
-                    >
-                      {{ 'recipes.editor.step_media_search_retry' | t }}
-                    </button>
-                  </div>
-                  <p
-                    *ngIf="stepMediaState(step) === 'empty'"
-                    class="editor-hint"
-                    role="status"
-                    aria-live="polite"
-                  >
-                    {{ 'recipes.editor.step_media_search_empty' | t }}
-                  </p>
-                  <p
-                    *ngIf="stepMediaResult(step)?.failed && stepMediaState(step) === 'results'"
-                    class="editor-hint"
-                    role="status"
-                  >
-                    {{ 'recipes.editor.step_media_search_failed' | t }}
-                  </p>
-                  <figure
-                    *ngIf="stepMediaResult(step)?.photo as photo"
-                    class="editor-step-media-search__photo"
-                  >
-                    <img [src]="photo.previewUrl" [alt]="photo.altText" loading="lazy" />
-                    <figcaption>
-                      <span>{{ photo.author }} · {{ photo.licenseName }}</span>
-                      <a [href]="photo.licenseUrl" target="_blank" rel="noopener noreferrer">{{
-                        photo.licenseName
-                      }}</a>
-                      <button
-                        type="button"
-                        class="editor-text-button"
-                        (click)="selectStepPhoto(step, photo)"
-                      >
-                        {{
-                          (step.imagePhotoId === photo.id
-                            ? 'recipes.editor.image_search_selected'
-                            : 'recipes.editor.image_search_select'
-                          ) | t
-                        }}
-                      </button>
-                    </figcaption>
-                  </figure>
-                  <div *ngIf="stepMediaResult(step)?.videos?.length" class="editor-video-results">
-                    <article
-                      *ngFor="let video of stepMediaResult(step)?.videos; trackBy: trackVideo"
-                      class="editor-video-result"
-                      [attr.data-test]="'recipe-step-video-result-' + group + '-' + index"
-                      [class.editor-video-result--selected]="step.videoId === video.id"
-                    >
-                      <img [src]="video.thumbnailUrl" alt="" loading="lazy" />
-                      <div class="editor-video-result__copy">
-                        <strong>{{ video.title }}</strong>
-                        <span>{{ video.author }} · {{ video.licenseName }}</span>
-                        <span>{{
-                          'recipes.editor.step_video_duration'
-                            | t: { seconds: video.durationSeconds }
-                        }}</span>
-                        <a [href]="video.licenseUrl" target="_blank" rel="noopener noreferrer">{{
-                          video.licenseName
-                        }}</a>
-                        <a [href]="video.sourceUrl" target="_blank" rel="noopener noreferrer">{{
-                          'recipes.step_photo_source' | t
-                        }}</a>
-                      </div>
-                      <app-button
-                        variant="outline"
-                        [disabled]="step.videoId === video.id"
-                        (onClick)="selectStepVideo(step, video)"
-                      >
-                        {{
-                          (step.videoId === video.id
-                            ? 'recipes.editor.step_video_selected'
-                            : 'recipes.editor.step_video_select'
-                          ) | t
-                        }}
-                      </app-button>
-                    </article>
-                  </div>
-                  <div *ngIf="step.video as selectedVideo" class="editor-selected-video">
-                    <img [src]="selectedVideo.thumbnailUrl" alt="" loading="lazy" />
-                    <span
-                      >{{ selectedVideo.title }} · {{ selectedVideo.author }} ·
-                      {{ selectedVideo.licenseName }}</span
-                    >
-                    <button type="button" class="editor-text-button" (click)="clearStepVideo(step)">
-                      {{ 'recipes.editor.step_video_remove' | t }}
-                    </button>
-                  </div>
                 </div>
                 <div
                   class="editor-field editor-field--wide editor-photo-search"
-                  [attr.data-test]="'recipe-step-photo-search-' + group + '-' + index"
+                  data-test="recipe-photo-search"
                 >
-                  <label [for]="'step-photo-search-' + group + '-' + index">{{
-                    'recipes.editor.step_image_search_label' | t
+                  <label for="editor-photo-search">{{
+                    'recipes.editor.image_search_label' | t
                   }}</label>
                   <input
-                    [id]="'step-photo-search-' + group + '-' + index"
+                    id="editor-photo-search"
                     class="form-input"
                     type="search"
-                    [name]="'step-photo-search-' + group + '-' + index"
-                    [(ngModel)]="step.photoSearchQuery"
-                    (ngModelChange)="searchStepPhotos(step, $event)"
-                    [placeholder]="'recipes.editor.step_image_search_placeholder' | t"
+                    name="photoSearch"
+                    [(ngModel)]="imageSearchQuery"
+                    (ngModelChange)="searchCoverPhotos($event)"
+                    [placeholder]="'recipes.editor.image_search_placeholder' | t"
                     maxlength="80"
                     autocomplete="off"
-                    [attr.aria-describedby]="'step-photo-search-hint-' + group + '-' + index"
+                    aria-describedby="editor-photo-search-hint"
                   />
-                  <p [id]="'step-photo-search-hint-' + group + '-' + index" class="editor-hint">
-                    {{ 'recipes.editor.step_image_search_hint' | t }}
+                  <p id="editor-photo-search-hint" class="editor-hint">
+                    {{ 'recipes.editor.image_search_hint' | t }}
                   </p>
                   <p
-                    *ngIf="stepPhotoState(step) === 'loading'"
+                    *ngIf="imageSearchState === 'loading'"
                     class="editor-hint"
                     role="status"
                     aria-live="polite"
@@ -900,7 +1302,7 @@ type RecipeEditorTab =
                     {{ 'recipes.editor.image_search_loading' | t }}
                   </p>
                   <p
-                    *ngIf="stepPhotoState(step) === 'empty'"
+                    *ngIf="imageSearchState === 'empty'"
                     class="editor-hint"
                     role="status"
                     aria-live="polite"
@@ -908,7 +1310,7 @@ type RecipeEditorTab =
                     {{ 'recipes.editor.image_search_empty' | t }}
                   </p>
                   <div
-                    *ngIf="stepPhotoState(step) === 'error'"
+                    *ngIf="imageSearchState === 'error'"
                     class="editor-photo-search__error"
                     role="alert"
                   >
@@ -916,392 +1318,88 @@ type RecipeEditorTab =
                     <button
                       type="button"
                       class="editor-text-button"
-                      (click)="searchStepPhotos(step, step.photoSearchQuery, true)"
+                      (click)="retryCoverPhotoSearch()"
                     >
                       {{ 'recipes.editor.image_search_retry' | t }}
                     </button>
                   </div>
                   <div
-                    *ngIf="stepPhotoResults(step).length > 0"
+                    *ngIf="imageSearchResults.length > 0"
                     class="editor-photo-results"
-                    [attr.data-test]="'recipe-step-photo-results-' + group + '-' + index"
+                    data-test="recipe-photo-results"
                   >
                     <button
-                      *ngFor="let photo of stepPhotoResults(step); trackBy: trackPhoto"
+                      *ngFor="let photo of imageSearchResults; trackBy: trackPhoto"
                       type="button"
                       class="editor-photo-result"
-                      [class.editor-photo-result--selected]="step.imagePhotoId === photo.id"
-                      [attr.aria-pressed]="step.imagePhotoId === photo.id"
-                      (click)="selectStepPhoto(step, photo)"
+                      [class.editor-photo-result--selected]="form.imagePhotoId === photo.id"
+                      [attr.aria-pressed]="form.imagePhotoId === photo.id"
+                      (click)="selectCoverPhoto(form, photo)"
                     >
                       <img [src]="photo.previewUrl" [alt]="photo.altText" loading="lazy" />
-                      <span class="editor-photo-result__author">{{ photo.author }}</span>
-                      <span>{{ photo.licenseName }}</span>
+                      <span class="editor-photo-result__author">{{ photo.author }}</span
+                      ><span>{{ photo.licenseName }}</span>
                       <span class="editor-photo-result__action">{{
-                        (step.imagePhotoId === photo.id
+                        (form.imagePhotoId === photo.id
                           ? 'recipes.editor.image_search_selected'
                           : 'recipes.editor.image_search_select'
                         ) | t
                       }}</span>
                     </button>
                   </div>
+                  <div class="editor-image-generation">
+                    <button
+                      type="button"
+                      class="editor-text-button"
+                      disabled
+                      aria-describedby="editor-image-generation-help"
+                    >
+                      {{ 'recipes.editor.generate_image' | t }}
+                    </button>
+                    <p id="editor-image-generation-help" class="editor-hint">
+                      {{ 'recipes.editor.generate_image_unavailable' | t }}
+                    </p>
+                  </div>
                 </div>
               </div>
-            </article>
-          </ng-template>
-        </section>
-
-        <section
-          [hidden]="activeTab !== 'guidance'"
-          id="editor-panel-guidance"
-          role="tabpanel"
-          tabindex="0"
-          aria-labelledby="recipe-editor-tab-guidance"
-          class="editor-section"
-        >
-          <h2 id="editor-equipment-title">{{ 'recipes.editor.section_equipment' | t }}</h2>
-          <div class="editor-grid">
-            <div class="editor-field">
-              <label for="editor-utensils">{{ 'recipes.utensils' | t }}</label>
-              <textarea
-                id="editor-utensils"
-                class="form-input editor-textarea"
-                name="utensils"
-                [(ngModel)]="form.utensilsText"
-                rows="4"
-              ></textarea>
-            </div>
-            <div class="editor-field">
-              <label for="editor-appliances">{{ 'recipes.editor.appliances' | t }}</label>
-              <textarea
-                id="editor-appliances"
-                class="form-input editor-textarea"
-                name="appliances"
-                [(ngModel)]="form.appliancesText"
-                rows="4"
-              ></textarea>
-            </div>
+            </section>
           </div>
-          <div class="editor-subsection">
-            <h2 id="editor-guidance-title">{{ 'recipes.editor.section_guidance' | t }}</h2>
-            <div class="editor-grid">
-              <div class="editor-field">
-                <label for="editor-parallel">{{ 'recipes.editor.parallel_tasks' | t }}</label>
-                <textarea
-                  id="editor-parallel"
-                  class="form-input editor-textarea"
-                  name="parallelTasks"
-                  [(ngModel)]="form.parallelTasksText"
-                  rows="4"
-                ></textarea>
-              </div>
-              <div class="editor-field">
-                <label for="editor-guidance-tips">{{ 'recipes.editor.tips_variations' | t }}</label>
-                <textarea
-                  id="editor-guidance-tips"
-                  class="form-input editor-textarea"
-                  name="guidanceTips"
-                  [(ngModel)]="form.tipsAndVariationsText"
-                  rows="4"
-                ></textarea>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section
-          [hidden]="activeTab !== 'nutrition'"
-          id="editor-panel-nutrition"
-          role="tabpanel"
-          tabindex="0"
-          aria-labelledby="recipe-editor-tab-nutrition"
-          class="editor-section"
-        >
-          <h2 id="editor-nutrition-title">{{ 'recipes.editor.section_nutrition' | t }}</h2>
-          <label class="editor-check editor-check--section">
-            <input type="checkbox" name="nutritionEnabled" [(ngModel)]="form.nutritionEnabled" />
-            <span>{{ 'recipes.editor.enable_nutrition' | t }}</span>
-          </label>
-          <div *ngIf="form.nutritionEnabled" class="editor-grid editor-grid--details">
-            <div class="editor-field">
-              <label for="nutrition-calories">{{ 'recipes.editor.calories' | t }}</label
-              ><input
-                id="nutrition-calories"
-                class="form-input"
-                type="number"
-                min="0"
-                step="any"
-                name="nutritionCalories"
-                [(ngModel)]="form.nutrition.calories"
-              />
-            </div>
-            <div class="editor-field">
-              <label for="nutrition-protein">{{ 'recipes.editor.protein' | t }}</label
-              ><input
-                id="nutrition-protein"
-                class="form-input"
-                type="number"
-                min="0"
-                step="any"
-                name="nutritionProtein"
-                [(ngModel)]="form.nutrition.protein"
-              />
-            </div>
-            <div class="editor-field">
-              <label for="nutrition-carbs">{{ 'recipes.editor.carbs' | t }}</label
-              ><input
-                id="nutrition-carbs"
-                class="form-input"
-                type="number"
-                min="0"
-                step="any"
-                name="nutritionCarbs"
-                [(ngModel)]="form.nutrition.carbs"
-              />
-            </div>
-            <div class="editor-field">
-              <label for="nutrition-fat">{{ 'recipes.editor.fat' | t }}</label
-              ><input
-                id="nutrition-fat"
-                class="form-input"
-                type="number"
-                min="0"
-                step="any"
-                name="nutritionFat"
-                [(ngModel)]="form.nutrition.fat"
-              />
-            </div>
-            <div class="editor-field">
-              <label for="nutrition-fiber">{{ 'recipes.editor.fiber' | t }}</label
-              ><input
-                id="nutrition-fiber"
-                class="form-input"
-                type="number"
-                min="0"
-                step="any"
-                name="nutritionFiber"
-                [(ngModel)]="form.nutrition.fiber"
-              />
-            </div>
-            <div class="editor-field">
-              <label for="nutrition-sugar">{{ 'recipes.editor.sugar' | t }}</label
-              ><input
-                id="nutrition-sugar"
-                class="form-input"
-                type="number"
-                min="0"
-                step="any"
-                name="nutritionSugar"
-                [(ngModel)]="form.nutrition.sugar"
-              />
-            </div>
-            <div class="editor-field">
-              <label for="nutrition-sodium">{{ 'recipes.editor.sodium' | t }}</label
-              ><input
-                id="nutrition-sodium"
-                class="form-input"
-                type="number"
-                min="0"
-                step="any"
-                name="nutritionSodium"
-                [(ngModel)]="form.nutrition.sodium"
-              />
-            </div>
-          </div>
-          <div class="editor-subsection">
-            <h2 id="editor-storage-title">{{ 'recipes.editor.section_storage' | t }}</h2>
-            <label class="editor-check editor-check--section">
-              <input type="checkbox" name="storageEnabled" [(ngModel)]="form.storageEnabled" />
-              <span>{{ 'recipes.editor.enable_storage' | t }}</span>
-            </label>
-            <div *ngIf="form.storageEnabled" class="editor-grid editor-grid--details">
-              <div class="editor-field">
-                <label for="storage-method">{{ 'recipes.editor.storage_method' | t }}</label
-                ><input
-                  id="storage-method"
-                  class="form-input"
-                  name="storageMethod"
-                  [(ngModel)]="form.storage.method"
-                  required
-                />
-              </div>
-              <div class="editor-field">
-                <label for="storage-container">{{ 'recipes.editor.storage_container' | t }}</label
-                ><input
-                  id="storage-container"
-                  class="form-input"
-                  name="storageContainer"
-                  [(ngModel)]="form.storage.container"
-                />
-              </div>
-              <div class="editor-field">
-                <label for="storage-duration">{{ 'recipes.editor.storage_duration' | t }}</label
-                ><input
-                  id="storage-duration"
-                  class="form-input"
-                  name="storageDuration"
-                  [(ngModel)]="form.storage.duration"
-                  required
-                />
-              </div>
-              <div class="editor-field">
-                <label for="storage-reheating">{{ 'recipes.editor.storage_reheating' | t }}</label
-                ><textarea
-                  id="storage-reheating"
-                  class="form-input editor-textarea"
-                  name="storageReheating"
-                  [(ngModel)]="form.storage.reheatingInstructions"
-                  rows="2"
-                ></textarea>
-              </div>
-              <label class="editor-check editor-field--wide"
-                ><input
-                  type="checkbox"
-                  name="storageFreezing"
-                  [(ngModel)]="form.storage.freezingPossible"
-                /><span>{{ 'recipes.editor.storage_freezing' | t }}</span></label
-              >
-              <div *ngIf="form.storage.freezingPossible" class="editor-field">
-                <label for="storage-freezing-duration">{{
-                  'recipes.editor.storage_freezing_duration' | t
-                }}</label
-                ><input
-                  id="storage-freezing-duration"
-                  class="form-input"
-                  name="storageFreezingDuration"
-                  [(ngModel)]="form.storage.freezingDuration"
-                />
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section
-          [hidden]="activeTab !== 'media'"
-          id="editor-panel-media"
-          role="tabpanel"
-          tabindex="0"
-          aria-labelledby="recipe-editor-tab-media"
-          data-test="editor-panel-media"
-          class="editor-section"
-        >
-          <h2 id="editor-media-title">{{ 'recipes.editor.section_media' | t }}</h2>
-          <div class="editor-grid">
-            <div class="editor-field editor-field--wide">
-              <label for="editor-image">{{ 'recipes.editor.cover_image' | t }}</label>
-              <input
-                id="editor-image"
-                class="form-input"
-                type="text"
-                name="image"
-                [ngModel]="form.image"
-                (ngModelChange)="onCoverImageChange(form, $event)"
-                inputmode="url"
-              />
-              <p class="editor-hint">{{ 'recipes.editor.cover_image_hint' | t }}</p>
-              <figure *ngIf="form.image" class="editor-cover-preview">
+          <aside
+            class="recipe-editor__sidebar"
+            data-test="recipe-editor-cover-sidebar"
+            [attr.aria-label]="'recipes.editor.cover_image' | t"
+          >
+            <section class="recipe-editor__cover-sidebar-card">
+              <h2>{{ 'recipes.editor.cover_image' | t }}</h2>
+              <figure *ngIf="form.image" class="recipe-editor__cover-sidebar-preview">
                 <img
                   [src]="form.image"
                   [alt]="form.imageAttribution?.altText || form.name"
                   loading="lazy"
+                  data-test="recipe-editor-cover-preview"
                 />
-                <figcaption *ngIf="form.imageAttribution as credit">
-                  <span>{{ 'recipes.step_photo_credit' | t: { author: credit.author } }}</span>
-                  <a [href]="credit.licenseUrl" target="_blank" rel="noopener noreferrer">{{
-                    credit.licenseName
-                  }}</a>
-                  <a [href]="credit.sourceUrl" target="_blank" rel="noopener noreferrer">{{
-                    'recipes.step_photo_source' | t
-                  }}</a>
-                </figcaption>
               </figure>
-            </div>
-            <div
-              class="editor-field editor-field--wide editor-photo-search"
-              data-test="recipe-photo-search"
-            >
-              <label for="editor-photo-search">{{ 'recipes.editor.image_search_label' | t }}</label>
-              <input
-                id="editor-photo-search"
-                class="form-input"
-                type="search"
-                name="photoSearch"
-                [(ngModel)]="imageSearchQuery"
-                (ngModelChange)="searchCoverPhotos($event)"
-                [placeholder]="'recipes.editor.image_search_placeholder' | t"
-                maxlength="80"
-                autocomplete="off"
-                aria-describedby="editor-photo-search-hint"
-              />
-              <p id="editor-photo-search-hint" class="editor-hint">
-                {{ 'recipes.editor.image_search_hint' | t }}
+              <app-button
+                data-test="recipe-editor-cover-edit"
+                variant="outline"
+                [fullWidth]="true"
+                [type]="'button'"
+                (onClick)="openCoverEditor()"
+              >
+                <app-icon name="edit" [size]="18" [label]="null" />
+                {{ 'recipes.editor.tab_media' | t }}
+              </app-button>
+              <p class="editor-hint">
+                {{
+                  (form.image
+                    ? 'recipes.editor.cover_image_hint'
+                    : 'recipes.editor.image_search_hint'
+                  ) | t
+                }}
               </p>
-              <p
-                *ngIf="imageSearchState === 'loading'"
-                class="editor-hint"
-                role="status"
-                aria-live="polite"
-              >
-                {{ 'recipes.editor.image_search_loading' | t }}
-              </p>
-              <p
-                *ngIf="imageSearchState === 'empty'"
-                class="editor-hint"
-                role="status"
-                aria-live="polite"
-              >
-                {{ 'recipes.editor.image_search_empty' | t }}
-              </p>
-              <div
-                *ngIf="imageSearchState === 'error'"
-                class="editor-photo-search__error"
-                role="alert"
-              >
-                <span>{{ 'recipes.editor.image_search_failed' | t }}</span>
-                <button type="button" class="editor-text-button" (click)="retryCoverPhotoSearch()">
-                  {{ 'recipes.editor.image_search_retry' | t }}
-                </button>
-              </div>
-              <div
-                *ngIf="imageSearchResults.length > 0"
-                class="editor-photo-results"
-                data-test="recipe-photo-results"
-              >
-                <button
-                  *ngFor="let photo of imageSearchResults; trackBy: trackPhoto"
-                  type="button"
-                  class="editor-photo-result"
-                  [class.editor-photo-result--selected]="form.imagePhotoId === photo.id"
-                  [attr.aria-pressed]="form.imagePhotoId === photo.id"
-                  (click)="selectCoverPhoto(form, photo)"
-                >
-                  <img [src]="photo.previewUrl" [alt]="photo.altText" loading="lazy" />
-                  <span class="editor-photo-result__author">{{ photo.author }}</span
-                  ><span>{{ photo.licenseName }}</span>
-                  <span class="editor-photo-result__action">{{
-                    (form.imagePhotoId === photo.id
-                      ? 'recipes.editor.image_search_selected'
-                      : 'recipes.editor.image_search_select'
-                    ) | t
-                  }}</span>
-                </button>
-              </div>
-              <div class="editor-image-generation">
-                <button
-                  type="button"
-                  class="editor-text-button"
-                  disabled
-                  aria-describedby="editor-image-generation-help"
-                >
-                  {{ 'recipes.editor.generate_image' | t }}
-                </button>
-                <p id="editor-image-generation-help" class="editor-hint">
-                  {{ 'recipes.editor.generate_image_unavailable' | t }}
-                </p>
-              </div>
-            </div>
-          </div>
-        </section>
+            </section>
+          </aside>
+        </div>
 
         <footer class="recipe-editor__actions">
           <app-button
@@ -1377,7 +1475,77 @@ type RecipeEditorTab =
       .recipe-editor__form {
         display: grid;
         gap: var(--space-4);
+        max-width: 1090px;
         padding-bottom: calc(96px + env(safe-area-inset-bottom));
+      }
+      .recipe-editor__layout {
+        min-width: 0;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 326px;
+        align-items: start;
+        gap: 18px;
+      }
+      .recipe-editor__main {
+        min-width: 0;
+      }
+      .recipe-editor__sidebar {
+        min-width: 0;
+      }
+      .recipe-editor__mobile-cover {
+        display: none;
+      }
+      .recipe-editor__mobile-cover-action {
+        width: 100%;
+        min-height: 56px;
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        padding: var(--space-3);
+        border: 1px solid var(--border-default);
+        border-radius: var(--radius-md);
+        background: var(--bg-tertiary);
+        color: var(--primary);
+        font: inherit;
+        font-size: var(--text-sm);
+        text-align: start;
+        cursor: pointer;
+      }
+      .recipe-editor__mobile-cover-action:focus-visible {
+        outline: 2px solid var(--primary);
+        outline-offset: 2px;
+      }
+      .recipe-editor__mobile-cover .editor-hint {
+        margin: 0;
+      }
+      .recipe-editor__cover-sidebar-card {
+        min-width: 0;
+        display: grid;
+        align-content: start;
+        gap: var(--space-3);
+        padding: var(--space-4);
+        border: 1px solid var(--border-default);
+        border-radius: var(--radius-lg);
+        background: var(--bg-secondary);
+      }
+      .recipe-editor__cover-sidebar-card h2 {
+        margin: 0;
+        color: var(--text-secondary);
+        font-size: var(--text-xs);
+        font-weight: var(--font-medium);
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+      .recipe-editor__cover-sidebar-preview {
+        min-width: 0;
+        margin: 0;
+      }
+      .recipe-editor__cover-sidebar-preview img {
+        display: block;
+        width: 100%;
+        aspect-ratio: 282 / 164;
+        border-radius: var(--radius-md);
+        background: var(--bg-tertiary);
+        object-fit: cover;
       }
       .recipe-editor__header {
         display: flex;
@@ -1911,36 +2079,41 @@ type RecipeEditorTab =
       }
       @media (max-width: 800px) {
         .recipe-editor__tabs {
-          display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-          overflow: visible;
-          border-bottom: 0;
+          display: flex;
+          flex-wrap: nowrap;
+          overflow-x: auto;
+          overflow-y: hidden;
+          scroll-snap-type: x proximity;
+          scrollbar-width: thin;
         }
         .recipe-editor__tab {
-          min-width: 0;
-          border: 1px solid var(--border-default);
-          border-radius: var(--radius-md);
-          white-space: normal;
-          line-height: var(--leading-tight);
-          text-align: center;
+          flex: 0 0 auto;
+          scroll-snap-align: start;
+          white-space: nowrap;
         }
-        .recipe-editor__tab.is-active {
-          border-color: var(--primary);
-          background: var(--bg-secondary);
+      }
+      @media (max-width: 1100px) {
+        .recipe-editor__layout {
+          grid-template-columns: minmax(0, 1fr);
         }
-        .recipe-editor__tab.is-active::after {
-          right: 25%;
-          left: 25%;
-          height: 2px;
-          bottom: 2px;
+        .recipe-editor__sidebar {
+          display: none;
+        }
+        .recipe-editor__mobile-cover {
+          display: grid;
+          gap: var(--space-2);
+          margin-top: var(--space-4);
         }
       }
       @media (max-width: 640px) {
         .recipe-editor__header {
           flex-wrap: wrap;
         }
+        .recipe-editor__heading {
+          flex: 1 1 100%;
+        }
         .recipe-editor__improve-trigger {
-          width: 100%;
+          width: auto;
         }
         .editor-section {
           padding: var(--space-3);
@@ -2320,6 +2493,14 @@ export class RecipeEditComponent implements OnInit, OnDestroy {
 
   setActiveTab(tab: RecipeEditorTab): void {
     this.activeTab = tab;
+  }
+
+  openCoverEditor(): void {
+    this.setActiveTab('media');
+    afterNextRender(
+      () => this.document.getElementById('editor-image')?.focus({ preventScroll: true }),
+      { injector: this.injector }
+    );
   }
 
   setActiveDetailLevel(level: RecipeDetailLevel): void {

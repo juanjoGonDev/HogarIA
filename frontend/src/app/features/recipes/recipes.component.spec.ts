@@ -138,12 +138,15 @@ describe('RecipesComponent', () => {
   let household: ReturnType<typeof createHouseholdService>;
   let toast: jasmine.SpyObj<ToastService>;
   let authUserId: string | null;
+  let authCurrentUser: any;
+  let authUpdateProfile: jasmine.Spy;
 
   function createRecipeService() {
     return {
       recipes: signal<Recipe[]>([]),
       total: signal(0),
       isLoading: signal(false),
+      recipesLoadError: signal(false),
       loadRecipes: jasmine.createSpy('loadRecipes'),
       getRecipe: jasmine.createSpy('getRecipe').and.returnValue(of(null)),
       createRecipe: jasmine.createSpy('createRecipe').and.returnValue(of(RECIPE)),
@@ -208,12 +211,41 @@ describe('RecipesComponent', () => {
     household = createHouseholdService();
     toast = jasmine.createSpyObj<ToastService>('ToastService', ['success', 'error']);
     authUserId = 'synthetic-user';
+    authCurrentUser = signal({
+      id: authUserId,
+      preferences: {
+        theme: 'system',
+        language: 'es',
+        detailLevel: 'intermediate',
+        notifications: {
+          expirationAlerts: true,
+          mealReminders: true,
+          recipeSuggestions: true
+        },
+        recipeViewMode: 'grid'
+      }
+    });
+    authUpdateProfile = jasmine.createSpy('updateProfile').and.callFake((patch: any) => {
+      const user = {
+        ...authCurrentUser(),
+        preferences: { ...authCurrentUser().preferences, ...patch.preferences }
+      };
+      authCurrentUser.set(user);
+      return of(user);
+    });
 
     await TestBed.configureTestingModule({
       imports: [RecipesComponent],
       providers: [
         { provide: RecipeService, useValue: recipes },
-        { provide: AuthService, useValue: { userId: () => authUserId } },
+        {
+          provide: AuthService,
+          useValue: {
+            userId: () => authUserId,
+            currentUser: authCurrentUser,
+            updateProfile: authUpdateProfile
+          }
+        },
         { provide: HouseholdService, useValue: household },
         {
           provide: TasteProfileService,
@@ -282,12 +314,24 @@ describe('RecipesComponent', () => {
 
     queryParams.next(convertToParamMap({ maxTime: '30' }));
     expect(component.activeFilter()).toBe('quick');
-    expect(recipes.loadRecipes).toHaveBeenCalledWith({ page: 1, pageSize: 20, maxTime: 30 });
+    expect(recipes.loadRecipes).toHaveBeenCalledWith({ page: 1, pageSize: 9, maxTime: 30 });
     queryParams.next(convertToParamMap({ author: 'user' }));
     expect(component.activeFilter()).toBe('');
     queryParams.next(convertToParamMap({ collection: 'book' }));
     expect(component.page()).toBe(1);
-    expect(recipes.loadRecipes).toHaveBeenCalledWith({ page: 1, pageSize: 12, catalogOnly: true });
+    expect(recipes.loadRecipes).toHaveBeenCalledWith({ page: 1, pageSize: 9, catalogOnly: true });
+  });
+
+  it('restores and saves the list/grid preference on the signed-in user', () => {
+    expect(component.viewMode()).toBe('grid');
+
+    component.setViewMode('list');
+
+    expect(component.viewMode()).toBe('list');
+    expect(authUpdateProfile).toHaveBeenCalledWith({
+      preferences: jasmine.objectContaining({ recipeViewMode: 'list' })
+    });
+    expect(authCurrentUser().preferences.recipeViewMode).toBe('list');
   });
 
   it('navigates to the dedicated manual recipe creation form', () => {
@@ -310,7 +354,7 @@ describe('RecipesComponent', () => {
     );
     expect(recipes.loadRecipes).toHaveBeenCalledWith({
       page: 1,
-      pageSize: 20,
+      pageSize: 9,
       countryCode: 'SV',
       difficulty: 'medium',
       isFavorite: true
@@ -344,16 +388,21 @@ describe('RecipesComponent', () => {
     component.setCollection('book');
     expect(router.navigate).toHaveBeenCalledWith(
       [],
-      jasmine.objectContaining({ queryParams: { collection: 'book', page: null, pageSize: '12' } })
+      jasmine.objectContaining({ queryParams: { collection: 'book', page: null, pageSize: null } })
     );
     component.setCollection('all');
     component.searchInput.set('  tortilla  ');
-    component.applyBookSearch();
+    component.applySearch();
     expect(router.navigate).toHaveBeenCalledWith(
       [],
       jasmine.objectContaining({ queryParams: { search: 'tortilla', page: null } })
     );
-    recipes.total.set(30);
+    component.setViewMode('grid');
+    expect(component.viewMode()).toBe('grid');
+    component.setViewMode('list');
+    expect(component.viewMode()).toBe('list');
+    component.setViewMode('grid');
+    recipes.total.set(18);
     component.page.set(1);
     expect(component.pageCount()).toBe(2);
     component.changePage(0);
@@ -377,6 +426,24 @@ describe('RecipesComponent', () => {
           page: null
         })
       })
+    );
+  });
+
+  it('returns to the last valid page when a refreshed result total shrinks', () => {
+    recipes.total.set(25);
+    recipes.loadRecipes.and.callFake(() => recipes.isLoading.set(true));
+
+    queryParams.next(convertToParamMap({ page: '2' }));
+    expect(component.page()).toBe(2);
+    expect(recipes.loadRecipes).toHaveBeenCalledWith(jasmine.objectContaining({ page: 2 }));
+
+    recipes.total.set(7);
+    recipes.isLoading.set(false);
+    fixture.detectChanges();
+
+    expect(router.navigate).toHaveBeenCalledWith(
+      [],
+      jasmine.objectContaining({ queryParams: jasmine.objectContaining({ page: '1' }) })
     );
   });
 

@@ -1,13 +1,12 @@
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { expect, test } from './fixtures';
-import { registerAndGoto } from './helpers/auth';
+import { registerWithHousehold } from './helpers/auth';
 import {
   createSyntheticRecipe,
   deleteSyntheticRecipe,
   waitForStableView
 } from './helpers/recipe-fixtures';
-import { mockRecipeStepPhotos } from './helpers/recipe-step-photos';
 
 const fullRecipe = {
   name: 'Arroz de prueba detallado',
@@ -152,15 +151,22 @@ const fullRecipe = {
   }
 };
 
+function resolveScreenshotDirectory(relativePath: string): string {
+  const configuredDirectory = process.env.E2E_SCREENSHOT_DIR;
+  return configuredDirectory
+    ? resolve(configuredDirectory, relativePath.split(/[\\/]/).at(-1) ?? 'recipe-full-detail')
+    : resolve(relativePath);
+}
+
 test('la ficha completa presenta detalle, ajusta raciones solo en pantalla y no solicita más IA', async ({
   page
 }, testInfo) => {
   const viewport =
     testInfo.project.name === 'chromium'
-      ? { width: 1440, height: 1000 }
-      : { width: 393, height: 852 };
-  const photoRequests = await mockRecipeStepPhotos(page);
-  await registerAndGoto(page, '/recipes', 'recipe-full-detail');
+      ? { width: 1440, height: 980 }
+      : { width: 390, height: 844 };
+  await page.setViewportSize(viewport);
+  await registerWithHousehold(page, '/recipes', 'recipe-full-detail');
   const recipe = await createSyntheticRecipe(page, fullRecipe);
   const aiRequests: string[] = [];
   page.on('request', (request) => {
@@ -175,63 +181,224 @@ test('la ficha completa presenta detalle, ajusta raciones solo en pantalla y no 
     await expect(page.locator('[data-test="recipe-list-view"]')).toBeHidden();
     await expect(detail).toBeVisible();
     await expect(page.locator('[data-test="recipe-detail-title"]')).toBeFocused();
-    const coverBox = await detail.locator('.recipe-detail__cover').boundingBox();
+    await expect(detail.locator('.recipe-detail__header app-badge')).toHaveText('Fácil');
+    const timings = detail.locator('.recipe-detail__timings');
+    await expect(timings).toHaveCSS('display', 'flex');
+    await expect(timings).not.toContainText('porciones');
+    await expect(timings.locator(':scope > span')).toHaveCount(4);
+    if (testInfo.project.name === 'mobile-chrome') {
+      await expect(timings.locator('.recipe-detail__timing-label--full').first()).toBeHidden();
+      await expect(timings.locator('.recipe-detail__timing-label--compact').first()).toBeVisible();
+    }
+    const screenshotDirectory = resolveScreenshotDirectory('.e2e-screenshots/recipe-redesign');
+    mkdirSync(screenshotDirectory, { recursive: true });
+    await page.screenshot({
+      path: resolve(screenshotDirectory, `detail-${testInfo.project.name}.png`),
+      fullPage: false,
+      animations: 'disabled'
+    });
+    if (testInfo.project.name === 'mobile-chrome') {
+      await page.setViewportSize({ width: 320, height: 640 });
+      await expect
+        .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
+        .toBeLessThanOrEqual(320);
+      await expect(timings).toHaveCSS('display', 'flex');
+      await page.setViewportSize(viewport);
+    }
+    await expect(
+      detail.locator('.recipe-detail__cover'),
+      'sin una portada guardada no debe reservarse un gran hueco vacío'
+    ).toHaveCount(0);
     const summaryBox = await detail.locator('.recipe-detail__header').boundingBox();
-    expect(coverBox).not.toBeNull();
+    const detailTabs = detail.locator('[data-test="recipe-detail-tabs"]');
+    const detailTabsBox = await detailTabs.boundingBox();
+    const preparationBox = await detail.locator('[data-test="recipe-preparation"]').boundingBox();
+    const articleBox = await detail.boundingBox();
+    expect(articleBox).not.toBeNull();
     expect(summaryBox).not.toBeNull();
-    if (viewport.width <= 760) {
-      expect(coverBox!.y + coverBox!.height).toBeLessThanOrEqual(summaryBox!.y + 1);
-    } else {
-      expect(
-        coverBox!.x + coverBox!.width,
-        'la portada debe quedar dentro de su columna, sin solaparse con el resumen'
-      ).toBeLessThanOrEqual(summaryBox!.x + 1);
+    expect(detailTabsBox).not.toBeNull();
+    expect(preparationBox).not.toBeNull();
+    expect(summaryBox!.width).toBeCloseTo(articleBox!.width, 0);
+    if (viewport.width > 1024) {
+      const ingredientsBox = await detail.locator('[data-test="recipe-ingredients"]').boundingBox();
+      expect(ingredientsBox).not.toBeNull();
+      expect(articleBox!.x).toBeCloseTo(312, 0);
+      expect(articleBox!.width).toBeCloseTo(1090, 0);
+      expect(detailTabsBox!.x).toBeCloseTo(312, 0);
+      expect(detailTabsBox!.width).toBeCloseTo(1090, 0);
+      expect(summaryBox!.y + summaryBox!.height).toBeLessThanOrEqual(detailTabsBox!.y + 1);
+      expect(preparationBox!.x).toBeCloseTo(312, 0);
+      expect(preparationBox!.width).toBeCloseTo(746, 0);
+      expect(ingredientsBox!.x).toBeCloseTo(1076, 0);
+      expect(ingredientsBox!.width).toBeCloseTo(326, 0);
+      expect(detailTabsBox!.y + detailTabsBox!.height).toBeLessThanOrEqual(preparationBox!.y + 1);
+      expect(ingredientsBox!.y).toBeCloseTo(preparationBox!.y, 0);
     }
     if (viewport.width <= 760) {
       const pageHeader = await page.locator('.recipe-detail-page__header').boundingBox();
       const pageTitle = await page.locator('[data-test="recipe-detail-title"]').boundingBox();
+      const summaryMeta = await detail.locator('.recipe-detail__meta').boundingBox();
+      const summaryDescription = await detail.locator('.recipe-detail__description').boundingBox();
+      const summaryTimings = await timings.boundingBox();
+      const backAction = await page.locator('.recipe-detail-page__back').boundingBox();
+      const editAction = await page.locator('[data-test="recipe-edit-action"]').boundingBox();
       expect(pageHeader).not.toBeNull();
       expect(pageTitle).not.toBeNull();
+      expect(summaryMeta).not.toBeNull();
+      expect(summaryDescription).not.toBeNull();
+      expect(summaryTimings).not.toBeNull();
+      expect(backAction).not.toBeNull();
+      expect(editAction).not.toBeNull();
       expect(pageTitle!.x).toBeCloseTo(pageHeader!.x, 0);
       expect(pageTitle!.width).toBeGreaterThanOrEqual(pageHeader!.width - 1);
+      expect(detailTabsBox!.x).toBeCloseTo(16, 0);
+      expect(detailTabsBox!.width).toBeCloseTo(358, 0);
+      expect(pageTitle!.y + pageTitle!.height).toBeLessThanOrEqual(summaryMeta!.y + 1);
+      expect(summaryMeta!.y + summaryMeta!.height).toBeLessThanOrEqual(summaryDescription!.y + 1);
+      expect(summaryDescription!.y + summaryDescription!.height).toBeLessThanOrEqual(
+        summaryTimings!.y + 1
+      );
+      expect(summaryTimings!.y + summaryTimings!.height).toBeLessThanOrEqual(detailTabsBox!.y + 1);
+      expect(detailTabsBox!.y + detailTabsBox!.height).toBeLessThanOrEqual(preparationBox!.y + 1);
+      expect(backAction!.y).toBeCloseTo(editAction!.y, 0);
+      expect(pageTitle!.y).toBeGreaterThanOrEqual(backAction!.y + backAction!.height);
+      expect(editAction!.x + editAction!.width).toBeLessThanOrEqual(
+        pageHeader!.x + pageHeader!.width
+      );
+      await expect(detail.locator('.recipe-detail__actions')).toHaveCSS('position', 'fixed');
+      const expandSteps = await detail
+        .locator('[data-test="recipe-expand-steps-mobile"]')
+        .boundingBox();
+      const actions = await detail.locator('.recipe-detail__actions').boundingBox();
+      expect(expandSteps).not.toBeNull();
+      expect(actions).not.toBeNull();
+      expect(expandSteps!.y + expandSteps!.height).toBeLessThanOrEqual(actions!.y);
     }
     await expect(detail).toContainText('~520 kcal por ración');
     await expect(detail).toContainText('Tiempo total');
     await expect(detail).toContainText('Preparación');
     await expect(detail).toContainText('Cocción');
     await expect(detail).toContainText('Reposo');
-    await expect(detail).toContainText('Azafrán QA');
-    await expect(detail).toContainText('Opcional');
-    await expect(detail).toContainText('quinoa');
-    await expect(page.locator('[data-test="recipe-equipment"]')).toContainText('Cocina de gas');
-    await expect(page.locator('[data-test="recipe-parallel-tasks"]')).toContainText(
+    await expect(detailTabs.getByRole('tab')).toHaveCount(4);
+    const tabStripOverflow = await detailTabs.evaluate((tabStrip) => ({
+      overflowY: getComputedStyle(tabStrip).overflowY,
+      clientHeight: tabStrip.clientHeight,
+      scrollHeight: tabStrip.scrollHeight
+    }));
+    expect(
+      tabStripOverflow.overflowY,
+      'la navegación horizontal de subtabs no debe mostrar una barra vertical interna'
+    ).toBe('hidden');
+    expect(tabStripOverflow.scrollHeight).toBeLessThanOrEqual(tabStripOverflow.clientHeight);
+    const preparationTab = detail.locator('[data-test="recipe-detail-tab-preparation"]');
+    const ingredientsTab = detail.locator('[data-test="recipe-detail-tab-ingredients"]');
+    const guidanceTab = detail.locator('[data-test="recipe-detail-tab-guidance"]');
+    const storageTab = detail.locator('[data-test="recipe-detail-tab-storage"]');
+    await expect(preparationTab).toHaveAttribute('aria-selected', 'true');
+    await expect(detail.locator('[data-test="recipe-preparation"]')).toBeVisible();
+    await expect(page.locator('[data-test="recipe-favorite-toggle"]')).toBeVisible();
+    const sidebarCook = detail.locator('[data-test="recipe-cooking-open-sidebar"]');
+    const responsiveCook = detail.locator('[data-test="recipe-cooking-open"]');
+    if (viewport.width > 1024) {
+      await expect(sidebarCook).toBeVisible();
+      await expect(responsiveCook).toBeHidden();
+      const sidebarButton = await sidebarCook.locator('button').boundingBox();
+      const sidebarBox = await sidebarCook.boundingBox();
+      expect(sidebarButton).not.toBeNull();
+      expect(sidebarBox).not.toBeNull();
+      expect(sidebarButton!.width).toBeCloseTo(sidebarBox!.width, 0);
+    } else {
+      await expect(sidebarCook).toBeHidden();
+      await expect(responsiveCook).toBeVisible();
+      await expect(detail.locator('.recipe-detail__actions app-button')).toHaveCount(1);
+      const stickyButton = await responsiveCook.locator('button').boundingBox();
+      const stickyBox = await responsiveCook.boundingBox();
+      expect(stickyButton).not.toBeNull();
+      expect(stickyBox).not.toBeNull();
+      expect(stickyButton!.width).toBeCloseTo(stickyBox!.width, 0);
+    }
+    await expect(
+      detail.locator('[data-test="recipe-preparation"] [data-test="recipe-step-photo"]'),
+      'la ficha mantiene los pasos compactos; las fotos de cada paso se reservan para cocinar'
+    ).toHaveCount(0);
+    await expect(
+      detail.locator('[data-test="recipe-preparation"] app-timer'),
+      'la ficha muestra duraciones; el temporizador interactivo vive en modo cocina'
+    ).toHaveCount(0);
+    if (viewport.width > 1024) {
+      await expect(detail.locator('[data-test="recipe-ingredients"]')).toBeVisible();
+    } else {
+      await expect(detail.locator('[data-test="recipe-ingredients"]')).toBeHidden();
+    }
+
+    await preparationTab.focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(ingredientsTab).toBeFocused();
+    await expect(ingredientsTab).toHaveAttribute('aria-selected', 'true');
+    await page.keyboard.press('Home');
+    await expect(preparationTab).toBeFocused();
+    await expect(preparationTab).toHaveAttribute('aria-selected', 'true');
+
+    await ingredientsTab.click();
+    await expect(ingredientsTab).toHaveAttribute('aria-selected', 'true');
+    await expect(detail.locator('[data-test="recipe-ingredients"]')).toContainText('Azafrán QA');
+    await expect(detail.locator('[data-test="recipe-ingredients"]')).toContainText('Opcional');
+    await expect(detail.locator('[data-test="recipe-ingredients"]')).toContainText('quinoa');
+    await expect(detail.locator('[data-test="recipe-cooking-mark-done"]')).toBeVisible();
+    await expect(detail.locator('[data-test="recipe-nutrition"]')).toBeHidden();
+    const servingsLabel = detail.locator('.recipe-detail__servings label');
+    const servingsInput = detail.locator('[data-test="recipe-serving-count"]');
+    const [servingsLabelBox, servingsInputBox] = await Promise.all([
+      servingsLabel.boundingBox(),
+      servingsInput.boundingBox()
+    ]);
+    expect(servingsLabelBox).not.toBeNull();
+    expect(servingsInputBox).not.toBeNull();
+    expect(servingsLabelBox!.height).toBeLessThanOrEqual(24);
+    expect(servingsLabelBox!.x + servingsLabelBox!.width).toBeLessThanOrEqual(servingsInputBox!.x);
+    await expect(detail.locator('[data-test="recipe-preparation"]')).toBeHidden();
+
+    await guidanceTab.click();
+    await expect(detail.locator('[data-test="recipe-equipment"]')).toContainText('Cocina de gas');
+    await expect(detail.locator('[data-test="recipe-parallel-tasks"]')).toContainText(
       'Calienta el caldo'
     );
-    await expect(page.locator('[data-test="recipe-tips-variations"]')).toContainText(
+    await expect(detail.locator('[data-test="recipe-tips-variations"]')).toContainText(
       'Tuesta el arroz'
     );
-    await expect(page.locator('[data-test="recipe-storage"]')).toContainText('hasta 2 días');
-    await expect(page.locator('[data-test="recipe-storage"]')).toContainText(
+    await expect(detail.locator('[data-test="recipe-preparation"]')).toBeHidden();
+
+    await storageTab.click();
+    await expect(detail.locator('[data-test="recipe-storage"]')).toContainText('hasta 2 días');
+    await expect(detail.locator('[data-test="recipe-storage"]')).toContainText(
       'Recipiente hermético'
     );
-    await expect(page.locator('[data-test="recipe-storage"]')).toContainText('hasta 1 mes');
-    const orderedSections = [
-      detail.locator('.recipe-detail__timings'),
-      detail.locator('[data-test="recipe-nutrition"]'),
-      detail.locator('[data-test="recipe-ingredients"]'),
-      detail.locator('[data-test="recipe-equipment"]'),
-      detail.locator('[data-test="recipe-preparation"]'),
-      detail.locator('[data-test="recipe-parallel-tasks"]'),
-      detail.locator('[data-test="recipe-tips-variations"]'),
-      detail.locator('[data-test="recipe-storage"]')
-    ];
-    const sectionTops = await Promise.all(
-      orderedSections.map(async (section) => (await section.boundingBox())?.y ?? Number.NaN)
-    );
-    expect(sectionTops, 'la ficha debe seguir el orden de lectura indicado en el prompt').toEqual(
-      [...sectionTops].sort((left, right) => left - right)
-    );
+    await expect(detail.locator('[data-test="recipe-storage"]')).toContainText('hasta 1 mes');
+    await expect(detail.locator('[data-test="recipe-nutrition"]')).toBeVisible();
+    await preparationTab.click();
+
     const detailLevel = page.locator('[data-test="recipe-detail-level"]');
+    await expect(detailLevel).toBeVisible();
+    const commonIngredientRows = await detail
+      .locator('[data-test="recipe-ingredients"] li')
+      .allTextContents();
+    const commonTimings = await detail.locator('.recipe-detail__timings').textContent();
+    expect(commonTimings).not.toBeNull();
+    expect(commonIngredientRows.length).toBeGreaterThan(0);
+    const secondStep = detail.locator('.step-card[data-step-number="2"]');
+    const expandSteps = detail.locator('[data-test="recipe-expand-steps-mobile"]');
+    if (testInfo.project.name === 'mobile-chrome') {
+      await expect(secondStep).toBeHidden();
+      await expect(expandSteps).toBeVisible();
+      await expandSteps.click();
+      await expect(secondStep).toBeVisible();
+      await expandSteps.click();
+      await expect(secondStep).toBeHidden();
+      await expandSteps.click();
+    } else {
+      await expect(secondStep).toBeVisible();
+      await expect(detail.locator('[data-test="recipe-expand-steps-desktop"]')).toHaveCount(0);
+    }
     const finalStep = detail.locator('.step-card[data-step-number="3"]');
     await finalStep.evaluate((element) => element.scrollIntoView({ block: 'start' }));
     const finalStepBox = await finalStep.boundingBox();
@@ -241,35 +408,14 @@ test('la ficha completa presenta detalle, ajusta raciones solo en pantalla y no 
     if (appHeaderBox) {
       expect(finalStepBox!.y).toBeGreaterThanOrEqual(appHeaderBox.y + appHeaderBox.height);
     }
-    const stepPhotos = detail.locator('[data-test="recipe-step-photo"]');
-    await expect(stepPhotos).toHaveCount(3);
-    await expect(stepPhotos.locator('img')).toHaveCount(3);
-    await detailLevel.selectOption('basic');
+    await detailLevel.locator('[data-test="recipe-detail-level-basic"]').click();
     await expect(detail).toContainText('Lava el arroz y escurre el agua.');
-    await expect(detail.locator('[data-test="recipe-step-photo"]')).toHaveCount(3);
-    await expect(detail.getByRole('img', { name: 'Foto real de referencia: cut' })).toBeVisible();
-    const photoShots = resolve('.e2e-screenshots/recipe-step-photos');
-    mkdirSync(photoShots, { recursive: true });
-    await detail.locator('.step-card[data-step-number="2"]').scrollIntoViewIfNeeded();
-    await page.screenshot({
-      path: resolve(photoShots, `${testInfo.project.name}-step-photos.png`),
-      fullPage: false,
-      animations: 'disabled'
-    });
-    const stepImage = detail.getByRole('img', { name: 'Foto real de referencia: wash' });
-    await stepImage.scrollIntoViewIfNeeded();
-    await expect(stepImage).toBeVisible();
-    await expect(detail.getByRole('link', { name: 'Wikimedia Commons' }).first()).toHaveAttribute(
-      'href',
-      'https://commons.wikimedia.org/wiki/File:synthetic-wash.jpg'
+    await expect(detail.locator('[data-test="recipe-ingredients"] li')).toHaveText(
+      commonIngredientRows
     );
-    expect(
-      photoRequests
-        .filter((request) => request.path.endsWith('/step-photos'))
-        .every((request) => Object.keys(request.params).length === 1 && 'scene' in request.params),
-      'las consultas solo envían una escena genérica, nunca el texto del paso'
-    ).toBeTruthy();
+    await expect(detail.locator('.recipe-detail__timings')).toHaveText(commonTimings!);
 
+    await ingredientsTab.click();
     const servings = page.locator('[data-test="recipe-serving-count"]');
     await expect(servings).toHaveValue('2');
     await expect(detail.locator('[data-test="recipe-ingredients"] li').first()).toContainText(
@@ -279,11 +425,18 @@ test('la ficha completa presenta detalle, ajusta raciones solo en pantalla y no 
     await expect(detail.locator('[data-test="recipe-ingredients"] li').first()).toContainText(
       '400 g'
     );
+    const commonIngredientRowsAtFourServings = await detail
+      .locator('[data-test="recipe-ingredients"] li')
+      .allTextContents();
 
-    await detailLevel.selectOption('expert');
-    await expect(detail.locator('[data-test="recipe-step-photo"]')).toHaveCount(3);
+    await preparationTab.click();
+    await detailLevel.locator('[data-test="recipe-detail-level-expert"]').click();
     await expect(detail).toContainText('proporción de dos a uno');
     await expect(detail).toContainText('No dejes el arroz en remojo');
+    await expect(detail.locator('[data-test="recipe-ingredients"] li')).toHaveText(
+      commonIngredientRowsAtFourServings
+    );
+    await expect(detail.locator('.recipe-detail__timings')).toHaveText(commonTimings!);
     expect(aiRequests, 'cambiar nivel y raciones no debe volver a invocar la IA').toEqual([]);
 
     const persistedResponse = await page.request.get(`/api/recipes/${recipe.id}`, {
@@ -298,14 +451,16 @@ test('la ficha completa presenta detalle, ajusta raciones solo en pantalla y no 
     );
 
     await waitForStableView(page);
+    await ingredientsTab.click();
     await servings.fill('2');
-    await detailLevel.selectOption('basic');
+    await preparationTab.click();
+    await detailLevel.locator('[data-test="recipe-detail-level-basic"]').click();
     await page.setViewportSize(viewport);
     await page.evaluate(() => window.scrollTo(0, 0));
     await expect
       .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
       .toBeLessThanOrEqual(viewport.width);
-    const screenshots = resolve('.e2e-screenshots/recipe-full-detail');
+    const screenshots = resolveScreenshotDirectory('.e2e-screenshots/recipe-full-detail');
     mkdirSync(screenshots, { recursive: true });
     await page.screenshot({
       path: resolve(screenshots, `${testInfo.project.name}-full-detail.png`),
@@ -319,23 +474,24 @@ test('la ficha completa presenta detalle, ajusta raciones solo en pantalla y no 
         .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
         .toBeLessThanOrEqual(320);
       await expect(detail.getByRole('heading', { name: 'Preparación' })).toBeVisible();
-      const visiblePhoto = detail.locator('[data-test="recipe-step-photo"]').first();
-      await visiblePhoto.scrollIntoViewIfNeeded();
-      const narrowPhotoBox = await visiblePhoto.boundingBox();
-      expect(narrowPhotoBox).not.toBeNull();
-      expect(narrowPhotoBox!.x + narrowPhotoBox!.width).toBeLessThanOrEqual(320);
+      await detail.locator('[data-test="recipe-expand-steps-mobile"]').click();
+      const finalStep = detail.locator('.step-card[data-step-number="3"]');
+      await finalStep.scrollIntoViewIfNeeded();
+      const narrowStepBox = await finalStep.boundingBox();
+      expect(narrowStepBox).not.toBeNull();
+      expect(narrowStepBox!.x + narrowStepBox!.width).toBeLessThanOrEqual(320);
 
       await page.setViewportSize({ width: 568, height: 320 });
-      await visiblePhoto.scrollIntoViewIfNeeded();
+      await finalStep.scrollIntoViewIfNeeded();
       await expect
         .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
         .toBeLessThanOrEqual(568);
-      const landscapePhotoBox = await visiblePhoto.boundingBox();
-      expect(landscapePhotoBox).not.toBeNull();
-      expect(landscapePhotoBox!.x + landscapePhotoBox!.width).toBeLessThanOrEqual(568);
+      const landscapeStepBox = await finalStep.boundingBox();
+      expect(landscapeStepBox).not.toBeNull();
+      expect(landscapeStepBox!.x + landscapeStepBox!.width).toBeLessThanOrEqual(568);
     }
 
-    await detailLevel.selectOption('expert');
+    await detailLevel.locator('[data-test="recipe-detail-level-expert"]').click();
     await expect(detail).toContainText('proporción de dos a uno');
     const backToRecipes = page.getByRole('button', { name: 'Volver a recetas' });
     await backToRecipes.focus();
@@ -343,13 +499,62 @@ test('la ficha completa presenta detalle, ajusta raciones solo en pantalla y no 
     await expect(page).toHaveURL(/\/recipes\?collection=all&page=1$/);
     await expect(page.locator('[data-test="recipe-list-heading"]')).toBeFocused();
 
-    const recipeCard = page.locator('.recipe-card').filter({ hasText: recipe.name });
-    await expect(recipeCard).toBeVisible();
-    await recipeCard.locator('.recipe-card__open').focus();
-    await recipeCard.locator('.recipe-card__open').press('Enter');
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.evaluate(() => window.scrollTo(0, 0));
+
+    if (viewport.width <= 760) {
+      const featured = page.locator('[data-test="recipe-featured"]');
+      await expect(featured).toContainText(recipe.name);
+      const featuredPlaceholder = featured.locator('.recipes__featured-media--placeholder');
+      await expect(featuredPlaceholder).toHaveCount(1);
+      const featuredPlaceholderBox = await featuredPlaceholder.boundingBox();
+      expect(featuredPlaceholderBox?.height).toBeLessThanOrEqual(112);
+      await page.screenshot({
+        path: resolve(screenshotDirectory, `no-cover-library-top-${testInfo.project.name}.png`),
+        fullPage: false,
+        animations: 'disabled'
+      });
+      await featured.scrollIntoViewIfNeeded();
+      await page.screenshot({
+        path: resolve(screenshotDirectory, `no-cover-library-${testInfo.project.name}.png`),
+        fullPage: false,
+        animations: 'disabled'
+      });
+      const featuredMedia = featured.locator('.recipes__featured-media');
+      await page.keyboard.press('Tab');
+      await featuredMedia.focus();
+      await expect(featuredMedia).toHaveCSS('outline-style', 'solid');
+      await page.screenshot({
+        path: resolve(
+          screenshotDirectory,
+          `featured-media-keyboard-focus-${testInfo.project.name}.png`
+        ),
+        fullPage: false,
+        animations: 'disabled'
+      });
+      await featured.locator('.recipes__featured-title-button').focus();
+      await featured.locator('.recipes__featured-title-button').press('Enter');
+    } else {
+      const recipeCard = page.locator('.recipe-card').filter({ hasText: recipe.name });
+      await expect(recipeCard).toBeVisible();
+      const cardPlaceholder = recipeCard.locator('.recipe-card__image--placeholder');
+      await expect(cardPlaceholder).toHaveCount(1);
+      const cardPlaceholderBox = await cardPlaceholder.boundingBox();
+      expect(cardPlaceholderBox?.height).toBeLessThanOrEqual(80);
+      await page.screenshot({
+        path: resolve(screenshotDirectory, `no-cover-library-${testInfo.project.name}.png`),
+        fullPage: false,
+        animations: 'disabled'
+      });
+      await recipeCard.locator('.recipe-card__open').focus();
+      await recipeCard.locator('.recipe-card__open').press('Enter');
+    }
     await expect(page).toHaveURL(new RegExp(`/recipes\\?[^#]*recipe=${recipe.id}`));
     await expect(page.locator('[data-test="recipe-detail-page"]')).toBeVisible();
-    await expect(page.locator('[data-test="recipe-detail-level"]')).toHaveValue('expert');
+    await expect(page.locator('[data-test="recipe-detail-level-expert"]')).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
     expect(aiRequests, 'reabrir la ficha no debe volver a invocar la IA').toEqual([]);
     await expect(page.locator('[data-test="recipe-detail-title"]')).toBeFocused();
     await page.goBack();
@@ -364,7 +569,7 @@ test('la ficha completa presenta detalle, ajusta raciones solo en pantalla y no 
     await aiDialog.locator('[data-test="recipe-ai-next"]').click();
     await expect(aiDialog.locator('[data-test="recipe-ai-step-3"]')).toBeVisible();
     const generationServings = aiDialog.getByLabel('Porciones', { exact: true });
-    await expect(generationServings).toHaveValue('2');
+    await expect(generationServings).toHaveValue('1');
     await generationServings.fill('3');
     await expect(generationServings).toHaveValue('3');
     expect(

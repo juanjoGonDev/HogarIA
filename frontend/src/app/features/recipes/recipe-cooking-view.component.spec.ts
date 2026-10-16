@@ -1,3 +1,4 @@
+import { SimpleChange } from '@angular/core';
 import { RecipeCookingViewComponent } from './recipe-cooking-view.component';
 import type { Recipe } from '../../shared/models/recipe.model';
 import type { RecipeInstructionStep } from '../../shared/models/recipe-instructions';
@@ -102,6 +103,26 @@ describe('RecipeCookingViewComponent', () => {
     expect(component.completionPercent()).toBe(0);
   });
 
+  it('resets step-bound cooking state when the selected instruction level changes', () => {
+    const checkbox = (checked: boolean) => ({ target: { checked } }) as unknown as Event;
+    component.focusStep(1);
+    component.setStepComplete(0, checkbox(true));
+    component.onTimerStart(0, steps[0]);
+    component.onTimerComplete(0, steps[0]);
+
+    const previousSteps = component.steps;
+    const expertSteps = [
+      { stepNumber: 1, instruction: 'Templar y detener.', timerRequired: true, timerDuration: 2 }
+    ];
+    component.steps = expertSteps;
+    component.ngOnChanges({ steps: new SimpleChange(previousSteps, expertSteps, false) });
+
+    expect(component.focusedStepIndex()).toBe(0);
+    expect(component.completedSteps()).toEqual(new Set<number>());
+    expect(component.timerProgress()).toEqual({});
+    expect(component.completedTimerStep()).toBeNull();
+  });
+
   it('bounds step navigation and toggles the mobile ingredient disclosure', () => {
     component.focusStep(1);
     expect(component.focusedStepIndex()).toBe(1);
@@ -114,6 +135,22 @@ describe('RecipeCookingViewComponent', () => {
     expect(component.mobileIngredientsExpanded()).toBeTrue();
     component.toggleMobileIngredients();
     expect(component.mobileIngredientsExpanded()).toBeFalse();
+  });
+
+  it('tracks failed video fallbacks per recipe step and clears only the retried clip', () => {
+    const firstVideoStep = { ...steps[0], videoId: 'video-a' };
+    const secondVideoStep = { ...steps[1], videoId: 'video-b' };
+    component.steps = [firstVideoStep, secondVideoStep];
+
+    component.onStepVideoUnavailable(firstVideoStep);
+
+    expect(component.isStepVideoFailed(firstVideoStep)).toBeTrue();
+    expect(component.isStepVideoFailed(secondVideoStep)).toBeFalse();
+
+    component.retryStepVideo(firstVideoStep);
+
+    expect(component.isStepVideoFailed(firstVideoStep)).toBeFalse();
+    expect(component.isStepVideoFailed(secondVideoStep)).toBeFalse();
   });
 
   it('tracks active, paused, reset and completed timers for hidden mobile steps', () => {
@@ -146,5 +183,18 @@ describe('RecipeCookingViewComponent', () => {
     component.onTimerReset(0, firstStep);
     expect(component.activeRecipeTimers()).toEqual([]);
     expect(component.completedTimerStep()).toBeNull();
+  });
+
+  it('keeps each active timer row keyed to its recipe step across ticks', () => {
+    const before = {
+      index: 1,
+      stepNumber: 2,
+      instruction: 'Hervir el caldo.',
+      currentTime: 60
+    };
+    const after = { ...before, currentTime: 59 };
+
+    expect(component.trackActiveRecipeTimer(0, before)).toBe(1);
+    expect(component.trackActiveRecipeTimer(0, after)).toBe(1);
   });
 });

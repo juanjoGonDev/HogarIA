@@ -38,6 +38,13 @@ export const TAG_STYLES: string[] = [
       }
     }
 
+    @media (max-width: 760px) {
+      .tag--touch-target {
+        min-height: 44px;
+        padding-inline: var(--space-2);
+      }
+    }
+
     .tag--selected {
       background: var(--primary-subtle);
       border-color: var(--primary);

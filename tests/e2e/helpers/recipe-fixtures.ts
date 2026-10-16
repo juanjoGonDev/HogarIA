@@ -14,6 +14,7 @@ export interface SyntheticRecipeOptions {
   totalTime?: number;
   tips?: string;
   warning?: string;
+  steps?: Array<{ stepNumber: number; instruction: string; tips?: string; warning?: string }>;
   servings?: number;
   calories?: number;
   restTime?: number | null;
@@ -83,7 +84,7 @@ export async function createSyntheticRecipe(
       ...(options.instructionsByLevel
         ? { instructionsByLevel: options.instructionsByLevel }
         : {
-            steps: [
+            steps: options.steps ?? [
               {
                 stepNumber: 1,
                 instruction: 'Cortar el tomate.',

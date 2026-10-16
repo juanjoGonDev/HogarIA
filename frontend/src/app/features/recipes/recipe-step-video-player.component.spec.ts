@@ -3,7 +3,7 @@ import { I18nService } from '../../core/services/i18n.service';
 import { RecipeService } from '../../core/services/recipe.service';
 import { RecipeStepVideoCandidate } from '../../shared/models/recipe-step-video';
 import { RecipeStepVideoPlayerComponent } from './recipe-step-video-player.component';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 
 const video: RecipeStepVideoCandidate = {
   id: 'a'.repeat(24),
@@ -72,6 +72,9 @@ describe('RecipeStepVideoPlayerComponent', () => {
       '/api/recipes/recipe-1/step-videos/video-1/stream'
     );
     expect(fixture.nativeElement.querySelector('video')?.getAttribute('autoplay')).toBe('');
+    expect(fixture.nativeElement.querySelector('video')?.hasAttribute('muted')).toBeTrue();
+    expect(fixture.nativeElement.querySelector('video')?.hasAttribute('loop')).toBeTrue();
+    expect(fixture.nativeElement.querySelector('video')?.hasAttribute('playsinline')).toBeTrue();
     expect(fixture.nativeElement.querySelector('video')?.getAttribute('crossorigin')).toBe(
       'use-credentials'
     );
@@ -118,7 +121,22 @@ describe('RecipeStepVideoPlayerComponent', () => {
     expect(fixture.nativeElement.textContent).toContain('recipes.cooking.video_unavailable');
   });
 
+  it('notifies the cooking view when the media element cannot play the selected clip', () => {
+    const unavailable: string[] = [];
+    fixture.componentInstance.videoUnavailable.subscribe(() => unavailable.push(video.id));
+    fixture.componentRef.setInput('recipeId', 'recipe-1');
+    fixture.componentRef.setInput('videoId', video.id);
+    fixture.componentRef.setInput('video', video);
+    fixture.detectChanges();
+
+    fixture.componentInstance.onPlaybackError();
+
+    expect(unavailable).toEqual([video.id]);
+  });
+
   it('exposes a recoverable inline error when authorization or playback fails', () => {
+    const unavailable: string[] = [];
+    fixture.componentInstance.videoUnavailable.subscribe(() => unavailable.push(video.id));
     recipeService.prepareStepVideoPlayback.and.returnValue(of(false));
     fixture.componentRef.setInput('recipeId', 'recipe-1');
     fixture.componentRef.setInput('videoId', video.id);
@@ -127,5 +145,22 @@ describe('RecipeStepVideoPlayerComponent', () => {
 
     expect(fixture.nativeElement.textContent).toContain('recipes.cooking.video_unavailable');
     expect(fixture.nativeElement.querySelector('video')).toBeNull();
+    expect(unavailable).toEqual([video.id]);
+  });
+
+  it('notifies the cooking view when playback preparation errors', () => {
+    const unavailable: string[] = [];
+    fixture.componentInstance.videoUnavailable.subscribe(() => unavailable.push(video.id));
+    recipeService.prepareStepVideoPlayback.and.returnValue(
+      throwError(() => new Error('synthetic playback error'))
+    );
+    fixture.componentRef.setInput('recipeId', 'recipe-1');
+    fixture.componentRef.setInput('videoId', video.id);
+    fixture.componentRef.setInput('video', video);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain('recipes.cooking.video_unavailable');
+    expect(fixture.nativeElement.querySelector('video')).toBeNull();
+    expect(unavailable).toEqual([video.id]);
   });
 });

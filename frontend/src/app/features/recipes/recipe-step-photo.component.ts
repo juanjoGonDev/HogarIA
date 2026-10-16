@@ -1,5 +1,13 @@
 import { CommonModule } from '@angular/common';
-import { Component, Input, OnChanges, OnDestroy, SimpleChanges, inject, signal } from '@angular/core';
+import {
+  Component,
+  Input,
+  OnChanges,
+  OnDestroy,
+  SimpleChanges,
+  inject,
+  signal
+} from '@angular/core';
 import { map, of, switchMap, Subscription } from 'rxjs';
 import { TranslatePipe } from '../../core/pipes/translate.pipe';
 import { RecipeService } from '../../core/services/recipe.service';
@@ -14,22 +22,50 @@ type PhotoState = 'loading' | 'photo' | 'empty' | 'error';
   standalone: true,
   imports: [CommonModule, TranslatePipe],
   template: `
-    <figure *ngIf="image && !ignoreSelectedImage" class="step-photo" data-test="recipe-step-photo">
-      <img [src]="image" [alt]="imageAttribution?.altText || instruction" loading="lazy" (error)="markSelectedImageUnavailable()" />
+    <figure
+      *ngIf="image && !ignoreSelectedImage"
+      class="step-photo"
+      [class.step-photo--cooking]="cookingMode"
+      data-test="recipe-step-photo"
+    >
+      <img
+        [src]="image"
+        [alt]="imageAttribution?.altText || instruction"
+        loading="lazy"
+        (error)="markSelectedImageUnavailable()"
+      />
       <figcaption *ngIf="imageAttribution as credit">
         <span>{{ 'recipes.step_photo_credit' | t: { author: credit.author } }}</span>
-        <a [href]="credit.licenseUrl" target="_blank" rel="noopener noreferrer">{{ credit.licenseName }}</a>
-        <a [href]="credit.sourceUrl" target="_blank" rel="noopener noreferrer">{{ 'recipes.step_photo_source' | t }}</a>
+        <a [href]="credit.licenseUrl" target="_blank" rel="noopener noreferrer">{{
+          credit.licenseName
+        }}</a>
+        <a [href]="credit.sourceUrl" target="_blank" rel="noopener noreferrer">{{
+          'recipes.step_photo_source' | t
+        }}</a>
       </figcaption>
     </figure>
 
     <div *ngIf="image && savedImageFailed && !ignoreSelectedImage" class="step-photo__fallback">
       <span role="status" aria-live="polite">{{ 'recipes.step_photo_failed' | t }}</span>
-      <button type="button" (click)="searchAlternative()">{{ 'recipes.step_photo_retry' | t }}</button>
+      <button type="button" (click)="searchAlternative()">
+        {{ 'recipes.step_photo_retry' | t }}
+      </button>
     </div>
 
-    <figure *ngIf="(!image || ignoreSelectedImage) && state() === 'photo' && photo() && imageUrl() as source" class="step-photo" data-test="recipe-step-photo">
-      <img [src]="source" [alt]="photo()!.altText" loading="lazy" (error)="markImageUnavailable()" />
+    <figure
+      *ngIf="
+        (!image || ignoreSelectedImage) && state() === 'photo' && photo() && imageUrl() as source
+      "
+      class="step-photo"
+      [class.step-photo--cooking]="cookingMode"
+      data-test="recipe-step-photo"
+    >
+      <img
+        [src]="source"
+        [alt]="photo()!.altText"
+        loading="lazy"
+        (error)="markImageUnavailable()"
+      />
       <figcaption>
         <span>{{ 'recipes.step_photo_credit' | t: { author: photo()!.author } }}</span>
         <a [href]="photo()!.licenseUrl" target="_blank" rel="noopener noreferrer">
@@ -40,16 +76,25 @@ type PhotoState = 'loading' | 'photo' | 'empty' | 'error';
           [href]="photo()!.sourceUrl"
           target="_blank"
           rel="noopener noreferrer"
-        >{{ 'recipes.step_photo_source' | t }}</a>
+          >{{ 'recipes.step_photo_source' | t }}</a
+        >
         <span>{{ 'recipes.step_photo_resized' | t }}</span>
       </figcaption>
     </figure>
 
-    <span *ngIf="(!image || ignoreSelectedImage) && state() === 'loading'" class="step-photo__status" role="status" aria-live="polite">
+    <span
+      *ngIf="(!image || ignoreSelectedImage) && state() === 'loading'"
+      class="step-photo__status"
+      role="status"
+      aria-live="polite"
+    >
       {{ 'recipes.step_photo_loading' | t }}
     </span>
 
-    <div *ngIf="(!image || ignoreSelectedImage) && (state() === 'empty' || state() === 'error')" class="step-photo__fallback">
+    <div
+      *ngIf="(!image || ignoreSelectedImage) && (state() === 'empty' || state() === 'error')"
+      class="step-photo__fallback"
+    >
       <span role="status" aria-live="polite">
         {{ (state() === 'empty' ? 'recipes.step_photo_missing' : 'recipes.step_photo_failed') | t }}
       </span>
@@ -76,6 +121,11 @@ type PhotoState = 'loading' | 'photo' | 'empty' | 'error';
         border-radius: var(--radius-lg);
         object-fit: cover;
         background: var(--bg-tertiary);
+      }
+
+      .step-photo--cooking img {
+        max-height: 28rem;
+        aspect-ratio: 16 / 9;
       }
 
       .step-photo figcaption {
@@ -128,6 +178,7 @@ export class RecipeStepPhotoComponent implements OnChanges, OnDestroy {
   @Input({ required: true }) instruction = '';
   @Input() image: string | null | undefined;
   @Input() imageAttribution: RecipeStepImageAttribution | null | undefined;
+  @Input() cookingMode = false;
 
   private readonly recipeService = inject(RecipeService);
   private request?: Subscription;

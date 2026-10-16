@@ -2,11 +2,19 @@ import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { expect, test } from './fixtures';
 import { registerWithHousehold } from './helpers/auth';
+import { mockRecipeStepPhotos } from './helpers/recipe-step-photos';
 import {
   createSyntheticRecipe,
   deleteSyntheticRecipe,
   waitForStableView
 } from './helpers/recipe-fixtures';
+
+function resolveScreenshotDirectory(relativePath: string): string {
+  const configuredDirectory = process.env.E2E_SCREENSHOT_DIR;
+  return configuredDirectory
+    ? resolve(configuredDirectory, relativePath.split(/[\\/]/).at(-1) ?? 'recipe-edit')
+    : resolve(process.cwd(), relativePath);
+}
 
 const detailedFixture = {
   name: 'Guiso de prueba para editar',
@@ -122,7 +130,7 @@ test('la vista dedicada edita todos los campos, conserva el estado personal y no
     await expect(page.getByRole('heading', { name: 'Editar receta' })).toBeFocused();
 
     if (testInfo.project.name === 'chromium' || testInfo.project.name === 'mobile-chrome') {
-      const directory = resolve(process.cwd(), '.e2e-screenshots/recipe-editor');
+      const directory = resolveScreenshotDirectory('.e2e-screenshots/recipe-editor');
       mkdirSync(directory, { recursive: true });
       const file = testInfo.project.name === 'chromium' ? 'desktop.png' : 'mobile.png';
       await page.screenshot({
@@ -207,7 +215,7 @@ test('la vista dedicada edita todos los campos, conserva el estado personal y no
 
     const detailLevel = page.locator('[data-test="recipe-detail-level"]');
     await expect(detailLevel).toBeVisible();
-    await detailLevel.selectOption('basic');
+    await detailLevel.locator('[data-test="recipe-detail-level-basic"]').click();
     const preparation = page.locator('[data-test="recipe-preparation"]');
     await expect(preparation).toContainText('Lava las espinacas y escurre los garbanzos.');
     await expect(preparation).toContainText('Temperatura: 90 °C');
@@ -225,12 +233,16 @@ test('la vista dedicada edita todos los campos, conserva el estado personal y no
     );
     await expect(page.locator('[data-test="recipe-nutrition"]')).toContainText('21 g');
     await expect(page.locator('[data-test="recipe-storage"]')).toContainText('2 meses');
-    await detailLevel.selectOption('expert');
+    await detailLevel.locator('[data-test="recipe-detail-level-expert"]').click();
     await expect(preparation).toContainText(
       'Enjuaga los garbanzos y seca las espinacas antes de saltear.'
     );
-    await detailLevel.selectOption('basic');
-    await page.locator('[data-test="recipe-cooking-open"] button').click();
+    await detailLevel.locator('[data-test="recipe-detail-level-basic"]').click();
+    await page
+      .locator(
+        '[data-test="recipe-cooking-open"]:visible button, [data-test="recipe-cooking-open-sidebar"]:visible button'
+      )
+      .click();
     await expect(page.locator('[data-test="recipe-cooking-view"]')).toContainText(
       'Temperatura: 90 °C'
     );
@@ -280,7 +292,7 @@ test('edita y guarda textos de receta largos en escritorio y móvil', async ({ p
 
       if (viewport.width === (isDesktop ? 1440 : 393)) {
         await page.locator('#recipe-editor-title').scrollIntoViewIfNeeded();
-        const directory = resolve(process.cwd(), '.e2e-screenshots/recipe-editor');
+        const directory = resolveScreenshotDirectory('.e2e-screenshots/recipe-editor');
         mkdirSync(directory, { recursive: true });
         await page.screenshot({
           path: resolve(directory, `unbounded-text-${isDesktop ? 'desktop' : 'mobile'}.png`),
@@ -420,7 +432,7 @@ test('busca y selecciona fotos reales para portada y pasos, con vista previa y a
 
     if (testInfo.project.name === 'chromium' || testInfo.project.name === 'mobile-chrome') {
       await page.locator('[data-test="recipe-step-photo-search-basic-0"]').scrollIntoViewIfNeeded();
-      const directory = resolve(process.cwd(), '.e2e-screenshots/recipe-step-photo-edit');
+      const directory = resolveScreenshotDirectory('.e2e-screenshots/recipe-step-photo-edit');
       mkdirSync(directory, { recursive: true });
       const file = testInfo.project.name === 'chromium' ? 'desktop.png' : 'mobile.png';
       await page.screenshot({
@@ -439,7 +451,7 @@ test('selecciona vídeos licenciados y solo carga el del paso activo al cocinar'
 }, testInfo) => {
   if (testInfo.project.name === 'chromium')
     await page.setViewportSize({ width: 1440, height: 1000 });
-  await stubAutomaticStepPhotos(page);
+  const photoRequests = await mockRecipeStepPhotos(page);
   await registerWithHousehold(page, '/recipes', 'recipe-step-video-selection');
   const videoFixture = {
     ...detailedFixture,
@@ -613,8 +625,12 @@ test('selecciona vídeos licenciados y solo carga el del paso activo al cocinar'
     await expect(page.locator('[data-test="recipe-detail-page"]')).toBeVisible();
     expect(savedRecipe).not.toBeNull();
 
-    await page.locator('[data-test="recipe-detail-level"]').selectOption('basic');
-    await page.locator('[data-test="recipe-cooking-open"] button').click();
+    await page.locator('[data-test="recipe-detail-level-basic"]').click();
+    await page
+      .locator(
+        '[data-test="recipe-cooking-open"]:visible button, [data-test="recipe-cooking-open-sidebar"]:visible button'
+      )
+      .click();
     const player = page.locator('[data-test="recipe-step-video-player"]');
     await expect(player).toBeVisible();
     await expect(
@@ -628,21 +644,59 @@ test('selecciona vídeos licenciados y solo carga el del paso activo al cocinar'
       `/api/recipes/${recipe.id}/step-videos/${candidate.id}/stream`
     );
     expect(await page.locator('[data-test="recipe-step-video-player"]').count()).toBe(1);
-    if (testInfo.project.name === 'mobile-chrome') {
-      await page.locator('.recipe-cooking__mobile-navigation app-button:last-child button').click();
-    } else {
-      await page.locator('[data-step-number="2"] .recipe-cooking__step-focus').click();
-    }
+    await page.getByRole('button', { name: 'Siguiente paso' }).click();
     expect(await page.locator('[data-test="recipe-step-video-player"]').count()).toBe(1);
     await expect(page.locator('[data-test="recipe-step-video"] source')).toHaveAttribute(
       'src',
       `/api/recipes/${recipe.id}/step-videos/${secondCandidate.id}/stream`
     );
 
-    const directory = resolve(process.cwd(), '.e2e-screenshots/recipe-step-video');
+    await page
+      .locator('[data-test="recipe-step-video"]')
+      .evaluate((element) => element.dispatchEvent(new Event('error')));
+    await expect(player).toHaveCount(0);
+    const photoFallback = page.locator('[data-test="recipe-step-photo"]');
+    await expect(photoFallback).toBeVisible();
+    await expect(photoFallback.locator('img')).toBeVisible();
+    await expect(photoFallback.locator('img')).toHaveJSProperty('naturalWidth', 800);
+    await expect(photoFallback).toContainText('Autora sintética de E2E');
+    await expect(
+      photoFallback.getByRole('link', { name: 'Ver foto original en Wikimedia Commons' })
+    ).toBeVisible();
+    expect(
+      photoRequests.some(
+        (request) => request.path.endsWith('/step-photos') && request.params.scene === 'cook'
+      )
+    ).toBeTruthy();
+    const fallbackNotice = page.locator('[data-test="recipe-step-video-fallback"]');
+    await expect(fallbackNotice.getByRole('status')).toContainText('No se pudo reproducir');
+    await expect(
+      page.getByText('Cocina la calabaza a fuego lento.', { exact: true })
+    ).toBeVisible();
+
+    const directory = resolveScreenshotDirectory('.e2e-screenshots/recipe-step-video');
     mkdirSync(directory, { recursive: true });
     await page.screenshot({
-      path: resolve(directory, `${testInfo.project.name}-cooking-step.png`),
+      path: resolve(directory, `${testInfo.project.name}-video-fallback-photo.png`),
+      animations: 'disabled'
+    });
+
+    await page.getByRole('button', { name: 'Paso anterior' }).click();
+    await expect(page.locator('[data-test="recipe-step-video"] source')).toHaveAttribute(
+      'src',
+      `/api/recipes/${recipe.id}/step-videos/${candidate.id}/stream`
+    );
+    await page.getByRole('button', { name: 'Siguiente paso' }).click();
+    await expect(photoFallback).toBeVisible();
+    await page.getByRole('button', { name: 'Reintentar vídeo' }).click();
+    await expect(player).toBeVisible();
+    await expect(page.locator('[data-test="recipe-step-video"] source')).toHaveAttribute(
+      'src',
+      `/api/recipes/${recipe.id}/step-videos/${secondCandidate.id}/stream`
+    );
+
+    await page.screenshot({
+      path: resolve(directory, `${testInfo.project.name}-video-fallback-after-retry.png`),
       animations: 'disabled'
     });
   } finally {
@@ -820,7 +874,7 @@ test('revisa una mejora canónica, busca medios genéricos y persiste solo al gu
     expect(JSON.stringify(improveRequests[0])).not.toContain('household');
 
     if (testInfo.project.name === 'chromium' || testInfo.project.name === 'mobile-chrome') {
-      const directory = resolve(process.cwd(), '.e2e-screenshots/recipe-editor');
+      const directory = resolveScreenshotDirectory('.e2e-screenshots/recipe-editor');
       mkdirSync(directory, { recursive: true });
       const device = testInfo.project.name === 'chromium' ? 'desktop' : 'mobile';
       await page.screenshot({
@@ -1001,7 +1055,7 @@ test('la búsqueda de fotos anuncia vacío/error, permite reintentar e ignora re
     await retryButton.focus();
     await expect(retryButton).toBeFocused();
     if (testInfo.project.name === 'chromium' || testInfo.project.name === 'mobile-chrome') {
-      const directory = resolve(process.cwd(), '.e2e-screenshots/recipe-photo-search-states');
+      const directory = resolveScreenshotDirectory('.e2e-screenshots/recipe-photo-search-states');
       mkdirSync(directory, { recursive: true });
       await page.screenshot({
         path: resolve(directory, `${testInfo.project.name}-failure.png`),
@@ -1062,6 +1116,16 @@ test('crea una receta manual solo al guardar y mantiene privada la receta nueva'
     await expect(page.locator('[data-test="recipe-editor-form"]')).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Nueva receta' })).toBeFocused();
     expect(createRequests).toHaveLength(0);
+    if (testInfo.project.name === 'chromium') {
+      await expect(page.locator('[data-test="recipe-editor-cover-sidebar"]')).toBeVisible();
+    } else if (testInfo.project.name === 'mobile-chrome') {
+      const mobileCoverAction = page.locator('[data-test="recipe-editor-mobile-cover-edit"]');
+      await expect(mobileCoverAction).toBeVisible();
+      await mobileCoverAction.click();
+      await expect(page.locator('[data-test="editor-panel-media"]')).toBeVisible();
+      await expect(page.locator('#editor-image')).toBeFocused();
+      await selectEditorTab(page, 'Datos');
+    }
 
     await page.goto('/recipes/new');
     await expect(page.locator('[data-test="recipe-editor-form"]')).toBeVisible();
@@ -1094,7 +1158,7 @@ test('crea una receta manual solo al guardar y mantiene privada la receta nueva'
     expect(createRequests).toHaveLength(0);
 
     if (testInfo.project.name === 'chromium' || testInfo.project.name === 'mobile-chrome') {
-      const directory = resolve(process.cwd(), '.e2e-screenshots/recipe-editor');
+      const directory = resolveScreenshotDirectory('.e2e-screenshots/recipe-editor');
       mkdirSync(directory, { recursive: true });
       const device = testInfo.project.name === 'chromium' ? 'desktop' : 'mobile';
       await page.screenshot({
@@ -1214,7 +1278,7 @@ test('el calor es opcional y quitarlo deja el paso guardado sin temperatura', as
     await expect(removeTemperature).toBeFocused();
     await page.keyboard.press('Enter');
     await expect(page.locator('#step-temperature-basic-0')).toHaveCount(0);
-    const screenshotDirectory = resolve(process.cwd(), '.e2e-screenshots/recipe-editor');
+    const screenshotDirectory = resolveScreenshotDirectory('.e2e-screenshots/recipe-editor');
     mkdirSync(screenshotDirectory, { recursive: true });
     const device = testInfo.project.name === 'chromium' ? 'desktop' : 'mobile';
     await page.locator('.editor-item.editor-step').first().scrollIntoViewIfNeeded();
@@ -1231,6 +1295,115 @@ test('el calor es opcional y quitarlo deja el paso guardado sin temperatura', as
     const saved = (await response.json()) as { data: Record<string, any> };
     expect(response.ok()).toBeTruthy();
     expect(saved.data.instructionsByLevel.basic[0].temperature).toBeUndefined();
+  } finally {
+    await deleteSyntheticRecipe(page, recipe);
+  }
+});
+
+test('the recipe editor follows Pencil desktop cover and mobile tab layout', async ({
+  page
+}, testInfo) => {
+  const desktop = testInfo.project.name === 'chromium';
+  await page.setViewportSize(desktop ? { width: 1440, height: 980 } : { width: 390, height: 844 });
+  await stubAutomaticStepPhotos(page);
+  await registerWithHousehold(page, '/recipes', 'recipe-editor-pencil-layout');
+  const recipe = await createSyntheticRecipe(page, detailedFixture);
+
+  try {
+    await openEditor(page, recipe.id);
+    const tabs = page.locator('[data-test="recipe-editor-tabs"]');
+    const coverSidebar = page.locator('[data-test="recipe-editor-cover-sidebar"]');
+    const visiblePanels = page.locator('[data-test^="editor-panel-"]:visible');
+    const screenshotDirectory = resolveScreenshotDirectory('.e2e-screenshots/recipe-editor');
+    mkdirSync(screenshotDirectory, { recursive: true });
+    await page.screenshot({
+      path: resolve(screenshotDirectory, `pencil-layout-${desktop ? 'desktop' : 'mobile'}.png`),
+      animations: 'disabled'
+    });
+
+    await expect(page.locator('[data-test="editor-panel-basics"]')).toBeVisible();
+    await expect(visiblePanels).toHaveCount(1);
+
+    if (desktop) {
+      await expect(coverSidebar).toBeVisible();
+      const geometry = await page.evaluate(() => {
+        const editor = document
+          .querySelector<HTMLElement>('.recipe-editor')!
+          .getBoundingClientRect();
+        const main = document
+          .querySelector<HTMLElement>('[data-test="recipe-editor-main"]')!
+          .getBoundingClientRect();
+        const sidebar = document
+          .querySelector<HTMLElement>('[data-test="recipe-editor-cover-sidebar"]')!
+          .getBoundingClientRect();
+        return {
+          editorLeft: editor.left,
+          mainLeft: main.left,
+          mainWidth: main.width,
+          mainRight: main.right,
+          sidebarLeft: sidebar.left,
+          sidebarWidth: sidebar.width
+        };
+      });
+
+      // Pencil PC: content 746 px + 18 px gutter + 326 px cover column.
+      expect(Math.abs(geometry.mainLeft - geometry.editorLeft)).toBeLessThanOrEqual(1);
+      expect(Math.abs(geometry.mainWidth - 746)).toBeLessThanOrEqual(1);
+      expect(Math.abs(geometry.sidebarLeft - geometry.mainRight - 18)).toBeLessThanOrEqual(1);
+      expect(Math.abs(geometry.sidebarWidth - 326)).toBeLessThanOrEqual(1);
+
+      await page.locator('[data-test="recipe-editor-cover-edit"] button').click();
+      await expect(page.locator('[data-test="editor-panel-media"]')).toBeVisible();
+      await expect(page.locator('#editor-image')).toBeFocused();
+    } else {
+      await expect(coverSidebar).toBeHidden();
+      const mobileGeometry = await page.evaluate(() => {
+        const main = document
+          .querySelector<HTMLElement>('[data-test="recipe-editor-main"]')!
+          .getBoundingClientRect();
+        const panel = document
+          .querySelector<HTMLElement>('[data-test="editor-panel-basics"]')!
+          .getBoundingClientRect();
+        return {
+          mainLeft: main.left,
+          mainWidth: main.width,
+          panelLeft: panel.left,
+          panelWidth: panel.width
+        };
+      });
+      expect(Math.abs(mobileGeometry.mainLeft - 16)).toBeLessThanOrEqual(1);
+      expect(Math.abs(mobileGeometry.mainWidth - 358)).toBeLessThanOrEqual(1);
+      expect(Math.abs(mobileGeometry.panelLeft - 16)).toBeLessThanOrEqual(1);
+      expect(Math.abs(mobileGeometry.panelWidth - 358)).toBeLessThanOrEqual(1);
+      const tabGeometry = await tabs.locator('[role="tab"]').evaluateAll((elements) =>
+        elements.map((element) => {
+          const rect = element.getBoundingClientRect();
+          return { top: rect.top, height: rect.height };
+        })
+      );
+      expect(
+        Math.max(...tabGeometry.map(({ top }) => top)) -
+          Math.min(...tabGeometry.map(({ top }) => top))
+      ).toBeLessThanOrEqual(1);
+      expect(tabGeometry.every(({ height }) => height >= 44)).toBeTruthy();
+      expect(await tabs.evaluate((element) => element.scrollWidth)).toBeGreaterThan(
+        await tabs.evaluate((element) => element.clientWidth)
+      );
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= document.documentElement.clientWidth
+        )
+      ).toBeTruthy();
+
+      await tabs.evaluate((element) => {
+        element.scrollLeft = element.scrollWidth;
+      });
+      await expect(page.getByRole('tab', { name: 'Multimedia', exact: true })).toBeInViewport();
+    }
+
+    await selectEditorTab(page, 'Preparación');
+    await expect(page.locator('[data-test="editor-panel-instructions"]')).toBeVisible();
+    await expect(visiblePanels).toHaveCount(1);
   } finally {
     await deleteSyntheticRecipe(page, recipe);
   }

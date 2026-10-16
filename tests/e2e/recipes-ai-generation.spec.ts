@@ -815,7 +815,7 @@ test.describe('Generación de recetas IA', () => {
       await expect(generatedStepPhoto).toHaveCount(1);
       await expect(generatedStepPhoto.locator('img')).toHaveAttribute(
         'alt',
-        'Foto real de referencia: cook'
+        'Imagen sintética de referencia: cook'
       );
       await recipeDialog.getByRole('button', { name: 'Editar ingredientes' }).click();
       await expect(recipeDialog.locator('.ai-form')).toBeVisible();
@@ -903,21 +903,27 @@ test.describe('Generación de recetas IA', () => {
       expect(syntheticProvider.requests).toHaveLength(1);
 
       await page.reload();
-      const card = page.locator('.recipe-card').filter({ hasText: recipeName }).first();
-      await expect(card).toBeVisible();
-      await card.locator('.recipe-card__open').click();
+      if (viewport.width <= 600) {
+        const featured = page
+          .locator('[data-test="recipe-featured"]')
+          .filter({ hasText: recipeName });
+        await expect(featured).toBeVisible();
+        await featured.locator('.recipes__featured-title-button').click();
+      } else {
+        const card = page.locator('.recipe-card:visible').filter({ hasText: recipeName }).first();
+        await expect(card).toBeVisible();
+        await card.locator('.recipe-card__open').click();
+      }
       await expect(page.locator('[data-test="recipe-detail-page"]')).toBeVisible();
       await expect(page.getByRole('dialog')).toHaveCount(0);
-      const savedSelector = page.locator('.recipe-detail__detail-level select');
-      await expect(savedSelector).toBeVisible();
-      await expect(savedSelector).toHaveAccessibleName('Nivel de detalle');
-      await savedSelector.focus();
-      await page.keyboard.press('Home');
-      await expect(savedSelector).toHaveValue('basic');
-      await expect(
-        page.locator('[data-test="recipe-full-detail"] [data-test="recipe-step-photo"]')
-      ).toHaveCount(1);
+      const savedBasicLevel = page.locator('[data-test="recipe-detail-level-basic"]');
+      await expect(savedBasicLevel).toBeVisible();
+      await savedBasicLevel.click();
+      await expect(savedBasicLevel).toHaveAttribute('aria-pressed', 'true');
       await expect(page.locator('.recipe-detail__steps')).toContainText('Cocer la zanahoria.');
+      const ingredientsTab = page.locator('[data-test="recipe-detail-tab-ingredients"]');
+      await ingredientsTab.click();
+      await expect(ingredientsTab).toHaveAttribute('aria-selected', 'true');
       await expect(page.locator('[data-test="recipe-serving-count"]')).toHaveValue('1');
       await expect(page.locator('[data-test="recipe-ingredients"] li').first()).toContainText(
         '2 unit'
@@ -931,7 +937,14 @@ test.describe('Generación de recetas IA', () => {
         '8 unit'
       );
       await savedServings.fill('1');
-      await page.locator('[data-test="recipe-cooking-open"] button').click();
+      await page
+        .locator(
+          '[data-test="recipe-cooking-open"]:visible button, [data-test="recipe-cooking-open-sidebar"]:visible button'
+        )
+        .click();
+      const cookingView = page.locator('[data-test="recipe-cooking-view"]');
+      await expect(cookingView).toBeVisible();
+      await expect(cookingView.locator('[data-test="recipe-step-photo"]')).toHaveCount(1);
       await expect(page.locator('[data-test="cooking-batch-warning"]')).toContainText(
         batchCookingWarning
       );
@@ -1236,9 +1249,12 @@ test.describe('Generación de recetas IA', () => {
       });
       await expect(page.locator('.modal-overlay')).toHaveCount(0);
       await page.reload();
-      await expect(
-        page.locator('.recipe-card__name').filter({ hasText: 'Opción sintética 2' }).first()
-      ).toBeVisible();
+      const savedRecipeInLibrary = page
+        .locator(
+          '[data-test="recipe-featured"]:visible h2:visible, [data-test="recipe-card"]:visible .recipe-card__name:visible'
+        )
+        .filter({ hasText: 'Opción sintética 2' });
+      await expect(savedRecipeInLibrary).toHaveCount(1);
 
       const documentWidth = await page.evaluate(() => document.documentElement.scrollWidth);
       expect(documentWidth).toBeLessThanOrEqual(viewport.width);

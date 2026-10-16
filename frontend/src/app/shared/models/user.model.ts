@@ -19,6 +19,8 @@ export interface UserPreferences {
   language: Language;
   detailLevel: DetailLevel;
   notifications: NotificationPreferences;
+  /** Preferencia personal de presentación de la biblioteca de recetas. */
+  recipeViewMode?: 'grid' | 'list';
   /**
    * Gustos, alergias y objetivo (ver TasteProfile). Lo rellena el onboarding y
    * se edita en Preferencias; la API lo expone en /api/auth/taste.
@@ -63,9 +65,3 @@ export interface TokenPayload {
   iat: number;
   exp: number;
 }
-
-
-
-
-
-

@@ -20,6 +20,7 @@ import { TAG_STYLES } from './tag.component';
 export class FilterTagComponent {
   @Input() selected = false;
   @Input() disabled = false;
+  @Input() touchTarget = false;
 
   @Output() onClick = new EventEmitter<void>();
 
@@ -27,6 +28,7 @@ export class FilterTagComponent {
     const classes = ['tag', 'tag--interactive'];
     if (this.selected) classes.push('tag--selected');
     if (this.disabled) classes.push('tag--disabled');
+    if (this.touchTarget) classes.push('tag--touch-target');
     return classes.join(' ');
   }
 }

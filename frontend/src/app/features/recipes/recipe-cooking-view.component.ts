@@ -1,5 +1,13 @@
 import { CommonModule } from '@angular/common';
-import { Component, EventEmitter, Input, Output, signal } from '@angular/core';
+import {
+  Component,
+  EventEmitter,
+  Input,
+  OnChanges,
+  Output,
+  SimpleChanges,
+  signal
+} from '@angular/core';
 import { TranslatePipe } from '../../core/pipes/translate.pipe';
 import { ButtonComponent } from '../../shared/components/ui/button/button.component';
 import { IconComponent } from '../../shared/components/ui/icon/icon.component';
@@ -7,6 +15,7 @@ import { Recipe } from '../../shared/models/recipe.model';
 import { RecipeInstructionStep } from '../../shared/models/recipe-instructions';
 import { TimerComponent, type TimerState } from '../../shared/components/ui/timer/timer.component';
 import { scaleRecipeQuantity } from './recipe-detail.util';
+import { RecipeStepPhotoComponent } from './recipe-step-photo.component';
 import { RecipeStepVideoPlayerComponent } from './recipe-step-video-player.component';
 
 interface TimerSnapshot {
@@ -30,13 +39,15 @@ interface ActiveRecipeTimer {
     ButtonComponent,
     IconComponent,
     TimerComponent,
+    RecipeStepPhotoComponent,
     RecipeStepVideoPlayerComponent
   ],
   template: `
     <section class="recipe-cooking" data-test="recipe-cooking-view">
       <header class="recipe-cooking__header">
         <div class="recipe-cooking__heading">
-          <h1 id="recipe-detail-title" tabindex="-1" data-test="recipe-cooking-title">
+          <p class="recipe-cooking__eyebrow">{{ 'recipes.cooking.title' | t }}</p>
+          <h1 id="recipe-cooking-title" tabindex="-1" data-test="recipe-cooking-title">
             {{ recipe.name }}
           </h1>
           <p class="recipe-cooking__time">
@@ -57,17 +68,30 @@ interface ActiveRecipeTimer {
           <div
             class="recipe-cooking__progress-track"
             role="progressbar"
-            [attr.aria-label]="'recipes.cooking.completed_progress_label' | t"
+            [attr.aria-label]="'recipes.cooking.step_progress_label' | t"
             [attr.aria-valuemin]="0"
             [attr.aria-valuemax]="steps.length"
-            [attr.aria-valuenow]="completedSteps().size"
+            [attr.aria-valuenow]="focusedStepIndex() + 1"
             [attr.aria-valuetext]="
-              'recipes.cooking.completed_progress'
-                | t: { current: completedSteps().size, total: steps.length }
+              'recipes.cooking.step_progress'
+                | t: { current: focusedStepIndex() + 1, total: steps.length }
             "
           >
-            <span [style.width.%]="completionPercent()"></span>
+            <span [style.width.%]="stepProgressPercent()"></span>
           </div>
+          <p
+            class="recipe-cooking__visually-hidden"
+            data-test="cooking-completion-status"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+            [attr.aria-label]="'recipes.cooking.completed_progress_label' | t"
+          >
+            {{
+              'recipes.cooking.completed_progress'
+                | t: { current: completedSteps().size, total: steps.length }
+            }}
+          </p>
         </div>
 
         <div class="recipe-cooking__servings" [attr.aria-label]="'recipes.cooking.servings' | t">
@@ -165,24 +189,6 @@ interface ActiveRecipeTimer {
       </section>
 
       <div class="recipe-cooking__layout">
-        <aside class="recipe-cooking__ingredients" [attr.aria-label]="'dashboard.ingredients' | t">
-          <h3>{{ 'dashboard.ingredients' | t }}</h3>
-          <ul class="recipe-cooking__ingredient-list">
-            <li *ngFor="let ingredient of recipe.ingredients" data-test="cooking-ingredient">
-              <strong>
-                {{ scaledQuantity(ingredient.quantity) | number: '1.0-2' }} {{ ingredient.unit }}
-              </strong>
-              <span>{{ ingredient.name }}</span>
-              <span *ngIf="ingredient.isOptional" class="recipe-cooking__optional">{{
-                'recipes.optional' | t
-              }}</span>
-              <span *ngIf="ingredient.preparation" class="recipe-cooking__ingredient-note">
-                {{ ingredient.preparation }}
-              </span>
-            </li>
-          </ul>
-        </aside>
-
         <section
           class="recipe-cooking__steps"
           [attr.aria-label]="'recipes.cooking.steps_label' | t"
@@ -227,9 +233,55 @@ interface ActiveRecipeTimer {
                       (change)="setStepComplete(index, $event)"
                     />
                     <span aria-hidden="true"></span>
+                    <span class="recipe-cooking__step-check-label">{{
+                      (isStepComplete(index)
+                        ? 'recipes.cooking.step_undo'
+                        : 'recipes.cooking.step_done'
+                      ) | t
+                    }}</span>
                   </label>
                 </header>
 
+                <app-recipe-step-video-player
+                  *ngIf="
+                    cookingModeActive &&
+                      focusedStepIndex() === index &&
+                      step.videoId &&
+                      !isStepVideoFailed(step);
+                    else recipeStepPhotoFallback
+                  "
+                  [recipeId]="recipe.id"
+                  [videoId]="step.videoId"
+                  [video]="step.video ?? null"
+                  (videoUnavailable)="onStepVideoUnavailable(step)"
+                />
+                <ng-template #recipeStepPhotoFallback>
+                  <ng-container *ngIf="cookingModeActive && focusedStepIndex() === index">
+                    <app-recipe-step-photo
+                      class="recipe-cooking__photo"
+                      [instruction]="step.instruction"
+                      [image]="step.image"
+                      [imageAttribution]="step.imageAttribution ?? null"
+                      [cookingMode]="true"
+                    />
+                    <div
+                      *ngIf="step.videoId && isStepVideoFailed(step)"
+                      class="recipe-cooking__video-fallback"
+                      data-test="recipe-step-video-fallback"
+                    >
+                      <p role="status" aria-live="polite">
+                        {{ 'recipes.cooking.video_fallback' | t }}
+                      </p>
+                      <app-button
+                        variant="outline"
+                        data-test="recipe-step-video-fallback-retry"
+                        (onClick)="retryStepVideo(step)"
+                      >
+                        {{ 'recipes.cooking.video_retry' | t }}
+                      </app-button>
+                    </div>
+                  </ng-container>
+                </ng-template>
                 <p class="recipe-cooking__instruction">{{ step.instruction }}</p>
                 <p *ngIf="step.temperature" class="recipe-cooking__temperature">
                   {{
@@ -237,12 +289,6 @@ interface ActiveRecipeTimer {
                       | t: { value: step.temperature.value, unit: step.temperature.unit }
                   }}
                 </p>
-                <app-recipe-step-video-player
-                  *ngIf="focusedStepIndex() === index && step.videoId"
-                  [recipeId]="recipe.id"
-                  [videoId]="step.videoId"
-                  [video]="step.video ?? null"
-                />
                 <p *ngIf="step.tips" class="recipe-cooking__tip">
                   <app-icon name="help_outline" [size]="16" [label]="null" /> {{ step.tips }}
                 </p>
@@ -250,23 +296,6 @@ interface ActiveRecipeTimer {
                   <app-icon name="error_outline" [size]="16" [label]="null" /> {{ step.warning }}
                 </p>
               </div>
-
-              <aside
-                *ngIf="step.timerRequired && step.timerDuration"
-                class="recipe-cooking__timer"
-                [attr.aria-label]="'recipes.timer_paso' | t: { n: step.stepNumber }"
-              >
-                <app-timer
-                  [duration]="timerDurationSeconds(step)"
-                  [label]="'recipes.timer_paso' | t: { n: step.stepNumber }"
-                  [compact]="true"
-                  (timerStart)="onTimerStart(index, step)"
-                  (timerPause)="onTimerPause(index)"
-                  (timerReset)="onTimerReset(index, step)"
-                  (timerTick)="onTimerTick(index, $event)"
-                  (timerComplete)="onTimerComplete(index, step)"
-                />
-              </aside>
             </li>
           </ol>
 
@@ -278,7 +307,7 @@ interface ActiveRecipeTimer {
           >
             <h3>{{ 'recipes.cooking.active_timers' | t }}</h3>
             <ul>
-              <li *ngFor="let timer of activeRecipeTimers()">
+              <li *ngFor="let timer of activeRecipeTimers(); trackBy: trackActiveRecipeTimer">
                 <button type="button" (click)="focusStep(timer.index)">
                   <span>{{ 'recipes.paso_n' | t: { n: timer.stepNumber } }}</span>
                   <span>{{ timer.instruction }}</span>
@@ -292,7 +321,7 @@ interface ActiveRecipeTimer {
           </section>
 
           <nav
-            class="recipe-cooking__mobile-navigation"
+            class="recipe-cooking__step-navigation"
             [attr.aria-label]="'recipes.cooking.step_navigation' | t"
           >
             <app-button
@@ -311,6 +340,50 @@ interface ActiveRecipeTimer {
             </app-button>
           </nav>
         </section>
+
+        <aside class="recipe-cooking__rail">
+          <ng-container *ngFor="let step of steps; let index = index">
+            <section
+              *ngIf="step.timerRequired && step.timerDuration"
+              class="recipe-cooking__timer"
+              [hidden]="focusedStepIndex() !== index"
+              [attr.aria-label]="'recipes.timer_paso' | t: { n: step.stepNumber }"
+              [attr.data-test]="'cooking-timer-step-' + step.stepNumber"
+            >
+              <app-timer
+                [duration]="timerDurationSeconds(step)"
+                [label]="'recipes.timer_paso' | t: { n: step.stepNumber }"
+                [compact]="true"
+                (timerStart)="onTimerStart(index, step)"
+                (timerPause)="onTimerPause(index)"
+                (timerReset)="onTimerReset(index, step)"
+                (timerTick)="onTimerTick(index, $event)"
+                (timerComplete)="onTimerComplete(index, step)"
+              />
+            </section>
+          </ng-container>
+
+          <section
+            class="recipe-cooking__ingredients"
+            [attr.aria-label]="'dashboard.ingredients' | t"
+          >
+            <h3>{{ 'dashboard.ingredients' | t }}</h3>
+            <ul class="recipe-cooking__ingredient-list">
+              <li *ngFor="let ingredient of recipe.ingredients" data-test="cooking-ingredient">
+                <strong>
+                  {{ scaledQuantity(ingredient.quantity) | number: '1.0-2' }} {{ ingredient.unit }}
+                </strong>
+                <span>{{ ingredient.name }}</span>
+                <span *ngIf="ingredient.isOptional" class="recipe-cooking__optional">{{
+                  'recipes.optional' | t
+                }}</span>
+                <span *ngIf="ingredient.preparation" class="recipe-cooking__ingredient-note">
+                  {{ ingredient.preparation }}
+                </span>
+              </li>
+            </ul>
+          </section>
+        </aside>
       </div>
 
       <p
@@ -332,6 +405,10 @@ interface ActiveRecipeTimer {
         display: block;
       }
 
+      :host([hidden]) {
+        display: none !important;
+      }
+
       .recipe-cooking {
         --recipe-cooking-focus: var(--color-primary-700);
         color: var(--text-primary);
@@ -348,6 +425,15 @@ interface ActiveRecipeTimer {
         gap: var(--space-4);
         padding-bottom: var(--space-4);
         border-bottom: 1px solid var(--border-default);
+      }
+
+      .recipe-cooking__eyebrow {
+        margin: 0 0 var(--space-1);
+        color: var(--color-primary-700);
+        font-size: var(--text-xs);
+        font-weight: var(--font-semibold);
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
       }
 
       .recipe-cooking__heading h1,
@@ -431,15 +517,29 @@ interface ActiveRecipeTimer {
 
       .recipe-cooking__layout {
         display: grid;
-        grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+        grid-template-columns: minmax(0, 1fr) minmax(280px, 320px);
         gap: var(--space-6);
         padding-top: var(--space-5);
       }
 
       .recipe-cooking__ingredients {
         min-width: 0;
-        padding-right: var(--space-5);
-        border-right: 1px solid var(--border-default);
+        align-self: start;
+        padding: var(--space-4);
+        border: 1px solid var(--border-default);
+        border-radius: var(--radius-lg);
+        background: var(--bg-primary);
+      }
+
+      .recipe-cooking__steps {
+        min-width: 0;
+      }
+
+      .recipe-cooking__rail {
+        display: grid;
+        align-content: start;
+        gap: var(--space-4);
+        min-width: 0;
       }
 
       .recipe-cooking__ingredient-list {
@@ -485,20 +585,21 @@ interface ActiveRecipeTimer {
 
       .recipe-cooking__step {
         position: relative;
-        display: grid;
-        grid-template-columns: 36px minmax(0, 1fr) minmax(216px, 260px);
-        gap: var(--space-3);
-        align-items: center;
+        display: none;
         min-width: 0;
-        padding: var(--space-3);
-        border: 1px solid var(--border-default);
-        border-radius: var(--radius-md);
-        background: var(--bg-primary);
+        padding: 0;
+        border: 0;
+        background: transparent;
       }
 
       .recipe-cooking__step--focused {
-        border-color: var(--recipe-cooking-focus);
-        background: var(--bg-secondary);
+        display: block;
+      }
+
+      .recipe-cooking__step-content {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
       }
 
       .recipe-cooking__step--complete .recipe-cooking__marker span {
@@ -508,10 +609,7 @@ interface ActiveRecipeTimer {
       }
 
       .recipe-cooking__marker {
-        align-self: stretch;
-        display: flex;
-        justify-content: center;
-        padding-top: var(--space-1);
+        display: none;
       }
 
       .recipe-cooking__marker span {
@@ -527,21 +625,19 @@ interface ActiveRecipeTimer {
         font-weight: var(--font-semibold);
       }
 
-      .recipe-cooking__step-content {
-        min-width: 0;
-      }
-
       .recipe-cooking__step-heading {
         display: flex;
         align-items: center;
         gap: var(--space-3);
         min-height: 44px;
+        order: 2;
       }
 
       .recipe-cooking__step-focus {
         display: inline-flex;
         align-items: center;
-        min-width: 0;
+        flex: 0 0 auto;
+        min-width: 44px;
         min-height: 44px;
         padding: 0;
         border: 0;
@@ -560,12 +656,18 @@ interface ActiveRecipeTimer {
       }
 
       .recipe-cooking__step-check {
-        display: grid;
-        place-items: center;
-        width: 44px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: var(--space-2);
+        width: auto;
         min-width: 44px;
-        height: 44px;
+        min-height: 44px;
         margin-left: auto;
+        padding-inline: var(--space-3);
+        border: 1px solid var(--border-default);
+        border-radius: var(--radius-md);
+        background: var(--bg-primary);
         cursor: pointer;
       }
 
@@ -580,7 +682,7 @@ interface ActiveRecipeTimer {
         clip-path: inset(50%);
       }
 
-      .recipe-cooking__step-check span {
+      .recipe-cooking__step-check > span:first-of-type {
         display: grid;
         place-items: center;
         width: 22px;
@@ -604,14 +706,28 @@ interface ActiveRecipeTimer {
         transform: rotate(45deg) translate(-1px, -1px);
       }
 
+      .recipe-cooking__step-check-label {
+        color: var(--text-primary);
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        white-space: nowrap;
+      }
+
+      .recipe-cooking__step-check input:checked ~ .recipe-cooking__step-check-label {
+        color: var(--color-success-700);
+      }
+
       .recipe-cooking__instruction {
         margin: var(--space-1) 0 0;
+        order: 3;
+        font-size: var(--text-lg);
         line-height: var(--leading-relaxed);
         overflow-wrap: anywhere;
       }
 
       .recipe-cooking__temperature {
         margin: var(--space-1) 0 0;
+        order: 4;
         color: var(--text-secondary);
         font-size: var(--text-sm);
         line-height: var(--leading-normal);
@@ -624,6 +740,48 @@ interface ActiveRecipeTimer {
         gap: var(--space-2);
         margin: var(--space-3) 0 0;
         font-size: var(--text-sm);
+      }
+
+      .recipe-cooking__tip {
+        order: 5;
+      }
+
+      .recipe-cooking__warning {
+        order: 6;
+      }
+
+      app-recipe-step-video-player,
+      .recipe-cooking__photo {
+        display: block;
+        width: 100%;
+        margin-bottom: var(--space-3);
+        order: 1;
+      }
+
+      .recipe-cooking__video-fallback {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: var(--space-2) var(--space-3);
+        margin: 0 0 var(--space-3);
+        color: var(--text-secondary);
+        font-size: var(--text-sm);
+      }
+
+      .recipe-cooking__video-fallback p {
+        margin: 0;
+      }
+
+      app-recipe-step-video-player video {
+        width: 100%;
+        max-width: none;
+        aspect-ratio: 16 / 9;
+        object-fit: cover;
+      }
+
+      .recipe-cooking__photo img {
+        max-height: 28rem;
+        aspect-ratio: 16 / 9;
       }
 
       .recipe-cooking__tip {
@@ -640,13 +798,29 @@ interface ActiveRecipeTimer {
 
       .recipe-cooking__timer {
         min-width: 0;
+        padding: var(--space-4);
+        border: 1px solid var(--border-default);
+        border-radius: var(--radius-lg);
+        background: var(--bg-secondary);
       }
 
       .recipe-cooking__active-timers,
-      .recipe-cooking__mobile-navigation,
       .recipe-cooking__ingredients-toggle,
       .recipe-cooking__mobile-ingredients {
         display: none;
+      }
+
+      .recipe-cooking__step-navigation {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-3);
+        margin-top: var(--space-4);
+      }
+
+      .recipe-cooking__step-navigation app-button {
+        flex: 0 1 15rem;
+        min-width: 0;
       }
 
       .recipe-cooking__timer-notice:not(:empty) {
@@ -662,6 +836,12 @@ interface ActiveRecipeTimer {
 
       .recipe-cooking__timer-notice:empty {
         display: none;
+      }
+
+      @media (max-width: 1024px) {
+        .recipe-cooking__layout {
+          grid-template-columns: minmax(0, 1fr);
+        }
       }
 
       .recipe-cooking__visually-hidden {
@@ -729,29 +909,21 @@ interface ActiveRecipeTimer {
           padding-top: var(--space-4);
         }
 
+        .recipe-cooking__rail {
+          margin-top: var(--space-4);
+        }
+
         .recipe-cooking__ingredients {
           display: none;
         }
 
         .recipe-cooking__step {
           display: none;
-          grid-template-columns: 32px minmax(0, 1fr);
-          align-items: start;
-          gap: var(--space-3);
-          padding: var(--space-3);
+          padding: 0;
         }
 
         .recipe-cooking__step--focused {
-          display: grid;
-        }
-
-        .recipe-cooking__step-content {
-          grid-column: 2;
-        }
-
-        .recipe-cooking__timer {
-          grid-column: 2;
-          margin-top: var(--space-2);
+          display: block;
         }
 
         .recipe-cooking__active-timers {
@@ -790,15 +962,21 @@ interface ActiveRecipeTimer {
           text-align: left;
         }
 
-        .recipe-cooking__mobile-navigation {
+        .recipe-cooking__step-navigation {
           display: flex;
           justify-content: space-between;
           gap: var(--space-3);
-          margin-top: var(--space-4);
-          padding-bottom: calc(var(--space-3) + env(safe-area-inset-bottom, 0px));
+          position: sticky;
+          bottom: 0;
+          z-index: 2;
+          margin: var(--space-4) calc(-1 * var(--container-padding)) 0;
+          padding: var(--space-3) var(--container-padding)
+            calc(var(--space-3) + env(safe-area-inset-bottom, 0px));
+          border-top: 1px solid var(--border-default);
+          background: var(--bg-primary);
         }
 
-        .recipe-cooking__mobile-navigation app-button {
+        .recipe-cooking__step-navigation app-button {
           flex: 1 1 0;
         }
       }
@@ -835,10 +1013,11 @@ interface ActiveRecipeTimer {
     `
   ]
 })
-export class RecipeCookingViewComponent {
+export class RecipeCookingViewComponent implements OnChanges {
   @Input({ required: true }) recipe!: Recipe;
   @Input() steps: RecipeInstructionStep[] = [];
   @Input() servings = 2;
+  @Input() cookingModeActive = true;
 
   @Output() servingsChange = new EventEmitter<number>();
   @Output() exit = new EventEmitter<void>();
@@ -847,11 +1026,26 @@ export class RecipeCookingViewComponent {
   readonly focusedStepIndex = signal(0);
   readonly completedSteps = signal<ReadonlySet<number>>(new Set<number>());
   readonly mobileIngredientsExpanded = signal(false);
+  readonly failedStepVideoKeys = signal<ReadonlySet<string>>(new Set<string>());
   readonly timerProgress = signal<Readonly<Record<number, TimerSnapshot>>>({});
   readonly completedTimerStep = signal<number | null>(null);
 
+  ngOnChanges(changes: SimpleChanges): void {
+    if (!changes['steps'] || changes['steps'].firstChange) return;
+    // A level switch supplies a different instruction sequence. Its step indexes must not inherit
+    // checklist/timer state from the previous sequence; hiding and reopening the same input keeps it.
+    this.focusedStepIndex.set(0);
+    this.completedSteps.set(new Set<number>());
+    this.timerProgress.set({});
+    this.completedTimerStep.set(null);
+  }
+
   completionPercent(): number {
     return this.steps.length ? (this.completedSteps().size / this.steps.length) * 100 : 0;
+  }
+
+  stepProgressPercent(): number {
+    return this.steps.length ? ((this.focusedStepIndex() + 1) / this.steps.length) * 100 : 0;
   }
 
   isStepComplete(index: number): boolean {
@@ -869,6 +1063,30 @@ export class RecipeCookingViewComponent {
   focusStep(index: number): void {
     if (!Number.isInteger(index) || index < 0 || index >= this.steps.length) return;
     this.focusedStepIndex.set(index);
+  }
+
+  isStepVideoFailed(step: RecipeInstructionStep): boolean {
+    return Boolean(step.videoId && this.failedStepVideoKeys().has(this.stepVideoKey(step)));
+  }
+
+  onStepVideoUnavailable(step: RecipeInstructionStep): void {
+    if (!step.videoId) return;
+    this.failedStepVideoKeys.update((keys) => new Set(keys).add(this.stepVideoKey(step)));
+  }
+
+  retryStepVideo(step: RecipeInstructionStep): void {
+    if (!step.videoId) return;
+    const key = this.stepVideoKey(step);
+    this.failedStepVideoKeys.update((keys) => {
+      if (!keys.has(key)) return keys;
+      const next = new Set(keys);
+      next.delete(key);
+      return next;
+    });
+  }
+
+  private stepVideoKey(step: RecipeInstructionStep): string {
+    return JSON.stringify([this.recipe?.id ?? '', step.stepNumber, step.videoId ?? '']);
   }
 
   toggleMobileIngredients(): void {
@@ -912,6 +1130,10 @@ export class RecipeCookingViewComponent {
         }
       ];
     });
+  }
+
+  trackActiveRecipeTimer(_index: number, timer: ActiveRecipeTimer): number {
+    return timer.index;
   }
 
   formatTime(seconds: number): string {

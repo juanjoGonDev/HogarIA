@@ -2,10 +2,12 @@ import { CommonModule, DOCUMENT } from '@angular/common';
 import {
   Component,
   DestroyRef,
+  EventEmitter,
   inject,
   Input,
   OnChanges,
   OnDestroy,
+  Output,
   SimpleChanges
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -88,11 +90,12 @@ type PlaybackState = 'idle' | 'preparing' | 'ready' | 'error';
       }
       .recipe-step-video video {
         display: block;
-        width: min(100%, 640px);
+        width: 100%;
+        max-width: none;
         aspect-ratio: 16 / 9;
         border-radius: var(--radius-md);
         background: var(--bg-tertiary);
-        object-fit: contain;
+        object-fit: cover;
       }
       .recipe-step-video__status,
       .recipe-step-video__error,
@@ -128,6 +131,8 @@ export class RecipeStepVideoPlayerComponent implements OnChanges, OnDestroy {
   @Input({ required: true }) videoId = '';
   @Input() video: RecipeStepVideoCandidate | null = null;
 
+  @Output() readonly videoUnavailable = new EventEmitter<void>();
+
   private readonly recipeService = inject(RecipeService);
   private readonly document = inject(DOCUMENT);
   private readonly destroyRef = inject(DestroyRef);
@@ -157,9 +162,14 @@ export class RecipeStepVideoPlayerComponent implements OnChanges, OnDestroy {
   }
 
   onPlaybackError(): void {
+    this.markPlaybackUnavailable();
+  }
+
+  private markPlaybackUnavailable(): void {
     this.streamUrl = '';
     this.autoPlay = false;
     this.playbackState = 'error';
+    this.videoUnavailable.emit();
   }
 
   private preparePlayback(autoplay: boolean): void {
@@ -171,14 +181,16 @@ export class RecipeStepVideoPlayerComponent implements OnChanges, OnDestroy {
     this.playbackRequest = this.recipeService
       .prepareStepVideoPlayback(this.recipeId, this.videoId)
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe((ready) => {
-        if (!ready) {
-          this.playbackState = 'error';
-          this.autoPlay = false;
-          return;
-        }
-        this.streamUrl = this.recipeService.stepVideoStreamUrl(this.recipeId, this.videoId);
-        this.playbackState = 'ready';
+      .subscribe({
+        next: (ready) => {
+          if (!ready) {
+            this.markPlaybackUnavailable();
+            return;
+          }
+          this.streamUrl = this.recipeService.stepVideoStreamUrl(this.recipeId, this.videoId);
+          this.playbackState = 'ready';
+        },
+        error: () => this.markPlaybackUnavailable()
       });
   }
 

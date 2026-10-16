@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from './fixtures';
-import { registerAndGoto } from './helpers/auth';
+import { registerWithHousehold } from './helpers/auth';
 import {
   createSyntheticRecipe,
   deleteSyntheticRecipe,
@@ -36,8 +36,10 @@ async function expectActionsFit(
     const bounds = element.getBoundingClientRect();
     const bodyBounds = element.closest('.modal__body')?.getBoundingClientRect();
     const appHeaderBounds = document.querySelector('.header')?.getBoundingClientRect();
-    const bottomNavigation = document.querySelector('.bottom-nav');
-    const bottomNavigationBounds = bottomNavigation?.getBoundingClientRect();
+    const safeAreaBottom =
+      Number.parseFloat(
+        getComputedStyle(document.documentElement).getPropertyValue('--hogaria-safe-area-bottom')
+      ) || 0;
     const buttons = Array.from(element.querySelectorAll('button'), (button) => {
       const rect = button.getBoundingClientRect();
       return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
@@ -48,11 +50,7 @@ async function expectActionsFit(
       left: bounds.left,
       right: bounds.right,
       bodyTop: bodyBounds?.top ?? appHeaderBounds?.bottom ?? 0,
-      bodyBottom:
-        bodyBounds?.bottom ??
-        (bottomNavigationBounds && bottomNavigationBounds.height > 0
-          ? bottomNavigationBounds.top
-          : innerHeight),
+      bodyBottom: bodyBounds?.bottom ?? (visualViewport?.height ?? innerHeight) - safeAreaBottom,
       buttons
     };
   });
@@ -140,13 +138,13 @@ test('el detalle a página completa conserva scroll y teclado; el formulario IA 
         { width: 393, height: 851 }
       ]
     : [{ width: 1440, height: 900 }];
-  await registerAndGoto(page, '/dashboard', 'recipe-actions-mobile');
+  await registerWithHousehold(page, '/dashboard', 'recipe-actions-mobile');
   const recipe = await createSyntheticRecipe(page, {
     name: 'Receta sintética para comprobar que el título largo no invade el botón de cierre',
-    tips: Array.from(
-      { length: 32 },
-      () => 'Consejo sintético para comprobar el desplazamiento interno del diálogo.'
-    ).join(' ')
+    steps: Array.from({ length: 32 }, (_, index) => ({
+      stepNumber: index + 1,
+      instruction: `Paso sintético ${index + 1}: comprueba que el contenido extenso de la ficha se desplaza sin perder el foco ni invadir los controles.`
+    }))
   });
   const providerRequests: string[] = [];
   page.on('request', (request) => {
@@ -167,7 +165,9 @@ test('el detalle a página completa conserva scroll y teclado; el formulario IA 
       await expect(page.locator('[data-test="recipe-detail-title"]')).toHaveText(recipe.name);
       await expect(page.locator('[data-test="recipe-detail-title"]')).toBeFocused();
       await expect(page.locator('.recipe-detail')).toBeVisible();
+      await expect(detailPage.locator('[data-test="recipe-favorite-toggle"]')).toBeVisible();
       await waitForStableView(page);
+      expect(await page.evaluate(() => window.scrollY)).toBe(0);
       const titleGeometry = await page
         .locator('[data-test="recipe-detail-title"]')
         .evaluate((heading: HTMLElement) => ({
@@ -183,6 +183,12 @@ test('el detalle a página completa conserva scroll y teclado; el formulario IA 
       expect(rootWidth, `la ficha no debe desbordar a ${viewport.width}px`).toBeLessThanOrEqual(
         viewport.width
       );
+      const expandSteps = page.locator(
+        '[data-test="recipe-expand-steps-mobile"]:visible, [data-test="recipe-expand-steps-desktop"]:visible'
+      );
+      await expect(expandSteps).toBeVisible();
+      await expandSteps.click();
+      await expect(page.locator('.recipe-detail__steps > .step-card')).toHaveCount(32);
       const detailBody = await page.evaluate(() => ({
         scrollHeight: document.documentElement.scrollHeight,
         clientHeight: window.innerHeight,
@@ -192,11 +198,15 @@ test('el detalle a página completa conserva scroll y teclado; el formulario IA 
         detailBody.scrollHeight,
         `la ficha larga debe desplazarse como página a ${viewport.width}px`
       ).toBeGreaterThan(detailBody.clientHeight);
-      expect(detailBody.scrollY).toBe(0);
-      await expectActionsFit(page, '.recipe-detail__actions', [
-        /Cocinar ahora/,
-        /Añadir a favoritos/
-      ]);
+      if (viewport.width <= 1024) {
+        await page.locator('.recipe-detail__actions').scrollIntoViewIfNeeded();
+        await expectActionsFit(page, '.recipe-detail__actions', [/Empezar a cocinar/]);
+      } else {
+        await expectActionsFit(page, '.recipe-detail-page__actions', [
+          /Añadir a favoritos/,
+          /Editar receta/
+        ]);
+      }
 
       if (screenshotDirectory) {
         mkdirSync(screenshotDirectory, { recursive: true });
