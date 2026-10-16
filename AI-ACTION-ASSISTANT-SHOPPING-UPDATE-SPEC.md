@@ -2,7 +2,7 @@
 
 Esta unidad amplía el asistente global con una edición acotada de listas existentes. Solo permite renombrar una lista activa o cambiar su tienda; resolver el target, detectar cambios concurrentes e impedir duplicados son condiciones obligatorias antes de habilitar la aprobación.
 
-**Estado:** implementación y verificación local completadas; pendiente commit selectivo y push con hooks. **Rama/PR:** `feat/household-floorplan` / #47; mantener Draft. **Alcance:** ampliación del PR #47 aprobada por el usuario el 2026-10-16. **Contrato padre:** `SPEC.md` y `AI-ACTION-ASSISTANT-EXTENSION-SPEC.md`.
+**Estado:** implementación y verificación completadas; commit `8a15c6e` publicado en la rama. **Rama/PR:** `feat/household-floorplan` / #47; mantener Draft. **Alcance:** ampliación del PR #47 aprobada por el usuario el 2026-10-16. **Contrato padre:** `SPEC.md` y `AI-ACTION-ASSISTANT-EXTENSION-SPEC.md`.
 
 ## Decisiones
 
@@ -27,7 +27,7 @@ Esta unidad amplía el asistente global con una edición acotada de listas exist
 - [x] Pruebas focales servidor/cliente cubren límites, errores, casos ambiguos, CAS concurrente/retrasado, cambio de ámbito, autorización, retry y edición manual.
 - [x] Playwright full-stack usa backend real y DB aislada: cero escrituras antes de aprobar o al rechazar; aprobación cambia solo la lista elegida y sobrevive a recarga; conflicto concurrente no pisa datos. Validado escritorio y móvil; capturas sintéticas fuera de Git.
 - [x] Cobertura en alcance supera 70 % en statements/branches/functions/lines; `check:ui`, typecheck E2E, build y formato pasan. Ver evidencia abajo.
-- [ ] Crear commit selectivo, ejecutar hooks de push y publicar en la rama existente; mantener PR #47 en Draft.
+- [x] Crear commit selectivo, ejecutar hooks de push y publicar en la rama existente; mantener PR #47 en Draft. Commit: `8a15c6e`.
 
 ## Evidencia reproducible
 
@@ -40,10 +40,11 @@ Esta unidad amplía el asistente global con una edición acotada de listas exist
 | `pnpm run typecheck:e2e`                                                                                                                                                                        | Pasa.                                                                                                                                                                                    |
 | `pnpm exec prettier --check` sobre archivos de esta unidad                                                                                                                                      | Pasa.                                                                                                                                                                                    |
 | `pnpm run build`                                                                                                                                                                                | Pasa (server + Angular production); quedan avisos preexistentes de budget/estilos/imports, sin errores.                                                                                  |
+| Hook de `git push` para `8a15c6e`                                                                                                                                                               | Pasa: format-check (19 rutas), `check:ui`, build, typecheck E2E y suites completas (config, 1632 cliente, 1972 servidor + 1 omitida).                                                    |
 | Playwright aislado, proyectos `chromium` y `mobile-chrome`, pruebas de rechazo/confirmación y conflicto obsoleto                                                                                | 4/4 pasan; backend real, proveedor IA interceptado con respuesta sintética, DB/artefactos temporales limpiados al cerrar. La matriz visual/teclado previa pasó 2/2 para ambos proyectos. |
 | Capturas E2E sintéticas                                                                                                                                                                         | `C:\Users\juanj\.codex\visualizations\2026\10\16\01a144e3-1d9b-78e3-a440-0f38ab3e1e80\ai-action-assistant-shopping\` (escritorio y móvil, fuera de Git).                                 |
 
-Limitación: no se ejecuta proveedor IA real; la respuesta de propuesta se simula en E2E. El push/hook del commit de esta unidad sigue pendiente.
+Limitación: no se ejecuta proveedor IA real; la respuesta de propuesta se simula en E2E. No se hizo merge; PR #47 sigue Draft.
 
 ## Evidencia inicial y riesgos
 
