@@ -17,6 +17,14 @@ El checklist anterior de este archivo decía que la unidad de recetas no ampliab
 - La carga global debe ser pequeña: FAB ligero en el shell y carga diferida de diálogo/flujo pesado. Reutilizar el modal, botones, tokens e i18n existentes. El aviso inferior de automatización de hogar ya ocupa abajo-derecha, por lo que la posición/stack del FAB se valida frente a ese aviso, teclado, drawer y safe-area.
 - QA repetible usa proveedores simulados y DB temporal aislada; el smoke final debe usar app/backend reales, interacción de navegador y DB temporal aislada. El proveedor IA real/local y micrófono son opt-in condicionados por privacidad, disponibilidad y recursos. Nunca escribir en la DB normal ni imprimir secretos/datos personales.
 
+### Riesgos de integración verificados en el código actual
+
+- `POST /api/ai/plan-week` persiste el plan antes de responder (`server/src/routes/ai.routes.ts`, `persistWeeklyPlan`); no reutilizarlo para previsualización global.
+- `POST /api/shopping/lists/:id/items` fusiona producto+unidad sumando cantidades (`server/src/routes/shopping.routes.ts`, `upsertLine`); un reintento puede duplicar cantidades sin idempotencia por acción.
+- `POST /api/calendar/events` inserta el evento antes de validar/asociar invitados (`server/src/routes/calendar.routes.ts`); no ofrecer invitados en acciones iniciales hasta hacer atómica esa escritura.
+- Tareas domésticas solo tienen lectura/escritura de semana completa con permiso y `baseVersion` (`server/src/routes/household-tasks.routes.ts`, `household-task.store.ts`); una acción debe releer, fusionar la semana y guardar por CAS, sin sobrescribir cambios concurrentes.
+- Algunas rutas de creación generan IDs nuevos y no tienen idempotencia común. La seguridad de reintento no se puede asumir por similitud con los endpoints de aprobación del plan de comidas.
+
 ## Aceptación priorizada
 
 ### P0 — Contrato, seguridad y flujo HITL
@@ -26,7 +34,7 @@ El checklist anterior de este archivo decía que la unidad de recetas no ampliab
 - [ ] Definir esquemas estrictos compartidos para solicitud, plan, acción, edición y estado: ID estable generado por la app, dominio/tipo allowlist, payload editable tipado, dependencias, advertencias, selección y estado de ejecución. Rechazar campos/acciones desconocidas; no aceptar instrucciones ejecutables ni confiar IDs/authorization generados por IA.
 - [ ] Añadir generación universal por lotes (intenciones múltiples y entre dominios) con fechas/cantidades naturales, ambigüedad y contexto mínimo de ruta/hogar. Prompt injection en texto/contexto recuperado se trata como dato no confiable.
 - [ ] Generar y refinar propuestas sin escritura persistente. Refinar lote/grupo/acción/campo con alcance explícito; conservar acciones no afectadas y ediciones manuales salvo que se pidan reemplazar; soportar repetición, dependencias coherentes y descartar/deshacer cuando sea práctico.
-- [ ] Crear registro extensible de acciones y mapear cada acción compatible a APIs/servicios existentes, reglas de autorización, validadores y lecturas de conflictos/duplicados. No añadir operaciones destructivas al registro inicial; cualquier futura acción destructiva requiere confirmación adicional explícita.
+- [ ] Crear registro extensible de acciones y mapear cada acción compatible a APIs/servicios existentes, reglas de autorización, validadores y lecturas de conflictos/duplicados. Añadir idempotencia atómica por acción donde el API no la ofrezca. No usar `/api/ai/plan-week` como preview ni ofrecer asistentes/invitados de eventos hasta proteger las escrituras parciales. No añadir operaciones destructivas al registro inicial; cualquier futura acción destructiva requiere confirmación adicional explícita.
 - [ ] La confirmación final ejecuta solo acciones seleccionadas y validadas. Orden topológico de dependencias; rechazos/fallos bloquean dependientes. Conservar resultados parciales, fallos por acción y reintentos seguros/idempotentes sin repetir éxitos; doble clic/cancelación no duplica escrituras.
 - [ ] La generación, refinamiento, edición, selección, expansión, rechazo y cierre sin confirmar causan cero escrituras. Cada persistencia ocurre únicamente después de aprobación explícita del usuario y validación backend de sesión, hogar/permisos, esquema, referencias y reglas de dominio.
 
