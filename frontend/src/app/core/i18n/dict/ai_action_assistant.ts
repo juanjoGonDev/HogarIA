@@ -27,7 +27,7 @@ export const aiActionAssistantEs = {
   'ai_assistant.voice_no_microphone':
     'No se detectó micrófono. Conecta o selecciona uno y revisa el permiso del sitio; también puedes escribir.',
   'ai_assistant.voice_service_unavailable':
-    'El servicio de dictado no responde. Comprueba la conexión o prueba otro navegador; también puedes escribir.',
+    'El navegador no transcribió. Si usas Brave, el dictado web puede fallar incluso con permiso; prueba Chrome o Edge. En Windows, enfoca el campo y pulsa Win+H (reconocimiento online de Microsoft), o escribe.',
   'ai_assistant.voice_error':
     'No se pudo reconocer la voz. Puedes corregir el texto o escribir la petición.',
   'ai_assistant.voice_finalizing': 'Finalizando el dictado…',
@@ -315,7 +315,7 @@ export const aiActionAssistantEn: Record<keyof typeof aiActionAssistantEs, strin
   'ai_assistant.voice_no_microphone':
     'No microphone detected. Connect or select one and check this site’s permission; you can also type.',
   'ai_assistant.voice_service_unavailable':
-    'The speech service is not responding. Check your connection or try another browser; you can also type your request.',
+    'The browser did not transcribe. If you use Brave, web speech can fail even with permission; try Chrome or Edge. On Windows, focus the field and press Win+H (Microsoft online recognition), or type.',
   'ai_assistant.voice_error':
     'Speech could not be recognised. You can edit the text or type your request.',
   'ai_assistant.voice_finalizing': 'Finishing dictation…',

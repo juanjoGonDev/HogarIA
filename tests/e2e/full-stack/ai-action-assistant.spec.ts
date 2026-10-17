@@ -14,6 +14,7 @@ type BrowserSpeechStubControl = {
   stopped: boolean;
   aborted: boolean;
   emitFinal(transcript: string): void;
+  fail(error: string): void;
   finish(): void;
 };
 
@@ -727,6 +728,10 @@ async function installSpeechRecognitionStub(page: Page): Promise<void> {
 
       emitFinal(transcript: string): void {
         this.onresult?.({ results: [{ 0: { transcript }, isFinal: true }] });
+      }
+
+      fail(error: string): void {
+        this.onerror?.({ error });
       }
 
       finish(): void {
@@ -4544,6 +4549,46 @@ test('asistente global: muestra error si el dictado termina sin transcripción',
   expect(proposalRequests).toBe(0);
   expect(assistantDatabaseSnapshot()).toEqual(databaseBeforeVoice);
   await capture(page, testInfo, 'voice-no-transcript-error');
+});
+
+test('asistente global: guía si falla el servicio de dictado del navegador', async ({
+  page
+}, testInfo) => {
+  await installSpeechRecognitionStub(page);
+  await registerUser(page, 'Asistente servicio de voz E2E');
+  await createHousehold(page, 'Hogar servicio de voz sintético');
+  await page.goto('/dashboard');
+  if (testInfo.project.name === 'mobile-chrome') {
+    await page.setViewportSize({ width: 320, height: 568 });
+  }
+  const databaseBeforeVoice = assistantDatabaseSnapshot();
+  await page.locator('[data-test="ai-assistant-open"]').click();
+
+  const dialog = page.locator('.modal[role="dialog"]');
+  const voiceControls = dialog.locator('.assistant__voice-controls');
+  await dialog.locator('.assistant__consent input').check();
+  await voiceControls.getByRole('button', { name: 'Dictar petición' }).click();
+  await expect(
+    dialog.getByRole('status').filter({ hasText: 'Escuchando; puedes corregir la transcripción' })
+  ).toBeVisible();
+
+  await page.evaluate(() => {
+    const recognition = (
+      window as typeof window & { __assistantSpeechRecognition?: BrowserSpeechStubControl }
+    ).__assistantSpeechRecognition;
+    if (!recognition) throw new Error('Speech recognition stub was not started');
+    recognition.fail('network');
+  });
+
+  const voiceError = dialog.locator('.assistant__error[role="alert"]');
+  await expect(voiceError).toContainText('Si usas Brave');
+  await expect(voiceError).toContainText('Chrome o Edge');
+  await expect(voiceError).toContainText('Win+H');
+  await expect(voiceError).toContainText('reconocimiento online');
+  await expect(voiceControls.getByRole('button', { name: 'Dictar petición' })).toBeVisible();
+  await expect(voiceError).toBeInViewport();
+  expect(assistantDatabaseSnapshot()).toEqual(databaseBeforeVoice);
+  await capture(page, testInfo, 'voice-service-fallback');
 });
 
 test('asistente global: navegar durante dictado libera voz y conserva el borrador', async ({

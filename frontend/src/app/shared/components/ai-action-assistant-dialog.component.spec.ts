@@ -2335,6 +2335,20 @@ describe('AiActionAssistantDialogComponent', () => {
     }
   });
 
+  it('offers browser and OS dictation alternatives when the speech service fails', () => {
+    const recognitions = mountWithSpeech(FakeSpeechRecognition);
+    component.voiceConsent.set(true);
+    component.startVoice();
+    recognitions[0].onerror?.({ error: 'network' });
+    fixture.detectChanges();
+
+    const voiceError = fixture.nativeElement.querySelector('[role="alert"]') as HTMLElement;
+    expect(voiceError.textContent).toContain('Si usas Brave');
+    expect(voiceError.textContent).toContain('Chrome o Edge');
+    expect(voiceError.textContent).toContain('Win+H');
+    expect(voiceError.textContent).toContain('reconocimiento online');
+  });
+
   it('reports denied microphone permission and falls back to text when unsupported', () => {
     const recognitions = mountWithSpeech(FakeSpeechRecognition);
     component.voiceConsent.set(true);
