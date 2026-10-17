@@ -503,9 +503,6 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
                   class="assistant__action"
                   [class.assistant__action--selected]="action.selected"
                   [attr.data-action-id]="action.id"
-                  [attr.data-meal-shopping-draft-action]="
-                    isMealShoppingDraftAction(action) ? '' : null
-                  "
                 >
                   <header class="assistant__action-header">
                     <app-checkbox
@@ -1075,104 +1072,6 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
                     >
                       {{ 'ai_assistant.meals.preview_ready' | t }}
                     </p>
-                    <p
-                      *ngIf="mealShoppingLoadingFor(action.id)"
-                      class="assistant__status"
-                      role="status"
-                      aria-live="polite"
-                    >
-                      {{ 'ai_assistant.meals.shopping_draft_loading' | t }}
-                    </p>
-                    <div
-                      *ngIf="mealShoppingError(action.id) as draftShoppingError"
-                      class="assistant__error"
-                      role="alert"
-                    >
-                      <span>{{ draftShoppingError | t }}</span>
-                      <app-button
-                        variant="ghost"
-                        [touchTarget]="true"
-                        [disabled]="mealShoppingLoadingFor(action.id) || executing()"
-                        data-test="ai-assistant-meals-shopping-draft-refresh"
-                        (onClick)="refreshAssistantMealShoppingPreview(action)"
-                      >
-                        {{ 'ai_assistant.meals.shopping_reload' | t }}
-                      </app-button>
-                    </div>
-                    <section
-                      *ngIf="mealShoppingPreview(action.id) as draftShoppingPreview"
-                      class="assistant__meal-shopping-draft"
-                      data-test="ai-assistant-meals-shopping-draft"
-                    >
-                      <h4>{{ 'ai_assistant.meals.shopping_draft_heading' | t }}</h4>
-                      <p class="assistant__hint">
-                        {{ 'ai_assistant.meals.shopping_draft_copy' | t }}
-                      </p>
-                      <p class="assistant__hint">
-                        {{
-                          'ai_assistant.meals.shopping_range'
-                            | t
-                              : {
-                                  start: draftShoppingPreview.startDate,
-                                  end: draftShoppingPreview.endDate
-                                }
-                        }}
-                        ·
-                        {{
-                          'ai_assistant.meals.shopping_draft_meal_count'
-                            | t: { count: draftShoppingPreview.plannedMealCount }
-                        }}
-                      </p>
-                      <p
-                        *ngIf="!draftShoppingPreview.sharedPantry"
-                        class="assistant__hint"
-                        role="note"
-                      >
-                        {{ 'ai_assistant.meals.shopping_stock_unknown' | t }}
-                      </p>
-                      <ul
-                        *ngIf="draftShoppingPreview.warnings.length"
-                        class="assistant__shopping-warnings"
-                      >
-                        <li *ngFor="let warning of draftShoppingPreview.warnings">
-                          {{
-                            'ai_assistant.meals.shopping_snapshot_warning'
-                              | t: { date: warning.date }
-                          }}
-                        </li>
-                      </ul>
-                      <p
-                        *ngIf="!hasSelectableMealShoppingLines(action.id)"
-                        class="assistant__hint"
-                        data-test="ai-assistant-meals-shopping-draft-empty"
-                      >
-                        {{ 'ai_assistant.meals.shopping_draft_no_shortages' | t }}
-                      </p>
-                      <ul class="assistant__shopping-lines">
-                        <li
-                          *ngFor="
-                            let line of mealShoppingLinesFor(action.id, false);
-                            trackBy: trackMealShoppingLine
-                          "
-                          class="assistant__shopping-line"
-                        >
-                          <span>{{ line.name }} · {{ line.quantity }} {{ line.unit }}</span>
-                          <span>{{ mealShoppingStatusLabel(line.status) | t }}</span>
-                          <span *ngIf="canAddMealShoppingLine(line)">
-                            {{
-                              'ai_assistant.meals.shopping_missing_quantity'
-                                | t: { quantity: line.missingQuantity, unit: line.unit }
-                            }}
-                          </span>
-                        </li>
-                      </ul>
-                      <p *ngIf="mealShoppingActionCount(action.id)" class="assistant__hint">
-                        {{
-                          'ai_assistant.meals.shopping_draft_actions'
-                            | t: { count: mealShoppingActionCount(action.id) }
-                        }}
-                      </p>
-                    </section>
                     <ng-container *ngIf="mealProposalFor(action.id) as mealPlan">
                       <details class="assistant__meal-preview" open>
                         <summary>{{ mealPlan.weekStart }} · {{ mealPlan.events.length }}</summary>
@@ -2565,11 +2464,7 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
   readonly mealShoppingSaving = signal<Record<string, boolean>>({});
   readonly mealShoppingApprovals = signal<Record<string, HouseholdMealShoppingApproval>>({});
   readonly mealShoppingErrors = signal<Record<string, TranslationKey | null>>({});
-  private readonly mealShoppingPreviewRequests = new Map<string, Subscription>();
-  private readonly mealShoppingPreviewRequestVersions = new Map<string, number>();
-  private readonly mealShoppingActionSources = new Map<string, string>();
   private proposalHouseholdId: string | null = null;
-  private mealShoppingActionSequence = 0;
 
   readonly selectedActions = computed(
     () => this.plan()?.actions.filter((action) => action.selected) ?? []
@@ -2584,10 +2479,7 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
   readonly confirmedMealPlanActions = computed(
     () =>
       this.plan()?.actions.filter(
-        (action) =>
-          action.kind === 'household.plan_meals' &&
-          action.status === 'succeeded' &&
-          !this.hasMealShoppingDraftActions(action.id)
+        (action) => action.kind === 'household.plan_meals' && action.status === 'succeeded'
       ) ?? []
   );
   readonly refinableDomains = computed(() => {
@@ -2630,7 +2522,6 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
   ngOnDestroy(): void {
     this.requestSubscription?.unsubscribe();
     this.mealRequestSubscriptions.forEach((subscription) => subscription.unsubscribe());
-    this.mealShoppingPreviewRequests.forEach((subscription) => subscription.unsubscribe());
     this.cancelVoice();
     this.restoreBodyScroll();
   }
@@ -2656,7 +2547,6 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
       .propose({ prompt, ...(this.routeHint ? { route: this.routeHint } : {}) })
       .subscribe({
         next: (plan) => {
-          this.mealShoppingActionSources.clear();
           this.plan.set(plan);
           this.mealParticipantSelections.set(
             Object.fromEntries(
@@ -2704,34 +2594,6 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
     );
   }
 
-  private isShoppingDraftActionReady(action: AssistantAction): boolean {
-    const mealActionId = this.mealShoppingDraftSourceId(action);
-    if (!mealActionId) return true;
-    return (
-      this.mealShoppingPreviewRequestsReady(mealActionId) &&
-      this.mealShoppingPreview(mealActionId) !== null
-    );
-  }
-
-  private mealShoppingDraftSourceId(action: AssistantAction): string | null {
-    return this.mealShoppingActionSources.get(action.id) ?? null;
-  }
-
-  private mealShoppingPreviewRequestsReady(actionId: string): boolean {
-    return !this.mealShoppingLoadingFor(actionId) && !this.mealShoppingError(actionId);
-  }
-
-  private hasMealShoppingDraftActions(actionId: string): boolean {
-    return (
-      this.plan()?.actions.some((action) => this.mealShoppingDraftSourceId(action) === actionId) ??
-      false
-    );
-  }
-
-  isMealShoppingDraftAction(action: AssistantAction): boolean {
-    return this.mealShoppingDraftSourceId(action) !== null;
-  }
-
   omitAction(id: string): void {
     if (this.hasDependents(id)) return;
     this.invalidateMealProposalDraft(id);
@@ -2768,8 +2630,7 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
         (action) =>
           (action.status === 'succeeded' ||
             (this.isActionValid(action) && this.isSpecializedProposalReady(action))) &&
-          !this.hasUnselectedDependency(action) &&
-          this.isShoppingDraftActionReady(action)
+          !this.hasUnselectedDependency(action)
       )
     );
   }
@@ -3127,7 +2988,6 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
             return;
           }
           this.mealProposals.update((proposals) => ({ ...proposals, [action.id]: proposal }));
-          this.requestAssistantMealShoppingPreview(action, proposal, householdMemberIds);
         },
         error: (error: unknown) => this.errorKey.set(this.mapError(error))
       });
@@ -3179,11 +3039,6 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
             ? refined
             : this.applyMealServingsOverrides(refined, overrides);
           this.mealProposals.update((proposals) => ({ ...proposals, [action.id]: nextProposal }));
-          this.requestAssistantMealShoppingPreview(
-            action,
-            nextProposal,
-            this.selectedMealParticipantIds(action.id)
-          );
           if (this.refinementChangesServings(instruction)) {
             this.mealManualServings.update((current) => ({ ...current, [action.id]: {} }));
           }
@@ -3204,11 +3059,10 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
       input.value = String(event.servings);
       return;
     }
-    let updatedProposal: HouseholdMealProposal | null = null;
     this.mealProposals.update((proposals) => {
       const proposal = proposals[actionId];
       if (!proposal) return proposals;
-      updatedProposal = {
+      const updatedProposal = {
         ...proposal,
         events: proposal.events.map((candidate) =>
           candidate.id === event.id ? { ...candidate, servings } : candidate
@@ -3216,17 +3070,6 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
       };
       return { ...proposals, [actionId]: updatedProposal };
     });
-    const mealAction = this.plan()?.actions.find(
-      (candidate): candidate is Extract<AssistantAction, { kind: 'household.plan_meals' }> =>
-        candidate.id === actionId && candidate.kind === 'household.plan_meals'
-    );
-    if (updatedProposal && mealAction) {
-      this.requestAssistantMealShoppingPreview(
-        mealAction,
-        updatedProposal,
-        this.selectedMealParticipantIds(actionId)
-      );
-    }
     this.mealManualServings.update((overrides) => ({
       ...overrides,
       [actionId]: {
@@ -3234,265 +3077,6 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
         [this.mealEventIdentity(event)]: servings
       }
     }));
-  }
-
-  refreshAssistantMealShoppingPreview(action: AssistantAction): void {
-    if (action.kind !== 'household.plan_meals') return;
-    const proposal = this.mealProposalFor(action.id);
-    if (!proposal || action.status !== 'pending' || !this.isMealProposalCurrent(action)) return;
-    this.requestAssistantMealShoppingPreview(
-      action,
-      proposal,
-      this.selectedMealParticipantIds(action.id)
-    );
-  }
-
-  mealShoppingActionCount(actionId: string): number {
-    return (
-      this.plan()?.actions.filter(
-        (action) =>
-          this.mealShoppingDraftSourceId(action) === actionId &&
-          action.kind === 'shopping.add_item' &&
-          action.status !== 'succeeded'
-      ).length ?? 0
-    );
-  }
-
-  private requestAssistantMealShoppingPreview(
-    action: Extract<AssistantAction, { kind: 'household.plan_meals' }>,
-    proposal: HouseholdMealProposal,
-    householdMemberIds: string[]
-  ): void {
-    const householdId = this.proposalHouseholdId;
-    const endDate = addIsoDays(proposal.weekStart, 6);
-    if (
-      !householdId ||
-      !endDate ||
-      action.status !== 'pending' ||
-      this.household.activeHouseholdId() !== householdId
-    ) {
-      this.setMealShoppingError(action.id, 'ai_assistant.error_context_changed');
-      return;
-    }
-
-    const version = (this.mealShoppingPreviewRequestVersions.get(action.id) ?? 0) + 1;
-    this.mealShoppingPreviewRequestVersions.set(action.id, version);
-    this.mealShoppingPreviewRequests.get(action.id)?.unsubscribe();
-    this.setMealShoppingError(action.id, null);
-    this.setMealShoppingLoading(action.id, true);
-    const subscription = this.mealProposalService
-      .previewAssistantShopping(householdId, {
-        proposalId: proposal.proposalId,
-        weekStart: proposal.weekStart,
-        householdMemberIds: [...householdMemberIds],
-        recipes: proposal.recipes,
-        events: proposal.events
-      })
-      .pipe(
-        finalize(() => {
-          if (this.mealShoppingPreviewRequestVersions.get(action.id) === version) {
-            this.setMealShoppingLoading(action.id, false);
-          }
-        })
-      )
-      .subscribe({
-        next: (preview) => {
-          if (this.mealShoppingPreviewRequestVersions.get(action.id) !== version) return;
-          const currentProposal = this.mealProposalFor(action.id);
-          if (
-            this.household.activeHouseholdId() !== householdId ||
-            !currentProposal ||
-            JSON.stringify(currentProposal) !== JSON.stringify(proposal)
-          ) {
-            this.setMealShoppingError(action.id, 'ai_assistant.error_context_changed');
-            return;
-          }
-          if (!this.isMealShoppingPreviewForRange(preview, proposal.weekStart, endDate)) {
-            this.setMealShoppingError(action.id, 'ai_assistant.meals.shopping_invalid_preview');
-            return;
-          }
-
-          this.mealShoppingPreviews.update((previews) => ({ ...previews, [action.id]: preview }));
-          this.mealShoppingLines.update((lines) => ({
-            ...lines,
-            [action.id]: [
-              ...preview.requiredIngredients.map((item) => this.makeMealShoppingLine(item, false)),
-              ...preview.optionalIngredients.map((item) => this.makeMealShoppingLine(item, true))
-            ]
-          }));
-          this.reconcileMealShoppingActions(action, preview);
-        },
-        error: (error: unknown) => {
-          if (this.mealShoppingPreviewRequestVersions.get(action.id) === version) {
-            this.setMealShoppingError(action.id, this.mapMealShoppingError(error));
-          }
-        }
-      });
-    this.mealShoppingPreviewRequests.set(action.id, subscription);
-    this.mealRequestSubscriptions.push(subscription);
-  }
-
-  private reconcileMealShoppingActions(
-    mealAction: Extract<AssistantAction, { kind: 'household.plan_meals' }>,
-    preview: HouseholdMealShoppingPreview
-  ): void {
-    const currentPlan = this.plan();
-    if (!currentPlan) return;
-    const existing = currentPlan.actions.filter(
-      (action) => this.mealShoppingDraftSourceId(action) === mealAction.id
-    );
-    const existingList = existing.find(
-      (action): action is Extract<AssistantAction, { kind: 'shopping.create_list' }> =>
-        action.kind === 'shopping.create_list'
-    );
-    const existingItems = existing.filter(
-      (action): action is Extract<AssistantAction, { kind: 'shopping.add_item' }> =>
-        action.kind === 'shopping.add_item'
-    );
-    const manualField = (action: AssistantAction, field: string): boolean =>
-      action.manualFields?.includes(JSON.stringify([field])) ?? false;
-    const listName =
-      existingList && manualField(existingList, 'name')
-        ? existingList.payload.name
-        : this.i18n.t('ai_assistant.meals.shopping_list_name', { week: preview.startDate });
-    const shortages = preview.requiredIngredients.filter(
-      (line) =>
-        (line.status === 'matched' || line.status === 'not_found') &&
-        line.missingQuantity !== null &&
-        line.missingQuantity > 0
-    );
-    const usedItemIds = new Set<string>();
-    const outdatedWarning = this.i18n.t('ai_assistant.meals.shopping_action_outdated');
-    const listId = existingList?.id ?? this.nextMealShoppingActionId();
-
-    let listAction: Extract<AssistantAction, { kind: 'shopping.create_list' }> | null = null;
-    const itemActions: AssistantAction[] = [];
-    const staleManualItems: AssistantAction[] = [];
-
-    if (shortages.length || existingItems.some((item) => item.manualFields?.length)) {
-      listAction = {
-        id: listId,
-        kind: 'shopping.create_list',
-        domain: 'shopping',
-        actionType: 'create_list',
-        title: this.i18n.t('ai_assistant.action.create_list'),
-        summary: this.i18n.t('ai_assistant.meals.shopping_list_summary', {
-          week: preview.startDate
-        }),
-        payload: { name: listName, store: existingList?.payload.store ?? null },
-        dependsOn: [mealAction.id],
-        warnings: existingList?.warnings ?? [],
-        selected: existingList?.selected ?? false,
-        status: existingList?.status ?? 'pending',
-        ...(existingList?.manualFields ? { manualFields: existingList.manualFields } : {})
-      };
-    }
-
-    shortages.forEach((line) => {
-      const key = `${normalizeAssistantShoppingName(line.name)}\u0000${line.unit.trim().toLocaleLowerCase()}`;
-      const previous = existingItems.find(
-        (item) =>
-          !usedItemIds.has(item.id) &&
-          `${normalizeAssistantShoppingName(item.payload.name)}\u0000${(item.payload.unit ?? '').trim().toLocaleLowerCase()}` ===
-            key
-      );
-      if (previous) usedItemIds.add(previous.id);
-
-      const hasManualQuantity = previous ? manualField(previous, 'quantity') : false;
-      const previewQuantity = line.missingQuantity!;
-      const needsReview = Boolean(previous && previous.payload.quantity !== previewQuantity);
-      const preserveAttemptedPayload =
-        previous?.status === 'succeeded' || previous?.status === 'failed';
-      const warnings = (previous?.warnings ?? []).filter((warning) => warning !== outdatedWarning);
-      if (needsReview) warnings.push(outdatedWarning);
-      const itemId = previous?.id ?? this.nextMealShoppingActionId();
-      const itemQuantity =
-        previous && (hasManualQuantity || preserveAttemptedPayload)
-          ? previous.payload.quantity
-          : previewQuantity;
-      const itemName =
-        previous && (manualField(previous, 'name') || preserveAttemptedPayload)
-          ? previous.payload.name
-          : line.name;
-      const itemUnit =
-        previous && (manualField(previous, 'unit') || preserveAttemptedPayload)
-          ? previous.payload.unit
-          : line.unit;
-      const itemListName =
-        previous && manualField(previous, 'listName') ? previous.payload.listName : listName;
-
-      itemActions.push({
-        id: itemId,
-        kind: 'shopping.add_item',
-        domain: 'shopping',
-        actionType: 'add_item',
-        title: this.i18n.t('ai_assistant.action.add_item'),
-        summary: this.i18n.t('ai_assistant.meals.shopping_item_summary', {
-          name: itemName,
-          quantity: itemQuantity ?? previewQuantity,
-          unit: itemUnit ?? line.unit
-        }),
-        payload: {
-          listName: itemListName,
-          name: itemName,
-          quantity: itemQuantity,
-          unit: itemUnit,
-          category: previous?.payload.category ?? null
-        },
-        dependsOn: [mealAction.id, listId],
-        warnings,
-        selected: Boolean(previous?.selected && !needsReview),
-        status: previous?.status ?? 'pending',
-        ...(previous?.manualFields ? { manualFields: previous.manualFields } : {})
-      });
-    });
-
-    for (const previous of existingItems) {
-      if (usedItemIds.has(previous.id) || !previous.manualFields?.length) continue;
-      staleManualItems.push({
-        ...previous,
-        dependsOn: [mealAction.id, listId],
-        warnings: [...new Set([...previous.warnings, outdatedWarning])],
-        selected: false
-      });
-    }
-
-    const retainedActions = [
-      ...(listAction ? [listAction] : []),
-      ...itemActions,
-      ...staleManualItems
-    ];
-    const retainedIds = new Set(retainedActions.map((action) => action.id));
-    for (const action of existing) {
-      if (!retainedIds.has(action.id)) this.mealShoppingActionSources.delete(action.id);
-    }
-    for (const action of retainedActions) {
-      this.mealShoppingActionSources.set(action.id, mealAction.id);
-    }
-    const existingIds = new Set(existing.map((action) => action.id));
-    this.updateActions((actions) => [
-      ...actions.filter((action) => !existingIds.has(action.id)),
-      ...retainedActions
-    ]);
-  }
-
-  private nextMealShoppingActionId(): string {
-    const cryptoApi = globalThis.crypto;
-    const id = cryptoApi?.randomUUID?.();
-    if (id) return id;
-
-    if (cryptoApi?.getRandomValues) {
-      const bytes = cryptoApi.getRandomValues(new Uint8Array(16));
-      bytes[6] = (bytes[6] & 0x0f) | 0x40;
-      bytes[8] = (bytes[8] & 0x3f) | 0x80;
-      const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
-      return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-    }
-
-    this.mealShoppingActionSequence += 1;
-    const timestamp = Date.now().toString(16).slice(-8).padStart(8, '0');
-    const sequence = this.mealShoppingActionSequence.toString(16).slice(-4).padStart(4, '0');
-    return `00000000-0000-4000-8000-${timestamp}${sequence}`;
   }
 
   mealRecipe(
@@ -3597,12 +3181,6 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
   }
 
   private invalidateMealProposalDraft(actionId: string): void {
-    this.mealShoppingPreviewRequestVersions.set(
-      actionId,
-      (this.mealShoppingPreviewRequestVersions.get(actionId) ?? 0) + 1
-    );
-    this.mealShoppingPreviewRequests.get(actionId)?.unsubscribe();
-    this.mealShoppingPreviewRequests.delete(actionId);
     this.mealProposals.update((proposals) => {
       if (!Object.prototype.hasOwnProperty.call(proposals, actionId)) return proposals;
       const next = { ...proposals };
@@ -3620,13 +3198,6 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
     this.mealShoppingLines.update((lines) => omitRecordKey(lines, actionId));
     this.mealShoppingErrors.update((errors) => omitRecordKey(errors, actionId));
     this.mealShoppingLoading.update((states) => omitRecordKey(states, actionId));
-    const removedIds = new Set(
-      [...this.mealShoppingActionSources.entries()]
-        .filter(([, sourceId]) => sourceId === actionId)
-        .map(([draftId]) => draftId)
-    );
-    removedIds.forEach((draftId) => this.mealShoppingActionSources.delete(draftId));
-    this.updateActions((actions) => actions.filter((action) => !removedIds.has(action.id)));
   }
 
   private mealEventIdentity(event: HouseholdMealProposalEvent): string {

@@ -231,20 +231,6 @@ export const aiActionAssistantEs = {
   'ai_assistant.meals.servings': 'Raciones',
   'ai_assistant.meals.unresolved': 'Pendiente de resolver: {reason}',
   'ai_assistant.meals.preview_ready': 'Borrador generado. Aún no se han guardado comidas.',
-  'ai_assistant.meals.shopping_draft_heading': 'Faltantes del borrador',
-  'ai_assistant.meals.shopping_draft_copy':
-    'Solo los faltantes necesarios y cuantificables generan acciones de compra, siempre deseleccionadas. Revisa cada acción y su destino antes de confirmar.',
-  'ai_assistant.meals.shopping_draft_loading': 'Comparando el borrador con la despensa compartida…',
-  'ai_assistant.meals.shopping_draft_meal_count': '{count} comidas del borrador',
-  'ai_assistant.meals.shopping_draft_actions': '{count} acciones de compra pendientes de revisión.',
-  'ai_assistant.meals.shopping_draft_no_shortages':
-    'No hay faltantes necesarios y cuantificables para proponer.',
-  'ai_assistant.meals.shopping_list_name': 'Compra para el plan {week}',
-  'ai_assistant.meals.shopping_list_summary': 'Lista de compra para los faltantes del plan {week}.',
-  'ai_assistant.meals.shopping_item_summary':
-    'Añade {quantity} {unit} de {name} a la lista del plan.',
-  'ai_assistant.meals.shopping_action_outdated':
-    'El faltante cambió al actualizar el plan. Revisa esta cantidad antes de aprobarla.',
   'ai_assistant.meals.confirm_summary': 'Se guardarán {count} comidas de la semana {week}.',
   'ai_assistant.meals.breakfast': 'Desayuno',
   'ai_assistant.meals.lunch': 'Comida',
@@ -523,19 +509,6 @@ export const aiActionAssistantEn: Record<keyof typeof aiActionAssistantEs, strin
   'ai_assistant.meals.servings': 'Servings',
   'ai_assistant.meals.unresolved': 'Needs attention: {reason}',
   'ai_assistant.meals.preview_ready': 'Draft generated. No meals have been saved yet.',
-  'ai_assistant.meals.shopping_draft_heading': 'Shopping needs from this draft',
-  'ai_assistant.meals.shopping_draft_copy':
-    'Only quantifiable required shortages create shopping actions, all unselected. Review each action and its destination before confirming.',
-  'ai_assistant.meals.shopping_draft_loading': 'Comparing this draft with the shared pantry…',
-  'ai_assistant.meals.shopping_draft_meal_count': '{count} meals in this draft',
-  'ai_assistant.meals.shopping_draft_actions': '{count} shopping actions waiting for review.',
-  'ai_assistant.meals.shopping_draft_no_shortages':
-    'There are no quantifiable required shortages to propose.',
-  'ai_assistant.meals.shopping_list_name': 'Shopping for plan {week}',
-  'ai_assistant.meals.shopping_list_summary': 'Shopping list for shortages in plan {week}.',
-  'ai_assistant.meals.shopping_item_summary': 'Add {quantity} {unit} of {name} to the plan list.',
-  'ai_assistant.meals.shopping_action_outdated':
-    'The shortage changed when the plan was updated. Review this quantity before approving it.',
   'ai_assistant.meals.confirm_summary': '{count} meals will be saved for the week of {week}.',
   'ai_assistant.meals.breakfast': 'Breakfast',
   'ai_assistant.meals.lunch': 'Lunch',
