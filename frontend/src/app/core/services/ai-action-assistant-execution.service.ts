@@ -12,6 +12,8 @@ import type { HouseholdTaskOccurrence } from '../../shared/models/household-task
 import type { AssistantAction } from '../../shared/models/ai-action-assistant.model';
 import { RecipeService } from './recipe.service';
 
+const MAX_TRACKED_ASSISTANT_ACTIONS = 256;
+
 interface ApiEnvelope<T> {
   success: boolean;
   data?: T;
@@ -68,7 +70,7 @@ export class AiActionAssistantExecutionService {
     this.rememberAttempt(action.id, payloadSnapshot);
     const execution = this.executeDomainAction(action, expectedHouseholdId, mealProposal)
       .then(() => {
-        this.completedActionIds.add(action.id);
+        this.rememberCompletedAction(action.id);
       })
       .finally(() => {
         this.executingActionIds.delete(action.id);
@@ -721,10 +723,24 @@ export class AiActionAssistantExecutionService {
   }
 
   private rememberAttempt(id: string, payloadSnapshot: string): void {
-    if (this.attemptedActionPayloads.size >= 256 && !this.attemptedActionPayloads.has(id)) {
+    if (
+      this.attemptedActionPayloads.size >= MAX_TRACKED_ASSISTANT_ACTIONS &&
+      !this.attemptedActionPayloads.has(id)
+    ) {
       const oldest = this.attemptedActionPayloads.keys().next().value;
       if (oldest) this.attemptedActionPayloads.delete(oldest);
     }
     this.attemptedActionPayloads.set(id, payloadSnapshot);
+  }
+
+  private rememberCompletedAction(id: string): void {
+    if (
+      this.completedActionIds.size >= MAX_TRACKED_ASSISTANT_ACTIONS &&
+      !this.completedActionIds.has(id)
+    ) {
+      const oldest = this.completedActionIds.values().next().value;
+      if (oldest !== undefined) this.completedActionIds.delete(oldest);
+    }
+    this.completedActionIds.add(id);
   }
 }

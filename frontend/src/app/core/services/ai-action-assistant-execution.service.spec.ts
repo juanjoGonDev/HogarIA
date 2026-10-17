@@ -86,6 +86,40 @@ describe('AiActionAssistantExecutionService', () => {
     await expectAsync(retry).toBeResolvedTo(undefined);
   });
 
+  it('bounds completed-action replay history to the most recent 256 IDs', async () => {
+    const firstAction = {
+      ...pantryAction(),
+      id: '00000000-0000-4000-8000-000000000000'
+    } as AssistantAction;
+
+    for (let index = 0; index < 257; index += 1) {
+      const action = {
+        ...pantryAction(),
+        id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`
+      } as AssistantAction;
+      const execution = service.execute(action, null);
+      const request = http.expectOne('/api/pantry/ingredients');
+      expect(request.request.headers.get('x-assistant-action-id')).toBe(action.id);
+      request.flush(
+        { success: true, data: { id: `ingredient-${index}` } },
+        { status: 201, statusText: 'Created' }
+      );
+      await expectAsync(execution).toBeResolvedTo(undefined);
+    }
+
+    const replay = service.execute(firstAction, null);
+    const replayRequests = http.match('/api/pantry/ingredients');
+    expect(replayRequests.length).toBe(1);
+    if (!replayRequests.length) {
+      await expectAsync(replay).toBeRejectedWithError('ASSISTANT_ACTION_ALREADY_SUCCEEDED');
+      return;
+    }
+
+    expect(replayRequests[0].request.headers.get('x-assistant-action-id')).toBe(firstAction.id);
+    replayRequests[0].flush({ success: true, idempotent: true });
+    await expectAsync(replay).toBeResolvedTo(undefined);
+  });
+
   it('coalesces concurrent approval calls into one domain write', async () => {
     const action = pantryAction();
     const firstExecution = service.execute(action, null);
