@@ -1,6 +1,6 @@
 # Edición segura de artículos de compra desde el asistente global
 
-**Estado:** implementación parcial; el flujo seguro de esta acción ya está implementado y probado. El build de producción vuelve a pasar tras diferir el diccionario completo del asistente; quedan pendientes la aprobación parcial/dependencias y el resto de criterios del contrato padre. El PR sigue Draft.
+**Estado:** implementación parcial; el flujo seguro de esta acción y la aprobación parcial con dependencias ya están probados. El build de producción pasa tras diferir el diccionario completo del asistente; quedan pendientes el resto de criterios del contrato padre. El PR sigue Draft.
 **Contrato padre:** `SPEC.md`; amplía las acciones del dominio `shopping` sin cambiar el comportamiento de la UI normal.
 **Rama/PR:** `feat/household-floorplan` / #47; mantener Draft, sin abrir otro PR ni mergear.
 
@@ -28,7 +28,7 @@ La acción existente `shopping.update_list` no sustituye esta capacidad: una cam
 - [x] Refinamiento conserva lista/artículo/unidad de coincidencia; edición manual mantiene target, parches permitidos y cantidad absoluta.
 - [x] TDD de propuesta sin escritura, descarte, edición manual, confirmación, conflicto/preimagen stale, replay exacto y reutilización del ID con otro payload.
 - [x] E2E Playwright contra frontend/API reales y SQLite temporal: crear lista/artículo por interacción, revisar, descartar con cero PATCH, editar, confirmar, recargar y replay; Chromium escritorio y Chromium móvil.
-- [ ] Verificar selección parcial/dependencias con una propuesta multiacción.
+- [x] Verificar selección parcial/dependencias con una propuesta multiacción.
 - [ ] `SPEC.md` y cuerpo de PR #47 enlazan este contrato; cobertura del alcance ≥70 % S/B/F/L, typecheck, `check:ui`, build, formato/hooks y PR Draft comprobados antes de cerrar.
 
 ## Hallazgo y evidencia reproducible
@@ -37,7 +37,7 @@ La acción existente `shopping.update_list` no sustituye esta capacidad: una cam
 - La prueba de ruta reprodujo el 409 antes del fix y pasa después; suite focal actual: `shopping.routes.spec.ts`, `ai-assistant.routes.spec.ts`, `ai-assistant.schema.spec.ts`, `shopping.schema.spec.ts` y `form-contract.spec.ts`.
 - E2E aislado repetido tras las normalizaciones de timestamps y campos vacíos: 2/2 proyectos (Chromium escritorio y mobile-chrome), app/API reales, SQLite temporal y proveedor sintético; capturas sintéticas ignoradas por Git en `.e2e-screenshots/ai-shopping-item-update/`.
 - Cobertura completa medida: servidor 89.66 % statements / 81.86 % branches / 95.82 % functions / 92.60 % lines; cliente 90.57 % / 80.96 % / 92.06 % / 93.08 %, respectivamente. Suites focales, `typecheck:e2e`, `tsc --noEmit` del servidor y `check:ui` pasan. Los 8 tests de ambos scripts de formato/hook pasan.
-- Build de producción sigue bloqueado: un worktree temporal de `HEAD` limpio también excede el budget inicial por 641 B. No se rebajó el límite; falta resolverlo antes de cerrar/pushear.
+- Hallazgo de build ya resuelto: el baseline previo excedía el budget inicial por 641 B. Diferir el diccionario del asistente dejó el bundle inicial bajo el límite de error de 1 MB, sin rebajar budgets; ver “Seguimiento de carga diferida”.
 
 ## Evidencia de código que motiva la unidad
 
@@ -53,3 +53,11 @@ La acción existente `shopping.update_list` no sustituye esta capacidad: una cam
 - E2E full-stack contra la app de producción, APIs/backend reales y SQLite temporal, con proveedor sintético: **28/28** en Chromium escritorio y mobile Chrome. Las capturas sintéticas inspeccionadas están ignoradas por Git: `.e2e-screenshots/ai-assistant-lazy-i18n/chromium/review-expanded-1440x900.png` y `.e2e-screenshots/ai-assistant-lazy-i18n/mobile-chrome/review-expanded-393x851.png`.
 - Los hooks activos pasaron: pre-commit (Prettier y `check:ui`) y pre-push (24 rutas formateadas, `check:ui` 263/21, build, `typecheck:e2e`, configuración y suites completas: 1.664 cliente; 2.063 servidor aprobadas y 1 omitida). El commit `43119ce` está en `origin/feat/household-floorplan`.
 - No se midió RAM/CPU ni se probó micrófono/modelo local real en este seguimiento; siguen pendientes en el contrato padre.
+
+### Aprobación parcial y dependencias (2026-10-17)
+
+- E2E full-stack aislado: `node scripts/run-isolated-playwright.mjs --config=playwright.full-stack.config.ts --project=chromium --project=mobile-chrome --grep "aprobación parcial conserva dependencia lista-artículo" --workers=1 tests/e2e/full-stack/ai-action-assistant.spec.ts` — **2/2**. Frontend/API/backend reales, SQLite temporal; solo la respuesta de propuesta IA es sintética. El primer POST de lista recibe un 503 transitorio inyectado en el navegador, sin llegar al servidor.
+- Antes de confirmar, desmarcar la lista bloquea el artículo dependiente, deshabilita continuar y mantiene el snapshot íntegro de la DB. La confirmación incluye solo lista, artículo y tarea; evento y receta quedan fuera.
+- Tras confirmar, lista queda `failed`, artículo `blocked` y tarea independiente `succeeded`; no se crean filas de compra ni cambia `ai_jobs`. El reintento crea lista y artículo en orden de dependencia, no repite la tarea y deja una sola lista/artículo persistidos tras recarga.
+- `pnpm run typecheck:e2e` y `pnpm run check:ui` pasan; este último informa **263 ficheros / 21 reglas / sin incidencias**. Capturas sintéticas PC (1440×900) y móvil (320×568), inspeccionadas e ignoradas por Git: `.e2e-screenshots/assistant-dependency-partial-final-20261017-r2/{chromium,mobile-chrome}/shopping-dependency-{unselected,review,confirm,partial,saved}-*.png`. Runner confirma limpieza de DB y artefactos temporales.
+- Cobertura focal N/A: se añadió E2E, no lógica productiva. Rollback: retirar este E2E/evidencia y reabrir la casilla de aprobación parcial; no revertir cambios de producto.

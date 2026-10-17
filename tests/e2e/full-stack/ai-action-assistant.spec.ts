@@ -1592,6 +1592,284 @@ test('asistente global: ejecuta acciones de todos los dominios solo tras confirm
   );
 });
 
+test('asistente global: aprobación parcial conserva dependencia lista-artículo', async ({
+  page
+}, testInfo) => {
+  const actionRequests: Array<{ method: string; pathname: string; actionId: string }> = [];
+  const actionResponses: Array<{
+    method: string;
+    pathname: string;
+    actionId: string;
+    status: number;
+  }> = [];
+  let listCreateAttempts = 0;
+  await page.route('**/api/shopping/lists', async (route) => {
+    if (route.request().method() !== 'POST') {
+      await route.continue();
+      return;
+    }
+    listCreateAttempts += 1;
+    if (listCreateAttempts === 1) {
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: false, code: 'E2E_TRANSIENT_WRITE_FAILURE' })
+      });
+      return;
+    }
+    await route.continue();
+  });
+  page.on('request', (request) => {
+    const actionId = request.headers()['x-assistant-action-id'];
+    if (actionId && ['POST', 'PUT', 'PATCH'].includes(request.method())) {
+      actionRequests.push({
+        method: request.method(),
+        pathname: new URL(request.url()).pathname,
+        actionId
+      });
+    }
+  });
+  page.on('response', (response) => {
+    const request = response.request();
+    const actionId = request.headers()['x-assistant-action-id'];
+    if (actionId && ['POST', 'PUT', 'PATCH'].includes(request.method())) {
+      actionResponses.push({
+        method: request.method(),
+        pathname: new URL(response.url()).pathname,
+        actionId,
+        status: response.status()
+      });
+    }
+  });
+  await page.route('**/api/ai/assistant/proposals', async (route) => {
+    await route.fulfill({ json: allDomainProposal() });
+  });
+
+  await registerUser(page, 'Asistente selección parcial E2E');
+  await createHousehold(page, 'Hogar sintético selección parcial');
+  await page.goto('/dashboard');
+  const token = await tokenOf(page);
+  const memberships = await page.request.get('/api/household/memberships', {
+    headers: { authorization: `Bearer ${token}` }
+  });
+  expect(memberships.status()).toBe(200);
+  const householdId = (await memberships.json()).data.activeHouseholdId as string;
+  expect(householdId).toBeTruthy();
+  const automation = await page.request.patch('/api/household/planning-automation', {
+    headers: {
+      authorization: `Bearer ${token}`,
+      'x-household-id': householdId
+    },
+    data: {
+      expectedVersion: 0,
+      enabled: true,
+      mode: 'generate',
+      scopes: ['tasks'],
+      weekday: 7,
+      localTime: '23:59',
+      timeZone: 'Europe/Madrid'
+    }
+  });
+  expect(automation.status(), await automation.text()).toBe(200);
+  await page.reload();
+  await expect(page.locator('[data-test="planning-automation-notice"]')).toBeVisible();
+  const viewport =
+    testInfo.project.name === 'chromium'
+      ? { width: 1440, height: 900 }
+      : { width: 320, height: 568 };
+  await page.setViewportSize(viewport);
+  const before = assistantDatabaseSnapshot();
+
+  const readTaskWeek = async () => {
+    const response = await page.request.get('/api/household/tasks?weekStart=2026-10-19', {
+      headers: {
+        authorization: `Bearer ${token}`,
+        'x-household-id': householdId
+      }
+    });
+    expect(response.status()).toBe(200);
+    return (await response.json()).data.tasks as Array<{ title: string }>;
+  };
+  const readEvents = async () => {
+    const response = await page.request.get('/api/calendar/events?from=2026-10-20&to=2026-10-20', {
+      headers: { authorization: `Bearer ${token}` }
+    });
+    expect(response.status()).toBe(200);
+    return (await response.json()).data as Array<{ title: string }>;
+  };
+  const readRecipe = async () => {
+    const response = await page.request.get(
+      `/api/recipes?search=${encodeURIComponent('Receta de dominio QA')}`,
+      { headers: { authorization: `Bearer ${token}` } }
+    );
+    expect(response.status()).toBe(200);
+    return (await response.json()).data.recipes as Array<{ name: string }>;
+  };
+
+  await expect
+    .poll(async () => (await shoppingListsByName(page, token, 'Lista de dominio QA')).length)
+    .toBe(0);
+  expect(await readTaskWeek()).toEqual([]);
+  expect(await readEvents()).toEqual([]);
+  expect(await readRecipe()).toEqual([]);
+
+  await page.locator('[data-test="ai-assistant-open"]').click();
+  await page
+    .locator('[data-test="ai-assistant-prompt"]')
+    .fill(
+      'Crea una lista, añade manzanas y prepara además tarea, evento y receta; apruebo solo la compra.'
+    );
+  await page.locator('[data-test="ai-assistant-submit"] button').click();
+  const review = page.locator('[data-test="ai-assistant-review"]');
+  await expect(review).toBeVisible();
+  await assertViewport(page, viewport.width, viewport.height, true);
+
+  const listAction = page.locator(`[data-action-id="${ACTION_IDS[0]}"]`);
+  const itemAction = page.locator(`[data-action-id="${ACTION_IDS[1]}"]`);
+  const taskAction = page.locator(`[data-action-id="${ACTION_IDS[2]}"]`);
+  await itemAction.getByRole('checkbox').click();
+  await expect(itemAction).toContainText(
+    'Selecciona también las acciones necesarias para este paso.'
+  );
+  await expect(page.locator('[data-test="ai-assistant-continue"] button')).toBeDisabled();
+  await assertViewport(page, viewport.width, viewport.height, true);
+  await capture(
+    page,
+    testInfo,
+    `shopping-dependency-unselected-${viewport.width}x${viewport.height}`
+  );
+  await expect
+    .poll(async () => (await shoppingListsByName(page, token, 'Lista de dominio QA')).length)
+    .toBe(0);
+  expect(actionRequests).toEqual([]);
+  expect(assistantDatabaseSnapshot()).toEqual(before);
+
+  await listAction.getByRole('checkbox').click();
+  await expect(page.locator('[data-test="ai-assistant-continue"] button')).toBeEnabled();
+  await listAction.getByRole('checkbox').click();
+  await expect(page.locator('[data-test="ai-assistant-continue"] button')).toBeDisabled();
+  await listAction.getByRole('checkbox').click();
+  await expect(page.locator('[data-test="ai-assistant-continue"] button')).toBeEnabled();
+  await taskAction.getByRole('checkbox').click();
+  await expect(page.locator('[data-test="ai-assistant-continue"] button')).toBeEnabled();
+  expect(assistantDatabaseSnapshot()).toEqual(before);
+  await capture(page, testInfo, `shopping-dependency-review-${viewport.width}x${viewport.height}`);
+
+  await page.locator('[data-test="ai-assistant-continue"] button').click();
+  const confirmation = page.locator('[data-test="ai-assistant-confirm"]');
+  await expect(confirmation).toBeVisible();
+  await assertViewport(page, viewport.width, viewport.height, true);
+  await expect(confirmation.locator('.assistant__confirm-list > li')).toHaveCount(3);
+  await expect(confirmation).toContainText('Lista de dominio QA');
+  await expect(confirmation).toContainText('Manzanas QA');
+  await expect(confirmation).toContainText('Tarea de dominio QA');
+  await expect(confirmation).not.toContainText('Evento de dominio QA');
+  await expect(confirmation).not.toContainText('Receta de dominio QA');
+  expect(actionRequests).toEqual([]);
+  expect(assistantDatabaseSnapshot()).toEqual(before);
+  expect(await shoppingListsByName(page, token, 'Lista de dominio QA')).toEqual([]);
+  await capture(page, testInfo, `shopping-dependency-confirm-${viewport.width}x${viewport.height}`);
+
+  await page.locator('[data-test="ai-assistant-confirm-submit"] button').click();
+  const rows = confirmation.locator('.assistant__confirm-list > li');
+  await expect(rows).toHaveCount(3);
+  await expect(rows.nth(0).locator('.assistant__confirm-status').first()).toHaveText('Fallida');
+  await expect(rows.nth(1).locator('.assistant__confirm-status').first()).toHaveText('Bloqueada');
+  await expect(rows.nth(2).locator('.assistant__confirm-status').first()).toHaveText('Completada');
+  await assertViewport(page, viewport.width, viewport.height, true);
+  await expect(confirmation).toContainText('puedes reintentar esta misma propuesta');
+  expect(actionRequests.map(({ actionId }) => actionId)).toEqual([ACTION_IDS[0], ACTION_IDS[2]]);
+  expect(actionResponses).toEqual([
+    {
+      method: 'POST',
+      pathname: '/api/shopping/lists',
+      actionId: ACTION_IDS[0],
+      status: 503
+    },
+    {
+      method: 'PUT',
+      pathname: '/api/household/tasks',
+      actionId: ACTION_IDS[2],
+      status: 200
+    }
+  ]);
+
+  const afterFailure = assistantDatabaseSnapshot();
+  expect(afterFailure.shopping_lists).toEqual(before.shopping_lists);
+  expect(afterFailure.shopping_list_items).toEqual(before.shopping_list_items);
+  expect(afterFailure.ai_jobs ?? []).toEqual(before.ai_jobs ?? []);
+
+  expect(await shoppingListsByName(page, token, 'Lista de dominio QA')).toEqual([]);
+  const completedTasks = await readTaskWeek();
+  expect(completedTasks).toEqual(
+    expect.arrayContaining([expect.objectContaining({ title: 'Tarea de dominio QA' })])
+  );
+  expect(await readEvents()).toEqual([]);
+  expect(await readRecipe()).toEqual([]);
+  expect(actionRequests.some(({ actionId }) => actionId === ACTION_IDS[1])).toBe(false);
+  await capture(page, testInfo, `shopping-dependency-partial-${viewport.width}x${viewport.height}`);
+
+  await page.locator('[data-test="ai-assistant-confirm-submit"] button').click();
+  await expect(rows.nth(0).locator('.assistant__confirm-status').first()).toHaveText('Completada');
+  await expect(rows.nth(1).locator('.assistant__confirm-status').first()).toHaveText('Completada');
+  await expect(rows.nth(2).locator('.assistant__confirm-status').first()).toHaveText('Completada');
+  await assertViewport(page, viewport.width, viewport.height, true);
+  expect(listCreateAttempts).toBe(2);
+  expect(actionRequests.map(({ actionId }) => actionId)).toEqual([
+    ACTION_IDS[0],
+    ACTION_IDS[2],
+    ACTION_IDS[0],
+    ACTION_IDS[1]
+  ]);
+  expect(actionResponses.slice(2)).toEqual([
+    {
+      method: 'POST',
+      pathname: '/api/shopping/lists',
+      actionId: ACTION_IDS[0],
+      status: 201
+    },
+    {
+      method: 'POST',
+      pathname: expect.stringMatching(/^\/api\/shopping\/lists\/[^/]+\/items$/),
+      actionId: ACTION_IDS[1],
+      status: 201
+    }
+  ]);
+
+  const savedLists = await shoppingListsByName(page, token, 'Lista de dominio QA');
+  expect(savedLists).toHaveLength(1);
+  const savedListResponse = await page.request.get(
+    `/api/shopping/lists/${encodeURIComponent(savedLists[0].id)}`,
+    { headers: { authorization: `Bearer ${token}` } }
+  );
+  expect(savedListResponse.status()).toBe(200);
+  expect((await savedListResponse.json()).data.items).toEqual(
+    expect.arrayContaining([expect.objectContaining({ name: 'Manzanas QA', quantity: 2 })])
+  );
+  expect(await readTaskWeek()).toEqual(completedTasks);
+  expect(await readEvents()).toEqual([]);
+  expect(await readRecipe()).toEqual([]);
+  const afterRetry = assistantDatabaseSnapshot();
+  expect(afterRetry.shopping_lists).toHaveLength((before.shopping_lists ?? []).length + 1);
+  expect(afterRetry.shopping_list_items).toHaveLength(
+    (before.shopping_list_items ?? []).length + 1
+  );
+  expect(afterRetry.ai_jobs ?? []).toEqual(before.ai_jobs ?? []);
+  await capture(page, testInfo, `shopping-dependency-saved-${viewport.width}x${viewport.height}`);
+
+  await page.reload();
+  const persisted = await shoppingListsByName(page, token, 'Lista de dominio QA');
+  expect(persisted).toHaveLength(1);
+  const persistedDetail = await page.request.get(
+    `/api/shopping/lists/${encodeURIComponent(persisted[0].id)}`,
+    { headers: { authorization: `Bearer ${token}` } }
+  );
+  expect(persistedDetail.status()).toBe(200);
+  expect((await persistedDetail.json()).data.items).toEqual(
+    expect.arrayContaining([expect.objectContaining({ name: 'Manzanas QA', quantity: 2 })])
+  );
+});
+
 test('asistente global: actualiza solo la tarea resuelta y persiste tras recargar', async ({
   page
 }, testInfo) => {
