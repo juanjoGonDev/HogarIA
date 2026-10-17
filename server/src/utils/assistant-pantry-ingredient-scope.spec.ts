@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  assistantPantryIngredientIdentitiesMatch,
   assistantPantryIngredientScope,
   comparablePantryIngredientName,
   comparablePantryIngredientUpdatedAt
@@ -25,6 +26,41 @@ describe('assistantPantryIngredientScope', () => {
   it('normalizes ingredient names without accent-folding or changing internal words', () => {
     expect(comparablePantryIngredientName('  cafe\u0301   molido ')).toBe('café molido');
     expect(comparablePantryIngredientName('CAFÉ MOLIDO')).toBe('café molido');
+  });
+
+  it('matches duplicate identity by normalized name, unit, location, and expiration date', () => {
+    const existing = {
+      name: '  LENTEJAS  ',
+      unit: 'UNIT',
+      location: 'PANTRY',
+      expirationDate: null
+    };
+    expect(
+      assistantPantryIngredientIdentitiesMatch(existing, {
+        name: 'lentejas',
+        unit: 'unit',
+        location: 'pantry',
+        expirationDate: undefined
+      })
+    ).toBe(true);
+    expect(
+      assistantPantryIngredientIdentitiesMatch(existing, {
+        ...existing,
+        expirationDate: '2026-12-31'
+      })
+    ).toBe(false);
+    expect(
+      assistantPantryIngredientIdentitiesMatch(
+        { ...existing, unit: null, location: null },
+        { ...existing, unit: null, location: null }
+      )
+    ).toBe(true);
+    expect(
+      assistantPantryIngredientIdentitiesMatch(
+        { ...existing, unit: null },
+        { ...existing, unit: 'unit' }
+      )
+    ).toBe(false);
   });
 
   it('compares SQLite UTC timestamps and their API ISO representation equally', () => {

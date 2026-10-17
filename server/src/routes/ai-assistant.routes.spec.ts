@@ -460,6 +460,155 @@ describe('POST /api/ai/assistant/proposals', () => {
     expect(persistedSnapshot()).toEqual(before);
   });
 
+  it('asks instead of proposing an exact pantry duplicate in personal scope', async () => {
+    addConfig(alice);
+    db.prepare(
+      `INSERT INTO ingredients
+        (id, user_id, household_id, name, category, quantity, unit, expiration_date, location, notes)
+       VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      'assistant-existing-lentils',
+      alice.id,
+      '  LENTEJAS  ',
+      'other',
+      12,
+      'UNIT',
+      null,
+      'PANTRY',
+      'Lote existente'
+    );
+    const before = persistedSnapshot();
+    const fetchMock = stubProvider(JSON.stringify(assistantCandidate()));
+
+    const response = await call(
+      'POST',
+      '/proposals',
+      { prompt: 'Añade lentejas a la despensa', route: 'pantry' },
+      alice.token,
+      { 'x-assistant-household-id': '' }
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { data: any };
+    expect(body.data.actions).toEqual([]);
+    expect(body.data.questions).toEqual(
+      expect.arrayContaining([expect.stringMatching(/ya existe una entrada de despensa/i)])
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(persistedSnapshot()).toEqual(before);
+  });
+
+  it('checks household pantry duplicates according to shared-pantry visibility', async () => {
+    addConfig(alice);
+    const householdId = 'assistant-pantry-duplicate-household';
+    const bobId = 'assistant-pantry-duplicate-other-member';
+    db.prepare('INSERT INTO users (id, email, name, password_hash) VALUES (?, ?, ?, ?)').run(
+      bobId,
+      'assistant-pantry-duplicate@test.local',
+      'Other member',
+      'hash'
+    );
+    db.prepare(
+      'INSERT INTO households (id, name, invite_code, shared_pantry) VALUES (?, ?, ?, 0)'
+    ).run(householdId, 'Hogar privado', 'INVITE-PANTRY-DUPLICATE');
+    for (const [memberId, userId] of [
+      ['assistant-pantry-duplicate-alice', alice.id],
+      ['assistant-pantry-duplicate-bob', bobId]
+    ]) {
+      db.prepare(
+        `INSERT INTO household_members (id, household_id, user_id, role, permissions)
+         VALUES (?, ?, ?, 'member', '{}')`
+      ).run(memberId, householdId, userId);
+      db.prepare('UPDATE users SET household_id = ? WHERE id = ?').run(householdId, userId);
+    }
+    db.prepare('UPDATE ai_configs SET household_id = ? WHERE user_id = ?').run(
+      householdId,
+      alice.id
+    );
+    db.prepare(
+      `INSERT INTO ingredients
+        (id, user_id, household_id, name, category, quantity, unit, expiration_date, location)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      'assistant-shared-pantry-lentils',
+      bobId,
+      householdId,
+      'LENTEJAS',
+      'other',
+      1,
+      'UNIT',
+      null,
+      'PANTRY'
+    );
+
+    const headers = { 'x-assistant-household-id': householdId };
+    stubProvider(JSON.stringify(assistantCandidate()));
+    const privateSnapshot = persistedSnapshot();
+    const privateResponse = await call(
+      'POST',
+      '/proposals',
+      { prompt: 'Añade lentejas a la despensa', route: 'pantry' },
+      alice.token,
+      headers
+    );
+    expect(privateResponse.status).toBe(200);
+    expect(await privateResponse.json()).toMatchObject({
+      data: { actions: [expect.objectContaining({ kind: 'pantry.add_ingredient' })], questions: [] }
+    });
+    expect(persistedSnapshot()).toEqual(privateSnapshot);
+
+    db.prepare('UPDATE households SET shared_pantry = 1 WHERE id = ?').run(householdId);
+    const sharedSnapshot = persistedSnapshot();
+    const sharedResponse = await call(
+      'POST',
+      '/proposals',
+      { prompt: 'Añade lentejas a la despensa', route: 'pantry' },
+      alice.token,
+      headers
+    );
+    expect(sharedResponse.status).toBe(200);
+    const sharedBody = (await sharedResponse.json()) as { data: any };
+    expect(sharedBody.data.actions).toEqual([]);
+    expect(sharedBody.data.questions).toEqual(
+      expect.arrayContaining([expect.stringMatching(/ya existe una entrada de despensa/i)])
+    );
+    expect(persistedSnapshot()).toEqual(sharedSnapshot);
+  });
+
+  it.each([
+    { unit: 'g', location: 'pantry', expirationDate: null },
+    { unit: 'unit', location: 'fridge', expirationDate: null },
+    { unit: 'unit', location: 'pantry', expirationDate: '2026-12-31' }
+  ])('allows a distinct pantry batch when identity differs: %o', async (identity) => {
+    addConfig(alice);
+    db.prepare(
+      `INSERT INTO ingredients
+        (id, user_id, household_id, name, category, quantity, unit, expiration_date, location)
+       VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?)`
+    ).run('assistant-existing-lentils', alice.id, 'Lentejas', 'other', 12, 'unit', null, 'pantry');
+    const candidate = structuredClone(assistantCandidate()) as {
+      actions: Array<{
+        payload: { unit: string; location: string; expirationDate: string | null };
+      }>;
+    };
+    Object.assign(candidate.actions[0]!.payload, identity);
+    stubProvider(JSON.stringify(candidate));
+
+    const response = await call(
+      'POST',
+      '/proposals',
+      { prompt: 'Añade lentejas a la despensa', route: 'pantry' },
+      alice.token,
+      { 'x-assistant-household-id': '' }
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { data: any };
+    expect(body.data.actions).toHaveLength(1);
+    expect(body.data.actions[0]).toMatchObject({ kind: 'pantry.add_ingredient' });
+    expect(body.data.questions).toEqual([]);
+  });
+
   it('resolves a private recipe target server-side and returns its exact preimage without writes', async () => {
     addConfig(alice);
     const snapshot = addOwnedRecipe();

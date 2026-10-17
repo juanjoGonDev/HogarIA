@@ -42,10 +42,13 @@ import {
 } from '../utils/ai-assistant-household-context.js';
 import { assistantShoppingListScope } from '../utils/assistant-shopping-list-scope.js';
 import {
+  assistantPantryIngredientIdentitiesMatch,
   assistantPantryIngredientScope,
   comparablePantryIngredientName,
-  comparablePantryIngredientUpdatedAt
+  comparablePantryIngredientUpdatedAt,
+  readAssistantVisiblePantryIngredientIdentities
 } from '../utils/assistant-pantry-ingredient-scope.js';
+import { readActiveHouseholdId } from '../utils/household-context.js';
 import {
   matchAssistantCalendarEvents,
   type AssistantCalendarEventLookupRow
@@ -354,6 +357,31 @@ function resolveAssistantActionTargets(
     | AssistantCalendarEventUpdateExecutionTarget
     | AssistantRecipeUpdateExecutionTarget
   >();
+
+  const pantryAddActions = candidate.actions.flatMap((action, index) =>
+    action.kind === 'pantry.add_ingredient' ? [{ action, index }] : []
+  );
+  if (pantryAddActions.length > 0) {
+    const pantryHouseholdId =
+      householdId === undefined ? readActiveHouseholdId(db, userId) : householdId;
+    const visibleIngredients = readAssistantVisiblePantryIngredientIdentities(
+      db,
+      userId,
+      pantryHouseholdId
+    );
+    pantryAddActions.forEach(({ action, index }) => {
+      if (
+        visibleIngredients.some((ingredient) =>
+          assistantPantryIngredientIdentitiesMatch(ingredient, action.payload)
+        )
+      ) {
+        unresolved.set(
+          index,
+          'Ya existe una entrada de despensa con el mismo nombre, unidad, ubicación y caducidad. Aclara si es otro lote o solicita explícitamente cambiar la entrada.'
+        );
+      }
+    });
+  }
 
   candidate.actions.forEach((action, index) => {
     if (action.kind !== 'household.update_task') return;

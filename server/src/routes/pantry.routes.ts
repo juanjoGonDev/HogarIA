@@ -53,9 +53,11 @@ import {
   withAssistantActionIdempotency
 } from '../utils/assistant-action-idempotency.js';
 import {
+  assistantPantryIngredientIdentitiesMatch,
   assistantPantryIngredientScope,
   comparablePantryIngredientName,
-  comparablePantryIngredientUpdatedAt
+  comparablePantryIngredientUpdatedAt,
+  readAssistantVisiblePantryIngredientIdentities
 } from '../utils/assistant-pantry-ingredient-scope.js';
 import { activeHouseholdId } from '../utils/household-context.js';
 import { queueProductImageSearch } from '../utils/product-image-search.js';
@@ -347,6 +349,24 @@ pantryRoutes.post('/ingredients', async (c) => {
           status: 409,
           record: false
         };
+      }
+      if (c.req.header(ASSISTANT_ACTION_ID_HEADER) !== undefined) {
+        const visibleIngredients = readAssistantVisiblePantryIngredientIdentities(
+          db,
+          userId,
+          scope.householdId
+        );
+        if (
+          visibleIngredients.some((ingredient) =>
+            assistantPantryIngredientIdentitiesMatch(ingredient, input)
+          )
+        ) {
+          return {
+            body: { success: false, code: 'ASSISTANT_INGREDIENT_NAME_CONFLICT' },
+            status: 409,
+            record: false
+          };
+        }
       }
       const id = nanoid();
       db.prepare(
