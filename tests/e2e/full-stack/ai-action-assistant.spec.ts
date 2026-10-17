@@ -1665,8 +1665,13 @@ test('asistente global: propone, refina y confirma comidas con participantes exp
   page
 }, testInfo) => {
   const mealActionId = '88888888-8888-4888-8888-888888888888';
+  const taskActionId = '99999999-9999-4999-8999-999999999999';
+  const eventActionId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
   const weekStart = '2026-10-19';
   const weekEnd = '2026-10-25';
+  const friday = '2026-10-23';
+  const taskTitle = 'Preparar cena del viernes';
+  const eventTitle = 'Cena del viernes';
   let generatedRequests = 0;
   let refinementRequests = 0;
   let refinedProposalId = '';
@@ -1682,23 +1687,47 @@ test('asistente global: propone, refina y confirma comidas con participantes exp
   });
 
   await page.route('**/api/ai/assistant/proposals', async (route) => {
+    const mealAction = action(
+      mealActionId,
+      'household.plan_meals',
+      'household',
+      'plan_meals',
+      'Proponer cenas de la semana',
+      { weekStart, instructions: 'Cenas sencillas; especialmente la del viernes.' }
+    );
+    const taskAction = {
+      ...action(taskActionId, 'household.create_task', 'household', 'create_task', taskTitle, {
+        title: taskTitle,
+        details: 'Dejar lista la cocina para la cena.',
+        scheduledDate: friday,
+        priority: 'medium',
+        spaceName: null,
+        assignedMemberName: null
+      }),
+      dependsOn: [mealActionId]
+    };
+    const eventAction = {
+      ...action(eventActionId, 'calendar.create_event', 'calendar', 'create_event', eventTitle, {
+        title: eventTitle,
+        kind: 'home',
+        date: friday,
+        startTime: '21:00',
+        endTime: '22:00',
+        allDay: false,
+        sharedWithHousehold: true,
+        location: 'Cocina',
+        notes: 'Cena planificada.'
+      }),
+      dependsOn: [mealActionId]
+    };
     await route.fulfill({
       json: {
         success: true,
         data: {
           id: 'meal-plan-e2e',
-          summary: 'Propuesta de comidas sintética.',
+          summary: 'Cena de viernes con preparación, evento y revisión de compra.',
           questions: [],
-          actions: [
-            action(
-              mealActionId,
-              'household.plan_meals',
-              'household',
-              'plan_meals',
-              'Proponer comidas',
-              { weekStart, instructions: 'Cenas sencillas.' }
-            )
-          ]
+          actions: [mealAction, taskAction, eventAction]
         }
       }
     });
@@ -1740,8 +1769,8 @@ test('asistente global: propone, refina y confirma comidas con participantes exp
     headers: mealHeaders,
     data: {
       household: {
-        mealTypes: { breakfast: false, lunch: true, snack: false, dinner: false },
-        mealTimes: { lunch: '13:00' }
+        mealTypes: { breakfast: false, lunch: false, snack: false, dinner: true },
+        mealTimes: { dinner: '21:00' }
       }
     }
   });
@@ -1755,12 +1784,30 @@ test('asistente global: propone, refina y confirma comidas con participantes exp
     expect(response.status(), 'lectura real del calendario hogar').toBe(200);
     return (await response.json()).data.meals as Array<Record<string, any>>;
   };
+  const readTasks = async () => {
+    const response = await page.request.get(`/api/household/tasks?weekStart=${weekStart}`, {
+      headers: { ...authHeaders, 'x-household-id': householdId }
+    });
+    expect(response.status()).toBe(200);
+    return (await response.json()).data.tasks as Array<Record<string, any>>;
+  };
+  const readEvents = async () => {
+    const response = await page.request.get(`/api/calendar/events?from=${friday}&to=${friday}`, {
+      headers: authHeaders
+    });
+    expect(response.status()).toBe(200);
+    return (await response.json()).data as Array<Record<string, any>>;
+  };
   expect(await readMeals()).toEqual([]);
+  expect(await readTasks()).toEqual([]);
+  expect(await readEvents()).toEqual([]);
 
   await page.locator('[data-test="ai-assistant-open"]').click();
   await page
     .locator('[data-test="ai-assistant-prompt"]')
-    .fill('Planifica las comidas de la semana del 19 de octubre con cenas sencillas.');
+    .fill(
+      'Planifica cenas de la semana del 19 de octubre; el viernes 23 a las 21:00. Añade una tarea de preparación y un evento. Revisa los faltantes antes de guardar.'
+    );
   await page.locator('[data-test="ai-assistant-submit"] button').click();
   const review = page.locator('[data-test="ai-assistant-review"]');
   await expect(review).toBeVisible();
@@ -1768,32 +1815,44 @@ test('asistente global: propone, refina y confirma comidas con participantes exp
   await expect(participant).toHaveCount(1);
   await expect(participant).not.toBeChecked();
   expect(await readMeals()).toEqual([]);
+  expect(await readTasks()).toEqual([]);
+  expect(await readEvents()).toEqual([]);
 
   await participant.check();
   await page.locator('[data-test="ai-assistant-meals-generate"] button').click();
   await expect(page.locator('[data-test="ai-assistant-meals-preview-ready"]')).toBeVisible();
   expect(generatedRequests).toBe(1);
   expect(await readMeals()).toEqual([]);
+  expect(await readTasks()).toEqual([]);
+  expect(await readEvents()).toEqual([]);
 
   await page.getByRole('button', { name: 'Cerrar asistente' }).click();
   await expect(page.getByRole('dialog', { name: '¿Descartar este borrador?' })).toBeVisible();
   await page.getByRole('button', { name: 'Descartar borrador' }).click();
   await expect(review).not.toBeVisible();
   expect(await readMeals()).toEqual([]);
+  expect(await readTasks()).toEqual([]);
+  expect(await readEvents()).toEqual([]);
 
   await page.locator('[data-test="ai-assistant-open"]').click();
   await page
     .locator('[data-test="ai-assistant-prompt"]')
-    .fill('Planifica las comidas de la semana del 19 de octubre con cenas sencillas.');
+    .fill(
+      'Planifica cenas de la semana del 19 de octubre; el viernes 23 a las 21:00. Añade una tarea de preparación y un evento. Revisa los faltantes antes de guardar.'
+    );
   await page.locator('[data-test="ai-assistant-submit"] button').click();
   await expect(review).toBeVisible();
   await expect(participant).not.toBeChecked();
   expect(await readMeals()).toEqual([]);
+  expect(await readTasks()).toEqual([]);
+  expect(await readEvents()).toEqual([]);
   await participant.check();
   await page.locator('[data-test="ai-assistant-meals-generate"] button').click();
   await expect(page.locator('[data-test="ai-assistant-meals-preview-ready"]')).toBeVisible();
   expect(generatedRequests).toBe(2);
   expect(await readMeals()).toEqual([]);
+  expect(await readTasks()).toEqual([]);
+  expect(await readEvents()).toEqual([]);
 
   const servings = review.locator('.assistant__meal-servings input').first();
   await servings.fill('3');
@@ -1806,16 +1865,29 @@ test('asistente global: propone, refina y confirma comidas con participantes exp
   expect(await readMeals()).toEqual([]);
 
   await review.locator(`[data-action-id="${mealActionId}"] app-checkbox`).click();
+  await review.locator(`[data-action-id="${taskActionId}"] app-checkbox`).click();
+  await review.locator(`[data-action-id="${eventActionId}"] app-checkbox`).click();
   await page.locator('[data-test="ai-assistant-continue"] button').click();
   const confirmation = page.locator('[data-test="ai-assistant-confirm"]');
   await expect(confirmation).toContainText('Comidas · Proponer comidas');
   await expect(confirmation).toContainText('Pasta con verduras');
+  await expect(confirmation).toContainText(taskTitle);
+  await expect(confirmation).toContainText(eventTitle);
+  await expect(confirmation).toContainText('21:00');
   await expect(confirmation).toContainText('3 Raciones');
   expect(await readMeals()).toEqual([]);
+  expect(await readTasks()).toEqual([]);
+  expect(await readEvents()).toEqual([]);
   await capture(page, testInfo, 'meal-plan-confirm');
 
   await page.locator('[data-test="ai-assistant-confirm-submit"] button').click();
-  await expect(confirmation.locator('.assistant__confirm-status')).toHaveText('Completada');
+  const confirmationRows = confirmation.locator('.assistant__confirm-list > li');
+  await expect(confirmationRows).toHaveCount(3);
+  for (let index = 0; index < 3; index += 1) {
+    await expect(
+      confirmationRows.nth(index).locator('.assistant__confirm-status').first()
+    ).toHaveText('Completada');
+  }
   expect(confirmationBody).toMatchObject({
     proposalId: refinedProposalId,
     weekStart
@@ -1826,6 +1898,16 @@ test('asistente global: propone, refina y confirma comidas con participantes exp
   expect(persistedMeals).toHaveLength(7);
   expect(persistedMeals.every((meal) => meal.custom_meal === 'Pasta con verduras')).toBe(true);
   expect(persistedMeals.find((meal) => meal.date === weekStart)).toMatchObject({ servings: 3 });
+  expect(await readTasks()).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ title: taskTitle, scheduledDate: friday, priority: 'medium' })
+    ])
+  );
+  expect(await readEvents()).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ title: eventTitle, date: friday, startTime: '21:00' })
+    ])
+  );
   await capture(page, testInfo, 'meal-plan-saved');
 
   const replay = await page.request.post('/api/household/meal-planning/confirm', {
@@ -1947,6 +2029,16 @@ test('asistente global: propone, refina y confirma comidas con participantes exp
 
   await page.reload();
   expect(await readMeals()).toHaveLength(7);
+  expect(await readTasks()).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ title: taskTitle, scheduledDate: friday, priority: 'medium' })
+    ])
+  );
+  expect(await readEvents()).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ title: eventTitle, date: friday, startTime: '21:00' })
+    ])
+  );
   const persistedShoppingLists = await shoppingListsByName(page, token, 'Plan de comidas');
   expect(persistedShoppingLists).toHaveLength(1);
   const persistedShoppingList = await page.request.get(
@@ -2033,13 +2125,13 @@ function assistantMealDraft(proposalId: string, recipeName: string, memberIds: s
         return {
           id: `${proposalId}-event-${index}`,
           date,
-          mealType: 'lunch',
-          time: '13:00',
+          mealType: 'dinner',
+          time: '21:00',
           recipeAlias: 'N1',
           participantAliases: ['P1'],
           participantIds: memberIds,
           servings: 2,
-          objectiveSummary: 'Comida equilibrada para la semana.',
+          objectiveSummary: 'Cena equilibrada para la semana.',
           status: 'scheduled',
           reason: null
         };
