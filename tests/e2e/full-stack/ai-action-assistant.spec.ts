@@ -1454,6 +1454,7 @@ test('asistente global: refina un grupo de dominio o el lote completo sin escrib
   await registerUser(page, 'Asistente refinamiento por ámbitos');
   await createHousehold(page, 'Hogar sintético refinamiento por ámbitos');
   const token = await tokenOf(page);
+  const beforeAssistant = assistantDatabaseSnapshot();
   await page.goto('/dashboard');
   await page.locator('[data-test="ai-assistant-open"]').click();
   await page
@@ -1461,6 +1462,7 @@ test('asistente global: refina un grupo de dominio o el lote completo sin escrib
     .fill('Prepara una propuesta de compra y despensa');
   await page.locator('[data-test="ai-assistant-submit"] button').click();
   await expect(page.locator('[data-test="ai-assistant-review"]')).toBeVisible();
+  expect(assistantDatabaseSnapshot()).toEqual(beforeAssistant);
 
   const groupButton = page.getByRole('button', { name: 'Refinar grupo de Compra' });
   await expect(groupButton).toBeVisible();
@@ -1473,6 +1475,7 @@ test('asistente global: refina un grupo de dominio o el lote completo sin escrib
   await capture(page, testInfo, 'refine-domain-group');
   await page.getByRole('button', { name: 'Actualizar propuestas' }).click();
   await expect(page.locator('[data-test="ai-assistant-review"]')).toBeVisible();
+  expect(assistantDatabaseSnapshot()).toEqual(beforeAssistant);
   expect(refinementScopes[0]).toEqual({ kind: 'group', domain: 'shopping' });
   await expect(page.locator(`[data-action-id="${ACTION_IDS[0]}"]`)).not.toContainText(
     'Grupo revisado:'
@@ -1490,6 +1493,7 @@ test('asistente global: refina un grupo de dominio o el lote completo sin escrib
   await capture(page, testInfo, 'refine-full-batch');
   await page.getByRole('button', { name: 'Actualizar propuestas' }).click();
   await expect(page.locator('[data-test="ai-assistant-review"]')).toBeVisible();
+  expect(assistantDatabaseSnapshot()).toEqual(beforeAssistant);
   expect(refinementScopes[1]).toEqual({ kind: 'batch' });
   expect(domainWrites).toEqual([]);
 
@@ -1499,6 +1503,7 @@ test('asistente global: refina un grupo de dominio o el lote completo sin escrib
   await capture(page, testInfo, 'discard-draft-confirmation');
   await discardDialog.getByRole('button', { name: 'Descartar borrador' }).click();
   await expect(page.locator('[data-test="ai-assistant-open"]')).toBeVisible();
+  expect(assistantDatabaseSnapshot()).toEqual(beforeAssistant);
   expect(domainWrites).toEqual([]);
   expect(await pantryByName(page, token, 'Action QA 01')).toEqual([]);
   expect(await shoppingListsByName(page, token, 'Lista QA confirmada')).toEqual([]);
