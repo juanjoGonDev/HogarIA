@@ -127,9 +127,7 @@ test('local Ollama returns an editable pantry proposal without persistent writes
   expect(after.ai_jobs ?? [], 'la propuesta transitoria no debe crear ai_jobs').toEqual([]);
 });
 
-test('local Ollama returns independent cross-domain actions without persistent writes', async ({
-  page
-}) => {
+test('local Ollama writes a selected cross-domain action only after approval', async ({ page }) => {
   test.skip(
     !LOCAL_SMOKE_ENABLED,
     'Smoke opt-in: requiere Ollama local y qwen3:8b; no usa proveedor externo.'
@@ -183,6 +181,7 @@ test('local Ollama returns independent cross-domain actions without persistent w
     success: boolean;
     data: {
       actions: Array<{
+        id: string;
         kind: string;
         status: string;
         selected: boolean;
@@ -205,16 +204,65 @@ test('local Ollama returns independent cross-domain actions without persistent w
   const pantryAction = proposalBody.data.actions.find(
     ({ kind }) => kind === 'pantry.add_ingredient'
   );
-  expect(pantryAction?.payload.name?.toString().toLocaleLowerCase()).toContain('arroz');
+  const listAction = proposalBody.data.actions.find(({ kind }) => kind === 'shopping.create_list');
+  if (!pantryAction || !listAction) throw new Error('Faltan acciones entre dominios');
+
+  const pantryName = String(pantryAction.payload.name);
+  const listName = String(listAction.payload.name);
+  expect(pantryName.toLocaleLowerCase()).toContain('arroz');
   expect(pantryAction?.payload.quantity).toBe(250);
   expect(pantryAction?.payload.unit).toBe('g');
-
-  const listAction = proposalBody.data.actions.find(({ kind }) => kind === 'shopping.create_list');
-  expect(listAction?.payload.name?.toString().toLocaleLowerCase()).toContain('cena');
+  expect(listName.toLocaleLowerCase()).toContain('cena');
   expect(proposalBody.data.actions.every(({ dependsOn }) => dependsOn.length === 0)).toBe(true);
   await expect(page.locator('[data-test="ai-assistant-review"]')).toBeVisible();
 
-  const after = isolatedDatabaseSnapshot();
-  expect(after).toEqual(before);
-  expect(after.ai_jobs ?? [], 'la propuesta transitoria no debe crear ai_jobs').toEqual([]);
+  const afterProposal = isolatedDatabaseSnapshot();
+  expect(afterProposal).toEqual(before);
+  expect(afterProposal.ai_jobs ?? [], 'la propuesta transitoria no debe crear ai_jobs').toEqual([]);
+
+  const pantryCard = page.locator(`[data-action-id="${pantryAction.id}"]`);
+  const listCard = page.locator(`[data-action-id="${listAction.id}"]`);
+  await expect(pantryCard.getByRole('checkbox')).not.toBeChecked();
+  await listCard.getByRole('checkbox').click();
+  await expect(listCard.getByRole('checkbox')).toBeChecked();
+  await page.locator('[data-test="ai-assistant-continue"] button').click();
+  const confirmation = page.locator('[data-test="ai-assistant-confirm"]');
+  await expect(confirmation).toBeVisible();
+  await expect(confirmation).toContainText(listName);
+  await expect(confirmation).not.toContainText(pantryName);
+
+  const creationResponsePromise = page.waitForResponse((response) => {
+    const request = response.request();
+    return (
+      request.method() === 'POST' && new URL(response.url()).pathname === '/api/shopping/lists'
+    );
+  });
+  await page.locator('[data-test="ai-assistant-confirm-submit"] button').click();
+  const creationResponse = await creationResponsePromise;
+  const creationBody = await creationResponse.json();
+  expect(creationResponse.status(), JSON.stringify(creationBody)).toBe(201);
+  expect(creationBody).toMatchObject({ success: true, data: { name: listName } });
+
+  const afterApproval = isolatedDatabaseSnapshot();
+  const changedTables = [
+    ...new Set([...Object.keys(before), ...Object.keys(afterApproval)])
+  ].filter((table) => JSON.stringify(before[table]) !== JSON.stringify(afterApproval[table]));
+  expect(changedTables.sort()).toEqual(
+    ['assistant_action_results', 'shopping_list_events', 'shopping_lists'].sort()
+  );
+  expect(afterApproval.shopping_lists).toHaveLength((before.shopping_lists ?? []).length + 1);
+  expect(afterApproval.shopping_list_items).toEqual(before.shopping_list_items);
+  expect(afterApproval.ingredients).toEqual(before.ingredients);
+  expect(afterApproval.ai_jobs ?? []).toEqual([]);
+
+  await page.reload();
+  const persistedLists = await page.request.get('/api/shopping/lists?status=active', {
+    headers: { authorization: `Bearer ${token}` }
+  });
+  expect(persistedLists.status()).toBe(200);
+  const persistedBody = (await persistedLists.json()) as {
+    data: Array<{ name: string }>;
+  };
+  expect(persistedBody.data.some(({ name }) => name === listName)).toBe(true);
+  expect(isolatedDatabaseSnapshot()).toEqual(afterApproval);
 });
