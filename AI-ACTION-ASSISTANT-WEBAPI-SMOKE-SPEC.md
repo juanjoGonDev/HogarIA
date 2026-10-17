@@ -7,7 +7,7 @@
 
 - Usar solo el WebAPI local activo y su proveedor externo ya configurado; crear cuenta/configuración/token temporales dentro del runner aislado.
 - Usar SQLite temporal y nombres sintéticos. No leer, enviar ni persistir datos reales de hogar, despensa o recetas.
-- Decisión de contrato interno: pedir `actions[].payloadJson` como JSON en texto para mantener pequeño el esquema estricto del proveedor; parsearlo y validarlo con el esquema Zod completo antes de resolver o devolver acciones. La API pública sigue entregando `payload` como objeto.
+- Decisión de contrato interno: pedir cada payload de acción en `payloadJson` como JSON en texto para mantener pequeños los esquemas estrictos del proveedor; parsearlo y validarlo con el esquema Zod completo antes de resolver o devolver acciones. La API pública sigue entregando `payload` como objeto.
 - Desactivar temporalmente el logging/captura de detalles autorizado por el usuario; registrar sus valores originales en memoria y restaurarlos/verificarlos en `finally`. Grabación de sesión y HTML diagnóstico siguen apagados.
 - No guardar ni imprimir bearer, prompts, respuesta completa, secretos, contenido personal ni capturas del smoke real.
 
@@ -15,7 +15,7 @@
 
 - [x] Diagnosticar y corregir el selector E2E de recetas: el ID está en el propio `app-picker`, no en un padre. La regresión sintética falla con `#generated-recipe-detail-level app-picker` y pasa con `#generated-recipe-detail-level` en escritorio y móvil.
 - [ ] Añadir un modo opt-in exclusivo para propuestas del asistente: 10 solicitudes secuenciales únicas a `POST /api/ai/assistant/proposals` mediante el proxy que conecta con WebAPI real; cada entrada exige esquema estricto `ai_action_plan`, HTTP 2xx, JSON válido y respuesta aceptada por la ruta.
-- [ ] Reducir el esquema estricto enviado al proveedor sin debilitar la validación local: el formato actual ocupa 23 237 bytes y WebAPI lo rechaza sobre su límite de 12 000 con HTTP 413 antes de llamar al proveedor. Mantener el contrato de acciones revisables y validar el payload completo en servidor antes de normalizar o devolverlo.
+- [ ] Reducir los tres esquemas estrictos de propuestas y refinamiento sin debilitar la validación local: ocupan 23 237, 23 235 y 23 247 bytes, y WebAPI los rechaza sobre su límite de 12 000 con HTTP 413 antes de llamar al proveedor. Mantener el contrato de acciones revisables y validar el payload completo en servidor antes de normalizar o devolverlo.
 - [ ] Ejecutar E2E con una cuenta temporal y probar que las propuestas de alta quedan sin seleccionar ni confirmar, y que no cambian despensa, ledger ni `ai_jobs`.
 - [ ] Exigir diez operaciones proveedor-asistente consecutivas con contrato válido tras el fallo diagnosticado; cualquier error/incompleto reinicia el conteo. Confirmar cleanup de token, proxy, DB y app aislada.
 - [ ] Verificar con evidencia que el logging sensible se desactiva solo durante el smoke y que todos los valores originales se restauran, incluso ante fallo/cancelación.
