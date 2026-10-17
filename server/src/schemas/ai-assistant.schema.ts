@@ -189,6 +189,74 @@ const assistantActionCandidateSchema = z.union([
   z
     .object({
       ...actionMetaSchema,
+      kind: z.literal('shopping.update_item'),
+      payload: z
+        .object({
+          listName: z.string().trim().min(1).max(80),
+          targetName: z.string().trim().min(1).max(200),
+          matchUnit: z.boolean(),
+          targetUnit: z.string().trim().min(1).max(48).nullable(),
+          changes: z
+            .object({
+              name: z.string().trim().min(1).max(200).nullable(),
+              setName: z.boolean(),
+              quantity: z.number().finite().positive().max(100000).nullable(),
+              setQuantity: z.boolean(),
+              unit: z.string().trim().min(1).max(48).nullable(),
+              setUnit: z.boolean(),
+              category: z.string().trim().min(1).max(48).nullable(),
+              setCategory: z.boolean()
+            })
+            .strict()
+            .superRefine((changes, context) => {
+              if (
+                !changes.setName &&
+                !changes.setQuantity &&
+                !changes.setUnit &&
+                !changes.setCategory
+              ) {
+                context.addIssue({
+                  code: 'custom',
+                  message: 'At least one shopping item field must change'
+                });
+              }
+              const fields = [
+                ['name', changes.name, changes.setName, false],
+                ['quantity', changes.quantity, changes.setQuantity, false],
+                ['unit', changes.unit, changes.setUnit, true],
+                ['category', changes.category, changes.setCategory, true]
+              ] as const;
+              fields.forEach(([key, value, selected, nullableWhenSelected]) => {
+                if (
+                  (!selected && value !== null) ||
+                  (selected && !nullableWhenSelected && value === null)
+                ) {
+                  context.addIssue({
+                    code: 'custom',
+                    path: [key],
+                    message: selected
+                      ? 'A selected shopping item field must have a value'
+                      : 'An unchanged shopping item field must be null'
+                  });
+                }
+              });
+            })
+        })
+        .strict()
+        .superRefine((payload, context) => {
+          if (!payload.matchUnit && payload.targetUnit !== null) {
+            context.addIssue({
+              code: 'custom',
+              path: ['targetUnit'],
+              message: 'An unmatched target unit must be null'
+            });
+          }
+        })
+    })
+    .strict(),
+  z
+    .object({
+      ...actionMetaSchema,
       kind: z.literal('shopping.add_item'),
       payload: z
         .object({
@@ -508,6 +576,7 @@ export type AssistantAction = AssistantActionCandidate & {
   executionTarget?:
     | AssistantTaskUpdateExecutionTarget
     | AssistantShoppingListUpdateExecutionTarget
+    | AssistantShoppingItemUpdateExecutionTarget
     | AssistantPantryIngredientUpdateExecutionTarget
     | AssistantCalendarEventUpdateExecutionTarget
     | AssistantRecipeUpdateExecutionTarget;
@@ -541,6 +610,24 @@ export interface AssistantShoppingListUpdateExecutionTarget {
   id: string;
   version: number;
   snapshot: { name: string; store: string | null };
+}
+
+export interface AssistantShoppingItemUpdateExecutionTarget {
+  kind: 'shopping-item';
+  id: string;
+  listId: string;
+  version: number;
+  snapshot: {
+    listName: string;
+    name: string;
+    productKey: string;
+    quantity: number;
+    unit: string | null;
+    category: string | null;
+    checked: boolean;
+    deletedAt: string | null;
+    updatedAt: string | null;
+  };
 }
 
 export interface AssistantCalendarEventUpdateExecutionTarget {
@@ -579,6 +666,7 @@ export function normalizeAssistantActionPlan(
     number,
     | AssistantTaskUpdateExecutionTarget
     | AssistantShoppingListUpdateExecutionTarget
+    | AssistantShoppingItemUpdateExecutionTarget
     | AssistantPantryIngredientUpdateExecutionTarget
     | AssistantCalendarEventUpdateExecutionTarget
     | AssistantRecipeUpdateExecutionTarget
@@ -598,6 +686,9 @@ export function normalizeAssistantActionPlan(
     }
     if (action.kind === 'shopping.update_list' && executionTarget?.kind !== 'shopping-list') {
       throw new Error('Missing server-resolved shopping list update target');
+    }
+    if (action.kind === 'shopping.update_item' && executionTarget?.kind !== 'shopping-item') {
+      throw new Error('Missing server-resolved shopping item update target');
     }
     if (
       action.kind === 'pantry.update_ingredient' &&

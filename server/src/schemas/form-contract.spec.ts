@@ -82,6 +82,7 @@ import {
 } from './household-planning-automation.schema.js';
 import { generatedRecipeCandidateSchema } from './generated-recipe.schema.js';
 import {
+  assistantUpdateItemSchema,
   assistantUpdateListSchema,
   applyLinesSchema,
   bulkItemsSchema,
@@ -694,6 +695,30 @@ const ROWS: Row[] = [
         operation: 'update_list',
         targetId: 'list-1',
         before: { name: 'Semana', store: null }
+      }
+    }
+  },
+  {
+    name: 'assistantUpdateItemSchema',
+    schema: assistantUpdateItemSchema,
+    required: {
+      version: 1,
+      changes: { quantity: 2 },
+      assistantAction: {
+        operation: 'update_item',
+        targetId: 'item-1',
+        listId: 'list-1',
+        before: {
+          listName: 'Semana',
+          name: 'Pan',
+          productKey: 'pan',
+          quantity: 1,
+          unit: null,
+          category: null,
+          checked: false,
+          deletedAt: null,
+          updatedAt: null
+        }
       }
     }
   },

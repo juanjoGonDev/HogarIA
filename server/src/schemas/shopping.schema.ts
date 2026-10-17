@@ -233,6 +233,56 @@ export const assistantUpdateListSchema = z
   })
   .strict();
 
+/** Narrow, optimistic-concurrency contract for an explicitly reviewed assistant item edit. */
+export const assistantUpdateItemSchema = z
+  .object({
+    version: z.number().int().positive(),
+    changes: z
+      .object({
+        name: z.string().trim().min(1).max(200).optional(),
+        quantity: z.number().finite().positive().max(10000).optional(),
+        unit: z
+          .string()
+          .trim()
+          .max(48)
+          .transform((value) => (value === '' ? null : value))
+          .nullable()
+          .optional(),
+        category: z
+          .string()
+          .trim()
+          .max(48)
+          .transform((value) => (value === '' ? null : value))
+          .nullable()
+          .optional()
+      })
+      .strict()
+      .refine((changes) => Object.keys(changes).length > 0, {
+        message: 'NothingToUpdate'
+      }),
+    assistantAction: z
+      .object({
+        operation: z.literal('update_item'),
+        targetId: z.string().trim().min(1).max(128),
+        listId: z.string().trim().min(1).max(128),
+        before: z
+          .object({
+            listName: z.string().min(1).max(80),
+            name: z.string().min(1).max(200),
+            productKey: z.string().max(3000),
+            quantity: z.number().finite().positive().max(10000),
+            unit: z.string().max(48).nullable(),
+            category: z.string().max(48).nullable(),
+            checked: z.literal(false),
+            deletedAt: z.null(),
+            updatedAt: z.string().max(80).nullable()
+          })
+          .strict()
+      })
+      .strict()
+  })
+  .strict();
+
 export const createItemSchema = z.object({
   name: z.string().trim().min(1),
   quantity: formField(quantity),

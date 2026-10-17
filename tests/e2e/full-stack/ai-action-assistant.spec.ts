@@ -4,6 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { join, resolve } from 'node:path';
 import { expect, test, type Page } from '../fixtures';
 import { createHousehold, registerUser } from '../helpers/auth';
+import { shoppingNewListAction } from '../helpers/shopping-ui';
 
 const TOKEN_KEY = 'hogar:v1:auth_token';
 const SCREENSHOT_DIR = process.env.E2E_SCREENSHOT_DIR;
@@ -314,6 +315,38 @@ function shoppingUpdateProposal(executionTarget: Record<string, any>) {
       actions: [{ ...update, executionTarget }]
     }
   };
+}
+
+function shoppingItemUpdateCandidate(listName: string, targetName: string) {
+  return JSON.stringify({
+    summary: 'Actualizar una línea de compra existente.',
+    questions: [],
+    actions: [
+      {
+        kind: 'shopping.update_item',
+        title: 'Actualizar artículo de compra',
+        summary: 'Ajusta los datos del artículo indicado.',
+        payload: {
+          listName,
+          targetName,
+          matchUnit: false,
+          targetUnit: null,
+          changes: {
+            name: 'Harina propuesta QA',
+            setName: true,
+            quantity: 4,
+            setQuantity: true,
+            unit: null,
+            setUnit: false,
+            category: null,
+            setCategory: false
+          }
+        },
+        dependsOn: [],
+        warnings: []
+      }
+    ]
+  });
 }
 
 function pantryUpdateProposal(executionTarget: Record<string, any>) {
@@ -1990,6 +2023,219 @@ test('asistente global: conflicto de lista obsoleta no pisa el cambio concurrent
     store: 'Competidor',
     version: list.version + 1
   });
+});
+
+test('asistente global: edición segura de artículo requiere aprobación y tolera replay exacto', async ({
+  page
+}, testInfo) => {
+  const listName = 'Compra artículo QA';
+  const itemName = 'Leche artículo QA';
+  const provider = await startDeterministicAiProvider(
+    shoppingItemUpdateCandidate(listName, itemName)
+  );
+  const assistantWrites: Array<{
+    actionId: string | undefined;
+    path: string;
+    body: any;
+    headers: Record<string, string>;
+  }> = [];
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(`${error.name}: ${error.message}`));
+  page.on('request', (request) => {
+    if (
+      request.method() === 'PATCH' &&
+      new URL(request.url()).pathname.endsWith('/assistant-update') &&
+      new URL(request.url()).pathname.includes('/items/')
+    ) {
+      assistantWrites.push({
+        actionId: request.headers()['x-assistant-action-id'],
+        path: new URL(request.url()).pathname,
+        body: request.postDataJSON(),
+        headers: request.headers()
+      });
+    }
+  });
+
+  try {
+    await registerUser(page, 'Asistente edita artículo de compra E2E');
+    await createHousehold(page, 'Casa sintética edita artículo de compra');
+    await page.goto('/shopping');
+    await shoppingNewListAction(page).click();
+    await page.locator('[data-test="list-name"]').fill(listName);
+    await page.locator('[data-test="create-submit"]').click();
+    await expect(page).toHaveURL(/\/shopping\/[\w-]+$/);
+    await page.locator('[data-test="add-input"]').fill(`2 ${itemName}`);
+    await page.locator('[data-test="add-submit"]').click();
+    const itemRow = page.locator('[data-test="item-row"]', {
+      has: page.locator('.detail__name', { hasText: itemName })
+    });
+    await expect(itemRow).toHaveCount(1);
+    await expect(itemRow.locator('.detail__qty')).toHaveText('2×');
+
+    const listId = new URL(page.url()).pathname.split('/').at(-1)!;
+    const token = await tokenOf(page);
+    const authHeaders = { authorization: `Bearer ${token}` };
+    const memberships = await page.request.get('/api/household/memberships', {
+      headers: authHeaders
+    });
+    expect(memberships.status(), await memberships.text()).toBe(200);
+    const householdId = (await memberships.json()).data.activeHouseholdId as string;
+    expect(householdId).toBeTruthy();
+    const assistantHeaders = {
+      ...authHeaders,
+      'x-assistant-household-id': householdId
+    };
+    await configureDeterministicAi(page, token, provider.baseUrl);
+
+    const readList = async () => {
+      const response = await page.request.get(`/api/shopping/lists/${listId}`, {
+        headers: authHeaders
+      });
+      expect(response.status(), 'lectura real de lista sintética').toBe(200);
+      return (await response.json()).data;
+    };
+    const initial = await readList();
+    expect(initial.items).toHaveLength(1);
+    expect(initial.items[0]).toMatchObject({ name: itemName, quantity: 2, checked: 0 });
+
+    const submitProposal = async () => {
+      await page.locator('[data-test="ai-assistant-open"]').click();
+      await page
+        .locator('[data-test="ai-assistant-prompt"]')
+        .fill(`Actualiza el nombre, cantidad, unidad y categoría de ${itemName} en ${listName}.`);
+      await page.locator('[data-test="ai-assistant-submit"] button').click();
+      await expect(page.locator('[data-test="ai-assistant-review"]')).toBeVisible();
+    };
+
+    await submitProposal();
+    const review = page.locator('[data-test="ai-assistant-review"]');
+    await expect(review.locator('[data-test="ai-assistant-shopping-item-target"]')).toContainText(
+      listName
+    );
+    await expect(review.locator('[data-test="ai-assistant-shopping-item-target"]')).toContainText(
+      itemName
+    );
+    expect(await readList()).toMatchObject({ version: initial.version, items: initial.items });
+    expect(assistantWrites).toEqual([]);
+    await page.getByRole('button', { name: 'Cerrar asistente' }).click();
+    await expect(page.getByRole('dialog', { name: '¿Descartar este borrador?' })).toBeVisible();
+    await page.getByRole('button', { name: 'Descartar borrador' }).click();
+    await expect(review).not.toBeVisible();
+    expect(await readList()).toMatchObject({ version: initial.version, items: initial.items });
+    expect(assistantWrites).toEqual([]);
+
+    await submitProposal();
+    const itemAction = review.locator('article', {
+      has: page.locator('[data-test="ai-assistant-shopping-item-target"]')
+    });
+    const itemDetails = itemAction.locator('[data-test^="ai-assistant-action-details-"]');
+    await expect(itemDetails).toHaveCount(1);
+    await itemDetails.locator('summary').click();
+    await itemDetails.locator('input[type="text"]').nth(0).fill('Harina confirmada QA');
+    await itemDetails.locator('input[type="number"]').fill('5');
+    await itemDetails.locator('input[type="text"]').nth(1).fill('kg');
+    await itemDetails.locator('input[type="text"]').nth(2).fill('Despensa');
+    await expect(itemDetails.locator('input[type="text"]').nth(0)).toHaveValue(
+      'Harina confirmada QA'
+    );
+    await capture(page, testInfo, 'shopping-item-update-review');
+
+    await page.getByRole('button', { name: 'Seleccionar todas' }).click();
+    await page.locator('[data-test="ai-assistant-continue"] button').click();
+    const confirmation = page.locator('[data-test="ai-assistant-confirm"]');
+    await expect(
+      confirmation.locator('[data-test="ai-assistant-shopping-item-target-confirm"]')
+    ).toContainText(listName);
+    const changes = confirmation.locator(
+      '[data-test="ai-assistant-shopping-item-changes-confirm"]'
+    );
+    await expect(changes).toContainText('Leche artículo QA');
+    await expect(changes).toContainText('Harina confirmada QA');
+    await expect(changes).toContainText('2');
+    await expect(changes).toContainText('5');
+    await expect(changes).toContainText('kg');
+    await expect(changes).toContainText('Despensa');
+    expect(await readList()).toMatchObject({ version: initial.version, items: initial.items });
+    expect(assistantWrites).toEqual([]);
+    await capture(page, testInfo, 'shopping-item-update-confirm');
+
+    const writeResponsePromise = page.waitForResponse((response) => {
+      const request = response.request();
+      return (
+        request.method() === 'PATCH' &&
+        new URL(response.url()).pathname.endsWith('/assistant-update') &&
+        new URL(response.url()).pathname.includes('/items/')
+      );
+    });
+    await page.locator('[data-test="ai-assistant-confirm-submit"] button').click();
+    const writeResponse = await writeResponsePromise;
+    const writeResponseBody = await writeResponse.text();
+    expect(writeResponse.status(), writeResponseBody).toBe(200);
+    await expect(
+      confirmation.locator('.assistant__confirm-list > li .assistant__confirm-status')
+    ).toHaveText('Completada');
+    expect(assistantWrites).toHaveLength(1);
+    const savedAction = assistantWrites[0]!;
+    expect(savedAction.actionId).toMatch(/^[\da-f-]{36}$/i);
+    expect(savedAction.path).toMatch(
+      new RegExp(`/api/shopping/lists/${listId}/items/[^/]+/assistant-update$`)
+    );
+    expect(savedAction.headers['x-assistant-household-id']).toBe(householdId);
+    expect(savedAction.body).toMatchObject({
+      version: initial.version,
+      changes: {
+        name: 'Harina confirmada QA',
+        quantity: 5,
+        unit: 'kg',
+        category: 'Despensa'
+      },
+      assistantAction: {
+        operation: 'update_item',
+        listId,
+        before: {
+          listName,
+          name: itemName,
+          quantity: 2,
+          checked: false,
+          deletedAt: null
+        }
+      }
+    });
+
+    const saved = await readList();
+    expect(saved).toMatchObject({
+      version: initial.version + 1,
+      items: [
+        expect.objectContaining({
+          name: 'Harina confirmada QA',
+          product_key: 'harina confirmada qa',
+          quantity: 5,
+          unit: 'kg',
+          category: 'Despensa',
+          checked: 0
+        })
+      ]
+    });
+    await page.reload();
+    await expect(page.locator('[data-test="ai-assistant-open"]')).toBeVisible();
+    await expect(page.locator('[data-test="item-row"]')).toContainText('Harina confirmada QA');
+    await expect(page.locator('[data-test="item-row"]')).toContainText('5');
+
+    const replay = await page.request.patch(savedAction.path, {
+      headers: {
+        ...assistantHeaders,
+        'x-assistant-action-id': savedAction.actionId!
+      },
+      data: savedAction.body
+    });
+    expect(replay.status(), await replay.text()).toBe(200);
+    expect(await replay.json()).toMatchObject({ success: true, idempotent: true });
+    expect(await readList()).toMatchObject({ version: initial.version + 1, items: saved.items });
+    expect(pageErrors).toEqual([]);
+    await capture(page, testInfo, 'shopping-item-update-saved');
+  } finally {
+    await provider.close();
+  }
 });
 
 test('asistente global: edita un ingrediente propio solo tras confirmar y protege el replay', async ({

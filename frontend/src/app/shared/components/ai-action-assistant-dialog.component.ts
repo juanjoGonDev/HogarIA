@@ -225,6 +225,7 @@ const ACTION_LABELS: Record<AssistantAction['actionType'], TranslationKey> = {
   update_ingredient: 'ai_assistant.action.update_ingredient',
   create_list: 'ai_assistant.action.create_list',
   update_list: 'ai_assistant.action.update_list',
+  update_item: 'ai_assistant.domain.shopping',
   add_item: 'ai_assistant.action.add_item',
   create_task: 'ai_assistant.action.create_task',
   update_task: 'ai_assistant.action.update_task',
@@ -535,6 +536,28 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
                             }
                     }}
                   </p>
+                  <ng-container *ngIf="action.kind === 'shopping.update_item'">
+                    <p
+                      class="assistant__action-summary"
+                      data-test="ai-assistant-shopping-item-target"
+                    >
+                      {{ 'ai_assistant.field.listName' | t }}: «{{
+                        action.executionTarget.snapshot.listName
+                      }}» · {{ 'ai_assistant.field.name' | t }}: «{{
+                        action.executionTarget.snapshot.name
+                      }}» · {{ 'ai_assistant.field.quantity' | t }}:
+                      {{ action.executionTarget.snapshot.quantity }}
+                      {{ action.executionTarget.snapshot.unit || '—' }} ·
+                      {{ 'ai_assistant.field.category' | t }}:
+                      {{ action.executionTarget.snapshot.category || '—' }}
+                    </p>
+                    <p
+                      class="assistant__action-summary"
+                      data-test="ai-assistant-shopping-item-changes"
+                    >
+                      {{ shoppingItemChangeSummary(action) }}
+                    </p>
+                  </ng-container>
                   <p
                     *ngIf="action.kind === 'pantry.update_ingredient'"
                     class="assistant__action-summary"
@@ -1202,6 +1225,28 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
                             }
                     }}
                   </p>
+                  <ng-container *ngIf="action.kind === 'shopping.update_item'">
+                    <p
+                      class="assistant__action-summary"
+                      data-test="ai-assistant-shopping-item-target-confirm"
+                    >
+                      {{ 'ai_assistant.field.listName' | t }}: «{{
+                        action.executionTarget.snapshot.listName
+                      }}» · {{ 'ai_assistant.field.name' | t }}: «{{
+                        action.executionTarget.snapshot.name
+                      }}» · {{ 'ai_assistant.field.quantity' | t }}:
+                      {{ action.executionTarget.snapshot.quantity }}
+                      {{ action.executionTarget.snapshot.unit || '—' }} ·
+                      {{ 'ai_assistant.field.category' | t }}:
+                      {{ action.executionTarget.snapshot.category || '—' }}
+                    </p>
+                    <p
+                      class="assistant__action-summary"
+                      data-test="ai-assistant-shopping-item-changes-confirm"
+                    >
+                      {{ shoppingItemChangeSummary(action) }}
+                    </p>
+                  </ng-container>
                   <p
                     *ngIf="action.kind === 'pantry.update_ingredient'"
                     class="assistant__action-summary"
@@ -3001,6 +3046,38 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
             'text'
           )
         ];
+      case 'shopping.update_item': {
+        const { changes } = action.payload;
+        const snapshot = action.executionTarget.snapshot;
+        return [
+          this.field(
+            'name',
+            ['changes', 'name'],
+            changes.setName ? changes.name : snapshot.name,
+            'text',
+            true
+          ),
+          this.field(
+            'quantity',
+            ['changes', 'quantity'],
+            changes.setQuantity ? changes.quantity : snapshot.quantity,
+            'number',
+            true
+          ),
+          this.field(
+            'unit',
+            ['changes', 'unit'],
+            changes.setUnit ? changes.unit : snapshot.unit,
+            'text'
+          ),
+          this.field(
+            'category',
+            ['changes', 'category'],
+            changes.setCategory ? changes.category : snapshot.category,
+            'text'
+          )
+        ];
+      }
       case 'shopping.add_item':
         return [
           this.field('listName', ['listName'], action.payload.listName, 'text', true),
@@ -3588,6 +3665,45 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
         (nameChanged || storeChanged)
       );
     }
+    if (action.kind === 'shopping.update_item') {
+      const { changes } = action.payload;
+      const target = action.executionTarget;
+      const snapshot = target.snapshot;
+      const changed =
+        (changes.setName && changes.name !== snapshot.name) ||
+        (changes.setQuantity && changes.quantity !== snapshot.quantity) ||
+        (changes.setUnit && changes.unit !== snapshot.unit) ||
+        (changes.setCategory && changes.category !== snapshot.category);
+      return (
+        target.kind === 'shopping-item' &&
+        target.id.length > 0 &&
+        target.listId.length > 0 &&
+        Number.isInteger(target.version) &&
+        target.version > 0 &&
+        !snapshot.checked &&
+        snapshot.deletedAt === null &&
+        this.comparableName(action.payload.listName) === this.comparableName(snapshot.listName) &&
+        this.comparableName(action.payload.targetName) === this.comparableName(snapshot.name) &&
+        (action.payload.matchUnit
+          ? action.payload.targetUnit === snapshot.unit
+          : action.payload.targetUnit === null) &&
+        changes.setName === (changes.name !== null) &&
+        changes.setQuantity === (changes.quantity !== null) &&
+        (changes.setUnit || changes.unit === null) &&
+        (changes.setCategory || changes.category === null) &&
+        (changes.name === null ||
+          (changes.name.trim().length > 0 && changes.name.trim().length <= 200)) &&
+        (changes.quantity === null ||
+          (Number.isFinite(changes.quantity) &&
+            changes.quantity > 0 &&
+            changes.quantity <= 10000)) &&
+        (changes.unit === null ||
+          (changes.unit.trim().length > 0 && changes.unit.trim().length <= 48)) &&
+        (changes.category === null ||
+          (changes.category.trim().length > 0 && changes.category.trim().length <= 48)) &&
+        changed
+      );
+    }
     if (action.kind === 'shopping.add_item') {
       return (
         action.payload.listName.trim().length <= 80 &&
@@ -3941,6 +4057,46 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
     }
 
     if (
+      currentAction?.kind === 'shopping.update_item' &&
+      path[0] === 'changes' &&
+      typeof path[1] === 'string' &&
+      ['name', 'quantity', 'unit', 'category'].includes(path[1])
+    ) {
+      const field = path[1] as 'name' | 'quantity' | 'unit' | 'category';
+      const rawText = typeof rawValue === 'string' ? rawValue.trim() : String(rawValue);
+      const nextValue =
+        field === 'quantity'
+          ? rawValue === ''
+            ? null
+            : Number(rawValue)
+          : field === 'name'
+            ? rawText || null
+            : rawText || null;
+      const beforeValue = currentAction.executionTarget.snapshot[field];
+      const changed = nextValue !== beforeValue;
+      const flagField = `set${field[0]!.toUpperCase()}${field.slice(1)}` as
+        'setName' | 'setQuantity' | 'setUnit' | 'setCategory';
+      const serializedPath = JSON.stringify(path);
+      const flagPath = JSON.stringify(['changes', flagField]);
+      this.updateActions((actions) =>
+        actions.map((action) => {
+          if (action.id !== actionId || action.kind !== 'shopping.update_item') return action;
+          const changes = {
+            ...action.payload.changes,
+            [field]: changed ? nextValue : null,
+            [flagField]: changed
+          };
+          return {
+            ...action,
+            payload: { ...action.payload, changes } as typeof action.payload,
+            manualFields: [...new Set([...(action.manualFields ?? []), serializedPath, flagPath])]
+          };
+        })
+      );
+      return;
+    }
+
+    if (
       currentAction?.kind === 'pantry.update_ingredient' &&
       path[0] === 'changes' &&
       typeof path[1] === 'string' &&
@@ -4108,6 +4264,31 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
 
   taskPriorityLabel(priority: HouseholdTaskPriority): string {
     return this.i18n.t(HOUSEHOLD_TASK_PRIORITY_LABELS[priority]);
+  }
+
+  shoppingItemChangeSummary(action: AssistantAction): string {
+    if (action.kind !== 'shopping.update_item') return '';
+    const { changes } = action.payload;
+    const snapshot = action.executionTarget.snapshot;
+    const rows: Array<{
+      key: AssistantFieldKey;
+      before: string | number | null;
+      after: string | number | null;
+    }> = [];
+    if (changes.setName) rows.push({ key: 'name', before: snapshot.name, after: changes.name });
+    if (changes.setQuantity) {
+      rows.push({ key: 'quantity', before: snapshot.quantity, after: changes.quantity });
+    }
+    if (changes.setUnit) rows.push({ key: 'unit', before: snapshot.unit, after: changes.unit });
+    if (changes.setCategory) {
+      rows.push({ key: 'category', before: snapshot.category, after: changes.category });
+    }
+    return rows
+      .map(
+        ({ key, before, after }) =>
+          `${this.i18n.t(FIELD_LABELS[key])}: ${before ?? '—'} → ${after ?? '—'}`
+      )
+      .join(' · ');
   }
 
   fieldKey(key: AssistantFieldKey): TranslationKey {

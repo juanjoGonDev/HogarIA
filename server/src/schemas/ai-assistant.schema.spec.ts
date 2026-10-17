@@ -750,6 +750,125 @@ describe('ai assistant proposal schemas', () => {
     ).toBe(false);
   });
 
+  it('accepts only a scoped shopping item patch with absolute values and no domain IDs', () => {
+    const updateItem = {
+      kind: 'shopping.update_item',
+      title: 'Ajustar cantidad de leche',
+      summary: 'Deja dos litros de leche en la lista Compra semanal.',
+      payload: {
+        listName: 'Compra semanal',
+        targetName: 'Leche',
+        matchUnit: false,
+        targetUnit: null,
+        changes: {
+          name: null,
+          setName: false,
+          quantity: 2,
+          setQuantity: true,
+          unit: null,
+          setUnit: false,
+          category: null,
+          setCategory: false
+        }
+      },
+      dependsOn: [],
+      warnings: []
+    };
+
+    expect(
+      assistantActionPlanCandidateSchema.safeParse({
+        summary: 'Artículo revisado.',
+        actions: [updateItem],
+        questions: []
+      }).success
+    ).toBe(true);
+    expect(
+      assistantActionPlanCandidateSchema.safeParse({
+        summary: 'Resolver la unidad indicada.',
+        actions: [
+          {
+            ...updateItem,
+            payload: {
+              ...updateItem.payload,
+              matchUnit: true,
+              targetUnit: 'l',
+              changes: {
+                ...updateItem.payload.changes,
+                quantity: null,
+                setQuantity: false,
+                unit: 'l',
+                setUnit: true
+              }
+            }
+          }
+        ],
+        questions: []
+      }).success
+    ).toBe(true);
+
+    const invalidCandidates = [
+      {
+        ...updateItem,
+        payload: { ...updateItem.payload, itemId: 'model-id' }
+      },
+      {
+        ...updateItem,
+        payload: { ...updateItem.payload, matchUnit: false, targetUnit: 'l' }
+      },
+      {
+        ...updateItem,
+        payload: {
+          ...updateItem.payload,
+          changes: { ...updateItem.payload.changes, quantity: 0 }
+        }
+      },
+      {
+        ...updateItem,
+        payload: {
+          ...updateItem.payload,
+          changes: { ...updateItem.payload.changes, setQuantity: false }
+        }
+      },
+      {
+        ...updateItem,
+        payload: {
+          ...updateItem.payload,
+          changes: {
+            ...updateItem.payload.changes,
+            name: null,
+            setName: true
+          }
+        }
+      },
+      {
+        ...updateItem,
+        payload: {
+          ...updateItem.payload,
+          changes: {
+            name: null,
+            setName: false,
+            quantity: null,
+            setQuantity: false,
+            unit: null,
+            setUnit: false,
+            category: null,
+            setCategory: false
+          }
+        }
+      }
+    ];
+
+    for (const action of invalidCandidates) {
+      expect(
+        assistantActionPlanCandidateSchema.safeParse({
+          summary: 'Parche rechazado.',
+          actions: [action],
+          questions: []
+        }).success
+      ).toBe(false);
+    }
+  });
+
   it('accepts scoped replacement or a question-only refinement result', () => {
     expect(
       assistantActionRefinementCandidateSchema.safeParse({

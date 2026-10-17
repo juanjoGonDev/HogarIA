@@ -120,6 +120,10 @@ export class AiActionAssistantExecutionService {
         await this.updateShoppingList(action, expectedHouseholdId);
         return;
 
+      case 'shopping.update_item':
+        await this.updateShoppingItem(action, expectedHouseholdId);
+        return;
+
       case 'shopping.add_item': {
         const lists = await this.get<{ data: ShoppingListMatch[] }>(
           '/shopping/lists',
@@ -435,6 +439,42 @@ export class AiActionAssistantExecutionService {
           assistantAction: {
             operation: 'update_list',
             targetId: target.id,
+            before: target.snapshot
+          }
+        },
+        {
+          context: this.silentContext,
+          headers: this.householdHeaders(householdId).set('x-assistant-action-id', action.id)
+        }
+      )
+    );
+    if (response?.success !== true) throw new Error('ASSISTANT_DOMAIN_WRITE_REJECTED');
+  }
+
+  private async updateShoppingItem(
+    action: Extract<AssistantAction, { kind: 'shopping.update_item' }>,
+    householdId: string | null
+  ): Promise<void> {
+    const {
+      executionTarget: target,
+      payload: { changes }
+    } = action;
+    const requestChanges = {
+      ...(changes.setName ? { name: changes.name } : {}),
+      ...(changes.setQuantity ? { quantity: changes.quantity } : {}),
+      ...(changes.setUnit ? { unit: changes.unit } : {}),
+      ...(changes.setCategory ? { category: changes.category } : {})
+    };
+    const response = await firstValueFrom(
+      this.http.patch<ApiEnvelope<unknown>>(
+        `${this.apiUrl}/shopping/lists/${encodeURIComponent(target.listId)}/items/${encodeURIComponent(target.id)}/assistant-update`,
+        {
+          version: target.version,
+          changes: requestChanges,
+          assistantAction: {
+            operation: 'update_item',
+            targetId: target.id,
+            listId: target.listId,
             before: target.snapshot
           }
         },

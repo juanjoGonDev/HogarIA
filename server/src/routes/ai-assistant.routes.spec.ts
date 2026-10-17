@@ -120,6 +120,38 @@ function shoppingUpdateCandidate(targetName = 'Compra semanal'): object {
   };
 }
 
+function shoppingItemUpdateCandidate(): object {
+  return {
+    summary: 'Ajusta un artículo de una lista existente.',
+    actions: [
+      {
+        kind: 'shopping.update_item',
+        title: 'Ajustar cantidad de leche',
+        summary: 'Deja dos litros de leche en Compra semanal.',
+        payload: {
+          listName: 'Compra semanal',
+          targetName: 'Leche',
+          matchUnit: false,
+          targetUnit: null,
+          changes: {
+            name: null,
+            setName: false,
+            quantity: 2,
+            setQuantity: true,
+            unit: null,
+            setUnit: false,
+            category: null,
+            setCategory: false
+          }
+        },
+        dependsOn: [],
+        warnings: []
+      }
+    ],
+    questions: []
+  };
+}
+
 function pantryUpdateCandidate(targetName = 'Yogur natural'): object {
   return {
     summary: 'Actualiza un ingrediente existente.',
@@ -650,6 +682,379 @@ describe('POST /api/ai/assistant/proposals', () => {
     const providerRequest = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
     expect(JSON.stringify(providerRequest)).not.toContain('shopping-list-target');
     expect(persistedSnapshot()).toEqual(before);
+  });
+
+  it('resolves one pending shopping item in the explicit list without writing during proposal', async () => {
+    addConfig(alice);
+    db.prepare(
+      `INSERT INTO shopping_lists (id, user_id, name, store)
+       VALUES (?, ?, ?, ?)`
+    ).run('assistant-shopping-item-list', alice.id, 'Compra semanal', null);
+    db.prepare(
+      `INSERT INTO shopping_list_items
+        (id, list_id, name, product_key, quantity, unit, category, position)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      'assistant-shopping-item-target',
+      'assistant-shopping-item-list',
+      'Leche',
+      'leche',
+      1,
+      'l',
+      'Lácteos',
+      0
+    );
+    const before = persistedSnapshot();
+    const candidate = structuredClone(shoppingItemUpdateCandidate()) as any;
+    candidate.actions[0].payload.matchUnit = true;
+    candidate.actions[0].payload.targetUnit = 'l';
+    const fetchMock = stubProvider(JSON.stringify(candidate));
+
+    const response = await call(
+      'POST',
+      '/proposals',
+      { prompt: 'Cambia a dos litros la leche de Compra semanal.', route: 'shopping' },
+      alice.token,
+      { 'x-assistant-household-id': '' }
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { data: any };
+    expect(body.data.actions[0]).toMatchObject({
+      kind: 'shopping.update_item',
+      executionTarget: {
+        kind: 'shopping-item',
+        id: 'assistant-shopping-item-target',
+        listId: 'assistant-shopping-item-list',
+        version: 1,
+        snapshot: {
+          listName: 'Compra semanal',
+          name: 'Leche',
+          productKey: 'leche',
+          quantity: 1,
+          unit: 'l',
+          category: 'Lácteos',
+          checked: false,
+          deletedAt: null
+        }
+      }
+    });
+    const providerRequest = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
+    expect(JSON.stringify(providerRequest)).not.toContain('assistant-shopping-item-target');
+    expect(JSON.stringify(providerRequest)).not.toContain('assistant-shopping-item-list');
+    expect(persistedSnapshot()).toEqual(before);
+  });
+
+  it('clarifies when a shopping item target is missing or ambiguous', async () => {
+    addConfig(alice);
+    db.prepare(
+      `INSERT INTO shopping_lists (id, user_id, name, store)
+       VALUES (?, ?, ?, ?)`
+    ).run('assistant-shopping-item-ambiguous-list', alice.id, 'Compra semanal', null);
+    const insertItem = db.prepare(
+      `INSERT INTO shopping_list_items
+        (id, list_id, name, product_key, quantity, unit, position)
+       VALUES (?, ?, 'Leche', 'leche', 1, ?, ?)`
+    );
+    insertItem.run(
+      'assistant-shopping-item-first',
+      'assistant-shopping-item-ambiguous-list',
+      'l',
+      0
+    );
+    insertItem.run(
+      'assistant-shopping-item-second',
+      'assistant-shopping-item-ambiguous-list',
+      'ml',
+      1
+    );
+    const before = persistedSnapshot();
+    const fetchMock = stubProvider(JSON.stringify(shoppingItemUpdateCandidate()));
+
+    const response = await call(
+      'POST',
+      '/proposals',
+      { prompt: 'Cambia a dos la leche de Compra semanal.', route: 'shopping' },
+      alice.token,
+      { 'x-assistant-household-id': '' }
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: {
+        actions: [],
+        questions: [expect.stringMatching(/más de un artículo «Leche»/i)]
+      }
+    });
+    const providerRequest = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
+    expect(JSON.stringify(providerRequest)).not.toContain('assistant-shopping-item-first');
+    expect(persistedSnapshot()).toEqual(before);
+  });
+
+  it('requires explicit shopping scope and clarifies missing list/item without writes', async () => {
+    addConfig(alice);
+    const before = persistedSnapshot();
+    const fetchMock = stubProvider(JSON.stringify(shoppingItemUpdateCandidate()));
+
+    const withoutScope = await call(
+      'POST',
+      '/proposals',
+      { prompt: 'Cambia la cantidad de Leche en Compra semanal.', route: 'shopping' },
+      alice.token
+    );
+    expect(withoutScope.status).toBe(200);
+    expect(await withoutScope.json()).toMatchObject({
+      data: {
+        actions: [],
+        questions: [
+          expect.stringMatching(/selecciona explícitamente el hogar o el ámbito personal/i)
+        ]
+      }
+    });
+    expect(persistedSnapshot()).toEqual(before);
+
+    const withoutList = await call(
+      'POST',
+      '/proposals',
+      { prompt: 'Cambia la cantidad de Leche en Compra semanal.', route: 'shopping' },
+      alice.token,
+      { 'x-assistant-household-id': '' }
+    );
+    expect(withoutList.status).toBe(200);
+    expect(await withoutList.json()).toMatchObject({
+      data: {
+        actions: [],
+        questions: [expect.stringMatching(/no encontré exactamente una lista activa/i)]
+      }
+    });
+    expect(persistedSnapshot()).toEqual(before);
+
+    db.prepare(
+      `INSERT INTO shopping_lists (id, user_id, name, store, status)
+       VALUES (?, ?, ?, ?, 'done')`
+    ).run('assistant-shopping-item-closed-list', alice.id, 'Compra semanal', null);
+    db.prepare(
+      `INSERT INTO shopping_list_items (id, list_id, name, product_key, quantity, position)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(
+      'assistant-shopping-item-closed-line',
+      'assistant-shopping-item-closed-list',
+      'Leche',
+      'leche',
+      1,
+      0
+    );
+    const beforeClosedList = persistedSnapshot();
+    const withoutActiveList = await call(
+      'POST',
+      '/proposals',
+      { prompt: 'Cambia la cantidad de Leche en Compra semanal.', route: 'shopping' },
+      alice.token,
+      { 'x-assistant-household-id': '' }
+    );
+    expect(withoutActiveList.status).toBe(200);
+    expect(await withoutActiveList.json()).toMatchObject({
+      data: {
+        actions: [],
+        questions: [expect.stringMatching(/no encontré exactamente una lista activa/i)]
+      }
+    });
+    expect(persistedSnapshot()).toEqual(beforeClosedList);
+
+    db.prepare(
+      `INSERT INTO shopping_lists (id, user_id, name, store)
+       VALUES (?, ?, ?, ?)`
+    ).run('assistant-shopping-item-missing-list', alice.id, 'Compra semanal', null);
+    db.prepare(
+      `INSERT INTO shopping_list_items (id, list_id, name, product_key, quantity, position)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(
+      'assistant-shopping-item-unmatched',
+      'assistant-shopping-item-missing-list',
+      'Yogur',
+      'yogur',
+      1,
+      0
+    );
+    db.prepare(
+      `INSERT INTO shopping_list_items
+        (id, list_id, name, product_key, quantity, position, checked)
+       VALUES (?, ?, ?, ?, ?, ?, 1)`
+    ).run(
+      'assistant-shopping-item-checked',
+      'assistant-shopping-item-missing-list',
+      'Leche',
+      'leche',
+      1,
+      1
+    );
+    db.prepare(
+      `INSERT INTO shopping_list_items
+        (id, list_id, name, product_key, quantity, position, deleted_at)
+       VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
+    ).run(
+      'assistant-shopping-item-deleted',
+      'assistant-shopping-item-missing-list',
+      'Leche',
+      'leche',
+      1,
+      2
+    );
+    const beforeMissingItem = persistedSnapshot();
+    const withoutItem = await call(
+      'POST',
+      '/proposals',
+      { prompt: 'Cambia la cantidad de Leche en Compra semanal.', route: 'shopping' },
+      alice.token,
+      { 'x-assistant-household-id': '' }
+    );
+    expect(withoutItem.status).toBe(200);
+    expect(await withoutItem.json()).toMatchObject({
+      data: {
+        actions: [],
+        questions: [expect.stringMatching(/no encontré exactamente un artículo pendiente/i)]
+      }
+    });
+    expect(persistedSnapshot()).toEqual(beforeMissingItem);
+
+    db.prepare(
+      `INSERT INTO shopping_lists (id, user_id, name, store)
+       VALUES (?, ?, ?, ?)`
+    ).run('assistant-shopping-item-duplicate-list', alice.id, 'Compra semanal', null);
+    const beforeAmbiguousList = persistedSnapshot();
+    const ambiguousList = await call(
+      'POST',
+      '/proposals',
+      { prompt: 'Cambia la cantidad de Leche en Compra semanal.', route: 'shopping' },
+      alice.token,
+      { 'x-assistant-household-id': '' }
+    );
+    expect(ambiguousList.status).toBe(200);
+    expect(await ambiguousList.json()).toMatchObject({
+      data: { actions: [], questions: [expect.stringMatching(/más de una lista activa/i)] }
+    });
+    expect(persistedSnapshot()).toEqual(beforeAmbiguousList);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+  });
+
+  it('matches a pending shopping item with an explicitly null current unit', async () => {
+    addConfig(alice);
+    db.prepare(
+      `INSERT INTO shopping_lists (id, user_id, name, store)
+       VALUES (?, ?, ?, ?)`
+    ).run('assistant-shopping-item-no-unit-list', alice.id, 'Compra semanal', null);
+    db.prepare(
+      `INSERT INTO shopping_list_items
+        (id, list_id, name, product_key, quantity, unit, position)
+       VALUES (?, ?, ?, ?, ?, NULL, ?)`
+    ).run(
+      'assistant-shopping-item-no-unit',
+      'assistant-shopping-item-no-unit-list',
+      'Leche',
+      'leche',
+      1,
+      0
+    );
+    const candidate = structuredClone(shoppingItemUpdateCandidate()) as any;
+    candidate.actions[0].payload.matchUnit = true;
+    candidate.actions[0].payload.targetUnit = null;
+    const before = persistedSnapshot();
+    stubProvider(JSON.stringify(candidate));
+
+    const response = await call(
+      'POST',
+      '/proposals',
+      { prompt: 'Deja dos unidades de Leche sin unidad en Compra semanal.', route: 'shopping' },
+      alice.token,
+      { 'x-assistant-household-id': '' }
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { data: any };
+    expect(body.data.actions[0]).toMatchObject({
+      kind: 'shopping.update_item',
+      executionTarget: {
+        kind: 'shopping-item',
+        id: 'assistant-shopping-item-no-unit',
+        snapshot: { unit: null }
+      }
+    });
+    expect(body.data.questions).toEqual([]);
+    expect(persistedSnapshot()).toEqual(before);
+  });
+
+  it('asks instead of creating a no-op or duplicate shopping-item target', async () => {
+    addConfig(alice);
+    db.prepare(
+      `INSERT INTO shopping_lists (id, user_id, name, store)
+       VALUES (?, ?, ?, ?)`
+    ).run('assistant-shopping-item-repeat-list', alice.id, 'Compra semanal', null);
+    db.prepare(
+      `INSERT INTO shopping_list_items
+        (id, list_id, name, product_key, quantity, position)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(
+      'assistant-shopping-item-repeat',
+      'assistant-shopping-item-repeat-list',
+      'Leche',
+      'leche',
+      2,
+      0
+    );
+    const candidate = structuredClone(shoppingItemUpdateCandidate()) as any;
+    candidate.actions[0].payload.changes.quantity = 2;
+    const fetchMock = stubProvider(JSON.stringify(candidate));
+    const before = persistedSnapshot();
+
+    const noOp = await call(
+      'POST',
+      '/proposals',
+      { prompt: 'Deja dos de Leche en Compra semanal.', route: 'shopping' },
+      alice.token,
+      { 'x-assistant-household-id': '' }
+    );
+    expect(noOp.status).toBe(200);
+    expect(await noOp.json()).toMatchObject({
+      data: { actions: [], questions: [expect.stringMatching(/ya tiene esos valores/i)] }
+    });
+    expect(persistedSnapshot()).toEqual(before);
+
+    candidate.actions[0].payload.changes = {
+      name: 'Leche fresca',
+      setName: true,
+      quantity: null,
+      setQuantity: false,
+      unit: null,
+      setUnit: false,
+      category: null,
+      setCategory: false
+    };
+    candidate.actions.push(structuredClone(candidate.actions[0]));
+    fetchMock.mockImplementationOnce(
+      async () =>
+        new Response(
+          JSON.stringify({ choices: [{ message: { content: JSON.stringify(candidate) } }] }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' }
+          }
+        )
+    );
+    const duplicate = await call(
+      'POST',
+      '/proposals',
+      { prompt: 'Actualiza Leche en Compra semanal de dos formas.', route: 'shopping' },
+      alice.token,
+      { 'x-assistant-household-id': '' }
+    );
+    expect(duplicate.status).toBe(200);
+    const duplicateBody = (await duplicate.json()) as { data: any };
+    expect(duplicateBody.data.actions).toEqual([]);
+    expect(duplicateBody.data.questions).toEqual(
+      expect.arrayContaining([expect.stringMatching(/varias acciones para el artículo «Leche»/i)])
+    );
+    expect(persistedSnapshot()).toEqual(before);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('resolves an ingredient in the explicit editable scope without writing during proposal', async () => {
@@ -1869,6 +2274,82 @@ describe('POST /api/ai/assistant/refine', () => {
 
     expect(response.status).toBe(502);
     expect(await response.json()).toMatchObject({ success: false, code: 'INVALID_AI_RESULT' });
+  });
+
+  it('refines shopping-item fields without changing the exact list/item selector or writing', async () => {
+    addConfig(alice);
+    const before = persistedSnapshot();
+    const action = (shoppingItemUpdateCandidate() as any).actions[0];
+    const replacement = {
+      ...action,
+      payload: {
+        ...action.payload,
+        changes: { ...action.payload.changes, quantity: 3 }
+      }
+    };
+    const fetchMock = stubProvider(
+      JSON.stringify({ summary: 'Cantidad ajustada.', replacement, questions: [] })
+    );
+
+    const response = await call(
+      'POST',
+      '/refine',
+      {
+        actionId: 'shopping-item-refine-1',
+        instruction: 'Deja tres unidades.',
+        action,
+        scope: { kind: 'action' }
+      },
+      alice.token,
+      { 'x-assistant-household-id': '' }
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { data: any };
+    expect(body.data.replacement.payload).toMatchObject({
+      listName: action.payload.listName,
+      targetName: action.payload.targetName,
+      matchUnit: action.payload.matchUnit,
+      targetUnit: action.payload.targetUnit,
+      changes: { quantity: 3 }
+    });
+    const providerRequest = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
+    expect(providerRequest.messages[0].content).toContain(
+      'quantity siempre es total final absoluto'
+    );
+    expect(persistedSnapshot()).toEqual(before);
+  });
+
+  it('rejects refinement when a shopping-item selector or match unit changes', async () => {
+    addConfig(alice);
+    const action = (shoppingItemUpdateCandidate() as any).actions[0];
+    const fetchMock = stubProvider(
+      JSON.stringify({
+        summary: 'Otro artículo.',
+        replacement: {
+          ...action,
+          payload: { ...action.payload, targetUnit: 'ml' }
+        },
+        questions: []
+      })
+    );
+
+    const response = await call(
+      'POST',
+      '/refine',
+      {
+        actionId: 'shopping-item-refine-2',
+        instruction: 'Cambia al artículo de mililitros.',
+        action,
+        scope: { kind: 'action' }
+      },
+      alice.token,
+      { 'x-assistant-household-id': '' }
+    );
+
+    expect(response.status).toBe(502);
+    expect(await response.json()).toMatchObject({ success: false, code: 'INVALID_AI_RESULT' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('preserves a recipe target while refining its typed content patch without writes', async () => {

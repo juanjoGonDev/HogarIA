@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { Hono } from 'hono';
 import jwt from 'jsonwebtoken';
 import { ReadableStream } from 'node:stream/web';
+import { zoneStampValue } from '../middleware/timestamp.middleware.js';
 
 /**
  * Lista de la compra y precios, sobre una BD en memoria real (nada de mocks de
@@ -580,6 +581,274 @@ describe('/lists/:id/items', () => {
     expect(first.position).toBe(0);
     expect(second.position).toBe(1);
     expect(first.merged).toBe(false);
+  });
+
+  it('actualiza un artículo revisado con CAS e idempotencia sin volver a sumar la cantidad', async () => {
+    const list = await createList(alice, 'Compra semanal');
+    const item = await data(
+      await call(alice, 'POST', `/lists/${list.id}/items`, {
+        name: 'Leche',
+        quantity: 1,
+        unit: 'l',
+        category: 'Lácteos'
+      })
+    );
+    const stored = db
+      .prepare(
+        `SELECT name, product_key AS productKey, quantity, unit, category,
+                checked, deleted_at AS deletedAt, updated_at AS updatedAt
+           FROM shopping_list_items WHERE id = ?`
+      )
+      .get(item.id) as {
+      name: string;
+      productKey: string;
+      quantity: number;
+      unit: string | null;
+      category: string | null;
+      checked: number;
+      deletedAt: string | null;
+      updatedAt: string | null;
+    };
+    const before = {
+      listName: list.name,
+      ...stored,
+      checked: Boolean(stored.checked),
+      updatedAt: zoneStampValue(stored.updatedAt, 'updatedAt') as string | null
+    };
+    const actionId = '723e4567-e89b-42d3-a456-426614174000';
+    const headers = {
+      'x-assistant-action-id': actionId,
+      'x-assistant-household-id': ''
+    };
+    const body = {
+      version: list.version + 1,
+      changes: { quantity: 2, unit: null, category: 'Bebidas' },
+      assistantAction: {
+        operation: 'update_item',
+        targetId: item.id,
+        listId: list.id,
+        before
+      }
+    };
+    const eventCount = () =>
+      (
+        db
+          .prepare('SELECT COUNT(*) AS count FROM shopping_list_events WHERE list_id = ?')
+          .get(list.id) as { count: number }
+      ).count;
+    const eventsBefore = eventCount();
+
+    const first = await call(
+      alice,
+      'PATCH',
+      `/lists/${list.id}/items/${item.id}/assistant-update`,
+      body,
+      'es',
+      headers
+    );
+
+    expect(first.status).toBe(200);
+    expect(await data(first)).toMatchObject({
+      name: 'Leche',
+      quantity: 2,
+      unit: null,
+      category: 'Bebidas'
+    });
+    expect((await data(await call(alice, 'GET', `/lists/${list.id}`))).version).toBe(
+      list.version + 2
+    );
+    expect(eventCount()).toBe(eventsBefore + 1);
+
+    const replay = await call(
+      alice,
+      'PATCH',
+      `/lists/${list.id}/items/${item.id}/assistant-update`,
+      body,
+      'es',
+      headers
+    );
+    expect(replay.status).toBe(200);
+    expect(await json(replay)).toMatchObject({ success: true, idempotent: true });
+    expect((await data(await call(alice, 'GET', `/lists/${list.id}`))).version).toBe(
+      list.version + 2
+    );
+    expect(eventCount()).toBe(eventsBefore + 1);
+
+    const changedReplay = await call(
+      alice,
+      'PATCH',
+      `/lists/${list.id}/items/${item.id}/assistant-update`,
+      { ...body, changes: { quantity: 3 } },
+      'es',
+      headers
+    );
+    expect(changedReplay.status).toBe(409);
+    expect(await json(changedReplay)).toMatchObject({ code: 'ASSISTANT_ACTION_ID_CONFLICT' });
+    expect((await data(await call(alice, 'GET', `/lists/${list.id}`))).items[0]).toMatchObject({
+      quantity: 2,
+      unit: null,
+      category: 'Bebidas'
+    });
+    expect(eventCount()).toBe(eventsBefore + 1);
+  });
+
+  it('rechaza preimagen obsoleta y artículos marcados o borrados sin mutarlos', async () => {
+    const list = await createList(alice, 'Compra con cambios concurrentes');
+    for (const state of ['stale', 'checked', 'deleted'] as const) {
+      const item = await data(
+        await call(alice, 'POST', `/lists/${list.id}/items`, {
+          name: `Artículo ${state}`,
+          quantity: 1
+        })
+      );
+      const stored = db
+        .prepare(
+          `SELECT name, product_key AS productKey, quantity, unit, category,
+                  checked, deleted_at AS deletedAt, updated_at AS updatedAt
+             FROM shopping_list_items WHERE id = ?`
+        )
+        .get(item.id) as {
+        name: string;
+        productKey: string;
+        quantity: number;
+        unit: string | null;
+        category: string | null;
+        checked: number;
+        deletedAt: string | null;
+        updatedAt: string | null;
+      };
+      const before = {
+        listName: list.name,
+        ...stored,
+        checked: Boolean(stored.checked)
+      };
+      const currentList = await data(await call(alice, 'GET', `/lists/${list.id}`));
+      const body = {
+        version: currentList.version,
+        changes: { quantity: 8 },
+        assistantAction: {
+          operation: 'update_item',
+          targetId: item.id,
+          listId: list.id,
+          before
+        }
+      };
+      const actionId = {
+        stale: '823e4567-e89b-42d3-a456-426614174001',
+        checked: '823e4567-e89b-42d3-a456-426614174002',
+        deleted: '823e4567-e89b-42d3-a456-426614174003'
+      }[state];
+      const headers = {
+        'x-assistant-action-id': actionId,
+        'x-assistant-household-id': ''
+      };
+
+      if (state === 'stale') {
+        db.prepare('UPDATE shopping_list_items SET quantity = 3 WHERE id = ?').run(item.id);
+        db.prepare('UPDATE shopping_lists SET version = version + 1 WHERE id = ?').run(list.id);
+      } else if (state === 'checked') {
+        db.prepare('UPDATE shopping_list_items SET checked = 1 WHERE id = ?').run(item.id);
+      } else {
+        db.prepare(
+          'UPDATE shopping_list_items SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?'
+        ).run(item.id);
+      }
+
+      const response = await call(
+        alice,
+        'PATCH',
+        `/lists/${list.id}/items/${item.id}/assistant-update`,
+        body,
+        'es',
+        headers
+      );
+      expect(response.status).toBe(409);
+      if (state === 'stale') {
+        expect(await json(response)).toMatchObject({ message: 'LIST_VERSION_CONFLICT' });
+        expect((await data(await call(alice, 'GET', `/lists/${list.id}`))).items).toEqual(
+          expect.arrayContaining([expect.objectContaining({ id: item.id, quantity: 3 })])
+        );
+      } else {
+        expect(await json(response)).toMatchObject({ code: 'SHOPPING_ITEM_NOT_EDITABLE' });
+        const current = db
+          .prepare(
+            `SELECT quantity, checked, deleted_at AS deletedAt
+               FROM shopping_list_items WHERE id = ?`
+          )
+          .get(item.id) as { quantity: number; checked: number; deletedAt: string | null };
+        expect(current.quantity).toBe(1);
+        expect(Boolean(current.checked)).toBe(state === 'checked');
+        expect(current.deletedAt === null).toBe(state !== 'deleted');
+      }
+    }
+  });
+
+  it('revierte artículo, versión, aviso e idempotencia si falla el aviso de dominio', async () => {
+    const list = await createList(alice, 'Compra transaccional');
+    const item = await data(
+      await call(alice, 'POST', `/lists/${list.id}/items`, { name: 'Café', quantity: 1 })
+    );
+    const currentList = await data(await call(alice, 'GET', `/lists/${list.id}`));
+    const stored = db
+      .prepare(
+        `SELECT name, product_key AS productKey, quantity, unit, category,
+                checked, deleted_at AS deletedAt, updated_at AS updatedAt
+           FROM shopping_list_items WHERE id = ?`
+      )
+      .get(item.id) as {
+      name: string;
+      productKey: string;
+      quantity: number;
+      unit: string | null;
+      category: string | null;
+      checked: number;
+      deletedAt: string | null;
+      updatedAt: string | null;
+    };
+    const body = {
+      version: currentList.version,
+      changes: { quantity: 3 },
+      assistantAction: {
+        operation: 'update_item',
+        targetId: item.id,
+        listId: list.id,
+        before: { listName: list.name, ...stored, checked: Boolean(stored.checked) }
+      }
+    };
+    const actionId = '923e4567-e89b-42d3-a456-426614174000';
+    db.exec(`CREATE TRIGGER reject_shopping_item_update_event
+      BEFORE INSERT ON shopping_list_events
+      WHEN NEW.list_id = '${list.id}' AND NEW.action = 'item.update'
+      BEGIN SELECT RAISE(ABORT, 'synthetic event failure'); END;`);
+
+    try {
+      const failed = await call(
+        alice,
+        'PATCH',
+        `/lists/${list.id}/items/${item.id}/assistant-update`,
+        body,
+        'es',
+        {
+          'x-assistant-action-id': actionId,
+          'x-assistant-household-id': ''
+        }
+      );
+      expect(failed.status).toBe(500);
+      expect((await data(await call(alice, 'GET', `/lists/${list.id}`))).version).toBe(
+        currentList.version
+      );
+      expect((await data(await call(alice, 'GET', `/lists/${list.id}`))).items[0]).toMatchObject({
+        id: item.id,
+        quantity: 1
+      });
+      expect(
+        db
+          .prepare('SELECT COUNT(*) AS count FROM assistant_action_results WHERE action_id = ?')
+          .get(actionId)
+      ).toEqual({ count: 0 });
+    } finally {
+      db.exec('DROP TRIGGER IF EXISTS reject_shopping_item_update_event');
+    }
   });
 
   it('repetir producto suma la cantidad en vez de duplicar la fila', async () => {

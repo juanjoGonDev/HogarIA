@@ -538,6 +538,66 @@ describe('AiActionAssistantExecutionService', () => {
     await expectAsync(execution).toBeResolvedTo(undefined);
   });
 
+  it('sends a reviewed shopping-item edit as an absolute CAS patch with its preimage', async () => {
+    householdContext.activeHouseholdId.set('home-a');
+    const snapshot = {
+      listName: 'Compra semanal',
+      name: 'Leche',
+      productKey: 'leche',
+      quantity: 1,
+      unit: 'l',
+      category: 'Lácteos',
+      checked: false,
+      deletedAt: null,
+      updatedAt: '2026-10-17 12:00:00'
+    };
+    const action = {
+      ...actionBase('shopping.update_item', 'shopping', 'update_item'),
+      kind: 'shopping.update_item',
+      payload: {
+        listName: 'Compra semanal',
+        targetName: 'Leche',
+        matchUnit: true,
+        targetUnit: 'l',
+        changes: {
+          name: null,
+          setName: false,
+          quantity: 2,
+          setQuantity: true,
+          unit: null,
+          setUnit: false,
+          category: null,
+          setCategory: false
+        }
+      },
+      executionTarget: {
+        kind: 'shopping-item',
+        id: 'item-1',
+        listId: 'list-1',
+        version: 3,
+        snapshot
+      }
+    } as AssistantAction;
+
+    const execution = service.execute(action, 'home-a');
+    const request = http.expectOne('/api/shopping/lists/list-1/items/item-1/assistant-update');
+    expect(request.request.method).toBe('PATCH');
+    expect(request.request.body).toEqual({
+      version: 3,
+      changes: { quantity: 2 },
+      assistantAction: {
+        operation: 'update_item',
+        targetId: 'item-1',
+        listId: 'list-1',
+        before: snapshot
+      }
+    });
+    expect(request.request.headers.get('x-assistant-action-id')).toBe(action.id);
+    expect(request.request.headers.get('x-assistant-household-id')).toBe('home-a');
+    request.flush({ success: true, data: { idempotent: false } });
+    await expectAsync(execution).toBeResolvedTo(undefined);
+  });
+
   it('sends only selected pantry changes with the server preimage and action id', async () => {
     householdContext.activeHouseholdId.set('home-a');
     const action = {

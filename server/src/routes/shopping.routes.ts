@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { nanoid } from 'nanoid';
 import { getDatabase } from '../config/database.js';
 import { authMiddleware } from '../middleware/auth.middleware.js';
+import { zoneStampValue } from '../middleware/timestamp.middleware.js';
 import {
   ASSISTANT_HOUSEHOLD_HEADER,
   ASSISTANT_HOUSEHOLD_CONTEXT_CHANGED,
@@ -21,6 +22,7 @@ import {
 } from '../utils/pantry-categories.js';
 import {
   applyLinesSchema,
+  assistantUpdateItemSchema,
   assistantUpdateListSchema,
   bulkItemsSchema,
   completeListSchema,
@@ -677,6 +679,218 @@ shoppingRoutes.patch('/lists/:id/assistant-update', async (c) => {
     }
   );
 
+  if ('error' in result) {
+    return result.error === 'invalid_action_id'
+      ? c.json({ success: false, code: 'ASSISTANT_ACTION_ID_INVALID' }, 400)
+      : c.json({ success: false, code: 'ASSISTANT_ACTION_ID_CONFLICT' }, 409);
+  }
+  return c.json(result.body, result.status);
+});
+
+shoppingRoutes.patch('/lists/:id/items/:itemId/assistant-update', async (c) => {
+  const actionId = c.req.header(ASSISTANT_ACTION_ID_HEADER);
+  if (!actionId) return c.json({ success: false, code: 'ASSISTANT_ACTION_ID_REQUIRED' }, 400);
+  if (c.req.header(ASSISTANT_HOUSEHOLD_HEADER) === undefined) {
+    return c.json({ success: false, code: 'ASSISTANT_HOUSEHOLD_CONTEXT_REQUIRED' }, 400);
+  }
+
+  const body = assistantUpdateItemSchema.parse(await c.req.json());
+  const targetListId = c.req.param('id');
+  const targetItemId = c.req.param('itemId');
+  if (
+    body.assistantAction.targetId !== targetItemId ||
+    body.assistantAction.listId !== targetListId
+  ) {
+    return c.json({ success: false, code: 'ASSISTANT_ACTION_TARGET_MISMATCH' }, 400);
+  }
+
+  const db = getDatabase();
+  const userId = c.get('userId');
+  const assistantSnapshot = currentAssistantHouseholdSnapshot(c);
+  if (!assistantSnapshot.valid) {
+    return c.json({ success: false, code: ASSISTANT_HOUSEHOLD_CONTEXT_CHANGED }, 409);
+  }
+  const scope = assistantShoppingListScope(userId, assistantSnapshot.householdId ?? null);
+  const result = withAssistantActionIdempotency(
+    db,
+    userId,
+    actionId,
+    {
+      operation: 'shopping.update_item',
+      householdId: scope.householdId,
+      listId: targetListId,
+      itemId: targetItemId,
+      version: body.version,
+      before: body.assistantAction.before,
+      changes: body.changes
+    },
+    () => {
+      if (!currentAssistantHouseholdSnapshot(c).valid) {
+        return {
+          body: { success: false, code: ASSISTANT_HOUSEHOLD_CONTEXT_CHANGED },
+          status: 409,
+          record: false
+        };
+      }
+
+      const list = readList(db, scope, targetListId);
+      if (!list) {
+        return { body: { success: false, message: 'List not found' }, status: 404, record: false };
+      }
+      if (list.status !== 'active') {
+        return { body: { success: false, code: 'SHOPPING_LIST_NOT_ACTIVE' }, status: 409 };
+      }
+      if (list.version !== body.version || list.name !== body.assistantAction.before.listName) {
+        return {
+          body: {
+            success: false,
+            message: 'LIST_VERSION_CONFLICT',
+            data: { currentVersion: list.version }
+          },
+          status: 409,
+          record: false
+        };
+      }
+
+      const item = db
+        .prepare(
+          `SELECT id, list_id AS listId, name, product_key AS productKey, quantity, unit, category,
+                  checked, deleted_at AS deletedAt, updated_at AS updatedAt
+             FROM shopping_list_items WHERE id = ? AND list_id = ?`
+        )
+        .get(targetItemId, targetListId) as
+        | {
+            id: string;
+            listId: string;
+            name: string;
+            productKey: string;
+            quantity: number;
+            unit: string | null;
+            category: string | null;
+            checked: number;
+            deletedAt: string | null;
+            updatedAt: string | null;
+          }
+        | undefined;
+      if (!item) {
+        return { body: { success: false, message: 'Item not found' }, status: 404, record: false };
+      }
+      if (item.deletedAt !== null || item.checked !== 0) {
+        return { body: { success: false, code: 'SHOPPING_ITEM_NOT_EDITABLE' }, status: 409 };
+      }
+
+      const before = body.assistantAction.before;
+      if (
+        item.name !== before.name ||
+        item.productKey !== before.productKey ||
+        Number(item.quantity) !== before.quantity ||
+        item.unit !== before.unit ||
+        item.category !== before.category ||
+        Boolean(item.checked) !== before.checked ||
+        item.deletedAt !== before.deletedAt ||
+        zoneStampValue(item.updatedAt, 'updatedAt') !==
+          zoneStampValue(before.updatedAt, 'updatedAt')
+      ) {
+        return {
+          body: {
+            success: false,
+            message: 'SHOPPING_ITEM_PREIMAGE_CONFLICT',
+            data: { currentVersion: list.version }
+          },
+          status: 409,
+          record: false
+        };
+      }
+
+      const changes: Array<[string, unknown]> = [
+        ...(body.changes.name !== undefined && body.changes.name !== item.name
+          ? [
+              ['name = ?', body.changes.name] as [string, unknown],
+              ['product_key = ?', productKeyOf(body.changes.name)] as [string, unknown]
+            ]
+          : []),
+        ...(body.changes.quantity !== undefined && body.changes.quantity !== Number(item.quantity)
+          ? [['quantity = ?', body.changes.quantity] as [string, unknown]]
+          : []),
+        ...(body.changes.unit !== undefined && body.changes.unit !== item.unit
+          ? [['unit = ?', body.changes.unit] as [string, unknown]]
+          : []),
+        ...(body.changes.category !== undefined && body.changes.category !== item.category
+          ? [['category = ?', body.changes.category] as [string, unknown]]
+          : [])
+      ];
+      if (changes.length === 0) {
+        return {
+          body: { success: false, code: 'ASSISTANT_ACTION_NO_CHANGE' },
+          status: 400,
+          record: false
+        };
+      }
+
+      try {
+        const apply = db.transaction(() => {
+          const sets = changes.map(([set]) => set);
+          const values = changes.map(([, value]) => value);
+          sets.push('updated_at = CURRENT_TIMESTAMP', 'updated_by = ?');
+          values.push(userId);
+          const updatedItem = db
+            .prepare(
+              `UPDATE shopping_list_items SET ${sets.join(', ')}
+                WHERE id = ? AND list_id = ? AND deleted_at IS NULL AND checked = 0
+                  AND name = ? AND product_key = ? AND quantity = ? AND unit IS ? AND category IS ?
+                  AND updated_at IS ?`
+            )
+            .run(
+              ...values,
+              targetItemId,
+              targetListId,
+              before.name,
+              before.productKey,
+              before.quantity,
+              before.unit,
+              before.category,
+              item.updatedAt
+            );
+          if (updatedItem.changes !== 1) throw new Error('SHOPPING_ITEM_PREIMAGE_CONFLICT');
+
+          const updatedList = db
+            .prepare(
+              `UPDATE shopping_lists
+                  SET version = version + 1, updated_at = CURRENT_TIMESTAMP, updated_by = ?
+                WHERE id = ? AND version = ? AND status = 'active' AND ${scope.clause}`
+            )
+            .run(userId, targetListId, body.version, ...scope.params);
+          if (updatedList.changes !== 1) throw new Error('SHOPPING_ITEM_LIST_VERSION_CONFLICT');
+
+          return db
+            .prepare('SELECT * FROM shopping_list_items WHERE id = ? AND list_id = ?')
+            .get(targetItemId, targetListId) as Record<string, unknown>;
+        });
+        const updated = apply();
+        announce(db, list, userId, 'item.update', String(updated.name));
+        return { body: { success: true, data: updated }, status: 200 };
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          ['SHOPPING_ITEM_PREIMAGE_CONFLICT', 'SHOPPING_ITEM_LIST_VERSION_CONFLICT'].includes(
+            error.message
+          )
+        ) {
+          const current = readList(db, scope, targetListId);
+          return {
+            body: {
+              success: false,
+              message: error.message,
+              data: { currentVersion: current?.version ?? null }
+            },
+            status: 409,
+            record: false
+          };
+        }
+        throw error;
+      }
+    }
+  );
   if ('error' in result) {
     return result.error === 'invalid_action_id'
       ? c.json({ success: false, code: 'ASSISTANT_ACTION_ID_INVALID' }, 400)

@@ -524,6 +524,117 @@ describe('AiActionAssistantDialogComponent', () => {
     expect(execution.execute).not.toHaveBeenCalled();
   });
 
+  it('reviews an exact shopping item and shows before/after values until explicit approval', () => {
+    const action: AssistantAction = {
+      id: 'shopping-item-update-1',
+      kind: 'shopping.update_item',
+      domain: 'shopping',
+      actionType: 'update_item',
+      title: 'Ajustar cantidad de leche',
+      summary: 'Deja dos litros de leche en Compra semanal.',
+      payload: {
+        listName: 'Compra semanal',
+        targetName: 'Leche',
+        matchUnit: true,
+        targetUnit: 'l',
+        changes: {
+          name: null,
+          setName: false,
+          quantity: 2,
+          setQuantity: true,
+          unit: null,
+          setUnit: false,
+          category: null,
+          setCategory: false
+        }
+      },
+      executionTarget: {
+        kind: 'shopping-item',
+        id: 'shopping-item-1',
+        listId: 'shopping-list-1',
+        version: 3,
+        snapshot: {
+          listName: 'Compra semanal',
+          name: 'Leche',
+          productKey: 'leche',
+          quantity: 1,
+          unit: 'l',
+          category: 'Lácteos',
+          checked: false,
+          deletedAt: null,
+          updatedAt: '2026-10-17 12:00:00'
+        }
+      },
+      dependsOn: [],
+      warnings: [],
+      selected: false,
+      status: 'pending'
+    };
+    component.plan.set({
+      id: 'shopping-item-update-plan',
+      summary: 'Actualiza un artículo.',
+      actions: [action],
+      questions: []
+    });
+    component.stage.set('review');
+    fixture.detectChanges();
+
+    const target = fixture.nativeElement.querySelector(
+      '[data-test="ai-assistant-shopping-item-target"]'
+    ) as HTMLElement;
+    const changeSummary = fixture.nativeElement.querySelector(
+      '[data-test="ai-assistant-shopping-item-changes"]'
+    ) as HTMLElement;
+    expect(target.textContent).toContain('Compra semanal');
+    expect(target.textContent).toContain('Leche');
+    expect(target.textContent).toContain('1');
+    expect(changeSummary.textContent).toContain('1 → 2');
+    expect(component.isActionValid(action)).toBeTrue();
+    expect(component.editableFields(action).map((field) => field.path.join('.'))).toEqual([
+      'changes.name',
+      'changes.quantity',
+      'changes.unit',
+      'changes.category'
+    ]);
+
+    component.updateField(action.id, ['changes', 'quantity'], '3', 'number');
+    component.updateField(action.id, ['changes', 'unit'], '');
+    component.updateField(action.id, ['changes', 'category'], '  ');
+    fixture.detectChanges();
+    const edited = component.plan()!.actions[0]!;
+    expect(edited.payload).toEqual(
+      jasmine.objectContaining({
+        listName: 'Compra semanal',
+        targetName: 'Leche',
+        changes: {
+          name: null,
+          setName: false,
+          quantity: 3,
+          setQuantity: true,
+          unit: null,
+          setUnit: true,
+          category: null,
+          setCategory: true
+        }
+      })
+    );
+    expect(component.isActionValid(edited)).toBeTrue();
+    expect(execution.execute).not.toHaveBeenCalled();
+
+    component.setSelected(action.id, true);
+    component.goToConfirmation();
+    fixture.detectChanges();
+    const confirmation = fixture.nativeElement.querySelector(
+      '[data-test="ai-assistant-confirm"]'
+    ) as HTMLElement;
+    expect(confirmation.textContent).toContain('Compra semanal');
+    expect(confirmation.textContent).toContain('Leche');
+    expect(confirmation.textContent).toContain('1 → 3');
+    expect(confirmation.textContent).toContain('l → —');
+    expect(confirmation.textContent).toContain('Lácteos → —');
+    expect(execution.execute).not.toHaveBeenCalled();
+  });
+
   it('validates shopping-item lengths and optional quantity/unit/category values', () => {
     const action: AssistantAction = {
       id: 'shopping-item-validation',
