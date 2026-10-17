@@ -1,6 +1,6 @@
 # Edición segura de artículos de compra desde el asistente global
 
-**Estado:** implementación parcial; el flujo seguro de esta acción ya está implementado y probado. Cierre bloqueado por el budget de build, que también falla en `HEAD` limpio (641 B sobre el límite); el PR sigue Draft.
+**Estado:** implementación parcial; el flujo seguro de esta acción ya está implementado y probado. El build de producción vuelve a pasar tras diferir el diccionario completo del asistente; quedan pendientes la aprobación parcial/dependencias y el resto de criterios del contrato padre. El PR sigue Draft.
 **Contrato padre:** `SPEC.md`; amplía las acciones del dominio `shopping` sin cambiar el comportamiento de la UI normal.
 **Rama/PR:** `feat/household-floorplan` / #47; mantener Draft, sin abrir otro PR ni mergear.
 
@@ -44,3 +44,11 @@ La acción existente `shopping.update_list` no sustituye esta capacidad: una cam
 - `server/src/routes/shopping.routes.ts`: `POST /lists/:id/items` fusiona producto/unidad sumando cantidades, y `PATCH /lists/:id/items/:itemId` permite campos fuera del alcance del asistente sin CAS/ledger. No reutilizar esas rutas tal cual para actualizar una propuesta revisable.
 - `server/src/routes/shopping.routes.ts`: `PATCH /lists/:id/assistant-update` ya ofrece el patrón vertical estrecho para actualizar listas con snapshot, versión, contexto explícito e idempotencia.
 - `server/src/schemas/ai-assistant.schema.ts`, `frontend/src/app/shared/models/ai-action-assistant.model.ts` y `frontend/src/app/core/services/ai-action-assistant-execution.service.ts` son los registros tipados actuales; la lista de compra se muestra/editable en `ai-action-assistant-dialog.component.ts`.
+
+## Seguimiento de carga diferida (2026-10-17)
+
+- `ai_action_assistant.ts` se retiró del diccionario estático inicial. El shell conserva solo las traducciones pequeñas del FAB/error; `I18nService` carga y cachea el diccionario completo al abrir el asistente, y el launcher informa el fallo de carga sin abrir un diálogo incompleto.
+- Pruebas focales i18n/launcher/diálogo/simetría: **57/57**. Cobertura cliente completa: **1.664/1.664**, **90,70 / 81,04 / 92,17 / 93,22 %** S/B/F/L. `check:ui`: **263 archivos / 21 reglas**, limpio. `typecheck:e2e`: pasa.
+- Build de producción: **974,45 kB** de bundle inicial, bajo el límite de error vigente de 1 MB (sin rebajar budgets), con warning vigente del umbral de 500 kB. El diccionario aparece en un chunk separado y las claves completas del asistente no aparecen en `main`.
+- E2E full-stack contra la app de producción, APIs/backend reales y SQLite temporal, con proveedor sintético: **28/28** en Chromium escritorio y mobile Chrome. Las capturas sintéticas inspeccionadas están ignoradas por Git: `.e2e-screenshots/ai-assistant-lazy-i18n/chromium/review-expanded-1440x900.png` y `.e2e-screenshots/ai-assistant-lazy-i18n/mobile-chrome/review-expanded-393x851.png`.
+- No se midió RAM/CPU ni se probó micrófono/modelo local real en este seguimiento; siguen pendientes en el contrato padre. También queda pendiente ejecutar los hooks de commit/push para esta unidad.

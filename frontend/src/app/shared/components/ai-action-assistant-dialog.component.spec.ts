@@ -106,7 +106,9 @@ describe('AiActionAssistantDialogComponent', () => {
       ]
     }).compileComponents();
 
-    TestBed.inject(I18nService).setLang('es');
+    const i18n = TestBed.inject(I18nService);
+    i18n.setLang('es');
+    await i18n.loadAssistantTranslations();
     fixture = TestBed.createComponent(AiActionAssistantDialogComponent);
     component = fixture.componentInstance;
     fixture.detectChanges();

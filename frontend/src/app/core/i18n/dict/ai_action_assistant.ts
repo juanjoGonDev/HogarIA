@@ -1,5 +1,4 @@
 export const aiActionAssistantEs = {
-  'ai_assistant.open': 'Abrir asistente de acciones con IA',
   'ai_assistant.title': 'Asistente de acciones',
   'ai_assistant.close': 'Cerrar asistente',
   'ai_assistant.compose_title': '¿Qué necesitas organizar?',
@@ -242,7 +241,6 @@ export const aiActionAssistantEs = {
 };
 
 export const aiActionAssistantEn: Record<keyof typeof aiActionAssistantEs, string> = {
-  'ai_assistant.open': 'Open AI action assistant',
   'ai_assistant.title': 'Action assistant',
   'ai_assistant.close': 'Close assistant',
   'ai_assistant.compose_title': 'What would you like to organise?',

@@ -11,6 +11,8 @@ import {
 import { NavigationEnd, Router } from '@angular/router';
 import { filter } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { I18nService } from '../../core/services/i18n.service';
+import { ToastService } from '../../core/services/toast.service';
 import type { AssistantRouteHint } from '../models/ai-action-assistant.model';
 import { TranslatePipe } from '../../core/pipes/translate.pipe';
 import { IconComponent } from './ui/icon/icon.component';
@@ -112,6 +114,8 @@ export class AiActionAssistantLauncherComponent implements OnDestroy {
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
   private readonly visualViewport = typeof window === 'undefined' ? null : window.visualViewport;
+  private readonly i18n = inject(I18nService);
+  private readonly toast = inject(ToastService);
 
   readonly isOpen = signal(false);
   readonly keyboardOpen = signal(false);
@@ -132,7 +136,13 @@ export class AiActionAssistantLauncherComponent implements OnDestroy {
     this.visualViewport?.removeEventListener('resize', this.onViewportResize);
   }
 
-  open(): void {
+  async open(): Promise<void> {
+    try {
+      await this.i18n.loadAssistantTranslations();
+    } catch {
+      this.toast.error(this.i18n.t('ui.error'), this.i18n.t('ai_assistant.load_error'));
+      return;
+    }
     this.isOpen.set(true);
   }
 

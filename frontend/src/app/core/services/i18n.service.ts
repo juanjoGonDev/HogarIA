@@ -37,6 +37,8 @@ export class I18nService {
   private householdDictionaryLoad: Promise<void> | null = null;
   private recipeDictionary: RecipeDictionary | null = null;
   private recipeDictionaryLoad: Promise<void> | null = null;
+  private assistantDictionary: HouseholdDictionary | null = null;
+  private assistantDictionaryLoad: Promise<void> | null = null;
 
   readonly lang = this.langSignal.asReadonly();
   readonly resolved = this.resolvedSignal.asReadonly();
@@ -115,6 +117,23 @@ export class I18nService {
     return this.recipeDictionaryLoad;
   }
 
+  /** The global assistant's full bilingual copy loads only after the user opens the assistant. */
+  loadAssistantTranslations(): Promise<void> {
+    if (this.assistantDictionary) return Promise.resolve();
+    if (!this.assistantDictionaryLoad) {
+      this.assistantDictionaryLoad = import('../i18n/dict/ai_action_assistant')
+        .then(({ aiActionAssistantEs, aiActionAssistantEn }) => {
+          this.assistantDictionary = { es: aiActionAssistantEs, en: aiActionAssistantEn };
+          this.changeTick.update((value) => value + 1);
+        })
+        .catch((error: unknown) => {
+          this.assistantDictionaryLoad = null;
+          throw error;
+        });
+    }
+    return this.assistantDictionaryLoad;
+  }
+
   /**
    * El texto de una clave, con sustitucion simple de {placeholder}.
    *
@@ -173,11 +192,14 @@ export class I18nService {
     const spanishDictionary = DICTS.es as Record<string, string>;
     const householdDictionary = this.householdDictionary;
     const recipeDictionary = this.recipeDictionary;
+    const assistantDictionary = this.assistantDictionary;
     const encontrada =
       activeDictionary[key] ??
+      assistantDictionary?.[language][key] ??
       householdDictionary?.[language][key] ??
       recipeDictionary?.[language][key] ??
       spanishDictionary[key] ??
+      assistantDictionary?.es[key] ??
       householdDictionary?.es[key] ??
       recipeDictionary?.es[key];
     let str: string = encontrada ?? key;

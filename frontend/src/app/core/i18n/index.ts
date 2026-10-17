@@ -36,7 +36,10 @@ import { profileEs, profileEn } from './dict/profile';
 import { settingsEs, settingsEn } from './dict/settings';
 import { tasteEs, tasteEn } from './dict/taste';
 import { aiParticipantsEs, aiParticipantsEn } from './dict/ai_participants';
-import { aiActionAssistantEs, aiActionAssistantEn } from './dict/ai_action_assistant';
+import {
+  aiActionAssistantShellEs,
+  aiActionAssistantShellEn
+} from './dict/ai_action_assistant_shell';
 
 const es = {
   ...homeProfilePickerEs,
@@ -62,7 +65,7 @@ const es = {
   ...settingsEs,
   ...tasteEs,
   ...aiParticipantsEs,
-  ...aiActionAssistantEs,
+  ...aiActionAssistantShellEs,
   ...uiEs
 };
 
@@ -90,7 +93,7 @@ const en: Record<keyof typeof es, string> = {
   ...settingsEn,
   ...tasteEn,
   ...aiParticipantsEn,
-  ...aiActionAssistantEn,
+  ...aiActionAssistantShellEn,
   ...uiEn
 };
 
@@ -100,7 +103,8 @@ export const DICTS = { es, en };
 export type TranslationKey =
   | keyof typeof es
   | keyof typeof import('./dict/household').householdEs
-  | keyof typeof import('./dict/recipes').recipesEs;
+  | keyof typeof import('./dict/recipes').recipesEs
+  | keyof typeof import('./dict/ai_action_assistant').aiActionAssistantEs;
 
 /** Lo que hay que traducir, por si manana el diccionario viene de un JSON y no de un literal. */
 /**

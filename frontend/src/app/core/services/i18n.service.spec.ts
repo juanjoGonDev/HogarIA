@@ -183,6 +183,32 @@ describe('I18nService', () => {
     expect(i18n.changeTick()).toBe(changeTickAfterLoad);
   });
 
+  it('loads assistant translations lazily once for both languages', async () => {
+    const i18n = injectService();
+    const dictionaries = DICTS.es as Record<string, string>;
+    const warning = spyOn(console, 'warn');
+    const changeTickBeforeLoad = i18n.changeTick();
+
+    expect(dictionaries['ai_assistant.title']).toBeUndefined();
+    expect(i18n.t('ai_assistant.open')).toBe('Abrir asistente de acciones con IA');
+    expect(i18n.t('ai_assistant.title')).toBe('ai_assistant.title');
+    warning.calls.reset();
+
+    await Promise.all([i18n.loadAssistantTranslations(), i18n.loadAssistantTranslations()]);
+
+    expect(i18n.changeTick()).toBe(changeTickBeforeLoad + 1);
+    expect(i18n.t('ai_assistant.title')).toBe('Asistente de acciones');
+
+    i18n.setLang('en');
+    TestBed.flushEffects();
+    expect(i18n.t('ai_assistant.title')).toBe('Action assistant');
+
+    const changeTickAfterLoad = i18n.changeTick();
+    await i18n.loadAssistantTranslations();
+    expect(i18n.changeTick()).toBe(changeTickAfterLoad);
+    expect(warning).not.toHaveBeenCalled();
+  });
+
   it('returns and warns with a missing key in development, but stays quiet in production', () => {
     const i18n = injectService();
     const missingKey = 'test.missing.translation' as TranslationKey;
