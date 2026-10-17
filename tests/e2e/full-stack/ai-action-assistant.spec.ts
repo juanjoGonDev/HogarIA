@@ -2716,6 +2716,10 @@ test('asistente global: edita un ingrediente propio solo tras confirmar y proteg
   await expect(review.locator('[data-test="ai-assistant-pantry-target"]')).toContainText(
     'Azúcar moreno QA'
   );
+  await expect(review.locator('[data-test="ai-assistant-pantry-target"]')).toContainText('Otros');
+  await expect(review.locator('[data-test="ai-assistant-pantry-target"]')).not.toContainText(
+    'other'
+  );
   expect(await readIngredient()).toMatchObject({
     name: 'Azúcar moreno QA',
     quantity: 500,
@@ -2772,6 +2776,12 @@ test('asistente global: edita un ingrediente propio solo tras confirmar y proteg
   const confirmation = page.locator('[data-test="ai-assistant-confirm"]');
   await expect(confirmation).toContainText('Azúcar moreno QA');
   await expect(confirmation).toContainText('Azúcar confirmada QA');
+  await expect(
+    confirmation.locator('[data-test="ai-assistant-pantry-target-confirm"]')
+  ).toContainText('Otros');
+  await expect(
+    confirmation.locator('[data-test="ai-assistant-pantry-target-confirm"]')
+  ).not.toContainText('other');
   await expect(confirmation).toContainText('0 g');
   expect(await readIngredient()).toMatchObject({ name: 'Azúcar moreno QA', quantity: 500 });
   expect(assistantWrites).toEqual([]);

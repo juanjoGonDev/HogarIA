@@ -909,7 +909,24 @@ describe('AiActionAssistantDialogComponent', () => {
     ) as HTMLElement;
     expect(target.textContent).toContain('Yogur natural');
     expect(target.textContent).toContain('2 unit');
+    expect(target.textContent).toContain('Lácteos');
+    expect(target.textContent).not.toContain('dairy');
     expect(target.textContent).toContain('Desayuno');
+    component.setSelected(action.id, true);
+    component.stage.set('confirm');
+    fixture.detectChanges();
+    const confirmationTarget = fixture.nativeElement.querySelector(
+      '[data-test="ai-assistant-pantry-target-confirm"]'
+    ) as HTMLElement;
+    expect(confirmationTarget.textContent).toContain('Lácteos');
+    expect(confirmationTarget.textContent).not.toContain('dairy');
+    component.stage.set('review');
+    component.setSelected(action.id, false);
+    fixture.detectChanges();
+    expect(component.pantryCategoryName(null)).toBe('—');
+    expect(component.pantryCategoryName('custom-household-category')).toBe(
+      'custom-household-category'
+    );
     expect(component.isActionValid(action)).toBeTrue();
     const unchangedFields = {
       name: null,

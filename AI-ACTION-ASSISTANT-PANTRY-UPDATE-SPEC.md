@@ -48,6 +48,14 @@ Esta unidad permite editar un ingrediente de inventario existente desde el asist
 - En E2E, respuesta de propuesta AI usa fixture determinista; endpoint de escritura y DB son reales. No se ejecutaron proveedor AI local, micrófono/transcripción real ni métricas de RAM; esos criterios siguen pendientes en la spec global. El smoke global del proveedor es opt-in.
 - Capturas sintéticas fuera de Git: `.e2e-screenshots/assistant-pantry-update-20261016/{chromium,mobile-chrome}/pantry-update-{review,confirm,saved}.png`.
 
+### Etiqueta de categoría — regresión de legibilidad (2026-10-17)
+
+- TDD reprodujo que el resumen mostraba la clave interna (`dairy`/`other`) aunque el selector de edición ya usaba etiquetas localizadas. `pantryCategoryName` ahora resuelve contra el catálogo del hogar y reutiliza `pantryCategoryLabel`; la revisión y la confirmación muestran la etiqueta (“Lácteos”, “Otros”), con fallback para categorías personalizadas/desconocidas y guion si no hay categoría.
+- `pnpm --filter @hogaria/web exec ng test --no-watch --include=src/app/shared/components/ai-action-assistant-dialog.component.spec.ts --browsers=ChromeHeadless --progress=false` — **40/40**. El test verifica resumen de revisión/confirmación, fallback vacío y categoría personalizada. La primera ejecución falló antes del fix con `category: dairy` en vez de `Lácteos`.
+- Con build de producción actualizado: `node scripts/run-isolated-playwright.mjs --config=playwright.full-stack.config.ts --project=chromium --project=mobile-chrome --grep 'asistente global: edita un ingrediente propio solo tras confirmar y protege el replay' tests/e2e/full-stack/ai-action-assistant.spec.ts` — **2/2**; confirma etiquetas localizadas en revisión y confirmación en PC/móvil, además de la escritura solo tras confirmación y DB temporal aislada.
+- `pnpm run build`, `pnpm run typecheck:e2e`, `pnpm run check:ui` (263 ficheros / 21 reglas), Prettier y `git diff --check` pasan. El runner full-stack sirve el artefacto existente `frontend/dist`; reconstruirlo antes de probar cambios de UI. Persisten warnings de bundle/estilos existentes, sin modificar budgets.
+- Capturas sintéticas inspeccionadas e ignoradas por Git: `.e2e-screenshots/ai-action-assistant-category-label-20261017-rerun/{chromium,mobile-chrome}/pantry-update-{review,confirm,saved}.png`.
+
 ## Fuera de esta unidad
 
 No editar ni borrar ingredientes de otro miembro, no mutar cantidades para duplicar/combinar filas, no registrar cambios de prioridad ni cambiar utensilios/productos de catálogo. No cierra la aceptación global: calendario, edición de recetas, otras operaciones de compra, voz/micrófono real y auditoría completa de rendimiento siguen sus propios criterios.

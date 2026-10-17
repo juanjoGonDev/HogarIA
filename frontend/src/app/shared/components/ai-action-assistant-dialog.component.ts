@@ -592,7 +592,9 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
                               name: action.executionTarget.snapshot.name,
                               quantity: action.executionTarget.snapshot.quantity,
                               unit: action.executionTarget.snapshot.unit,
-                              category: action.executionTarget.snapshot.category,
+                              category: pantryCategoryName(
+                                action.executionTarget.snapshot.category
+                              ),
                               expirationDate: action.executionTarget.snapshot.expirationDate || '—',
                               location: pantryLocationLabel(
                                 action.executionTarget.snapshot.location
@@ -1281,7 +1283,9 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
                               name: action.executionTarget.snapshot.name,
                               quantity: action.executionTarget.snapshot.quantity,
                               unit: action.executionTarget.snapshot.unit,
-                              category: action.executionTarget.snapshot.category,
+                              category: pantryCategoryName(
+                                action.executionTarget.snapshot.category
+                              ),
                               expirationDate: action.executionTarget.snapshot.expirationDate || '—',
                               location: pantryLocationLabel(
                                 action.executionTarget.snapshot.location
@@ -4185,6 +4189,12 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
     if (location === 'freezer') return this.i18n.t('ai_assistant.location.freezer');
     if (location === 'counter') return this.i18n.t('ai_assistant.location.counter');
     return location || '—';
+  }
+
+  pantryCategoryName(categoryKey: string | null): string {
+    if (!categoryKey) return '—';
+    const category = this.pantry.categories().find((candidate) => candidate.key === categoryKey);
+    return pantryCategoryLabel(category ?? categoryKey, (key) => this.i18n.t(key));
   }
 
   calendarEventTimeLabel(
