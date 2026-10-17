@@ -2,7 +2,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { signal } from '@angular/core';
 import { NavigationEnd, Router } from '@angular/router';
-import { NEVER, of, Subject } from 'rxjs';
+import { NEVER, Observable, of, Subject, throwError } from 'rxjs';
 import { AiActionAssistantService } from '../../core/services/ai-action-assistant.service';
 import { AiActionAssistantExecutionService } from '../../core/services/ai-action-assistant-execution.service';
 import { HouseholdService } from '../../core/services/household.service';
@@ -63,10 +63,11 @@ describe('AiActionAssistantDialogComponent', () => {
     execution.execute.and.resolveTo(undefined);
     mealProposals = jasmine.createSpyObj<HouseholdMealProposalService>(
       'HouseholdMealProposalService',
-      ['createAssistantProposal', 'refineAssistantProposal']
+      ['createAssistantProposal', 'refineAssistantProposal', 'previewAssistantShopping']
     );
     mealProposals.createAssistantProposal.and.returnValue(of(emptyMealProposal()));
     mealProposals.refineAssistantProposal.and.returnValue(of(emptyMealProposal()));
+    mealProposals.previewAssistantShopping.and.returnValue(of(emptyMealShoppingPreview()));
     mealShopping = jasmine.createSpyObj<HouseholdMealShoppingService>(
       'HouseholdMealShoppingService',
       ['loadPreview', 'approve']
@@ -407,6 +408,7 @@ describe('AiActionAssistantDialogComponent', () => {
     fixture.detectChanges();
 
     expect(component.plan()?.actions[0].status).toBe('succeeded');
+    expect(component.confirmedMealPlanActions().map((item) => item.id)).toEqual([action.id]);
     expect(mealShopping.approve).not.toHaveBeenCalled();
     click('[data-test="ai-assistant-meals-shopping-open"]');
     await fixture.whenStable();
@@ -445,6 +447,221 @@ describe('AiActionAssistantDialogComponent', () => {
       ]
     });
     expect(component.mealShoppingApproval(action.id)).toEqual(approval);
+  });
+
+  it('adds unselected shortage actions from an unconfirmed meal draft with explicit dependencies', async () => {
+    householdContext.activeHouseholdId.set('home-meals');
+    householdContext.household.set(syntheticMealHousehold());
+    const action = mealPlanAction();
+    const proposal = householdMealProposal('shopping-draft', 2);
+    const plan: AssistantActionPlan = {
+      id: 'meal-shopping-draft-plan',
+      summary: 'Planifica comidas y calcula faltantes.',
+      actions: [action],
+      questions: []
+    };
+    assistant.propose.and.returnValue(of(plan));
+    mealProposals.createAssistantProposal.and.returnValue(of(proposal));
+    mealProposals.previewAssistantShopping.and.returnValue(
+      of({
+        ...emptyMealShoppingPreview(),
+        plannedMealCount: 1,
+        requiredIngredients: [
+          {
+            name: 'Arroz',
+            unit: 'g',
+            quantity: 100,
+            stockQuantity: 25,
+            missingQuantity: 75,
+            status: 'matched'
+          },
+          {
+            name: 'Harina',
+            unit: 'g',
+            quantity: 20,
+            stockQuantity: null,
+            missingQuantity: null,
+            status: 'ambiguous'
+          }
+        ],
+        optionalIngredients: [
+          {
+            name: 'Aceite',
+            unit: 'ml',
+            quantity: 10,
+            stockQuantity: 0,
+            missingQuantity: 10,
+            status: 'not_found'
+          }
+        ]
+      })
+    );
+
+    enterPrompt('Planifica comidas y añade los faltantes a la compra.');
+    fixture.detectChanges();
+    click('[data-test="ai-assistant-submit"]');
+    fixture.detectChanges();
+    const participant = fixture.nativeElement.querySelector(
+      '.assistant__meal-participants input'
+    ) as HTMLInputElement;
+    participant.checked = true;
+    participant.dispatchEvent(new Event('change', { bubbles: true }));
+    fixture.detectChanges();
+    click('[data-test="ai-assistant-meals-generate"]');
+    fixture.detectChanges();
+
+    expect(mealProposals.previewAssistantShopping).toHaveBeenCalledWith(
+      'home-meals',
+      jasmine.objectContaining({
+        proposalId: 'shopping-draft',
+        weekStart: '2026-10-19',
+        householdMemberIds: ['membership-1']
+      })
+    );
+    const actions = component.plan()!.actions;
+    const list = actions.find((candidate) => candidate.kind === 'shopping.create_list')!;
+    const rice = actions.find(
+      (candidate) => candidate.kind === 'shopping.add_item' && candidate.payload.name === 'Arroz'
+    )!;
+    expect(list.id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+    );
+    expect(rice.id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+    );
+    expect(list.selected).toBeFalse();
+    expect(rice.selected).toBeFalse();
+    expect(list.dependsOn).toContain(action.id);
+    expect(rice.dependsOn).toEqual([action.id, list.id]);
+    expect((rice as Extract<AssistantAction, { kind: 'shopping.add_item' }>).payload).toEqual({
+      listName: (list as Extract<AssistantAction, { kind: 'shopping.create_list' }>).payload.name,
+      name: 'Arroz',
+      quantity: 75,
+      unit: 'g',
+      category: null
+    });
+    expect(
+      actions.some(
+        (candidate) => candidate.kind === 'shopping.add_item' && candidate.payload.name === 'Aceite'
+      )
+    ).toBeFalse();
+    expect(
+      actions.some(
+        (candidate) => candidate.kind === 'shopping.add_item' && candidate.payload.name === 'Harina'
+      )
+    ).toBeFalse();
+    expect(execution.execute).not.toHaveBeenCalled();
+
+    const i18n = TestBed.inject(I18nService);
+    i18n.setLang('en');
+    fixture.detectChanges();
+    expect(
+      fixture.nativeElement.querySelector('[data-test="ai-assistant-meals-shopping-draft"]')
+        .textContent
+    ).toContain('Shopping needs from this draft');
+    i18n.setLang('es');
+    fixture.detectChanges();
+
+    component.setSelected(action.id, true);
+    component.setSelected(list.id, true);
+    component.setSelected(rice.id, true);
+    expect(component.canContinue()).toBeTrue();
+    component.goToConfirmation();
+    fixture.detectChanges();
+    click('[data-test="ai-assistant-confirm-submit"]');
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(execution.execute.calls.allArgs().map(([selectedAction]) => selectedAction.id)).toEqual([
+      action.id,
+      list.id,
+      rice.id
+    ]);
+    expect(mealShopping.approve).not.toHaveBeenCalled();
+  });
+
+  it('keeps a failed shopping preview visible and allows a retry', () => {
+    householdContext.activeHouseholdId.set('home-meals');
+    householdContext.household.set(syntheticMealHousehold());
+    const action = mealPlanAction();
+    const plan: AssistantActionPlan = {
+      id: 'meal-shopping-error-plan',
+      summary: 'Planifica comidas y calcula faltantes.',
+      actions: [action],
+      questions: []
+    };
+    assistant.propose.and.returnValue(of(plan));
+    mealProposals.createAssistantProposal.and.returnValue(
+      of(householdMealProposal('shopping-error', 2))
+    );
+    mealProposals.previewAssistantShopping.and.returnValues(
+      throwError(() => ({ status: 503 })),
+      of(emptyMealShoppingPreview())
+    );
+
+    enterPrompt('Planifica comidas.');
+    fixture.detectChanges();
+    click('[data-test="ai-assistant-submit"]');
+    fixture.detectChanges();
+    const participant = fixture.nativeElement.querySelector(
+      '.assistant__meal-participants input'
+    ) as HTMLInputElement;
+    participant.checked = true;
+    participant.dispatchEvent(new Event('change', { bubbles: true }));
+    fixture.detectChanges();
+    click('[data-test="ai-assistant-meals-generate"]');
+    fixture.detectChanges();
+
+    expect(component.mealShoppingError(action.id)).toBeTruthy();
+    expect(
+      fixture.nativeElement.querySelector('[data-test="ai-assistant-meals-shopping-draft-refresh"]')
+    ).toBeTruthy();
+
+    click('[data-test="ai-assistant-meals-shopping-draft-refresh"]');
+    fixture.detectChanges();
+
+    expect(component.mealShoppingError(action.id)).toBeNull();
+    expect(component.mealShoppingPreview(action.id)).toEqual(emptyMealShoppingPreview());
+    expect(execution.execute).not.toHaveBeenCalled();
+  });
+
+  it('cancels an in-flight shopping preview when the dialog is destroyed', () => {
+    householdContext.activeHouseholdId.set('home-meals');
+    householdContext.household.set(syntheticMealHousehold());
+    const action = mealPlanAction();
+    assistant.propose.and.returnValue(
+      of({
+        id: 'meal-shopping-cancel-plan',
+        summary: 'Planifica comidas.',
+        actions: [action],
+        questions: []
+      })
+    );
+    mealProposals.createAssistantProposal.and.returnValue(
+      of(householdMealProposal('shopping-cancel', 2))
+    );
+    let cancelled = false;
+    mealProposals.previewAssistantShopping.and.returnValue(
+      new Observable<HouseholdMealShoppingPreview>(() => () => {
+        cancelled = true;
+      })
+    );
+
+    enterPrompt('Planifica comidas.');
+    fixture.detectChanges();
+    click('[data-test="ai-assistant-submit"]');
+    fixture.detectChanges();
+    const participant = fixture.nativeElement.querySelector(
+      '.assistant__meal-participants input'
+    ) as HTMLInputElement;
+    participant.checked = true;
+    participant.dispatchEvent(new Event('change', { bubbles: true }));
+    fixture.detectChanges();
+    click('[data-test="ai-assistant-meals-generate"]');
+
+    expect(cancelled).toBeFalse();
+    component.ngOnDestroy();
+    expect(cancelled).toBeTrue();
+    expect(execution.execute).not.toHaveBeenCalled();
   });
 
   it('shows the existing task preimage in both review and final confirmation', () => {

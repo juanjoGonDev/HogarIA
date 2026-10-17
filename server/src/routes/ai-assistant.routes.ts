@@ -54,6 +54,13 @@ import { readHouseholdTaskWeek } from '../utils/household-task.store.js';
 import type { HouseholdTaskOccurrence } from '../schemas/household-task.schema.js';
 import { householdMealProposalConfirmRequestSchema } from '../schemas/household-meal-proposal-request.schema.js';
 import { mealProposalSchema } from '../schemas/household-meal-proposal.schema.js';
+import { createHouseholdMealRecipeSnapshot } from '../utils/household-meal-recipe-snapshot.js';
+import {
+  HouseholdMealShoppingPreviewError,
+  householdMealShoppingPreviewId,
+  readHouseholdMealShoppingPreviewForProposedMeals
+} from '../utils/household-meal-shopping-preview.store.js';
+import { canViewSharedMeals } from '../utils/shared-meal-calendar.store.js';
 import {
   AutomatedHouseholdMealProposalError,
   generateAutomatedHouseholdMealProposal,
@@ -1149,6 +1156,119 @@ aiAssistantRoutes.post(
       events: parsedProposal.data.events.map(({ id: _id, participantIds: _ids, ...event }) => event)
     };
     return generateAssistantMealProposal(c, input.data, currentDraft);
+  }
+);
+
+aiAssistantRoutes.post(
+  '/meal-proposals/shopping-preview',
+  bodyLimit({
+    maxSize: MAX_MEAL_PROPOSAL_REFINEMENT_BYTES,
+    onError: (c) => c.json({ success: false, code: 'ASSISTANT_REQUEST_TOO_LARGE' }, 413)
+  }),
+  async (c) => {
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ success: false, code: 'INVALID_ASSISTANT_MEAL_SHOPPING_PREVIEW' }, 400);
+    }
+
+    const parsed = householdMealProposalConfirmRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json({ success: false, code: 'INVALID_ASSISTANT_MEAL_SHOPPING_PREVIEW' }, 400);
+    }
+
+    const userId = c.get('userId');
+    const db = getDatabase();
+    const householdSnapshot = currentAssistantHouseholdSnapshot(c);
+    if (!householdSnapshot.valid) {
+      return c.json({ success: false, code: 'ASSISTANT_HOUSEHOLD_CONTEXT_CHANGED' }, 409);
+    }
+    const householdId = householdSnapshot.householdId;
+    if (!householdId) return c.json({ success: false, code: 'HOUSEHOLD_REQUIRED' }, 404);
+    if (!canViewSharedMeals(db, householdId, userId)) {
+      return c.json({ success: false, code: 'HOUSEHOLD_CALENDAR_VIEW_REQUIRED' }, 403);
+    }
+
+    const memberIds = parsed.data.householdMemberIds;
+    const placeholders = memberIds.map(() => '?').join(', ');
+    const currentMembers = db
+      .prepare(
+        `SELECT id FROM household_members
+          WHERE household_id = ? AND is_active = 1 AND id IN (${placeholders})`
+      )
+      .all(householdId, ...memberIds) as Array<{ id: string }>;
+    if (currentMembers.length !== memberIds.length) {
+      return c.json({ success: false, code: 'HOUSEHOLD_MEMBER_NOT_FOUND' }, 404);
+    }
+
+    const validMealShape = mealProposalSchema.safeParse({
+      newRecipes: parsed.data.recipes.flatMap((recipe) =>
+        recipe.source === 'new' ? [{ alias: recipe.alias, recipe: recipe.recipe }] : []
+      ),
+      events: parsed.data.events.map(({ id: _id, participantIds: _ids, ...event }) => event)
+    });
+    if (!validMealShape.success) {
+      return c.json({ success: false, code: 'INVALID_ASSISTANT_MEAL_SHOPPING_PREVIEW' }, 400);
+    }
+
+    try {
+      const catalog = readHouseholdMealRecipeCatalog(db, userId);
+      for (const recipe of parsed.data.recipes) {
+        if (recipe.source !== 'catalog') continue;
+        const canonical = catalog.recipes.find((entry) => entry.recipeId === recipe.recipeId);
+        if (!canonical?.selectable || !isDeepStrictEqual(recipe.recipe, canonical.recipe)) {
+          return c.json({ success: false, code: 'MEAL_PROPOSAL_RECIPE_CHANGED' }, 409);
+        }
+      }
+
+      const recipesByAlias = new Map(parsed.data.recipes.map((recipe) => [recipe.alias, recipe]));
+      const proposedMeals = parsed.data.events.flatMap((event) => {
+        if (event.status !== 'scheduled' || !event.recipeAlias) return [];
+        const recipe = recipesByAlias.get(event.recipeAlias);
+        if (!recipe) return [];
+        return [
+          {
+            date: event.date,
+            servings: event.servings,
+            recipeSnapshot: createHouseholdMealRecipeSnapshot(recipe.recipe)
+          }
+        ];
+      });
+      const endDate = new Date(`${parsed.data.weekStart}T00:00:00.000Z`);
+      endDate.setUTCDate(endDate.getUTCDate() + 6);
+      const preview = readHouseholdMealShoppingPreviewForProposedMeals(
+        db,
+        householdId,
+        { startDate: parsed.data.weekStart, endDate: endDate.toISOString().slice(0, 10) },
+        proposedMeals
+      );
+
+      const current = currentAssistantHouseholdSnapshot(c);
+      if (!current.valid || current.householdId !== householdId) {
+        return c.json({ success: false, code: 'ASSISTANT_HOUSEHOLD_CONTEXT_CHANGED' }, 409);
+      }
+      c.header('Cache-Control', 'no-store');
+      return c.json({
+        success: true,
+        data: {
+          ...preview,
+          proposalId: parsed.data.proposalId,
+          previewId: householdMealShoppingPreviewId(householdId, preview)
+        }
+      });
+    } catch (error) {
+      if (error instanceof HouseholdMealShoppingPreviewError) {
+        return c.json({ success: false, code: 'HOUSEHOLD_REQUIRED' }, 404);
+      }
+      if (
+        error instanceof HouseholdMealRecipeCatalogReadError ||
+        error instanceof HouseholdRecipeCatalogAttachmentError
+      ) {
+        return c.json({ success: false, code: error.code }, 409);
+      }
+      return c.json({ success: false, code: 'ASSISTANT_MEAL_SHOPPING_PREVIEW_UNAVAILABLE' }, 500);
+    }
   }
 );
 

@@ -217,3 +217,68 @@ function applyHouseholdStock(
 function roundQuantity(quantity: number): number {
   return Number(quantity.toFixed(6));
 }
+
+export interface ProposedHouseholdMealForShoppingPreview {
+  date: string;
+  servings: number;
+  recipeSnapshot: unknown;
+}
+
+/** Calculate shortages from an uncommitted proposal without materializing meals in SQLite. */
+export function readHouseholdMealShoppingPreviewForProposedMeals(
+  db: SqliteDb,
+  householdId: string,
+  range: HouseholdMealShoppingPreviewQuery,
+  proposedMeals: ProposedHouseholdMealForShoppingPreview[],
+  today = new Date().toISOString().slice(0, 10)
+): HouseholdMealShoppingPreview {
+  const household = db
+    .prepare('SELECT shared_pantry FROM households WHERE id = ?')
+    .get(householdId) as { shared_pantry: number | null } | undefined;
+  if (!household) throw new HouseholdMealShoppingPreviewError('HOUSEHOLD_NOT_FOUND');
+
+  const meals = proposedMeals.filter(
+    (meal) =>
+      meal.date >= range.startDate &&
+      meal.date <= range.endDate &&
+      meal.date >= today &&
+      Number.isInteger(meal.servings) &&
+      meal.servings > 0
+  );
+  const required = new Map<string, IngredientNeed>();
+  const optional = new Map<string, IngredientNeed>();
+  const warnings: HouseholdMealShoppingPreview['warnings'] = [];
+
+  for (const meal of meals) {
+    const snapshot = parseRecipeSnapshotValue(meal.recipeSnapshot);
+    if (!snapshot) {
+      warnings.push({ code: 'RECIPE_SNAPSHOT_UNAVAILABLE', date: meal.date });
+      continue;
+    }
+    for (const ingredient of snapshot.ingredients) {
+      addNeed(ingredient.isOptional ? optional : required, ingredient, meal.servings);
+    }
+  }
+
+  const sharedPantry = household.shared_pantry === 1;
+  const ingredients = sharedPantry ? readHouseholdIngredients(db, householdId) : [];
+  const remainingStock = new Map<string, number>();
+  return {
+    startDate: range.startDate,
+    endDate: range.endDate,
+    sharedPantry,
+    plannedMealCount: meals.length,
+    requiredIngredients: [...required.values()].map((need) =>
+      applyHouseholdStock(need, ingredients, remainingStock, sharedPantry)
+    ),
+    optionalIngredients: [...optional.values()].map((need) =>
+      applyHouseholdStock(need, ingredients, remainingStock, sharedPantry)
+    ),
+    warnings
+  };
+}
+
+function parseRecipeSnapshotValue(value: unknown): z.infer<typeof recipeSnapshotSchema> | null {
+  const parsed = recipeSnapshotSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}

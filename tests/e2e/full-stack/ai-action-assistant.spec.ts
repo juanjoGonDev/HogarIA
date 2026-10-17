@@ -2161,6 +2161,14 @@ test('asistente global: propone, refina y confirma comidas con participantes exp
   let refinementRequests = 0;
   let refinedProposalId = '';
   let confirmationBody: Record<string, any> | null = null;
+  const waitForShoppingPreview = () =>
+    page.waitForResponse((response) => {
+      const request = response.request();
+      return (
+        request.method() === 'POST' &&
+        new URL(response.url()).pathname === '/api/ai/assistant/meal-proposals/shopping-preview'
+      );
+    });
 
   page.on('request', (request) => {
     if (
@@ -2304,12 +2312,31 @@ test('asistente global: propone, refina y confirma comidas con participantes exp
   expect(await readEvents()).toEqual([]);
 
   await participant.check();
+  const firstShoppingPreviewPromise = waitForShoppingPreview();
   await page.locator('[data-test="ai-assistant-meals-generate"] button').click();
+  const firstShoppingPreviewResponse = await firstShoppingPreviewPromise;
+  expect(firstShoppingPreviewResponse.status()).toBe(200);
+  expect((await firstShoppingPreviewResponse.json()).data).toMatchObject({
+    startDate: weekStart,
+    endDate: weekEnd,
+    plannedMealCount: 7,
+    requiredIngredients: [
+      expect.objectContaining({
+        name: 'verduras',
+        unit: 'g',
+        quantity: 1680,
+        missingQuantity: 1680
+      })
+    ]
+  });
   await expect(page.locator('[data-test="ai-assistant-meals-preview-ready"]')).toBeVisible();
+  await expect(page.locator('[data-test="ai-assistant-meals-shopping-draft"]')).toBeVisible();
+  await expect(page.locator('[data-meal-shopping-draft-action]')).toHaveCount(2);
   expect(generatedRequests).toBe(1);
   expect(await readMeals()).toEqual([]);
   expect(await readTasks()).toEqual([]);
   expect(await readEvents()).toEqual([]);
+  expect(await shoppingListsByName(page, token, 'Compra para el plan')).toEqual([]);
 
   await page.getByRole('button', { name: 'Cerrar asistente' }).click();
   await expect(page.getByRole('dialog', { name: '¿Descartar este borrador?' })).toBeVisible();
@@ -2332,7 +2359,10 @@ test('asistente global: propone, refina y confirma comidas con participantes exp
   expect(await readTasks()).toEqual([]);
   expect(await readEvents()).toEqual([]);
   await participant.check();
+  const generatedShoppingPreviewPromise = waitForShoppingPreview();
   await page.locator('[data-test="ai-assistant-meals-generate"] button').click();
+  const generatedShoppingPreviewResponse = await generatedShoppingPreviewPromise;
+  expect(generatedShoppingPreviewResponse.status()).toBe(200);
   await expect(page.locator('[data-test="ai-assistant-meals-preview-ready"]')).toBeVisible();
   expect(generatedRequests).toBe(2);
   expect(await readMeals()).toEqual([]);
@@ -2340,14 +2370,100 @@ test('asistente global: propone, refina y confirma comidas con participantes exp
   expect(await readEvents()).toEqual([]);
 
   const servings = review.locator('.assistant__meal-servings input').first();
+  const servingsShoppingPreviewPromise = waitForShoppingPreview();
   await servings.fill('3');
   await servings.dispatchEvent('change');
+  const servingsShoppingPreviewResponse = await servingsShoppingPreviewPromise;
+  expect(servingsShoppingPreviewResponse.status()).toBe(200);
   const mealRefinement = review.locator('.assistant__meal-refinement textarea');
   await mealRefinement.fill('Cambia la receta del lunes por pasta.');
+  const refinementShoppingPreviewPromise = waitForShoppingPreview();
   await page.locator('[data-test="ai-assistant-meals-refine"] button').click();
+  const refinementShoppingPreviewResponse = await refinementShoppingPreviewPromise;
+  expect(refinementShoppingPreviewResponse.status()).toBe(200);
+  expect((await refinementShoppingPreviewResponse.json()).data).toMatchObject({
+    plannedMealCount: 7,
+    requiredIngredients: [
+      expect.objectContaining({
+        name: 'verduras',
+        unit: 'g',
+        quantity: 1800,
+        missingQuantity: 1800
+      })
+    ]
+  });
   await expect(review).toContainText('Pasta con verduras');
+  await expect(review.locator('[data-test="ai-assistant-meals-shopping-draft"]')).toContainText(
+    '1800 g'
+  );
   expect(refinementRequests).toBe(1);
   expect(await readMeals()).toEqual([]);
+
+  const draftShoppingActions = review.locator('[data-meal-shopping-draft-action]');
+  await expect(draftShoppingActions).toHaveCount(2);
+  const shoppingListAction = draftShoppingActions.nth(0);
+  const shoppingItemAction = draftShoppingActions.nth(1);
+  await expect(shoppingListAction.getByRole('checkbox')).not.toBeChecked();
+  await expect(shoppingItemAction.getByRole('checkbox')).not.toBeChecked();
+
+  const shoppingDraftPreview = review.locator('[data-test="ai-assistant-meals-shopping-draft"]');
+  await shoppingDraftPreview.scrollIntoViewIfNeeded();
+  await capture(page, testInfo, 'meal-shopping-draft-review-pc');
+  const desktopViewport = page.viewportSize();
+  expect(desktopViewport).toBeTruthy();
+  for (const viewport of [
+    { width: 320, height: 568 },
+    { width: 768, height: 1024 }
+  ]) {
+    await page.setViewportSize(viewport);
+    await shoppingDraftPreview.scrollIntoViewIfNeeded();
+    await capture(
+      page,
+      testInfo,
+      `meal-shopping-draft-review-${viewport.width}x${viewport.height}`
+    );
+    const geometry = await page.evaluate(() => {
+      const body = document.querySelector<HTMLElement>('.modal__body');
+      return {
+        viewportWidth: window.visualViewport?.width ?? window.innerWidth,
+        documentWidth: document.documentElement.scrollWidth,
+        modalWidth: body?.clientWidth ?? 0,
+        modalScrollWidth: body?.scrollWidth ?? 0
+      };
+    });
+    expect(geometry.documentWidth).toBeLessThanOrEqual(geometry.viewportWidth + 1);
+    expect(geometry.modalScrollWidth).toBeLessThanOrEqual(geometry.modalWidth + 1);
+  }
+  await page.setViewportSize(desktopViewport!);
+
+  const destinationName = 'Compra cena viernes E2E';
+  const listDetails = shoppingListAction.locator('details.assistant__details');
+  await listDetails.locator('summary').click();
+  await listDetails.locator('input[type="text"]').first().fill(destinationName);
+  const itemDetails = shoppingItemAction.locator('details.assistant__details');
+  await itemDetails.locator('summary').click();
+  await expect(itemDetails.locator('input[type="text"]').first()).toHaveValue(destinationName);
+  await expect(itemDetails.locator('input[type="number"]').first()).toHaveValue('1800');
+  await itemDetails.locator('input[type="number"]').first().fill('1700');
+  const changedServings = review.locator('.assistant__meal-servings input').first();
+  const changedServingsShoppingPreviewPromise = waitForShoppingPreview();
+  await changedServings.fill('4');
+  await changedServings.dispatchEvent('change');
+  const changedServingsShoppingPreviewResponse = await changedServingsShoppingPreviewPromise;
+  expect(changedServingsShoppingPreviewResponse.status()).toBe(200);
+  await expect(itemDetails.locator('input[type="number"]').first()).toHaveValue('1700');
+  await expect(shoppingItemAction).toContainText(
+    'El faltante cambió al actualizar el plan. Revisa esta cantidad antes de aprobarla.'
+  );
+  await expect(shoppingItemAction.getByRole('checkbox')).not.toBeChecked();
+  expect(await readMeals()).toEqual([]);
+  expect(await readTasks()).toEqual([]);
+  expect(await readEvents()).toEqual([]);
+  expect(await shoppingListsByName(page, token, destinationName)).toEqual([]);
+  await shoppingListAction.locator('app-checkbox').click();
+  await shoppingItemAction.locator('app-checkbox').click();
+  await expect(shoppingListAction.getByRole('checkbox')).toBeChecked();
+  await expect(shoppingItemAction.getByRole('checkbox')).toBeChecked();
 
   await review.locator(`[data-action-id="${mealActionId}"] app-checkbox`).click();
   await review.locator(`[data-action-id="${taskActionId}"] app-checkbox`).click();
@@ -2358,8 +2474,10 @@ test('asistente global: propone, refina y confirma comidas con participantes exp
   await expect(confirmation).toContainText('Pasta con verduras');
   await expect(confirmation).toContainText(taskTitle);
   await expect(confirmation).toContainText(eventTitle);
+  await expect(confirmation).toContainText(destinationName);
+  await expect(confirmation).toContainText('1700');
   await expect(confirmation).toContainText('21:00');
-  await expect(confirmation).toContainText('3 Raciones');
+  await expect(confirmation).toContainText('4 Raciones');
   expect(await readMeals()).toEqual([]);
   expect(await readTasks()).toEqual([]);
   expect(await readEvents()).toEqual([]);
@@ -2367,8 +2485,8 @@ test('asistente global: propone, refina y confirma comidas con participantes exp
 
   await page.locator('[data-test="ai-assistant-confirm-submit"] button').click();
   const confirmationRows = confirmation.locator('.assistant__confirm-list > li');
-  await expect(confirmationRows).toHaveCount(3);
-  for (let index = 0; index < 3; index += 1) {
+  await expect(confirmationRows).toHaveCount(5);
+  for (let index = 0; index < 5; index += 1) {
     await expect(
       confirmationRows.nth(index).locator('.assistant__confirm-status').first()
     ).toHaveText('Completada');
@@ -2378,11 +2496,11 @@ test('asistente global: propone, refina y confirma comidas con participantes exp
     weekStart
   });
   expect(confirmationBody!.events).toHaveLength(7);
-  expect(confirmationBody!.events[0]).toMatchObject({ servings: 3 });
+  expect(confirmationBody!.events[0]).toMatchObject({ servings: 4 });
   const persistedMeals = await readMeals();
   expect(persistedMeals).toHaveLength(7);
   expect(persistedMeals.every((meal) => meal.custom_meal === 'Pasta con verduras')).toBe(true);
-  expect(persistedMeals.find((meal) => meal.date === weekStart)).toMatchObject({ servings: 3 });
+  expect(persistedMeals.find((meal) => meal.date === weekStart)).toMatchObject({ servings: 4 });
   expect(await readTasks()).toEqual(
     expect.arrayContaining([
       expect.objectContaining({ title: taskTitle, scheduledDate: friday, priority: 'medium' })
@@ -2391,6 +2509,21 @@ test('asistente global: propone, refina y confirma comidas con participantes exp
   expect(await readEvents()).toEqual(
     expect.arrayContaining([
       expect.objectContaining({ title: eventTitle, date: friday, startTime: '21:00' })
+    ])
+  );
+  await expect(
+    confirmation.locator(`[data-test="ai-assistant-meals-shopping-${mealActionId}"]`)
+  ).toHaveCount(0);
+  const confirmedShoppingLists = await shoppingListsByName(page, token, destinationName);
+  expect(confirmedShoppingLists).toHaveLength(1);
+  const confirmedShoppingList = await page.request.get(
+    `/api/shopping/lists/${encodeURIComponent(confirmedShoppingLists[0].id)}`,
+    { headers: mealHeaders }
+  );
+  expect(confirmedShoppingList.status(), await confirmedShoppingList.text()).toBe(200);
+  expect((await confirmedShoppingList.json()).data.items).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ name: 'verduras', quantity: 1700, unit: 'g' })
     ])
   );
   await capture(page, testInfo, 'meal-plan-saved');
@@ -2402,115 +2535,6 @@ test('asistente global: propone, refina y confirma comidas con participantes exp
   expect(replay.status(), await replay.text()).toBe(200);
   expect(await replay.json()).toMatchObject({ success: true, data: { idempotent: true } });
   expect(await readMeals()).toHaveLength(7);
-  const lists = await page.request.get('/api/shopping/lists?status=active', {
-    headers: authHeaders
-  });
-  expect(lists.status()).toBe(200);
-  expect((await lists.json()).data).toEqual([]);
-
-  const shoppingReview = confirmation.locator(
-    `[data-test="ai-assistant-meals-shopping-${mealActionId}"]`
-  );
-  await expect(shoppingReview).toBeVisible();
-  await shoppingReview.locator('[data-test="ai-assistant-meals-shopping-open"] button').click();
-  await expect(shoppingReview.locator('.assistant__shopping-line')).toHaveCount(1);
-  const missingIngredient = shoppingReview.locator('.assistant__shopping-line').first();
-  await expect(missingIngredient).toContainText('verduras');
-  await expect(missingIngredient).toContainText('1800 g');
-  await expect(missingIngredient.locator('input[type="checkbox"]')).toBeChecked();
-  await missingIngredient.scrollIntoViewIfNeeded();
-  const approveShopping = shoppingReview.locator(
-    '[data-test="ai-assistant-meals-shopping-approve"] button'
-  );
-  await expect(approveShopping).toBeEnabled();
-  await capture(page, testInfo, 'meal-shopping-review');
-
-  const originalViewport = page.viewportSize();
-  expect(originalViewport).toBeTruthy();
-  for (const viewport of [
-    { width: 320, height: 568 },
-    { width: 568, height: 320 }
-  ]) {
-    await page.setViewportSize(viewport);
-    await missingIngredient.scrollIntoViewIfNeeded();
-    await expect(missingIngredient.locator('input[type="checkbox"]')).toBeInViewport();
-    await missingIngredient.locator('input[type="number"]').scrollIntoViewIfNeeded();
-    await expect(missingIngredient.locator('input[type="number"]')).toBeInViewport();
-    await approveShopping.scrollIntoViewIfNeeded();
-    const geometry = await page.evaluate(() => {
-      const modalBody = document.querySelector<HTMLElement>('.modal__body');
-      const footer = document.querySelector<HTMLElement>('.assistant__footer');
-      const approve = document.querySelector<HTMLElement>(
-        '[data-test="ai-assistant-meals-shopping-approve"] button'
-      );
-      return {
-        viewportWidth: window.visualViewport?.width ?? window.innerWidth,
-        documentWidth: document.documentElement.scrollWidth,
-        modalWidth: modalBody?.clientWidth ?? 0,
-        modalScrollWidth: modalBody?.scrollWidth ?? 0,
-        footerTop: footer?.getBoundingClientRect().top ?? 0,
-        approveBottom: approve?.getBoundingClientRect().bottom ?? Number.POSITIVE_INFINITY
-      };
-    });
-    expect(geometry.documentWidth).toBeLessThanOrEqual(geometry.viewportWidth + 1);
-    expect(geometry.modalScrollWidth).toBeLessThanOrEqual(geometry.modalWidth + 1);
-    expect(geometry.approveBottom).toBeLessThanOrEqual(geometry.footerTop + 1);
-  }
-  await page.setViewportSize(originalViewport!);
-
-  const beforeShoppingApproval = await page.request.get('/api/shopping/lists?status=active', {
-    headers: authHeaders
-  });
-  expect(beforeShoppingApproval.status()).toBe(200);
-  expect((await beforeShoppingApproval.json()).data).toEqual([]);
-  await missingIngredient.locator('input[type="checkbox"]').uncheck();
-  await expect(approveShopping).toBeDisabled();
-  const afterRejectingShopping = await page.request.get('/api/shopping/lists?status=active', {
-    headers: authHeaders
-  });
-  expect(afterRejectingShopping.status()).toBe(200);
-  expect((await afterRejectingShopping.json()).data).toEqual([]);
-
-  await missingIngredient.locator('input[type="checkbox"]').check();
-  await page.route('**/api/shopping/meal-plan/approve', async (route) => {
-    await route.fulfill({
-      status: 503,
-      contentType: 'application/json',
-      body: JSON.stringify({ code: 'SIMULATED_TEMPORARY_FAILURE' })
-    });
-  });
-  await approveShopping.click();
-  await expect(shoppingReview.locator('.assistant__error')).toBeVisible();
-  await expect(approveShopping).toBeDisabled();
-  expect(await readMeals()).toHaveLength(7);
-  const afterShoppingFailure = await page.request.get('/api/shopping/lists?status=active', {
-    headers: authHeaders
-  });
-  expect(afterShoppingFailure.status()).toBe(200);
-  expect((await afterShoppingFailure.json()).data).toEqual([]);
-  await capture(page, testInfo, 'meal-shopping-error');
-
-  await page.unroute('**/api/shopping/meal-plan/approve');
-  await shoppingReview.locator('[data-test="ai-assistant-meals-shopping-open"] button').click();
-  await expect(shoppingReview.locator('.assistant__shopping-line')).toHaveCount(1);
-  await expect(approveShopping).toBeEnabled();
-  await approveShopping.click();
-  await expect(
-    shoppingReview.locator('[data-test="ai-assistant-meals-shopping-success"]')
-  ).toBeVisible();
-  await capture(page, testInfo, 'meal-shopping-approved');
-  const mealPlanLists = await shoppingListsByName(page, token, 'Plan de comidas');
-  expect(mealPlanLists).toHaveLength(1);
-  const shoppingList = await page.request.get(
-    `/api/shopping/lists/${encodeURIComponent(mealPlanLists[0].id)}`,
-    { headers: mealHeaders }
-  );
-  expect(shoppingList.status(), await shoppingList.text()).toBe(200);
-  expect((await shoppingList.json()).data.items).toEqual(
-    expect.arrayContaining([
-      expect.objectContaining({ name: 'verduras', quantity: 1800, unit: 'g' })
-    ])
-  );
 
   await page.reload();
   expect(await readMeals()).toHaveLength(7);
@@ -2524,7 +2548,7 @@ test('asistente global: propone, refina y confirma comidas con participantes exp
       expect.objectContaining({ title: eventTitle, date: friday, startTime: '21:00' })
     ])
   );
-  const persistedShoppingLists = await shoppingListsByName(page, token, 'Plan de comidas');
+  const persistedShoppingLists = await shoppingListsByName(page, token, destinationName);
   expect(persistedShoppingLists).toHaveLength(1);
   const persistedShoppingList = await page.request.get(
     `/api/shopping/lists/${encodeURIComponent(persistedShoppingLists[0].id)}`,
@@ -2533,7 +2557,7 @@ test('asistente global: propone, refina y confirma comidas con participantes exp
   expect(persistedShoppingList.status(), await persistedShoppingList.text()).toBe(200);
   expect((await persistedShoppingList.json()).data.items).toEqual(
     expect.arrayContaining([
-      expect.objectContaining({ name: 'verduras', quantity: 1800, unit: 'g' })
+      expect.objectContaining({ name: 'verduras', quantity: 1700, unit: 'g' })
     ])
   );
 });

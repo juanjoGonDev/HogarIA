@@ -1,6 +1,6 @@
 # Propuesta de faltantes de compra desde comidas — Asistente global
 
-**Estado:** contrato activo; implementación pendiente. Mantener PR #47 en Draft.
+**Estado:** contrato activo; implementación en verificación. Mantener PR #47 en Draft.
 **Alcance:** componer la propuesta efímera de comidas con una vista previa exacta de faltantes de despensa y acciones de compra revisables.
 **Idioma:** interfaz ES/EN mediante i18n existente; esta spec en español.
 
@@ -22,13 +22,13 @@ No se reutiliza el endpoint de vista previa de comidas persistidas: la propuesta
 
 ## Criterios de aceptación
 
-- [ ] Añadir endpoint efímero, autenticado, limitado y validado para calcular faltantes desde la propuesta actual sin persistirla.
-- [ ] Reutilizar/extraer el cálculo de compra para recetas guardadas y propuestas; probar escala de raciones, agregación, stock compartido, cantidades parciales, opcionales, nombres/unidades ambiguos y pantry no compartido.
-- [ ] Mostrar faltantes y advertencias en la revisión de comidas. Permitir editar selección, cantidades y lista destino; todas las acciones derivadas quedan deseleccionadas por defecto y ligadas por dependencia al plan.
-- [ ] Al refinar/cambiar una receta o porciones, refrescar el preview y reconciliar cambios sin perder silenciosamente ediciones manuales.
-- [ ] TDD: pruebas de schema, permisos, hogar cambiado, fechas/raciones inválidas, cero escrituras SQLite/`ai_jobs`, errores y cancelación de solicitudes.
-- [ ] Playwright aislado con usuario, hogar, recetas, despensa y lista sintéticos: preview no escribe; se proponen solo faltantes; selección parcial confirma solo lo elegido; rechazo deja cero escrituras; dependencias y replay impiden duplicados; recarga muestra persistencia.
-- [ ] Validar PC/móvil, teclado y foco, mensajes ES/EN, errores, overflow y capturas sintéticas ignoradas por Git.
+- [x] Añadir endpoint efímero, autenticado, limitado y validado para calcular faltantes desde la propuesta actual sin persistirla.
+- [x] Reutilizar/extraer el cálculo de compra para recetas guardadas y propuestas; probar escala de raciones, agregación, stock compartido, cantidades parciales, opcionales, nombres/unidades ambiguos y pantry no compartido.
+- [x] Mostrar faltantes y advertencias en la revisión de comidas. Permitir editar selección, cantidades y lista destino; todas las acciones derivadas quedan deseleccionadas por defecto y ligadas por dependencia al plan.
+- [x] Al refinar/cambiar una receta o porciones, refrescar el preview y reconciliar cambios sin perder silenciosamente ediciones manuales.
+- [x] TDD: pruebas de schema, permisos, hogar cambiado, fechas/raciones inválidas, cero escrituras SQLite/`ai_jobs`, errores y cancelación de solicitudes.
+- [x] Playwright aislado con usuario, hogar, recetas, despensa y lista sintéticos: preview no escribe; se proponen solo faltantes; selección parcial confirma solo lo elegido; rechazo deja cero escrituras; dependencias y replay impiden duplicados; recarga muestra persistencia.
+- [x] Validar PC/móvil, teclado y foco, mensajes ES/EN, errores, overflow y capturas sintéticas ignoradas por Git.
 - [ ] Ejecutar coverage aplicable (≥70 % S/B/F/L), typecheck, `check:ui`, build y hooks. Registrar resultados sin afirmar pruebas de modelo/micrófono real que no se ejecuten.
 
 ## Límites explícitos
@@ -36,3 +36,12 @@ No se reutiliza el endpoint de vista previa de comidas persistidas: la propuesta
 - Sin compras automáticas, checkout, sustituciones de unidad ni inferencia de equivalencias entre ingredientes.
 - Sin promover cantidades ambiguas o con unidad incompatible a artículos de compra; pedir revisión manual.
 - El smoke local y el micrófono real siguen sujetos a sus preflight de privacidad, consentimiento y recursos de `SPEC.md`.
+
+## Evidencia
+
+- `pnpm --filter @hogaria/server run test:coverage`: 121 archivos pasaron, 2.071 pruebas pasaron; cobertura global 89,60 % statements, 81,80 % branches, 95,74 % functions y 92,54 % lines. Umbral local del servidor: 70 % por archivo y métrica.
+- `pnpm run test:client:coverage`: 1.676 pruebas pasaron; cobertura global 90,41 % statements, 80,49 % branches, 92,03 % functions y 92,96 % lines. El componente del asistente superó 70 % en las cuatro métricas.
+- `pnpm run typecheck:e2e`, `pnpm run check:ui` y `pnpm run build`: pasaron. El build conserva avisos de tamaño/lint previos, no errores.
+- Playwright full-stack aislado: caso de comidas y caso de selección parcial/reintento pasaron; caso de revisión/refino/teclado/foco pasó. El runner usó DB y usuarios sintéticos temporales.
+- Capturas sintéticas ignoradas por Git: `test-results/assistant-meal-shopping/chromium/` (escritorio 1440 px, móvil 320 px y tablet 768 px).
+- Modelo local sigue sin ejecutar. Tras consentimiento explícito, se intentó una sola frase sintética `es-ES` con `SpeechRecognition` real en Chromium aislado: API/contexto seguro/dispositivos disponibles y consentimiento de la app confirmados, pero no llegó transcripción en 30 s ni error visible. No se usó micrófono físico ni hubo POST de propuesta; WAV sintético temporal eliminado. Voz física sigue pendiente. PR Draft; hooks de commit/push aún por validar.

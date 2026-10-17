@@ -2158,6 +2158,147 @@ describe('POST /api/ai/assistant/meal-proposals', () => {
     expect(persistedSnapshot()).toEqual(before);
   });
 
+  it('previews shopping from an unconfirmed meal proposal without writing or calling AI', async () => {
+    prepareMealHousehold();
+    db.prepare(
+      `INSERT INTO ingredients (id, user_id, household_id, name, category, quantity, unit)
+       VALUES ('assistant-rice-stock', ?, 'assistant-home', 'ARROZ', 'other', 30, 'g')`
+    ).run(alice.id);
+    const before = persistedSnapshot();
+    const provider = vi.fn();
+    vi.stubGlobal('fetch', provider);
+    const candidate = mealProposalCandidate() as any;
+    const response = await call(
+      'POST',
+      '/meal-proposals/shopping-preview',
+      {
+        proposalId: 'assistant-shopping-preview',
+        weekStart: '2026-10-19',
+        householdMemberIds: ['assistant-membership'],
+        recipes: [
+          {
+            alias: 'N1',
+            source: 'new',
+            recipeId: null,
+            recipe: mealRecipe()
+          }
+        ],
+        events: candidate.events.map((event: any, index: number) => ({
+          ...event,
+          id: `draft-event-${index + 1}`,
+          participantIds: [alice.id]
+        }))
+      },
+      alice.token,
+      { 'x-assistant-household-id': 'assistant-home' }
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { success: boolean; data: any };
+    expect(body.data).toMatchObject({
+      startDate: '2026-10-19',
+      endDate: '2026-10-25',
+      sharedPantry: true,
+      plannedMealCount: 7,
+      requiredIngredients: [
+        expect.objectContaining({
+          name: 'arroz',
+          unit: 'g',
+          quantity: 560,
+          stockQuantity: 30,
+          missingQuantity: 530,
+          status: 'matched'
+        })
+      ],
+      warnings: []
+    });
+    expect(body.data.previewId).toMatch(/^[a-f0-9]{64}$/);
+    expect(provider).not.toHaveBeenCalled();
+    expect(persistedSnapshot()).toEqual(before);
+  });
+
+  it('rejects invalid, unauthorized, and stale-context shopping previews without writes', async () => {
+    prepareMealHousehold();
+    const before = persistedSnapshot();
+    const candidate = mealProposalCandidate() as any;
+    const validBody = {
+      proposalId: 'assistant-shopping-preview',
+      weekStart: '2026-10-19',
+      householdMemberIds: ['assistant-membership'],
+      recipes: [{ alias: 'N1', source: 'new', recipeId: null, recipe: mealRecipe() }],
+      events: candidate.events.map((event: any, index: number) => ({
+        ...event,
+        id: `draft-event-${index + 1}`,
+        participantIds: [alice.id]
+      }))
+    };
+    const headers = { 'x-assistant-household-id': 'assistant-home' };
+
+    const invalid = await call(
+      'POST',
+      '/meal-proposals/shopping-preview',
+      { ...validBody, unexpected: true },
+      alice.token,
+      headers
+    );
+    expect(invalid.status).toBe(400);
+    const afterInvalid = persistedSnapshot();
+
+    const invalidWeek = await call(
+      'POST',
+      '/meal-proposals/shopping-preview',
+      { ...validBody, weekStart: '2026-13-40' },
+      alice.token,
+      headers
+    );
+    expect(invalidWeek.status).toBe(400);
+
+    const invalidServings = await call(
+      'POST',
+      '/meal-proposals/shopping-preview',
+      {
+        ...validBody,
+        events: validBody.events.map((event: any, index: number) =>
+          index === 0 ? { ...event, servings: 0 } : event
+        )
+      },
+      alice.token,
+      headers
+    );
+    expect(invalidServings.status).toBe(400);
+
+    db.prepare('UPDATE household_members SET permissions = ? WHERE id = ?').run(
+      JSON.stringify({ calendar: { view: false, edit: true } }),
+      'assistant-membership'
+    );
+    const beforeDenied = persistedSnapshot();
+    const denied = await call(
+      'POST',
+      '/meal-proposals/shopping-preview',
+      validBody,
+      alice.token,
+      headers
+    );
+    expect(denied.status).toBe(403);
+    expect(persistedSnapshot()).toEqual(beforeDenied);
+
+    db.prepare('UPDATE household_members SET permissions = ? WHERE id = ?').run(
+      JSON.stringify({ calendar: { view: true, edit: true } }),
+      'assistant-membership'
+    );
+    const beforeChangedContext = persistedSnapshot();
+    const changed = await call('POST', '/meal-proposals/shopping-preview', validBody, alice.token, {
+      'x-assistant-household-id': 'different-home'
+    });
+    expect(changed.status).toBe(409);
+    expect(afterInvalid).toEqual(before);
+    expect(persistedSnapshot()).toEqual(beforeChangedContext);
+    db.prepare('UPDATE household_members SET permissions = ? WHERE id = ?').run(
+      JSON.stringify({ calendar: { view: true, edit: true } }),
+      'assistant-membership'
+    );
+  });
+
   it('rejects a meal draft whose recipe aliases are incomplete before AI refinement', async () => {
     prepareMealHousehold();
     const before = persistedSnapshot();

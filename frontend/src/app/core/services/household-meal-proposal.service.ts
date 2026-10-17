@@ -4,6 +4,7 @@ import { Observable, map } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import type { MealType } from '../../shared/models/calendar.model';
 import { SILENT_TOAST } from '../interceptors/error.interceptor';
+import type { HouseholdMealShoppingPreview } from './household-meal-shopping.service';
 
 export interface HouseholdMealProposalRequest {
   weekStart: string;
@@ -185,6 +186,22 @@ export class HouseholdMealProposalService {
         headers: this.assistantHouseholdHeaders(householdId),
         context: this.silentContext
       })
+      .pipe(map((response) => this.requireData(response)));
+  }
+
+  previewAssistantShopping(
+    householdId: string,
+    request: HouseholdMealProposalConfirmRequest
+  ): Observable<HouseholdMealShoppingPreview> {
+    return this.http
+      .post<ApiEnvelope<HouseholdMealShoppingPreview>>(
+        `${this.assistantApiUrl}/shopping-preview`,
+        request,
+        {
+          headers: this.assistantHouseholdHeaders(householdId),
+          context: this.silentContext
+        }
+      )
       .pipe(map((response) => this.requireData(response)));
   }
 

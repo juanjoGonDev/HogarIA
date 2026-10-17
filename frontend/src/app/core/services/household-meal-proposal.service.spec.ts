@@ -11,6 +11,7 @@ import {
   type HouseholdMealProposalConfirmRequest,
   type HouseholdMealProposalRequest
 } from './household-meal-proposal.service';
+import type { HouseholdMealShoppingPreview } from './household-meal-shopping.service';
 
 describe('HouseholdMealProposalService', () => {
   let service: HouseholdMealProposalService;
@@ -118,6 +119,32 @@ describe('HouseholdMealProposalService', () => {
     request.flush({ success: true, data: proposal });
 
     expect(result).toEqual(proposal);
+  });
+
+  it('previews shopping needs from an unconfirmed assistant meal draft', () => {
+    const preview: HouseholdMealShoppingPreview = {
+      startDate: '2026-10-12',
+      endDate: '2026-10-18',
+      previewId: 'a'.repeat(64),
+      sharedPantry: true,
+      plannedMealCount: 1,
+      requiredIngredients: [],
+      optionalIngredients: [],
+      warnings: []
+    };
+    let result: HouseholdMealShoppingPreview | undefined;
+    service.previewAssistantShopping('home-5', confirmationRequest).subscribe((value) => {
+      result = value;
+    });
+
+    const request = http.expectOne('/api/ai/assistant/meal-proposals/shopping-preview');
+    expect(request.request.method).toBe('POST');
+    expect(request.request.headers.get('x-assistant-household-id')).toBe('home-5');
+    expect(request.request.body).toEqual(confirmationRequest);
+    expect(request.request.context.get(SILENT_TOAST)).toBeTrue();
+    request.flush({ success: true, data: preview });
+
+    expect(result).toEqual(preview);
   });
 
   it('rejects an unsuccessful proposal envelope without data', () => {
