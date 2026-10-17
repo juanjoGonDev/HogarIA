@@ -825,6 +825,65 @@ async function assertViewport(page: Page, width: number, height: number, dialogO
       '[data-test="planning-automation-notice"]'
     );
     const notice = noticeElement?.getBoundingClientRect();
+    const floatingControlOverlaps =
+      !hasDialog && fab && fabElement
+        ? Array.from(
+            document.querySelectorAll<HTMLElement>(
+              'button, a[href], input:not([type="hidden"]), select, textarea, [role="button"], [role="link"]'
+            )
+          )
+            .filter((control) => {
+              if (
+                control === fabElement ||
+                control.closest('app-ai-action-assistant-launcher') ||
+                control.closest('[aria-hidden="true"], [inert]')
+              ) {
+                return false;
+              }
+              const style = getComputedStyle(control);
+              const rect = control.getBoundingClientRect();
+              if (
+                style.display === 'none' ||
+                style.visibility !== 'visible' ||
+                Number(style.opacity) <= 0 ||
+                rect.width <= 0 ||
+                rect.height <= 0
+              ) {
+                return false;
+              }
+
+              let ancestor: HTMLElement | null = control;
+              let isFloating = false;
+              while (ancestor && ancestor !== document.body) {
+                const position = getComputedStyle(ancestor).position;
+                if (position === 'fixed' || position === 'sticky') {
+                  isFloating = true;
+                  break;
+                }
+                ancestor = ancestor.parentElement;
+              }
+
+              return Boolean(
+                isFloating &&
+                fab.left < rect.right &&
+                fab.right > rect.left &&
+                fab.top < rect.bottom &&
+                fab.bottom > rect.top
+              );
+            })
+            .map((control) => {
+              const rect = control.getBoundingClientRect();
+              return {
+                label:
+                  control.getAttribute('aria-label') ||
+                  control.title ||
+                  control.getAttribute('data-test') ||
+                  control.textContent?.replace(/\s+/g, ' ').trim().slice(0, 60) ||
+                  control.tagName.toLowerCase(),
+                rect: { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom }
+              };
+            })
+        : [];
     const dialog = hasDialog
       ? document.querySelector<HTMLElement>('.modal[role="dialog"]')?.getBoundingClientRect()
       : null;
@@ -856,6 +915,7 @@ async function assertViewport(page: Page, width: number, height: number, dialogO
       appHeaderZ,
       fabRect: fab ? { left: fab.left, right: fab.right, top: fab.top, bottom: fab.bottom } : null,
       fabNoticeOverlap: overlaps,
+      floatingControlOverlaps,
       noticePresent: Boolean(noticeElement),
       noticeRect: notice
         ? { left: notice.left, right: notice.right, top: notice.top, bottom: notice.bottom }
@@ -889,6 +949,12 @@ async function assertViewport(page: Page, width: number, height: number, dialogO
     metrics.fabNoticeOverlap,
     `FAB separado del aviso del hogar en ${width}×${height}: ${JSON.stringify(metrics)}`
   ).toBe(false);
+  if (!dialogOpen) {
+    expect(
+      metrics.floatingControlOverlaps,
+      `FAB no tapa controles fijos o sticky en ${width}×${height}: ${JSON.stringify(metrics)}`
+    ).toEqual([]);
+  }
   if (dialogOpen) {
     if (metrics.appHeaderVisible) {
       expect(
@@ -1187,6 +1253,13 @@ test('asistente global: lote revisable, refino aislado y aprobación selectiva r
       page.locator('app-ai-action-assistant-launcher'),
       `instancia única en ${route}`
     ).toHaveCount(1);
+    for (const size of [
+      { width: 1440, height: 900 },
+      { width: 768, height: 1024 },
+      { width: 320, height: 568 }
+    ]) {
+      await assertViewport(page, size.width, size.height, false);
+    }
   }
   await page.goto('/dashboard');
   await expect(launcher).toBeVisible();
