@@ -1,7 +1,8 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { signal } from '@angular/core';
-import { NEVER, of } from 'rxjs';
+import { NavigationEnd, Router } from '@angular/router';
+import { NEVER, of, Subject } from 'rxjs';
 import { AiActionAssistantService } from '../../core/services/ai-action-assistant.service';
 import { AiActionAssistantExecutionService } from '../../core/services/ai-action-assistant-execution.service';
 import { HouseholdService } from '../../core/services/household.service';
@@ -34,6 +35,7 @@ describe('AiActionAssistantDialogComponent', () => {
   let mealProposals: jasmine.SpyObj<HouseholdMealProposalService>;
   let mealShopping: jasmine.SpyObj<HouseholdMealShoppingService>;
   let pantryService: jasmine.SpyObj<PantryService>;
+  let navigationEvents: Subject<NavigationEnd>;
   let householdContext: {
     activeHouseholdId: ReturnType<typeof signal<string | null>>;
     household: ReturnType<typeof signal<Household | null>>;
@@ -71,6 +73,7 @@ describe('AiActionAssistantDialogComponent', () => {
     );
     mealShopping.loadPreview.and.returnValue(of(emptyMealShoppingPreview()));
     mealShopping.approve.and.returnValue(of(emptyMealShoppingApproval()));
+    navigationEvents = new Subject<NavigationEnd>();
     pantryService = jasmine.createSpyObj<PantryService>('PantryService', ['loadCategories'], {
       categories: signal<PantryCategory[]>([
         {
@@ -115,7 +118,11 @@ describe('AiActionAssistantDialogComponent', () => {
         { provide: HouseholdMealProposalService, useValue: mealProposals },
         { provide: HouseholdMealShoppingService, useValue: mealShopping },
         { provide: PantryService, useValue: pantryService },
-        { provide: HouseholdService, useValue: householdContext }
+        { provide: HouseholdService, useValue: householdContext },
+        {
+          provide: Router,
+          useValue: { url: '/dashboard', events: navigationEvents.asObservable() }
+        }
       ]
     }).compileComponents();
 
@@ -1464,6 +1471,25 @@ describe('AiActionAssistantDialogComponent', () => {
 
     expect(recognition.aborted).toBeTrue();
     expect(component.prompt()).toBe('');
+  });
+
+  it('stops voice recognition on navigation while preserving its editable transcript', () => {
+    const recognitions = mountWithSpeech(FakeSpeechRecognition);
+    component.voiceConsent.set(true);
+    component.startVoice();
+    const recognition = recognitions[0];
+    recognition.onresult?.({
+      results: [{ 0: { transcript: 'Añade lentejas' }, isFinal: false }]
+    });
+
+    navigationEvents.next(new NavigationEnd(1, '/dashboard', '/shopping'));
+    recognition.onresult?.({
+      results: [{ 0: { transcript: 'Añade lentejas y harina' }, isFinal: true }]
+    });
+
+    expect(recognition.aborted).toBeTrue();
+    expect(component.voiceState()).toBe('idle');
+    expect(component.prompt()).toBe('Añade lentejas');
   });
 
   it('ignores end events from a cancelled recognition after a new voice session starts', () => {

@@ -14,8 +14,10 @@ import {
   inject,
   signal
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { HttpErrorResponse } from '@angular/common/http';
-import { finalize, Subscription } from 'rxjs';
+import { NavigationEnd, Router } from '@angular/router';
+import { filter, finalize, Subscription } from 'rxjs';
 import { I18nService } from '../../core/services/i18n.service';
 import { ConfirmService } from '../../core/services/confirm.service';
 import { PantryService } from '../../core/services/pantry.service';
@@ -2401,6 +2403,7 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
   ]
 })
 export class AiActionAssistantDialogComponent implements OnDestroy {
+  private readonly router = inject(Router);
   @ViewChild('stageHeading') private stageHeading?: ElementRef<HTMLElement>;
 
   @Input() routeHint: AssistantRouteHint | undefined;
@@ -2492,6 +2495,12 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
   private bodyOverflowBeforeLock: string | null = null;
 
   constructor() {
+    this.router.events
+      .pipe(
+        filter((event): event is NavigationEnd => event instanceof NavigationEnd),
+        takeUntilDestroyed()
+      )
+      .subscribe(() => this.cancelVoice());
     this.pantry.loadCategories();
     effect(() => {
       if (this.modalOpen()) this.lockBodyScroll();

@@ -4330,6 +4330,72 @@ test('asistente global: cerrar aborta el dictado y descarta callbacks tardíos',
   expect(proposalRequests).toBe(0);
 });
 
+test('asistente global: navegar durante dictado libera voz y conserva el borrador', async ({
+  page
+}) => {
+  await installSpeechRecognitionStub(page);
+  let proposalRequests = 0;
+  page.on('request', (request) => {
+    if (
+      request.method() === 'POST' &&
+      new URL(request.url()).pathname === '/api/ai/assistant/proposals'
+    ) {
+      proposalRequests += 1;
+    }
+  });
+
+  const viewport =
+    (page.viewportSize()?.width ?? 0) < 1024
+      ? { width: 320, height: 568 }
+      : { width: 1440, height: 900 };
+  await page.setViewportSize(viewport);
+  await registerUser(page, 'Asistente navegación voz E2E');
+  await createHousehold(page, 'Hogar navegación voz sintético');
+  await page.goto('/dashboard');
+
+  if (viewport.width < 1024) await page.locator('.header__menu').click();
+  await page.locator('.sidebar__nav a[href="/shopping"]').click();
+  await expect(page).toHaveURL(/\/shopping$/);
+
+  await page.locator('[data-test="ai-assistant-open"]').click();
+  const dialog = page.locator('.modal[role="dialog"]');
+  const voiceControls = dialog.locator('.assistant__voice-controls');
+  const prompt = dialog.locator('[data-test="ai-assistant-prompt"]');
+  await dialog.locator('.assistant__consent input').check();
+  await voiceControls.getByRole('button', { name: 'Dictar petición' }).click();
+  await expect(
+    dialog.getByRole('status').filter({ hasText: 'Escuchando; puedes corregir la transcripción' })
+  ).toBeVisible();
+
+  await page.evaluate((transcript) => {
+    const recognition = (
+      window as typeof window & { __assistantSpeechRecognition?: BrowserSpeechStubControl }
+    ).__assistantSpeechRecognition;
+    if (!recognition) throw new Error('Speech recognition stub was not started');
+    recognition.emitFinal(transcript);
+  }, 'Añade lentejas');
+  await expect(prompt).toHaveValue('Añade lentejas');
+
+  await page.goBack();
+  await expect(page).toHaveURL(/\/dashboard$/);
+  await expect(dialog).toBeVisible();
+  await expect(voiceControls.getByRole('button', { name: 'Dictar petición' })).toBeVisible();
+  const aborted = await page.evaluate((transcript) => {
+    const recognition = (
+      window as typeof window & { __assistantSpeechRecognition?: BrowserSpeechStubControl }
+    ).__assistantSpeechRecognition;
+    if (!recognition) throw new Error('Speech recognition stub was not started');
+    recognition.emitFinal(transcript);
+    return recognition.aborted;
+  }, 'Añade lentejas y harina');
+
+  expect(aborted).toBe(true);
+  await expect(prompt).toHaveValue('Añade lentejas');
+  await expect(voiceControls.getByRole('button', { name: 'Dictar petición' })).toBeVisible();
+  await expect(voiceControls.getByRole('button', { name: 'Terminar dictado' })).toHaveCount(0);
+  expect(proposalRequests).toBe(0);
+});
+
 test('asistente global: oculta el FAB cuando visualViewport reduce espacio móvil', async ({
   page
 }) => {
