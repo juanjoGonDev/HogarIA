@@ -4329,3 +4329,34 @@ test('asistente global: cerrar aborta el dictado y descarta callbacks tardíos',
   await expect(reopenedPrompt).toHaveValue('');
   expect(proposalRequests).toBe(0);
 });
+
+test('asistente global: oculta el FAB cuando visualViewport reduce espacio móvil', async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 393, height: 851 });
+  await registerUser(page, 'Asistente teclado móvil E2E');
+  await createHousehold(page, 'Hogar teclado móvil sintético');
+  await page.goto('/dashboard');
+
+  const launcher = page.locator('[data-test="ai-assistant-open"]');
+  await expect(launcher).toBeVisible();
+
+  await page.evaluate(() => {
+    const visualViewport = window.visualViewport;
+    if (!visualViewport) throw new Error('Visual viewport is unavailable');
+    Object.defineProperty(visualViewport, 'height', {
+      configurable: true,
+      get: () => window.innerHeight - 250
+    });
+    visualViewport.dispatchEvent(new Event('resize'));
+  });
+  await expect(launcher).toBeHidden();
+
+  await page.evaluate(() => {
+    const visualViewport = window.visualViewport;
+    if (!visualViewport) throw new Error('Visual viewport is unavailable');
+    Reflect.deleteProperty(visualViewport, 'height');
+    visualViewport.dispatchEvent(new Event('resize'));
+  });
+  await expect(launcher).toBeVisible();
+});
