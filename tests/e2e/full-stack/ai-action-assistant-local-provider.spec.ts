@@ -266,3 +266,85 @@ test('local Ollama writes a selected cross-domain action only after approval', a
   expect(persistedBody.data.some(({ name }) => name === listName)).toBe(true);
   expect(isolatedDatabaseSnapshot()).toEqual(afterApproval);
 });
+
+test('local Ollama resolves calendar dates from the client local reference date', async ({
+  page
+}) => {
+  test.skip(
+    !LOCAL_SMOKE_ENABLED,
+    'Smoke opt-in: requiere Ollama local y qwen3:8b; no usa proveedor externo.'
+  );
+  test.setTimeout(180_000);
+
+  await registerUser(page, 'Asistente Ollama fecha local');
+  await createHousehold(page, 'Hogar sintético Ollama fecha local');
+
+  const token = await page.evaluate((key) => window.localStorage.getItem(key), TOKEN_KEY);
+  expect(token, 'sesión sintética de E2E').toBeTruthy();
+  const config = await page.request.post('/api/ai/configs', {
+    headers: { authorization: `Bearer ${token}` },
+    data: {
+      name: 'Ollama local smoke',
+      provider: 'custom',
+      baseUrl: OLLAMA_BASE_URL,
+      apiKey: 'ollama-local-no-secret',
+      model: OLLAMA_MODEL,
+      temperature: 0,
+      maxTokens: 2048,
+      timeout: 180_000,
+      retryAttempts: 0,
+      concurrency: 1
+    }
+  });
+  expect(config.status(), await config.text()).toBe(201);
+
+  const before = isolatedDatabaseSnapshot();
+  expect(before.ai_jobs ?? [], 'la línea base no debe contener trabajos IA').toEqual([]);
+
+  await page.goto('/dashboard');
+  await page.locator('[data-test="ai-assistant-open"]').click();
+  await expect(page.locator('[data-test="ai-assistant-compose"]')).toBeVisible();
+  await page
+    .locator('[data-test="ai-assistant-prompt"]')
+    .fill('Crea un evento de calendario titulado "Cita de prueba" mañana a las 19:00.');
+
+  const proposalResponsePromise = page.waitForResponse((response) => {
+    const request = response.request();
+    return (
+      request.method() === 'POST' &&
+      new URL(response.url()).pathname === '/api/ai/assistant/proposals'
+    );
+  });
+  await page.locator('[data-test="ai-assistant-submit"] button').click();
+  const proposalResponse = await proposalResponsePromise;
+  const proposalBody = (await proposalResponse.json()) as {
+    success: boolean;
+    data: {
+      actions: Array<{
+        kind: string;
+        status: string;
+        selected: boolean;
+        payload: { date?: string; startTime?: string | null };
+      }>;
+    };
+  };
+  expect(proposalResponse.status(), JSON.stringify(proposalBody)).toBe(200);
+  expect(proposalBody.success).toBe(true);
+
+  const requestBody = proposalResponse.request().postDataJSON() as { referenceDate?: string };
+  expect(requestBody.referenceDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  const [year, month, day] = requestBody.referenceDate!.split('-').map(Number);
+  const expectedDate = new Date(Date.UTC(year!, month! - 1, day! + 1)).toISOString().slice(0, 10);
+  expect(proposalBody.data.actions).toHaveLength(1);
+  expect(proposalBody.data.actions[0]).toMatchObject({
+    kind: 'calendar.create_event',
+    status: 'pending',
+    selected: false,
+    payload: { date: expectedDate, startTime: '19:00' }
+  });
+  await expect(page.locator('[data-test="ai-assistant-review"]')).toBeVisible();
+
+  const after = isolatedDatabaseSnapshot();
+  expect(after).toEqual(before);
+  expect(after.ai_jobs ?? [], 'la propuesta transitoria no debe crear ai_jobs').toEqual([]);
+});
