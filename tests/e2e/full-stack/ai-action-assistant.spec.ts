@@ -4428,6 +4428,59 @@ test('asistente global: cerrar aborta el dictado y descarta callbacks tardíos',
   expect(proposalRequests).toBe(0);
 });
 
+test('asistente global: muestra error si el dictado termina sin transcripción', async ({
+  page
+}, testInfo) => {
+  await installSpeechRecognitionStub(page);
+  let proposalRequests = 0;
+  page.on('request', (request) => {
+    if (
+      request.method() === 'POST' &&
+      new URL(request.url()).pathname === '/api/ai/assistant/proposals'
+    ) {
+      proposalRequests += 1;
+    }
+  });
+
+  await registerUser(page, 'Asistente sin transcripción E2E');
+  await createHousehold(page, 'Hogar sin transcripción sintético');
+  await page.goto('/dashboard');
+  const databaseBeforeVoice = assistantDatabaseSnapshot();
+  await page.locator('[data-test="ai-assistant-open"]').click();
+
+  const dialog = page.locator('.modal[role="dialog"]');
+  const voiceControls = dialog.locator('.assistant__voice-controls');
+  await dialog.locator('.assistant__consent input').check();
+  await voiceControls.getByRole('button', { name: 'Dictar petición' }).click();
+  await expect(
+    dialog.getByRole('status').filter({ hasText: 'Escuchando; puedes corregir la transcripción' })
+  ).toBeVisible();
+
+  await page.evaluate(() => {
+    const recognition = (
+      window as typeof window & { __assistantSpeechRecognition?: BrowserSpeechStubControl }
+    ).__assistantSpeechRecognition;
+    if (!recognition) throw new Error('Speech recognition stub was not started');
+    recognition.finish();
+  });
+
+  const voiceError = dialog.locator('.assistant__error[role="alert"]');
+  await expect(voiceError).toContainText('No se pudo reconocer la voz.');
+  await expect(voiceControls.getByRole('button', { name: 'Dictar petición' })).toBeVisible();
+  await expect(voiceControls.getByRole('button', { name: 'Terminar dictado' })).toHaveCount(0);
+  const errorBounds = await voiceError.boundingBox();
+  const bodyBounds = await dialog.locator('.modal__body').boundingBox();
+  expect(errorBounds).not.toBeNull();
+  expect(bodyBounds).not.toBeNull();
+  expect(errorBounds!.y).toBeGreaterThanOrEqual(bodyBounds!.y);
+  expect(errorBounds!.y + errorBounds!.height).toBeLessThanOrEqual(
+    bodyBounds!.y + bodyBounds!.height
+  );
+  expect(proposalRequests).toBe(0);
+  expect(assistantDatabaseSnapshot()).toEqual(databaseBeforeVoice);
+  await capture(page, testInfo, 'voice-no-transcript-error');
+});
+
 test('asistente global: navegar durante dictado libera voz y conserva el borrador', async ({
   page
 }) => {

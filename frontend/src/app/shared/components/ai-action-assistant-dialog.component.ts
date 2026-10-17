@@ -403,9 +403,15 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
               <p class="assistant__hint" role="note">{{ 'ai_assistant.voice_unsupported' | t }}</p>
             </ng-template>
 
-            <p *ngIf="voiceError() as voiceErrorKey" class="assistant__error" role="alert">
+            <p
+              #voiceErrorAlert
+              *ngIf="voiceError() as voiceErrorKey"
+              class="assistant__error"
+              role="alert"
+            >
               {{ voiceErrorKey | t }}
             </p>
+
             <p
               *ngIf="errorKey() as errorMessageKey"
               class="assistant__error"
@@ -2510,6 +2516,7 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
 export class AiActionAssistantDialogComponent implements OnDestroy {
   private readonly router = inject(Router);
   @ViewChild('stageHeading') private stageHeading?: ElementRef<HTMLElement>;
+  @ViewChild('voiceErrorAlert') private voiceErrorAlert?: ElementRef<HTMLElement>;
 
   @Input() routeHint: AssistantRouteHint | undefined;
   @Output() readonly dismiss = new EventEmitter<void>();
@@ -5596,6 +5603,15 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
     return voiceWindow.SpeechRecognition ?? voiceWindow.webkitSpeechRecognition ?? null;
   }
 
+  private showVoiceError(errorKey: TranslationKey): void {
+    this.voiceError.set(errorKey);
+    this.voiceState.set('error');
+    afterNextRender(
+      () => this.voiceErrorAlert?.nativeElement.scrollIntoView({ block: 'nearest' }),
+      { injector: this.injector }
+    );
+  }
+
   setVoiceConsent(consented: boolean): void {
     this.voiceConsent.set(consented);
     if (!consented) {
@@ -5608,7 +5624,7 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
     if (!this.voiceConsent() || this.recognition) return;
     const Recognition = this.speechRecognitionConstructor();
     if (!Recognition) {
-      this.voiceError.set('ai_assistant.voice_unsupported');
+      this.showVoiceError('ai_assistant.voice_unsupported');
       return;
     }
     this.voiceError.set(null);
@@ -5631,12 +5647,11 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
         if (this.recognition !== recognition || !this.voiceConsent()) return;
         this.voiceStopPending.set(false);
         this.supportsPause.set(false);
-        this.voiceError.set(
+        this.showVoiceError(
           event.error === 'not-allowed' || event.error === 'service-not-allowed'
             ? 'ai_assistant.voice_permission'
             : 'ai_assistant.voice_error'
         );
-        this.voiceState.set('error');
         this.recognition = null;
       };
       recognition.onend = () => {
@@ -5647,8 +5662,7 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
           if (hasVoiceTranscript) {
             this.voiceState.set('idle');
           } else {
-            this.voiceError.set('ai_assistant.voice_error');
-            this.voiceState.set('error');
+            this.showVoiceError('ai_assistant.voice_error');
           }
         }
         this.supportsPause.set(false);
@@ -5661,8 +5675,7 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
       recognition.start();
       this.voiceState.set('listening');
     } catch {
-      this.voiceError.set('ai_assistant.voice_permission');
-      this.voiceState.set('error');
+      this.showVoiceError('ai_assistant.voice_permission');
       this.recognition = null;
       this.voiceStopPending.set(false);
       this.supportsPause.set(false);
@@ -5677,8 +5690,7 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
       recognition.stop();
     } catch {
       this.cancelVoice();
-      this.voiceError.set('ai_assistant.voice_error');
-      this.voiceState.set('error');
+      this.showVoiceError('ai_assistant.voice_error');
     }
   }
 
