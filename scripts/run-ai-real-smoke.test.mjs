@@ -3,6 +3,8 @@ import test from 'node:test';
 
 import { runAiLiveSmoke } from './run-ai-real-smoke.mjs';
 import {
+  AI_LIVE_ASSISTANT_SCHEMA_NAME,
+  AI_LIVE_ASSISTANT_SMOKE_COMPLETION_BUDGET,
   AI_LIVE_RECEIPT_SMOKE_MAX_REQUEST_BYTES,
   AI_LIVE_RECEIPT_SMOKE_TICKET_COUNT,
   AI_LIVE_SMOKE_ENV,
@@ -66,8 +68,18 @@ test('coordinator rejects an incomplete receipt-only request before any live set
 test('long-ticket-only coordinator budgets and validates exactly one safe receipt', async () => {
   const proxyCalls = [
     {
-      status: 200,
+      status: 400,
       stream: true,
+      schemaName: 'receipt',
+      requestContract: {
+        strictJsonSchema: true,
+        inventoryJsonAttachmentCount: 1,
+        receiptAttachmentCount: 1
+      }
+    },
+    {
+      status: 200,
+      stream: false,
       schemaName: 'receipt',
       requestContract: {
         strictJsonSchema: true,
@@ -95,7 +107,7 @@ test('long-ticket-only coordinator budgets and validates exactly one safe receip
         cleanup: async () => {}
       }),
       createAiLiveProxy: async (input) => {
-        assert.equal(input.maxCalls, 1);
+        assert.equal(input.maxCalls, 2);
         assert.equal(input.maxRequestBytes, AI_LIVE_RECEIPT_SMOKE_MAX_REQUEST_BYTES);
         assert.equal(input.requireReceiptAttachments, true);
         return {
@@ -131,13 +143,13 @@ test('long-ticket-only coordinator budgets and validates exactly one safe receip
     model: 'gpt-5',
     sourceCount: 6,
     tickets: 1,
-    requests: 1,
+    requests: 2,
     completions: 1,
-    verifiedStrictSchemaRequests: 1,
-    verifiedInventoryJsonAttachments: 1,
-    verifiedReceiptAttachments: 1,
+    verifiedStrictSchemaRequests: 2,
+    verifiedInventoryJsonAttachments: 2,
+    verifiedReceiptAttachments: 2,
     elapsedMs: 0,
-    recoveredFallbacks: 0
+    recoveredFallbacks: 1
   });
 });
 
@@ -224,6 +236,92 @@ test('recipe-only coordinator pins a strict generated_recipe smoke to one comple
     elapsedMs: 25,
     usage: { promptTokens: 140, completionTokens: 420, totalTokens: 560, costUsd: 0.01 }
   });
+});
+
+test('assistant-only coordinator requires ten strict action-plan completions and cleans credentials', async () => {
+  const events = [];
+  const successMessages = [];
+  const errors = [];
+  const secretSentinel = 'synthetic-existing-webapi-token-not-for-logs';
+  const call = {
+    status: 200,
+    schemaName: AI_LIVE_ASSISTANT_SCHEMA_NAME,
+    requestContract: { strictJsonSchema: true },
+    responseFormat: {
+      hasChoices: true,
+      messageContentType: 'text',
+      isJsonObject: true,
+      finishReason: 'stop'
+    },
+    elapsedMs: 25,
+    usage: { promptTokens: 100, completionTokens: 200, totalTokens: 300 }
+  };
+  const proxyMetrics = {
+    calls: Array.from({ length: AI_LIVE_ASSISTANT_SMOKE_COMPLETION_BUDGET }, () => call),
+    requestAttempts: AI_LIVE_ASSISTANT_SMOKE_COMPLETION_BUDGET,
+    rejectedRequests: 0,
+    failed: false
+  };
+  const result = await runAiLiveSmoke({
+    env: {
+      [AI_LIVE_SMOKE_ENV.optIn]: '1',
+      [AI_LIVE_SMOKE_ENV.assistantOnly]: '1'
+    },
+    dependencies: {
+      prepareExistingAiLiveSmokeSession: async () => ({
+        origin: 'http://127.0.0.1:3001',
+        token: secretSentinel,
+        model: 'gpt-5',
+        cleanup: async () => events.push('session:cleanup')
+      }),
+      createAiLiveProxy: async (input) => {
+        events.push('proxy:create');
+        assert.equal(input.maxCalls, AI_LIVE_ASSISTANT_SMOKE_COMPLETION_BUDGET);
+        assert.equal(input.expectedSchemaName, AI_LIVE_ASSISTANT_SCHEMA_NAME);
+        return {
+          clientToken: 'synthetic-proxy-token',
+          baseUrl: 'http://127.0.0.1:43210/v1',
+          metrics: proxyMetrics,
+          close: async () => events.push('proxy:close')
+        };
+      },
+      createAiLiveSmokeRunnerEnvironment: (_parentEnv, options) => {
+        events.push('runner:environment');
+        assert.equal(options.assistantOnly, true);
+        return { isolated: true };
+      },
+      runAiLiveSmokeRunner: async () => {
+        events.push('runner:start');
+        return { code: 0, cancelled: false, timedOut: false, runnerCleaned: true };
+      },
+      isSuccessfulAiLiveSmokeResult
+    },
+    writeError: (message) => errors.push(message),
+    writeSuccess: (message) => successMessages.push(message),
+    writeProgress: () => {}
+  });
+
+  assert.equal(result, 0);
+  assert.deepEqual(errors, []);
+  assert.deepEqual(events, [
+    'proxy:create',
+    'runner:environment',
+    'runner:start',
+    'proxy:close',
+    'session:cleanup'
+  ]);
+  assert.equal(successMessages.length, 1);
+  assert.deepEqual(JSON.parse(successMessages[0]), {
+    result: 'passed',
+    provider: 'local WebAPI :3001',
+    model: 'gpt-5',
+    proposals: 10,
+    verifiedStrictJsonSchemaRequests: 10,
+    verifiedAssistantActionPlanResponses: 10,
+    elapsedMs: 250,
+    usage: { promptTokens: 1000, completionTokens: 2000, totalTokens: 3000 }
+  });
+  assert.equal(successMessages.join('').includes(secretSentinel), false);
 });
 
 test('preferred-jpeg-only coordinator budgets and validates exactly one safe receipt', async () => {

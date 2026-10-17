@@ -541,11 +541,6 @@ export const assistantActionPlanCandidateSchema = z
   })
   .strict();
 
-export const AI_ASSISTANT_RESPONSE_FORMAT = createAiResponseFormat(
-  'ai_action_plan',
-  assistantActionPlanCandidateSchema
-);
-
 export const assistantActionRefinementCandidateSchema = z
   .object({
     summary: z.string().trim().min(1).max(300),
@@ -562,14 +557,327 @@ export const assistantActionBatchRefinementCandidateSchema = z
   })
   .strict();
 
+const assistantActionProviderKinds = [
+  'pantry.add_ingredient',
+  'pantry.update_ingredient',
+  'shopping.create_list',
+  'shopping.update_list',
+  'shopping.update_item',
+  'shopping.add_item',
+  'household.plan_meals',
+  'household.create_task',
+  'household.update_task',
+  'calendar.create_event',
+  'calendar.update_event',
+  'recipes.update_content',
+  'recipes.create_draft'
+] as const;
+const assistantActionProviderKindSchema = z.enum(assistantActionProviderKinds);
+
+const assistantActionSchemaFieldNames = new Set([
+  'summary',
+  'actions',
+  'questions',
+  'kind',
+  'title',
+  'dependsOn',
+  'warnings',
+  'payloadJson',
+  'payload',
+  'name',
+  'quantity',
+  'unit',
+  'category',
+  'expirationDate',
+  'location',
+  'notes',
+  'targetName',
+  'changes',
+  'setName',
+  'setCategory',
+  'setQuantity',
+  'setUnit',
+  'setExpirationDate',
+  'setLocation',
+  'setNotes',
+  'store',
+  'setStore',
+  'listName',
+  'matchUnit',
+  'targetUnit',
+  'weekStart',
+  'instructions',
+  'details',
+  'scheduledDate',
+  'priority',
+  'spaceName',
+  'assignedMemberName',
+  'targetTitle',
+  'targetScheduledDate',
+  'targetDate',
+  'targetStartTime',
+  'date',
+  'startTime',
+  'endTime',
+  'allDay',
+  'sharedWithHousehold',
+  'operation',
+  'ingredient',
+  'preparation',
+  'isOptional',
+  'substitutes',
+  'servings',
+  'ingredients',
+  'level',
+  'stepNumber',
+  'instruction',
+  'recipe'
+]);
+
+function isAssistantSchemaRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function collectAssistantIssuePaths(
+  issues: unknown,
+  prefix: Array<string | number>,
+  paths: Set<string>
+): void {
+  if (!Array.isArray(issues)) return;
+  for (const issue of issues) {
+    if (!isAssistantSchemaRecord(issue)) continue;
+    if (issue.code === 'invalid_union' && Array.isArray(issue.errors)) {
+      for (const branch of issue.errors)
+        collectAssistantIssuePaths(
+          branch,
+          [...prefix, ...((issue.path as Array<string | number> | undefined) ?? [])],
+          paths
+        );
+      continue;
+    }
+    const path = [...prefix, ...(Array.isArray(issue.path) ? issue.path : [])].filter(
+      (part): part is string | number =>
+        (typeof part === 'number' && Number.isInteger(part) && part >= 0) ||
+        (typeof part === 'string' && assistantActionSchemaFieldNames.has(part))
+    );
+    if (path.length > 0 && typeof issue.code === 'string') {
+      paths.add(`${path.join('.')}:${issue.code}`);
+    }
+  }
+}
+
+/** Return schema paths only; never expose provider values, prompts, or issue messages. */
+export function summarizeAssistantActionPlanValidationIssues(
+  input: unknown,
+  issues: unknown
+): string[] {
+  const paths = new Set<string>();
+  const actions =
+    isAssistantSchemaRecord(input) && Array.isArray(input.actions) ? input.actions : [];
+  if (!Array.isArray(issues)) return [];
+  for (const issue of issues) {
+    if (!isAssistantSchemaRecord(issue)) continue;
+    if (
+      issue.code === 'invalid_union' &&
+      Array.isArray(issue.errors) &&
+      Array.isArray(issue.path) &&
+      issue.path[0] === 'actions' &&
+      typeof issue.path[1] === 'number'
+    ) {
+      const actionIndex = issue.path[1];
+      const action = actions[actionIndex];
+      const kind = isAssistantSchemaRecord(action) ? action.kind : undefined;
+      const branchIndex =
+        typeof kind === 'string'
+          ? assistantActionProviderKinds.indexOf(
+              kind as (typeof assistantActionProviderKinds)[number]
+            )
+          : -1;
+      const matchingBranch = branchIndex >= 0 ? issue.errors[branchIndex] : undefined;
+      collectAssistantIssuePaths(
+        matchingBranch ?? issue.errors,
+        issue.path as Array<string | number>,
+        paths
+      );
+      continue;
+    }
+    collectAssistantIssuePaths([issue], [], paths);
+  }
+  return [...paths].slice(0, 12);
+}
+
+const assistantActionProviderWireSchema = z
+  .object({
+    ...actionMetaSchema,
+    kind: assistantActionProviderKindSchema,
+    payloadJson: z
+      .string()
+      .trim()
+      .min(2)
+      .max(20_000)
+      .describe(`JSON object fields by action kind: ${buildAssistantActionPayloadSchemaGuidance()}`)
+  })
+  .strict();
+
+const assistantActionPlanProviderWireSchema = z
+  .object({
+    summary: z.string().trim().min(1).max(300),
+    actions: z.array(assistantActionProviderWireSchema).max(8),
+    questions: z.array(z.string().trim().min(1).max(300)).max(8)
+  })
+  .strict();
+
+const assistantActionRefinementProviderWireSchema = z
+  .object({
+    summary: z.string().trim().min(1).max(300),
+    replacement: assistantActionProviderWireSchema.nullable(),
+    questions: z.array(z.string().trim().min(1).max(300)).max(8)
+  })
+  .strict();
+
+const assistantActionBatchRefinementProviderWireSchema = z
+  .object({
+    summary: z.string().trim().min(1).max(300),
+    replacements: z.array(assistantActionProviderWireSchema).max(8),
+    questions: z.array(z.string().trim().min(1).max(300)).max(8)
+  })
+  .strict();
+
+function decodeAssistantActionProviderPayload(
+  action: z.infer<typeof assistantActionProviderWireSchema>,
+  context: z.RefinementCtx,
+  path: Array<string | number>
+) {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(action.payloadJson);
+  } catch {
+    context.addIssue({
+      code: 'custom',
+      path: [...path, 'payloadJson'],
+      message: 'Action payload must contain valid JSON'
+    });
+    return z.NEVER;
+  }
+
+  const { payloadJson, ...metadata } = action;
+  return { ...metadata, payload };
+}
+
+export const assistantActionPlanProviderCandidateSchema = assistantActionPlanProviderWireSchema
+  .transform((candidate, context) => ({
+    summary: candidate.summary,
+    actions: candidate.actions.map((action, index) =>
+      decodeAssistantActionProviderPayload(action, context, ['actions', index])
+    ),
+    questions: candidate.questions
+  }))
+  .pipe(assistantActionPlanCandidateSchema);
+
+export const assistantActionRefinementProviderCandidateSchema =
+  assistantActionRefinementProviderWireSchema
+    .transform((candidate, context) => ({
+      summary: candidate.summary,
+      replacement:
+        candidate.replacement === null
+          ? null
+          : decodeAssistantActionProviderPayload(candidate.replacement, context, ['replacement']),
+      questions: candidate.questions
+    }))
+    .pipe(assistantActionRefinementCandidateSchema);
+
+export const assistantActionBatchRefinementProviderCandidateSchema =
+  assistantActionBatchRefinementProviderWireSchema
+    .transform((candidate, context) => ({
+      summary: candidate.summary,
+      replacements: candidate.replacements.map((action, index) =>
+        decodeAssistantActionProviderPayload(action, context, ['replacements', index])
+      ),
+      questions: candidate.questions
+    }))
+    .pipe(assistantActionBatchRefinementCandidateSchema);
+
+function describeAssistantActionPayloadSchema(schema: unknown): string {
+  if (!isAssistantSchemaRecord(schema)) return 'JSON value';
+  if (Object.hasOwn(schema, 'const')) return JSON.stringify(schema.const);
+  if (Array.isArray(schema.enum)) {
+    return `one of ${schema.enum.map((value) => JSON.stringify(value)).join(' | ')}`;
+  }
+  const alternatives = Array.isArray(schema.anyOf)
+    ? schema.anyOf
+    : Array.isArray(schema.oneOf)
+      ? schema.oneOf
+      : undefined;
+  if (alternatives) {
+    return [...new Set(alternatives.map(describeAssistantActionPayloadSchema))].join(' | ');
+  }
+  if (schema.type === 'object' && isAssistantSchemaRecord(schema.properties)) {
+    const properties = schema.properties;
+    const required = new Set(Array.isArray(schema.required) ? schema.required : []);
+    const fields = Object.entries(properties).map(([name, fieldSchema]) => {
+      const optional = required.has(name) ? '' : '?';
+      return `${name}${optional}: ${describeAssistantActionPayloadSchema(fieldSchema)}`;
+    });
+    return `{ ${fields.join('; ')} }`;
+  }
+  if (schema.type === 'array') {
+    return `array<${describeAssistantActionPayloadSchema(schema.items)}>`;
+  }
+  if (schema.type === 'string') {
+    return schema.format === 'date' ? 'ISO date string' : 'string';
+  }
+  if (schema.type === 'integer') return 'integer';
+  if (schema.type === 'number') return 'number';
+  if (schema.type === 'boolean') return 'boolean';
+  if (schema.type === 'null') return 'null';
+  if (Array.isArray(schema.type)) return schema.type.join(' | ');
+  return 'JSON value';
+}
+
+function buildAssistantActionPayloadSchemaGuidance(): string {
+  const canonicalSchema = z.toJSONSchema(assistantActionPlanCandidateSchema, {
+    target: 'draft-7',
+    unrepresentable: 'any'
+  }) as Record<string, unknown>;
+  const planProperties = canonicalSchema.properties as Record<string, unknown>;
+  const actionsSchema = planProperties.actions as Record<string, unknown>;
+  const itemSchema = actionsSchema.items as Record<string, unknown>;
+  const variants = itemSchema.anyOf;
+  if (!Array.isArray(variants)) {
+    throw new Error('Assistant action payload guidance requires a union schema.');
+  }
+
+  return variants
+    .map((variant) => {
+      const variantSchema = variant as Record<string, unknown>;
+      const properties = variantSchema.properties as Record<string, unknown>;
+      const kind = (properties.kind as Record<string, unknown>).const;
+      const payload = properties.payload;
+      if (typeof kind !== 'string' || !payload || typeof payload !== 'object') {
+        throw new Error('Assistant action payload guidance schema is incomplete.');
+      }
+      return `${kind}: ${describeAssistantActionPayloadSchema(payload)}`;
+    })
+    .join('\n');
+}
+
+/** Human-readable payload contract, generated from canonical Zod action schemas. */
+export const AI_ASSISTANT_ACTION_PAYLOAD_SCHEMA_GUIDANCE =
+  buildAssistantActionPayloadSchemaGuidance();
+
+export const AI_ASSISTANT_RESPONSE_FORMAT = createAiResponseFormat(
+  'ai_action_plan',
+  assistantActionPlanProviderWireSchema
+);
+
 export const AI_ASSISTANT_BATCH_REFINEMENT_RESPONSE_FORMAT = createAiResponseFormat(
   'ai_action_batch_refinement',
-  assistantActionBatchRefinementCandidateSchema
+  assistantActionBatchRefinementProviderWireSchema
 );
 
 export const AI_ASSISTANT_REFINEMENT_RESPONSE_FORMAT = createAiResponseFormat(
   'ai_action_refinement',
-  assistantActionRefinementCandidateSchema
+  assistantActionRefinementProviderWireSchema
 );
 
 export type AssistantActionPlanCandidate = z.infer<typeof assistantActionPlanCandidateSchema>;

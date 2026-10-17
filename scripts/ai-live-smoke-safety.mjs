@@ -32,7 +32,8 @@ export const AI_LIVE_SMOKE_ENV = Object.freeze({
   receiptDirectory: 'HOGARIA_AI_REAL_SMOKE_RECEIPT_DIRECTORY',
   preferredJpegOrdinal: 'HOGARIA_AI_REAL_SMOKE_PREFERRED_JPEG_ORDINAL',
   householdMealOnly: 'HOGARIA_AI_REAL_SMOKE_HOUSEHOLD_MEAL_ONLY',
-  recipeOnly: 'HOGARIA_AI_REAL_SMOKE_RECIPE_ONLY'
+  recipeOnly: 'HOGARIA_AI_REAL_SMOKE_RECIPE_ONLY',
+  assistantOnly: 'HOGARIA_AI_REAL_SMOKE_ASSISTANT_ONLY'
 });
 
 export const AI_LIVE_SMOKE_KEY_MARKER = '__HOGARIA_AI_REAL_SMOKE_PROVIDER_KEY__';
@@ -46,6 +47,8 @@ export const AI_LIVE_HOUSEHOLD_MEAL_SMOKE_COMPLETION_BUDGET = 1;
 export const AI_LIVE_HOUSEHOLD_MEAL_SCHEMA_NAME = 'weekly_meal_proposal';
 export const AI_LIVE_RECIPE_SMOKE_COMPLETION_BUDGET = 1;
 export const AI_LIVE_RECIPE_SCHEMA_NAME = 'generated_recipe';
+export const AI_LIVE_ASSISTANT_SMOKE_COMPLETION_BUDGET = 10;
+export const AI_LIVE_ASSISTANT_SCHEMA_NAME = 'ai_action_plan';
 export const AI_LIVE_HOUSEHOLD_MEAL_CONTEXT_FILENAME = 'meal-planning-context.json';
 export const AI_LIVE_HOUSEHOLD_MEAL_RECIPE_CATALOG_FILENAME = 'household-recipes-catalog.json';
 export const AI_LIVE_HOUSEHOLD_MEAL_PROMPT_CONTRACT = Object.freeze({
@@ -85,6 +88,23 @@ export function validateAiLiveRecipeSmokeRequest(env = process.env) {
     env[AI_LIVE_SMOKE_ENV.householdMealOnly] === '1'
   ) {
     throw new Error('Recipe-only smoke cannot combine with other smoke inputs.');
+  }
+  return true;
+}
+
+export function validateAiLiveAssistantSmokeRequest(env = process.env) {
+  const requested = env[AI_LIVE_SMOKE_ENV.assistantOnly];
+  if (requested === undefined || requested === '0' || requested === '') return false;
+  if (requested !== '1') {
+    throw new Error('Assistant-only smoke requires the exact opt-in value.');
+  }
+  if (
+    RECEIPT_SMOKE_INPUT_KEYS.some((key) => env[key] !== undefined) ||
+    env[AI_LIVE_SMOKE_ENV.receiptsOnly] === '1' ||
+    env[AI_LIVE_SMOKE_ENV.householdMealOnly] === '1' ||
+    env[AI_LIVE_SMOKE_ENV.recipeOnly] === '1'
+  ) {
+    throw new Error('Assistant-only smoke cannot combine with other smoke inputs.');
   }
   return true;
 }
@@ -148,10 +168,11 @@ export function validateAiLiveSmokeRunner(env, args) {
   }
   validateAiLiveSmokeOptIn(env);
   const householdMealOnly = validateAiLiveHouseholdMealSmokeRequest(env);
-  validateAiLiveReceiptSmokeRequest(env);
+  const receiptsOnly = validateAiLiveReceiptSmokeRequest(env);
   const recipeOnly = validateAiLiveRecipeSmokeRequest(env);
-  if (recipeOnly && householdMealOnly) {
-    throw new Error('Recipe-only smoke cannot combine with other smoke inputs.');
+  const assistantOnly = validateAiLiveAssistantSmokeRequest(env);
+  if ([householdMealOnly, receiptsOnly, recipeOnly, assistantOnly].filter(Boolean).length > 1) {
+    throw new Error('AI live smoke modes cannot be combined.');
   }
   if (env[AI_LIVE_SMOKE_ENV.providerToken]) {
     throw new Error('The WebAPI bearer must remain in the smoke coordinator process memory.');
@@ -586,6 +607,8 @@ export function isolatedProcessEnvironments(env) {
   delete browser[AI_LIVE_SMOKE_ENV.householdMealOnly];
   delete server[AI_LIVE_SMOKE_ENV.recipeOnly];
   delete browser[AI_LIVE_SMOKE_ENV.recipeOnly];
+  delete server[AI_LIVE_SMOKE_ENV.assistantOnly];
+  delete browser[AI_LIVE_SMOKE_ENV.assistantOnly];
   delete server[AI_LIVE_SMOKE_ENV.receiptPath];
   delete browser[AI_LIVE_SMOKE_ENV.receiptPath];
   for (const key of [
@@ -610,7 +633,8 @@ export function createAiLiveSmokeRunnerEnvironment(
     model,
     deadlines = AI_LIVE_SMOKE_DEADLINES,
     householdMealOnly = false,
-    recipeOnly = false
+    recipeOnly = false,
+    assistantOnly = false
   }
 ) {
   assertAiLiveSmokeDeadlineContract(deadlines);
@@ -637,7 +661,9 @@ export function createAiLiveSmokeRunnerEnvironment(
   const receiptInputs = new Set(RECEIPT_SMOKE_INPUT_KEYS);
   const env = Object.fromEntries(
     allowedInherited
-      .filter((key) => !(householdMealOnly || recipeOnly) || !receiptInputs.has(key))
+      .filter(
+        (key) => !(householdMealOnly || recipeOnly || assistantOnly) || !receiptInputs.has(key)
+      )
       .filter((key) => typeof parentEnv[key] === 'string')
       .map((key) => [key, parentEnv[key]])
   );
@@ -656,6 +682,7 @@ export function createAiLiveSmokeRunnerEnvironment(
     [AI_LIVE_SMOKE_ENV.globalTimeoutMs]: String(deadlines.globalMs),
     ...(householdMealOnly ? { [AI_LIVE_SMOKE_ENV.householdMealOnly]: '1' } : {}),
     ...(recipeOnly ? { [AI_LIVE_SMOKE_ENV.recipeOnly]: '1' } : {}),
+    ...(assistantOnly ? { [AI_LIVE_SMOKE_ENV.assistantOnly]: '1' } : {}),
     E2E_RATE_LIMIT: 'off'
   };
 }
@@ -667,8 +694,17 @@ export function isSuccessfulAiLiveSmokeResult({
   receiptsOnly = false,
   expectedReceiptTicketCount = AI_LIVE_RECEIPT_SMOKE_TICKET_COUNT,
   recipeOnly = false,
+  assistantOnly = false,
   proxyMetrics
 }) {
+  if (assistantOnly) {
+    return isSuccessfulAiLiveAssistantSmokeResult({
+      runnerExit,
+      cleanupFailed,
+      calls,
+      proxyMetrics
+    });
+  }
   if (recipeOnly) {
     return isSuccessfulAiLiveRecipeSmokeResult({ runnerExit, cleanupFailed, calls, proxyMetrics });
   }
@@ -715,6 +751,37 @@ export function isSuccessfulAiLiveSmokeResult({
     calls.length >= AI_LIVE_SMOKE_MIN_COMPLETIONS &&
     calls.length <= AI_LIVE_SMOKE_COMPLETION_BUDGET &&
     (unsuccessfulIndexes.length === 0 || onlySuccessfulReceiptFallbackFailed)
+  );
+}
+
+export function isSuccessfulAiLiveAssistantSmokeResult({
+  runnerExit,
+  cleanupFailed,
+  calls,
+  proxyMetrics
+}) {
+  return (
+    runnerExit?.code === 0 &&
+    runnerExit.cancelled !== true &&
+    runnerExit.timedOut !== true &&
+    runnerExit.runnerCleaned === true &&
+    cleanupFailed !== true &&
+    Array.isArray(calls) &&
+    calls.length === AI_LIVE_ASSISTANT_SMOKE_COMPLETION_BUDGET &&
+    calls.every(
+      (call) =>
+        call?.status >= 200 &&
+        call.status < 300 &&
+        call.schemaName === AI_LIVE_ASSISTANT_SCHEMA_NAME &&
+        call.requestContract?.strictJsonSchema === true &&
+        call.responseFormat?.hasChoices === true &&
+        call.responseFormat.messageContentType === 'text' &&
+        call.responseFormat.isJsonObject === true &&
+        call.responseFormat.finishReason === 'stop'
+    ) &&
+    proxyMetrics?.requestAttempts === AI_LIVE_ASSISTANT_SMOKE_COMPLETION_BUDGET &&
+    proxyMetrics.rejectedRequests === 0 &&
+    proxyMetrics.failed !== true
   );
 }
 

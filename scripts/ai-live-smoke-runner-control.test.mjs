@@ -165,6 +165,41 @@ test('runner exposes only allowlisted progress labels from its child', async () 
   });
   child.emit('message', {
     type: AI_LIVE_SMOKE_RUNNER_PROGRESS_MESSAGE,
+    phase: 'test-phase:recipe-only-request-start',
+    secret: 'must-not-be-forwarded'
+  });
+  child.emit('message', {
+    type: AI_LIVE_SMOKE_RUNNER_PROGRESS_MESSAGE,
+    phase: 'test-phase:assistant-proposal-response-validated',
+    secret: 'must-not-be-forwarded'
+  });
+  child.emit('message', {
+    type: AI_LIVE_SMOKE_RUNNER_PROGRESS_MESSAGE,
+    phase: 'test-phase:assistant-proposal-error-AI_PROVIDER_ERROR',
+    secret: 'must-not-be-forwarded'
+  });
+  child.emit('message', {
+    type: AI_LIVE_SMOKE_RUNNER_PROGRESS_MESSAGE,
+    phase: 'test-phase:assistant-proposal-invalid-category-invalid_type',
+    secret: 'must-not-be-forwarded'
+  });
+  child.emit('message', {
+    type: AI_LIVE_SMOKE_RUNNER_PROGRESS_MESSAGE,
+    phase: 'test-phase:assistant-proposal-invalid-action-count',
+    secret: 'must-not-be-forwarded'
+  });
+  child.emit('message', {
+    type: AI_LIVE_SMOKE_RUNNER_PROGRESS_MESSAGE,
+    phase: 'test-phase:assistant-proposal-error-secret-value',
+    secret: 'must-not-be-forwarded'
+  });
+  child.emit('message', {
+    type: AI_LIVE_SMOKE_RUNNER_PROGRESS_MESSAGE,
+    phase: 'test-phase:assistant-proposals-read-only-validated',
+    secret: 'must-not-be-forwarded'
+  });
+  child.emit('message', {
+    type: AI_LIVE_SMOKE_RUNNER_PROGRESS_MESSAGE,
     phase: 'test-phase:recipe-error-invalid-json',
     secret: 'must-not-be-forwarded'
   });
@@ -248,6 +283,12 @@ test('runner exposes only allowlisted progress labels from its child', async () 
     'Último hito E2E: otros ingredientes sintéticos excluidos de la estimación.',
     'Último hito E2E: la API devolvió una receta.',
     'Último hito E2E: contenido de la receta validado.',
+    'Último hito E2E: iniciando la receta sintética real.',
+    'Último hito E2E: propuesta estructurada y revisable validada.',
+    'Último hito E2E: propuesta falló con código API AI_PROVIDER_ERROR.',
+    'Último hito E2E: el campo category del payload no pasó la validación (invalid_type).',
+    'Último hito E2E: la comprobación segura action-count de la propuesta no pasó.',
+    'Último hito E2E: las diez propuestas no escribieron datos.',
     'Último hito E2E: la respuesta del proveedor no fue JSON utilizable.',
     'Último hito E2E: el borrador generado no contenía una receta utilizable.',
     'Último hito E2E: la receta generada no cumplió el esquema completo.',

@@ -371,10 +371,68 @@ function mealProposalCandidate(name = 'Arroz con verduras'): object {
   };
 }
 
+function assistantProviderWireContent(content: string, schemaName?: string): string {
+  if (
+    !['ai_action_plan', 'ai_action_refinement', 'ai_action_batch_refinement'].includes(
+      schemaName ?? ''
+    )
+  ) {
+    return content;
+  }
+
+  try {
+    const candidate = JSON.parse(content) as Record<string, unknown>;
+    const encodeAction = (value: unknown): unknown => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+      const action = value as Record<string, unknown>;
+      if (typeof action.payloadJson === 'string' || !Object.hasOwn(action, 'payload')) {
+        return value;
+      }
+      const { payload, ...metadata } = action;
+      return { ...metadata, payloadJson: JSON.stringify(payload) };
+    };
+
+    if (schemaName === 'ai_action_plan' && Array.isArray(candidate.actions)) {
+      candidate.actions = candidate.actions.map(encodeAction);
+    } else if (schemaName === 'ai_action_refinement') {
+      candidate.replacement = encodeAction(candidate.replacement);
+    } else if (
+      schemaName === 'ai_action_batch_refinement' &&
+      Array.isArray(candidate.replacements)
+    ) {
+      candidate.replacements = candidate.replacements.map(encodeAction);
+    }
+
+    return JSON.stringify(candidate);
+  } catch {
+    return content;
+  }
+}
+
 function stubProvider(content: string): ReturnType<typeof vi.fn> {
   const fetch = vi.fn(
-    async () =>
-      new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status: 200 })
+    async (
+      _input: Parameters<typeof globalThis.fetch>[0],
+      init?: Parameters<typeof globalThis.fetch>[1]
+    ) => {
+      let schemaName: string | undefined;
+      try {
+        const providerRequest = JSON.parse(String(init?.body ?? '')) as {
+          response_format?: { json_schema?: { name?: string } };
+        };
+        schemaName = providerRequest.response_format?.json_schema?.name;
+      } catch {
+        // Keep malformed request fixtures unchanged so the route can reject them.
+      }
+
+      const responseContent = assistantProviderWireContent(content, schemaName);
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: responseContent } }] }),
+        {
+          status: 200
+        }
+      );
+    }
   );
   vi.stubGlobal('fetch', fetch);
   return fetch;
@@ -437,7 +495,19 @@ describe('POST /api/ai/assistant/proposals', () => {
   it('returns a server-normalized proposal and makes zero SQLite writes', async () => {
     addConfig(alice);
     const before = persistedSnapshot();
-    const fetchMock = stubProvider(JSON.stringify(assistantCandidate()));
+    const providerCandidate = structuredClone(assistantCandidate()) as {
+      summary: string;
+      actions: Array<Record<string, unknown>>;
+      questions: string[];
+    };
+    const { payload, ...providerAction } = providerCandidate.actions[0] as {
+      payload: unknown;
+    } & Record<string, unknown>;
+    providerCandidate.actions[0] = {
+      ...providerAction,
+      payloadJson: JSON.stringify(payload)
+    };
+    const fetchMock = stubProvider(JSON.stringify(providerCandidate));
 
     const response = await call('POST', '/proposals', {
       prompt: 'Añade lentejas a la despensa',
@@ -445,6 +515,18 @@ describe('POST /api/ai/assistant/proposals', () => {
     });
 
     expect(response.status).toBe(200);
+    const providerRequest = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
+    expect(providerRequest.response_format.json_schema.name).toBe('ai_action_plan');
+    const providerResponseSchema = JSON.stringify(
+      providerRequest.response_format.json_schema.schema
+    );
+    expect(Buffer.byteLength(providerResponseSchema, 'utf8')).toBeLessThanOrEqual(12_000);
+    expect(providerRequest.messages[0].content).toContain('payloadJson');
+    expect(providerRequest.messages[0].content).toContain('no devuelvas `payload` como otro campo');
+    expect(providerResponseSchema).toContain(
+      'pantry.add_ingredient: { name: string; quantity: number;'
+    );
+    expect(providerResponseSchema).toContain('expirationDate: string | null');
     const body = (await response.json()) as { success: boolean; data: any };
     expect(body.success).toBe(true);
     expect(body.data.actions[0]).toMatchObject({
@@ -456,7 +538,35 @@ describe('POST /api/ai/assistant/proposals', () => {
       dependsOn: []
     });
     expect(body.data.actions[0].id).toBeTruthy();
+    expect(body.data.actions[0].payload).toEqual(payload);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(persistedSnapshot()).toEqual(before);
+  });
+
+  it('rejects invalid provider payload JSON without writing app data', async () => {
+    addConfig(alice);
+    const before = persistedSnapshot();
+    stubProvider(
+      JSON.stringify({
+        summary: 'Añade lentejas.',
+        actions: [
+          {
+            kind: 'pantry.add_ingredient',
+            title: 'Añadir lentejas',
+            summary: 'Añade lentejas a la despensa.',
+            payloadJson: '{invalid',
+            dependsOn: [],
+            warnings: []
+          }
+        ],
+        questions: []
+      })
+    );
+
+    const response = await call('POST', '/proposals', { prompt: 'Añade lentejas' });
+
+    expect(response.status).toBe(502);
+    expect(await response.json()).toMatchObject({ code: 'INVALID_AI_RESULT' });
     expect(persistedSnapshot()).toEqual(before);
   });
 
@@ -1164,10 +1274,14 @@ describe('POST /api/ai/assistant/proposals', () => {
       setCategory: false
     };
     candidate.actions.push(structuredClone(candidate.actions[0]));
+    const duplicateProviderContent = assistantProviderWireContent(
+      JSON.stringify(candidate),
+      'ai_action_plan'
+    );
     fetchMock.mockImplementationOnce(
       async () =>
         new Response(
-          JSON.stringify({ choices: [{ message: { content: JSON.stringify(candidate) } }] }),
+          JSON.stringify({ choices: [{ message: { content: duplicateProviderContent } }] }),
           {
             status: 200,
             headers: { 'content-type': 'application/json' }
@@ -1993,7 +2107,16 @@ describe('POST /api/ai/assistant/proposals', () => {
         await fetchGate;
         return new Response(
           JSON.stringify({
-            choices: [{ message: { content: JSON.stringify(assistantCandidate()) } }]
+            choices: [
+              {
+                message: {
+                  content: assistantProviderWireContent(
+                    JSON.stringify(assistantCandidate()),
+                    'ai_action_plan'
+                  )
+                }
+              }
+            ]
           }),
           { status: 200 }
         );
@@ -2780,7 +2903,7 @@ describe('POST /api/ai/assistant/refine', () => {
       '`replacement` debe ser la acción completa, no un parche parcial'
     );
     expect(request.messages[0].content).toContain(
-      'repite los campos `kind`, `title`, `summary`, `payload`, `dependsOn` y `warnings`'
+      'repite los campos `kind`, `title`, `summary`, `payloadJson`, `dependsOn` y `warnings`'
     );
     expect(request.messages[0].content).toContain(
       '`replacement.summary` debe conservar exactamente el resumen actual de la acción'
@@ -2897,11 +3020,14 @@ describe('POST /api/ai/assistant/refine', () => {
     let releaseFetch!: () => void;
     const fetchEntered = new Promise<void>((resolve) => (enterFetch = resolve));
     const fetchGate = new Promise<void>((resolve) => (releaseFetch = resolve));
-    const providerContent = JSON.stringify({
-      summary: 'Lote simplificado.',
-      replacements: [pantryAction, shoppingAction],
-      questions: []
-    });
+    const providerContent = assistantProviderWireContent(
+      JSON.stringify({
+        summary: 'Lote simplificado.',
+        replacements: [pantryAction, shoppingAction],
+        questions: []
+      }),
+      'ai_action_batch_refinement'
+    );
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => {
@@ -3007,7 +3133,7 @@ describe('POST /api/ai/assistant/refine', () => {
       'cada elemento de `replacements` debe ser una acción completa, no un parche parcial'
     );
     expect(providerRequest.messages[0].content).toContain(
-      'repite los campos `kind`, `title`, `summary`, `payload`, `dependsOn` y `warnings`'
+      'repite los campos `kind`, `title`, `summary`, `payloadJson`, `dependsOn` y `warnings`'
     );
     expect(providerRequest.messages[1].content).toContain('ui-pantry');
     expect(providerRequest.messages[1].content).toContain('ui-shopping');

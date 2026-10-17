@@ -1,8 +1,9 @@
+import Database from 'better-sqlite3';
+import { join, resolve } from 'node:path';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { readFile } from 'node:fs/promises';
 import { writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { expect, test } from './fixtures';
 import { registerAndGoto, registerWithHousehold } from './helpers/auth';
 import {
@@ -48,6 +49,7 @@ const LIVE_SMOKE_ENABLED =
   process.env.HOGARIA_AI_REAL_SMOKE === '1' && process.env.HOGARIA_AI_REAL_SMOKE_RUNNER === '1';
 const LIVE_RECEIPTS_ONLY = process.env.HOGARIA_AI_REAL_SMOKE_RECEIPTS_ONLY === '1';
 const LIVE_RECIPE_ONLY = process.env.HOGARIA_AI_REAL_SMOKE_RECIPE_ONLY === '1';
+const LIVE_ASSISTANT_ONLY = process.env.HOGARIA_AI_REAL_SMOKE_ASSISTANT_ONLY === '1';
 const LIVE_RECEIPT_SELECTION = process.env.HOGARIA_AI_REAL_SMOKE_RECEIPT_SELECTION;
 const LIVE_SMOKE_PHASE_FILE = process.env.E2E_RUN_DIR
   ? join(process.env.E2E_RUN_DIR, 'ai-live-smoke-phase')
@@ -59,6 +61,34 @@ function reportLiveSmokePhase(phase: string): void {
     writeFileSync(LIVE_SMOKE_PHASE_FILE, phase, 'utf8');
   } catch {
     // Diagnostic breadcrumbs are optional and never change the test outcome.
+  }
+}
+
+function liveAssistantDatabaseSnapshot(): Record<string, string[]> {
+  const runDirectory = process.env.E2E_RUN_DIR;
+  const databasePath = process.env.DATABASE_PATH;
+  if (!runDirectory || !databasePath) throw new Error('E2E requiere SQLite temporal aislada');
+  if (resolve(databasePath) !== resolve(runDirectory, 'hogaria.sqlite')) {
+    throw new Error('DATABASE_PATH debe ser la SQLite temporal de este smoke');
+  }
+
+  const database = new Database(databasePath, { readonly: true, fileMustExist: true });
+  try {
+    const tables = database
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+      .all() as { name: string }[];
+    return Object.fromEntries(
+      tables.map(({ name }) => {
+        const quotedName = `"${name.replaceAll('"', '""')}"`;
+        const rows = database.prepare(`SELECT * FROM ${quotedName}`).all() as Record<
+          string,
+          unknown
+        >[];
+        return [name, rows.map((row) => JSON.stringify(row)).sort()];
+      })
+    );
+  } finally {
+    database.close();
   }
 }
 
@@ -685,8 +715,8 @@ test('procesa solo los tickets reales seleccionados y verifica la revisión sin 
 
 test('recorre los ocho AiJobKind con WebAPI real y ticket sintético editable', async ({ page }) => {
   test.skip(
-    !LIVE_SMOKE_ENABLED || LIVE_RECEIPTS_ONLY || LIVE_RECIPE_ONLY,
-    'El flujo general no corre en los smoke específicos de tickets o receta.'
+    !LIVE_SMOKE_ENABLED || LIVE_RECEIPTS_ONLY || LIVE_RECIPE_ONLY || LIVE_ASSISTANT_ONLY,
+    'El flujo general no corre en smoke de tickets, receta o propuestas del asistente.'
   );
   test.setTimeout(LIVE_TEST_TIMEOUT_MS);
   page.setDefaultTimeout(LIVE_REQUEST_TIMEOUT_MS);
@@ -820,7 +850,7 @@ test('recorre los ocho AiJobKind con WebAPI real y ticket sintético editable', 
     timeout: LIVE_REQUEST_TIMEOUT_MS
   });
   await expect(page.locator('.generated-recipe__title')).not.toBeEmpty();
-  const generatedLevel = page.locator('#generated-recipe-detail-level app-picker');
+  const generatedLevel = page.locator('#generated-recipe-detail-level');
   const generatedLevelTrigger = generatedLevel.getByRole('button');
   await expect(generatedLevelTrigger).toHaveAccessibleName('Nivel de detalle: Experto');
   await expect(page.locator('.generated-recipe__steps')).toContainText(
@@ -1380,6 +1410,150 @@ test('valida una receta sintética con texto sin topes mediante una única petic
   reportLiveSmokePhase('recipe-only-response-validated');
 });
 
+test('valida diez propuestas transitorias del asistente con WebAPI real', async ({ page }) => {
+  test.skip(
+    !LIVE_SMOKE_ENABLED || !LIVE_ASSISTANT_ONLY,
+    'Smoke opt-in: requiere la modalidad exclusiva de propuestas del asistente.'
+  );
+  test.setTimeout(LIVE_TEST_TIMEOUT_MS);
+  page.setDefaultTimeout(LIVE_REQUEST_TIMEOUT_MS);
+
+  reportLiveSmokePhase('assistant-only-register-start');
+  await registerWithHousehold(page, '/dashboard', 'ai-live-assistant-only');
+  const token = await authToken(page);
+  await saveLiveAiConfig(page, token);
+  reportLiveSmokePhase('assistant-only-configured');
+
+  const before = liveAssistantDatabaseSnapshot();
+  expect(before.ai_jobs ?? []).toHaveLength(0);
+  const headers = { authorization: `Bearer ${token}` };
+
+  for (let ordinal = 1; ordinal <= 10; ordinal += 1) {
+    reportLiveSmokePhase('assistant-proposal-request-start');
+    const prompt = `Añade exactamente un ingrediente a la despensa: 250 g de arroz integral QA WebAPI ${String(ordinal).padStart(2, '0')}, categoría cereales, ubicación despensa, sin caducidad ni notas.`;
+    const response = await page.request.post('/api/ai/assistant/proposals', {
+      headers,
+      data: { prompt, route: 'pantry', referenceDate: '2026-10-17' },
+      timeout: LIVE_REQUEST_TIMEOUT_MS
+    });
+    const responseStatus = response.status();
+    reportLiveSmokePhase(
+      responseStatus === 200
+        ? 'assistant-proposal-response-ok'
+        : responseStatus >= 500
+          ? 'assistant-proposal-response-server-error'
+          : 'assistant-proposal-response-other-error'
+    );
+    const responseBody = await response.json().catch(() => null);
+    const safeErrorCodes = new Set([
+      'AI_CANCELLED',
+      'AI_NOT_CONFIGURED',
+      'AI_PROVIDER_ERROR',
+      'AI_TIMEOUT',
+      'ASSISTANT_BUSY',
+      'ASSISTANT_HOUSEHOLD_CONTEXT_CHANGED',
+      'INVALID_AI_RESULT',
+      'INVALID_ASSISTANT_REQUEST'
+    ]);
+    const responseErrorCode =
+      responseBody &&
+      typeof responseBody === 'object' &&
+      'code' in responseBody &&
+      typeof responseBody.code === 'string' &&
+      safeErrorCodes.has(responseBody.code)
+        ? responseBody.code
+        : 'unavailable';
+    if (responseStatus !== 200) {
+      reportLiveSmokePhase(`assistant-proposal-error-${responseErrorCode}`);
+      const diagnostics: string[] =
+        responseBody &&
+        typeof responseBody === 'object' &&
+        'diagnostics' in responseBody &&
+        typeof responseBody.diagnostics === 'object' &&
+        responseBody.diagnostics !== null &&
+        'invalidPaths' in responseBody.diagnostics &&
+        Array.isArray(responseBody.diagnostics.invalidPaths)
+          ? responseBody.diagnostics.invalidPaths.filter(
+              (path: unknown): path is string => typeof path === 'string'
+            )
+          : [];
+      const safePayloadFields = new Set([
+        'name',
+        'quantity',
+        'unit',
+        'category',
+        'expirationDate',
+        'location',
+        'notes'
+      ]);
+      const invalidPayloadField = diagnostics
+        .map((path) =>
+          path.match(
+            /^actions\.\d+\.payload\.([A-Za-z][A-Za-z0-9]*):(invalid_type|too_small|too_big|invalid_value|invalid_format|unrecognized_keys|custom)$/
+          )
+        )
+        .find((match) => match && safePayloadFields.has(match[1]));
+      if (invalidPayloadField) {
+        reportLiveSmokePhase(
+          `assistant-proposal-invalid-${invalidPayloadField[1]}-${invalidPayloadField[2]}`
+        );
+      }
+    }
+    expect(responseStatus, `Respuesta de propuesta rechazada: ${responseErrorCode}`).toBe(200);
+
+    const body = responseBody as {
+      success?: unknown;
+      data?: {
+        summary?: unknown;
+        actions?: Array<{
+          kind?: unknown;
+          domain?: unknown;
+          selected?: unknown;
+          status?: unknown;
+          payload?: { name?: unknown; quantity?: unknown; unit?: unknown };
+        }>;
+        questions?: unknown;
+      };
+    } | null;
+    const action = body?.data?.actions?.[0];
+    const quantity = action?.payload?.quantity;
+    const proposalChecks = [
+      ['success', body?.success === true],
+      ['summary', typeof body?.data?.summary === 'string' && body.data.summary.trim().length > 0],
+      ['action-count', body?.data?.actions?.length === 1],
+      ['action-kind', action?.kind === 'pantry.add_ingredient'],
+      ['domain', action?.domain === 'pantry'],
+      ['selection', action?.selected === false],
+      ['status', action?.status === 'pending'],
+      [
+        'payload-name',
+        typeof action?.payload?.name === 'string' && action.payload.name.trim().length > 0
+      ],
+      [
+        'payload-quantity',
+        typeof quantity === 'number' && Number.isFinite(quantity) && quantity > 0
+      ],
+      ['payload-unit', typeof action?.payload?.unit === 'string' && action.payload.unit.length > 0],
+      ['questions', Array.isArray(body?.data?.questions)]
+    ] as const;
+    const failedCheck = proposalChecks.find(([, passed]) => !passed)?.[0];
+    if (failedCheck) reportLiveSmokePhase(`assistant-proposal-invalid-${failedCheck}`);
+    expect(
+      failedCheck,
+      `Propuesta inválida: comprobación ${failedCheck ?? 'desconocida'}`
+    ).toBeUndefined();
+    const afterProposal = liveAssistantDatabaseSnapshot();
+    expect(afterProposal).toEqual(before);
+    expect(afterProposal.ai_jobs ?? []).toHaveLength(0);
+    reportLiveSmokePhase('assistant-proposal-response-validated');
+  }
+
+  const after = liveAssistantDatabaseSnapshot();
+  expect(after).toEqual(before);
+  expect(after.ai_jobs ?? []).toHaveLength(0);
+  reportLiveSmokePhase('assistant-proposals-read-only-validated');
+});
+
 test('cubre los ocho AiJobKind con fixtures de proveedor loopback', async ({ page }) => {
   test.skip(LIVE_SMOKE_ENABLED, 'Las fixtures loopback se ejecutan fuera del smoke real.');
   test.setTimeout(120_000);
@@ -1387,7 +1561,7 @@ test('cubre los ocho AiJobKind con fixtures de proveedor loopback', async ({ pag
   const provider = new SyntheticAiProvider();
   await provider.start();
   try {
-    await registerAndGoto(page, '/dashboard', 'ai-synthetic-job-kinds');
+    await registerWithHousehold(page, '/dashboard', 'ai-synthetic-job-kinds');
     const token = await authToken(page);
     const headers = { authorization: `Bearer ${token}` };
 

@@ -5,10 +5,17 @@ import {
   aiAssistantBatchRefinementRequestSchema,
   assistantMealProposalRefinementInstructionSchema,
   assistantMealProposalRequestSchema,
+  AI_ASSISTANT_ACTION_PAYLOAD_SCHEMA_GUIDANCE,
   AI_ASSISTANT_RESPONSE_FORMAT,
+  AI_ASSISTANT_REFINEMENT_RESPONSE_FORMAT,
+  AI_ASSISTANT_BATCH_REFINEMENT_RESPONSE_FORMAT,
   assistantActionPlanCandidateSchema,
+  assistantActionPlanProviderCandidateSchema,
+  assistantActionRefinementProviderCandidateSchema,
+  assistantActionBatchRefinementProviderCandidateSchema,
   assistantActionRefinementCandidateSchema,
   assistantActionBatchRefinementCandidateSchema,
+  summarizeAssistantActionPlanValidationIssues,
   normalizeAssistantActionPlan
 } from './ai-assistant.schema.js';
 
@@ -271,11 +278,132 @@ describe('ai assistant proposal schemas', () => {
     ).toBe(false);
   });
 
-  it('builds a strict structured-output schema without oneOf', () => {
-    const schema = JSON.stringify(AI_ASSISTANT_RESPONSE_FORMAT.json_schema.schema);
-    expect(AI_ASSISTANT_RESPONSE_FORMAT.json_schema.strict).toBe(true);
-    expect(schema).not.toContain('"oneOf"');
-    expect(schema).toContain('"anyOf"');
+  it('keeps every strict assistant provider schema below WebAPI’s 12 KB limit', () => {
+    for (const format of [
+      AI_ASSISTANT_RESPONSE_FORMAT,
+      AI_ASSISTANT_REFINEMENT_RESPONSE_FORMAT,
+      AI_ASSISTANT_BATCH_REFINEMENT_RESPONSE_FORMAT
+    ]) {
+      const schema = JSON.stringify(format.json_schema.schema);
+      expect(format.json_schema.strict).toBe(true);
+      expect(Buffer.byteLength(schema, 'utf8')).toBeLessThanOrEqual(12_000);
+      expect(schema).toContain('payloadJson');
+      expect(schema).toContain('pantry.add_ingredient: { name: string; quantity: number;');
+      expect(schema).toContain('expirationDate: string | null');
+      expect(schema).not.toContain('"oneOf"');
+    }
+  });
+
+  it('derives prompt payload contracts for every canonical action kind', () => {
+    const contracts = AI_ASSISTANT_ACTION_PAYLOAD_SCHEMA_GUIDANCE.split('\n');
+
+    expect(contracts.map((line) => line.slice(0, line.indexOf(':')))).toEqual([
+      'pantry.add_ingredient',
+      'pantry.update_ingredient',
+      'shopping.create_list',
+      'shopping.update_list',
+      'shopping.update_item',
+      'shopping.add_item',
+      'household.plan_meals',
+      'household.create_task',
+      'household.update_task',
+      'calendar.create_event',
+      'calendar.update_event',
+      'recipes.update_content',
+      'recipes.create_draft'
+    ]);
+    expect(contracts[0]).toMatch(
+      /name: string; quantity: number; unit: one of .*; category: string; expirationDate: string \| null; location: one of .*; notes: string \| null/
+    );
+    expect(contracts[11]).toContain('ingredients: array<');
+    expect(contracts[11]).toContain('instructions: array<');
+  });
+
+  it('decodes each compact provider action and still enforces the full candidate schema', () => {
+    const toProviderAction = (action: typeof ingredientAction) => {
+      const { payload, ...metadata } = action;
+      return { ...metadata, payloadJson: JSON.stringify(payload) };
+    };
+    const candidate = {
+      summary: 'Añade lentejas a la despensa.',
+      actions: [ingredientAction],
+      questions: []
+    };
+    const providerAction = toProviderAction(ingredientAction);
+    const providerCandidate = {
+      summary: candidate.summary,
+      actions: [providerAction],
+      questions: []
+    };
+
+    expect(assistantActionPlanProviderCandidateSchema.parse(providerCandidate)).toEqual(candidate);
+    expect(
+      assistantActionRefinementProviderCandidateSchema.parse({
+        summary: 'Mantiene la propuesta completa.',
+        replacement: providerAction,
+        questions: []
+      }).replacement
+    ).toEqual(ingredientAction);
+    expect(
+      assistantActionBatchRefinementProviderCandidateSchema.parse({
+        summary: 'Mantiene la propuesta completa.',
+        replacements: [providerAction],
+        questions: []
+      }).replacements
+    ).toEqual([ingredientAction]);
+
+    expect(
+      assistantActionPlanProviderCandidateSchema.safeParse({
+        ...providerCandidate,
+        actions: [{ ...providerAction, payloadJson: '{invalid' }]
+      }).success
+    ).toBe(false);
+    expect(
+      assistantActionPlanProviderCandidateSchema.safeParse({
+        ...providerCandidate,
+        actions: [
+          {
+            ...providerAction,
+            payloadJson: JSON.stringify({
+              ...ingredientAction.payload,
+              modelOwnedId: 'must-reject'
+            })
+          }
+        ]
+      }).success
+    ).toBe(false);
+  });
+
+  it('summarizes only allowlisted schema paths for invalid provider payloads', () => {
+    const invalidProviderCandidate = {
+      summary: 'Añade arroz.',
+      actions: [
+        {
+          kind: 'pantry.add_ingredient',
+          title: 'Añadir arroz',
+          summary: 'Añade arroz a la despensa.',
+          payloadJson: JSON.stringify({ name: 'arroz sintético', quantity: 250, unit: 'g' }),
+          dependsOn: [],
+          warnings: []
+        }
+      ],
+      questions: []
+    };
+    const result = assistantActionPlanProviderCandidateSchema.safeParse(invalidProviderCandidate);
+    expect(result.success).toBe(false);
+    if (result.success) throw new Error('Fixture must violate the full pantry payload schema.');
+
+    const paths = summarizeAssistantActionPlanValidationIssues(
+      invalidProviderCandidate,
+      result.error.issues
+    );
+    expect(paths).toEqual([
+      'actions.0.payload.category:invalid_type',
+      'actions.0.payload.expirationDate:invalid_type',
+      'actions.0.payload.location:invalid_value',
+      'actions.0.payload.notes:invalid_type'
+    ]);
+    expect(JSON.stringify(paths)).not.toContain('arroz sintético');
   });
 
   it('accepts a bounded non-empty prompt and an allowlisted route hint only', () => {

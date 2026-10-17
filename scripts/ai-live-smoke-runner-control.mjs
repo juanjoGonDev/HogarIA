@@ -17,6 +17,49 @@ export const AI_LIVE_SMOKE_RUNNER_SHUTDOWN_MESSAGE = 'ai-live-smoke-shutdown';
 export const AI_LIVE_SMOKE_RUNNER_COMPLETE_MESSAGE = 'ai-live-smoke-runner-complete';
 export const AI_LIVE_SMOKE_RUNNER_PROGRESS_MESSAGE = 'ai-live-smoke-progress';
 
+const SAFE_ASSISTANT_API_ERROR_CODES = Object.freeze([
+  'AI_CANCELLED',
+  'AI_NOT_CONFIGURED',
+  'AI_PROVIDER_ERROR',
+  'AI_TIMEOUT',
+  'ASSISTANT_BUSY',
+  'ASSISTANT_HOUSEHOLD_CONTEXT_CHANGED',
+  'INVALID_AI_RESULT',
+  'INVALID_ASSISTANT_REQUEST',
+  'unavailable'
+]);
+const SAFE_ASSISTANT_PAYLOAD_FIELDS = Object.freeze([
+  'name',
+  'quantity',
+  'unit',
+  'category',
+  'expirationDate',
+  'location',
+  'notes'
+]);
+const SAFE_ASSISTANT_VALIDATION_CODES = Object.freeze([
+  'invalid_type',
+  'too_small',
+  'too_big',
+  'invalid_value',
+  'invalid_format',
+  'unrecognized_keys',
+  'custom'
+]);
+const SAFE_ASSISTANT_PROPOSAL_CHECKS = Object.freeze([
+  'success',
+  'summary',
+  'action-count',
+  'action-kind',
+  'domain',
+  'selection',
+  'status',
+  'payload-name',
+  'payload-quantity',
+  'payload-unit',
+  'questions'
+]);
+
 const SAFE_RUNNER_PROGRESS = Object.freeze({
   'run-dir-created': 'Entorno aislado temporal preparado.',
   'isolated-stack-starting': 'Iniciando la aplicación aislada.',
@@ -88,6 +131,52 @@ const SAFE_RUNNER_PROGRESS = Object.freeze({
     'Último hito E2E: la receta generada no cumplió el esquema completo.',
   'test-phase:recipe-error-unclassified':
     'Último hito E2E: la API devolvió un error de receta no clasificado.',
+  'test-phase:recipe-only-register-start': 'Último hito E2E: iniciando registro de prueba.',
+  'test-phase:recipe-only-registered': 'Último hito E2E: registro de prueba completado.',
+  'test-phase:recipe-only-request-start': 'Último hito E2E: iniciando la receta sintética real.',
+  'test-phase:recipe-only-response-ok': 'Último hito E2E: la API respondió a la receta sintética.',
+  'test-phase:recipe-only-response-server-error':
+    'Último hito E2E: la API devolvió un error al generar la receta sintética.',
+  'test-phase:recipe-only-response-other-error':
+    'Último hito E2E: respuesta no válida al generar la receta sintética.',
+  'test-phase:recipe-only-response-validated':
+    'Último hito E2E: la receta sintética quedó validada.',
+  'test-phase:assistant-only-register-start':
+    'Último hito E2E: iniciando la cuenta sintética del asistente.',
+  'test-phase:assistant-only-configured':
+    'Último hito E2E: proveedor temporal preparado para el asistente.',
+  'test-phase:assistant-proposal-request-start':
+    'Último hito E2E: iniciando propuesta transitoria del asistente.',
+  'test-phase:assistant-proposal-response-ok':
+    'Último hito E2E: WebAPI respondió a la propuesta del asistente.',
+  'test-phase:assistant-proposal-response-server-error':
+    'Último hito E2E: WebAPI devolvió error de servidor a la propuesta del asistente.',
+  'test-phase:assistant-proposal-response-other-error':
+    'Último hito E2E: respuesta no válida a la propuesta del asistente.',
+  'test-phase:assistant-proposal-response-validated':
+    'Último hito E2E: propuesta estructurada y revisable validada.',
+  ...Object.fromEntries(
+    SAFE_ASSISTANT_API_ERROR_CODES.map((code) => [
+      `test-phase:assistant-proposal-error-${code}`,
+      `Último hito E2E: propuesta falló con código API ${code}.`
+    ])
+  ),
+  ...Object.fromEntries(
+    SAFE_ASSISTANT_PAYLOAD_FIELDS.flatMap((field) =>
+      SAFE_ASSISTANT_VALIDATION_CODES.map((code) => [
+        `test-phase:assistant-proposal-invalid-${field}-${code}`,
+        `Último hito E2E: el campo ${field} del payload no pasó la validación (${code}).`
+      ])
+    )
+  ),
+  ...Object.fromEntries(
+    SAFE_ASSISTANT_PROPOSAL_CHECKS.map((check) => [
+      `test-phase:assistant-proposal-invalid-${check}`,
+      `Último hito E2E: la comprobación segura ${check} de la propuesta no pasó.`
+    ])
+  ),
+  'test-phase:assistant-proposals-read-only-validated':
+    'Último hito E2E: las diez propuestas no escribieron datos.',
   'test-phase:connection-tested': 'Último hito E2E: conexión IA comprobada.',
   'test-phase:multiple-recipes-request-start': 'Último hito E2E: generando recetas múltiples.',
   'test-phase:multiple-recipes-response-ok': 'Último hito E2E: API devolvió recetas múltiples.',

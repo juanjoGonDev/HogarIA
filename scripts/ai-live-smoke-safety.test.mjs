@@ -9,12 +9,14 @@ import {
   prepareAiLiveSmokeSession,
   createAiLiveProxy,
   isSuccessfulAiLiveSmokeResult,
+  isSuccessfulAiLiveAssistantSmokeResult,
   isSuccessfulAiLiveRecipeSmokeResult,
   isSuccessfulAiLiveHouseholdMealSmokeResult,
   isolatedProcessEnvironments,
   selectAiLiveModel,
   validateAiLiveSmokeOptIn,
   validateAiLiveRecipeSmokeRequest,
+  validateAiLiveAssistantSmokeRequest,
   validateAiLiveHouseholdMealSmokeRequest,
   validateAiLiveSmokeRunner
 } from './ai-live-smoke-safety.mjs';
@@ -100,6 +102,105 @@ test('recipe-only success requires one unbounded strict recipe schema and one co
     isSuccessfulAiLiveRecipeSmokeResult({
       ...input,
       proxyMetrics: { ...proxyMetrics, requestAttempts: 2 }
+    }),
+    false
+  );
+});
+
+test('assistant-only smoke requires its isolated mode and rejects every competing scenario', () => {
+  const args = ['--config=playwright.ai-real-smoke.config.ts', 'tests/e2e/ai-real-smoke.spec.ts'];
+  const env = {
+    HOGARIA_AI_REAL_SMOKE: '1',
+    HOGARIA_AI_REAL_SMOKE_RUNNER: '1',
+    HOGARIA_AI_REAL_SMOKE_ASSISTANT_ONLY: '1',
+    HOGARIA_AI_REAL_SMOKE_PROXY_TOKEN: 'synthetic-local-proxy-token',
+    HOGARIA_AI_REAL_SMOKE_PROXY_URL: 'http://127.0.0.1:41000/v1',
+    HOGARIA_AI_REAL_SMOKE_MODEL: 'gpt-5',
+    CI: ''
+  };
+
+  assert.equal(validateAiLiveAssistantSmokeRequest(env), true);
+  assert.equal(validateAiLiveSmokeRunner(env, args), true);
+  assert.equal(validateAiLiveAssistantSmokeRequest({}), false);
+  assert.throws(
+    () =>
+      validateAiLiveAssistantSmokeRequest({
+        ...env,
+        HOGARIA_AI_REAL_SMOKE_ASSISTANT_ONLY: 'true'
+      }),
+    /exact opt-in/i
+  );
+  for (const conflictingInput of [
+    { HOGARIA_AI_REAL_SMOKE_RECEIPTS_ONLY: '1' },
+    { HOGARIA_AI_REAL_SMOKE_RECIPE_ONLY: '1' },
+    { HOGARIA_AI_REAL_SMOKE_HOUSEHOLD_MEAL_ONLY: '1' },
+    { HOGARIA_AI_REAL_SMOKE_RECEIPT_PATH: 'C:/private/ticket.pdf' }
+  ]) {
+    assert.throws(
+      () => validateAiLiveAssistantSmokeRequest({ ...env, ...conflictingInput }),
+      /cannot combine/i
+    );
+  }
+  assert.throws(
+    () =>
+      validateAiLiveSmokeRunner(env, [
+        '--config=playwright.config.ts',
+        'tests/e2e/ai-real-smoke.spec.ts'
+      ]),
+    /only accepts/i
+  );
+});
+
+test('assistant-only success requires ten consecutive strict action-plan responses and cleanup', () => {
+  const runnerExit = { code: 0, timedOut: false, cancelled: false, runnerCleaned: true };
+  const call = {
+    status: 200,
+    schemaName: 'ai_action_plan',
+    requestContract: { strictJsonSchema: true },
+    responseFormat: {
+      hasChoices: true,
+      messageContentType: 'text',
+      isJsonObject: true,
+      finishReason: 'stop'
+    }
+  };
+  const proxyMetrics = { requestAttempts: 10, rejectedRequests: 0, failed: false };
+  const calls = Array.from({ length: 10 }, () => call);
+  const input = { runnerExit, cleanupFailed: false, calls, proxyMetrics };
+
+  assert.equal(isSuccessfulAiLiveAssistantSmokeResult(input), true);
+  assert.equal(
+    isSuccessfulAiLiveAssistantSmokeResult({ ...input, calls: calls.slice(0, 9) }),
+    false
+  );
+  assert.equal(
+    isSuccessfulAiLiveAssistantSmokeResult({ ...input, calls: [...calls, call] }),
+    false
+  );
+  for (const invalidCall of [
+    { ...call, status: 500 },
+    { ...call, schemaName: 'generated_recipe' },
+    { ...call, requestContract: { strictJsonSchema: false } },
+    { ...call, responseFormat: { ...call.responseFormat, isJsonObject: false } },
+    { ...call, responseFormat: { ...call.responseFormat, finishReason: 'length' } }
+  ]) {
+    assert.equal(
+      isSuccessfulAiLiveAssistantSmokeResult({ ...input, calls: [invalidCall, ...calls.slice(1)] }),
+      false
+    );
+  }
+  assert.equal(isSuccessfulAiLiveAssistantSmokeResult({ ...input, cleanupFailed: true }), false);
+  assert.equal(
+    isSuccessfulAiLiveAssistantSmokeResult({
+      ...input,
+      proxyMetrics: { ...proxyMetrics, requestAttempts: 9 }
+    }),
+    false
+  );
+  assert.equal(
+    isSuccessfulAiLiveAssistantSmokeResult({
+      ...input,
+      proxyMetrics: { ...proxyMetrics, rejectedRequests: 1, failed: true }
     }),
     false
   );
@@ -954,6 +1055,42 @@ test('recipe-only runner environment strips receipt inputs and exposes mode only
   assert.equal(Object.hasOwn(isolated.server, 'HOGARIA_AI_REAL_SMOKE_RECIPE_ONLY'), false);
   assert.equal(Object.hasOwn(isolated.browser, 'HOGARIA_AI_REAL_SMOKE_RECIPE_ONLY'), false);
   assert.equal(isolated.playwright.HOGARIA_AI_REAL_SMOKE_RECIPE_ONLY, '1');
+});
+
+test('assistant-only runner environment keeps its mode in Playwright and strips receipt inputs', () => {
+  const env = createAiLiveSmokeRunnerEnvironment(
+    {
+      PATH: 'C:/Windows/System32',
+      HOGARIA_AI_REAL_SMOKE_RECEIPT_PATH: 'C:/private/ticket.pdf',
+      HOGARIA_AI_REAL_SMOKE_RECEIPTS_ONLY: '1',
+      HOGARIA_AI_REAL_SMOKE_RECEIPT_SELECTION: 'unsubmitted-only',
+      HOGARIA_AI_REAL_SMOKE_RECEIPT_DIRECTORY: 'C:/private/tickets',
+      HOGARIA_AI_REAL_SMOKE_PREFERRED_JPEG_ORDINAL: '2'
+    },
+    {
+      proxyToken: 'synthetic-local-proxy-token',
+      proxyUrl: 'http://127.0.0.1:41000/v1',
+      model: 'gpt-5',
+      assistantOnly: true
+    }
+  );
+  assert.equal(env.HOGARIA_AI_REAL_SMOKE_ASSISTANT_ONLY, '1');
+  for (const key of [
+    'HOGARIA_AI_REAL_SMOKE_RECEIPT_PATH',
+    'HOGARIA_AI_REAL_SMOKE_RECEIPTS_ONLY',
+    'HOGARIA_AI_REAL_SMOKE_RECEIPT_SELECTION',
+    'HOGARIA_AI_REAL_SMOKE_RECEIPT_DIRECTORY',
+    'HOGARIA_AI_REAL_SMOKE_PREFERRED_JPEG_ORDINAL'
+  ]) {
+    assert.equal(env[key], undefined);
+  }
+
+  const processEnvs = isolatedProcessEnvironments(env);
+  assert.equal(processEnvs.server.HOGARIA_AI_REAL_SMOKE_ASSISTANT_ONLY, undefined);
+  assert.equal(processEnvs.browser.HOGARIA_AI_REAL_SMOKE_ASSISTANT_ONLY, undefined);
+  assert.equal(processEnvs.playwright.HOGARIA_AI_REAL_SMOKE_ASSISTANT_ONLY, '1');
+  assert.equal(processEnvs.server.HOGARIA_AI_REAL_SMOKE_PROXY_TOKEN, 'synthetic-local-proxy-token');
+  assert.equal(processEnvs.playwright.HOGARIA_AI_REAL_SMOKE_PROXY_TOKEN, undefined);
 });
 
 test('accepts only a fully successful run with nine or ten live completions', () => {

@@ -120,7 +120,10 @@ import {
   assistantMealProposalRequestSchema,
   assistantActionBatchRefinementCandidateSchema,
   assistantActionPlanCandidateSchema,
-  assistantActionRefinementCandidateSchema
+  assistantActionRefinementCandidateSchema,
+  assistantActionBatchRefinementProviderCandidateSchema,
+  assistantActionPlanProviderCandidateSchema,
+  assistantActionRefinementProviderCandidateSchema
 } from './ai-assistant.schema.js';
 import { assistantUpdateIngredientSchema } from './ai-assistant-pantry-update.schema.js';
 import {
@@ -834,6 +837,21 @@ const ROWS: Row[] = [
     name: 'assistantActionPlanCandidateSchema',
     schema: assistantActionPlanCandidateSchema,
     required: { summary: 'Sin acciones.', actions: [], questions: [] }
+  },
+  {
+    name: 'assistantActionPlanProviderCandidateSchema',
+    schema: assistantActionPlanProviderCandidateSchema,
+    required: { summary: 'Sin acciones.', actions: [], questions: [] }
+  },
+  {
+    name: 'assistantActionRefinementProviderCandidateSchema',
+    schema: assistantActionRefinementProviderCandidateSchema,
+    required: { summary: 'Sin cambios.', replacement: null, questions: [] }
+  },
+  {
+    name: 'assistantActionBatchRefinementProviderCandidateSchema',
+    schema: assistantActionBatchRefinementProviderCandidateSchema,
+    required: { summary: 'Sin cambios.', replacements: [], questions: [] }
   },
   {
     name: 'assistantUpdateIngredientSchema',
