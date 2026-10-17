@@ -28,6 +28,12 @@ const dateSchema = z
     const timestamp = Date.parse(`${value}T00:00:00.000Z`);
     return Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === value;
   }, 'Expected a real ISO date');
+const optionalDateReferenceSchema = z
+  .preprocess(
+    (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+    dateSchema.nullish()
+  )
+  .transform((value) => value ?? undefined);
 const pantryUnitSchema = z.enum([
   'g',
   'kg',
@@ -420,7 +426,8 @@ const assistantActionCandidateSchema = z.union([
 export const aiAssistantProposalRequestSchema = z
   .object({
     prompt: z.string().trim().min(1).max(2000),
-    route: routeHintSchema.nullish()
+    route: routeHintSchema.nullish(),
+    referenceDate: optionalDateReferenceSchema
   })
   .strict();
 
@@ -468,7 +475,8 @@ export const aiAssistantActionRefinementRequestSchema = z
     actionId: z.string().trim().min(1).max(100),
     instruction: z.string().trim().min(1).max(1000),
     action: assistantActionCandidateSchema,
-    scope: refinementScopeSchema
+    scope: refinementScopeSchema,
+    referenceDate: optionalDateReferenceSchema
   })
   .strict();
 
@@ -493,7 +501,8 @@ export const aiAssistantBatchRefinementRequestSchema = z
   .object({
     instruction: z.string().trim().min(1).max(1000),
     scope: assistantBatchRefinementScopeSchema,
-    actions: z.array(assistantBatchRefinementTargetSchema).min(2).max(8)
+    actions: z.array(assistantBatchRefinementTargetSchema).min(2).max(8),
+    referenceDate: optionalDateReferenceSchema
   })
   .strict()
   .superRefine((request, context) => {

@@ -1663,6 +1663,25 @@ describe('POST /api/ai/assistant/proposals', () => {
     expect(persistedCounts()).toEqual(before);
   });
 
+  it('anchors relative dates to the client local date as untrusted context', async () => {
+    addConfig(alice);
+    const before = persistedSnapshot();
+    const fetchMock = stubProvider(JSON.stringify(assistantCandidate()));
+
+    const response = await call('POST', '/proposals', {
+      prompt: 'Crea una tarea para mañana',
+      referenceDate: '2035-09-25'
+    });
+
+    expect(response.status).toBe(200);
+    const providerRequest = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
+    expect(providerRequest.messages[0].content).toContain(
+      'Fecha local de referencia del cliente: 2035-09-25'
+    );
+    expect(providerRequest.messages[0].content).toContain('Es contexto no confiable');
+    expect(persistedSnapshot()).toEqual(before);
+  });
+
   it('does not repair a stale inactive-household pointer during proposal or refinement', async () => {
     const householdId = 'assistant-stale-household';
     db.prepare('INSERT INTO households (id, name, invite_code) VALUES (?, ?, ?)').run(
@@ -2298,7 +2317,8 @@ describe('POST /api/ai/assistant/refine', () => {
         actionId: 'shopping-item-refine-1',
         instruction: 'Deja tres unidades.',
         action,
-        scope: { kind: 'action' }
+        scope: { kind: 'action' },
+        referenceDate: '2035-09-25'
       },
       alice.token,
       { 'x-assistant-household-id': '' }
@@ -2316,6 +2336,9 @@ describe('POST /api/ai/assistant/refine', () => {
     const providerRequest = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
     expect(providerRequest.messages[0].content).toContain(
       'quantity siempre es total final absoluto'
+    );
+    expect(providerRequest.messages[0].content).toContain(
+      'Fecha local de referencia del cliente: 2035-09-25'
     );
     expect(persistedSnapshot()).toEqual(before);
   });
@@ -2648,6 +2671,7 @@ describe('POST /api/ai/assistant/refine', () => {
     const response = await call('POST', '/refine-batch', {
       instruction: 'Simplifica el lote.',
       scope: { kind: 'batch' },
+      referenceDate: '2035-09-25',
       actions: [
         { actionId: 'ui-pantry', action: pantryAction },
         { actionId: 'ui-shopping', action: shoppingAction }
@@ -2665,6 +2689,9 @@ describe('POST /api/ai/assistant/refine', () => {
       questions: []
     });
     const providerRequest = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
+    expect(providerRequest.messages[0].content).toContain(
+      'Fecha local de referencia del cliente: 2035-09-25'
+    );
     expect(providerRequest.messages[1].content).toContain('ui-pantry');
     expect(providerRequest.messages[1].content).toContain('ui-shopping');
     expect(fetchMock).toHaveBeenCalledTimes(1);

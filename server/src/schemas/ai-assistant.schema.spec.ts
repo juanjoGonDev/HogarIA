@@ -283,6 +283,18 @@ describe('ai assistant proposal schemas', () => {
       aiAssistantProposalRequestSchema.safeParse({ prompt: 'Añade lentejas', route: 'pantry' })
         .success
     ).toBe(true);
+    expect(
+      aiAssistantProposalRequestSchema.safeParse({
+        prompt: 'Añade lentejas',
+        referenceDate: '2035-09-25'
+      }).success
+    ).toBe(true);
+    expect(
+      aiAssistantProposalRequestSchema.safeParse({
+        prompt: 'Añade lentejas',
+        referenceDate: '2035-02-30'
+      }).success
+    ).toBe(false);
     expect(aiAssistantProposalRequestSchema.safeParse({ prompt: '   ' }).success).toBe(false);
     expect(
       aiAssistantProposalRequestSchema.safeParse({ prompt: 'Añade lentejas', route: '/admin' })
@@ -301,7 +313,8 @@ describe('ai assistant proposal schemas', () => {
       actionId: 'ui-action-1',
       instruction: 'Cambia a 500 gramos',
       action: ingredientAction,
-      scope: { kind: 'action' }
+      scope: { kind: 'action' },
+      referenceDate: '2035-09-25'
     });
     expect(actionScope.success).toBe(true);
     expect(
@@ -316,9 +329,10 @@ describe('ai assistant proposal schemas', () => {
         actionId: 'ui-action-1',
         instruction: 'Cambia la cantidad',
         action: ingredientAction,
-        scope: { kind: 'field', path: ['quantity'] }
+        scope: { kind: 'field', path: ['quantity'] },
+        referenceDate: 'mañana'
       }).success
-    ).toBe(true);
+    ).toBe(false);
     expect(
       aiAssistantActionRefinementRequestSchema.safeParse({
         actionId: 'ui-action-1',
@@ -362,7 +376,8 @@ describe('ai assistant proposal schemas', () => {
       aiAssistantBatchRefinementRequestSchema.safeParse({
         instruction: 'Haz el plan más fácil de preparar.',
         scope: { kind: 'batch' },
-        actions: targets
+        actions: targets,
+        referenceDate: '2035-09-25'
       }).success
     ).toBe(true);
     expect(

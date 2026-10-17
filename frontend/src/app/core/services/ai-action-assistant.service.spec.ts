@@ -3,6 +3,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { TestBed } from '@angular/core/testing';
 import { signal } from '@angular/core';
 import { SILENT_TOAST } from '../interceptors/error.interceptor';
+import { toDayKey } from '../time';
 import { HouseholdService } from './household.service';
 import type {
   AssistantActionPlan,
@@ -37,13 +38,18 @@ describe('AiActionAssistantService', () => {
       questions: []
     };
     let result: AssistantActionPlan | undefined;
+    const localReferenceDate = toDayKey(new Date());
     service
       .propose({ prompt: 'Añade lentejas', route: 'pantry' })
       .subscribe((value) => (result = value));
 
     const request = http.expectOne('/api/ai/assistant/proposals');
     expect(request.request.method).toBe('POST');
-    expect(request.request.body).toEqual({ prompt: 'Añade lentejas', route: 'pantry' });
+    expect(request.request.body).toEqual({
+      prompt: 'Añade lentejas',
+      route: 'pantry',
+      referenceDate: localReferenceDate
+    });
     expect(request.request.headers.get('x-assistant-household-id')).toBe('household-1');
     expect(request.request.context.get(SILENT_TOAST)).toBeTrue();
     request.flush({ success: true, data: plan });
@@ -66,6 +72,7 @@ describe('AiActionAssistantService', () => {
       action: {} as never,
       scope: { kind: 'field' as const, path: ['quantity'] }
     };
+    const localReferenceDate = toDayKey(new Date());
     service
       .refine(input)
       .subscribe({ next: (value) => (result = value), error: (value) => (error = value) });
@@ -75,7 +82,8 @@ describe('AiActionAssistantService', () => {
       jasmine.objectContaining({
         actionId: 'action-1',
         instruction: 'Reduce la cantidad',
-        scope: input.scope
+        scope: input.scope,
+        referenceDate: localReferenceDate
       })
     );
     expect(request.request.headers.get('x-assistant-household-id')).toBe('household-1');
@@ -107,11 +115,12 @@ describe('AiActionAssistantService', () => {
       ],
       scope: { kind: 'batch' as const }
     };
+    const localReferenceDate = toDayKey(new Date());
     service.refineBatch(input).subscribe((value) => (result = value));
 
     const request = http.expectOne('/api/ai/assistant/refine-batch');
     expect(request.request.method).toBe('POST');
-    expect(request.request.body).toEqual(input);
+    expect(request.request.body).toEqual({ ...input, referenceDate: localReferenceDate });
     expect(request.request.headers.get('x-assistant-household-id')).toBe('household-1');
     request.flush({ success: true, data: resultData });
 

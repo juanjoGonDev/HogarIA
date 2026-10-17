@@ -3,6 +3,7 @@ import { Injectable, inject } from '@angular/core';
 import { map, type Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { SILENT_TOAST } from '../interceptors/error.interceptor';
+import { toDayKey } from '../time';
 import type {
   AssistantActionCandidate,
   AssistantActionPlan,
@@ -27,10 +28,14 @@ export class AiActionAssistantService {
 
   propose(input: { prompt: string; route?: AssistantRouteHint }): Observable<AssistantActionPlan> {
     return this.http
-      .post<ApiResponse<AssistantActionPlan>>(`${this.apiUrl}/proposals`, input, {
-        context: this.silentContext(),
-        headers: this.householdHeaders()
-      })
+      .post<ApiResponse<AssistantActionPlan>>(
+        `${this.apiUrl}/proposals`,
+        { ...input, referenceDate: this.localReferenceDate() },
+        {
+          context: this.silentContext(),
+          headers: this.householdHeaders()
+        }
+      )
       .pipe(map((response) => this.requireData(response)));
   }
 
@@ -41,10 +46,14 @@ export class AiActionAssistantService {
     scope: AssistantActionRefinementScope;
   }): Observable<AssistantActionRefinementResult> {
     return this.http
-      .post<ApiResponse<AssistantActionRefinementResult>>(`${this.apiUrl}/refine`, input, {
-        context: this.silentContext(),
-        headers: this.householdHeaders()
-      })
+      .post<ApiResponse<AssistantActionRefinementResult>>(
+        `${this.apiUrl}/refine`,
+        { ...input, referenceDate: this.localReferenceDate() },
+        {
+          context: this.silentContext(),
+          headers: this.householdHeaders()
+        }
+      )
       .pipe(map((response) => this.requireData(response)));
   }
 
@@ -54,10 +63,14 @@ export class AiActionAssistantService {
     scope: AssistantBatchRefinementScope;
   }): Observable<AssistantBatchRefinementResult> {
     return this.http
-      .post<ApiResponse<AssistantBatchRefinementResult>>(`${this.apiUrl}/refine-batch`, input, {
-        context: this.silentContext(),
-        headers: this.householdHeaders()
-      })
+      .post<ApiResponse<AssistantBatchRefinementResult>>(
+        `${this.apiUrl}/refine-batch`,
+        { ...input, referenceDate: this.localReferenceDate() },
+        {
+          context: this.silentContext(),
+          headers: this.householdHeaders()
+        }
+      )
       .pipe(map((response) => this.requireData(response)));
   }
 
@@ -76,5 +89,10 @@ export class AiActionAssistantService {
     return new HttpHeaders({
       'x-assistant-household-id': this.household.activeHouseholdId() ?? ''
     });
+  }
+
+  private localReferenceDate(): string {
+    // Send only the local calendar day needed for relative dates, never the device's time zone.
+    return toDayKey(new Date());
   }
 }

@@ -3415,6 +3415,19 @@ test('asistente global: edita una receta propia tras revisión explícita y prot
     });
     expect(assistantWrites).toEqual([]);
     expect(provider.requests.at(-1)).not.toContain(recipe.id);
+    const referenceDate = await page.evaluate(() => {
+      const parts = new Intl.DateTimeFormat('en-CA', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      }).formatToParts(new Date());
+      const value = (type: string) => parts.find((part) => part.type === type)?.value ?? '';
+      return `${value('year')}-${value('month')}-${value('day')}`;
+    });
+    const providerRequest = JSON.parse(provider.requests.at(-1) ?? '{}');
+    expect(providerRequest.messages[0].content).toContain(
+      `Fecha local de referencia del cliente: ${referenceDate}`
+    );
 
     await page.keyboard.press('Escape');
     const discardDialog = page.getByRole('dialog', { name: '¿Descartar este borrador?' });
