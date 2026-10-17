@@ -1610,6 +1610,31 @@ describe('AiActionAssistantDialogComponent', () => {
     ]);
   });
 
+  it('executes selected prerequisites before dependents when proposal order is reversed', async () => {
+    const plan = pantryPlan();
+    const prerequisite = { ...plan.actions[0], selected: true };
+    const dependent: AssistantAction = {
+      ...calendarAction(),
+      id: 'calendar-dependent',
+      selected: true,
+      dependsOn: [prerequisite.id]
+    };
+    component.plan.set({ ...plan, actions: [dependent, prerequisite] });
+    component.stage.set('confirm');
+    execution.execute.and.returnValue(Promise.resolve(undefined));
+
+    await component.executeSelected();
+
+    expect(execution.execute.calls.allArgs().map(([action]) => action.id)).toEqual([
+      prerequisite.id,
+      dependent.id
+    ]);
+    expect(component.plan()?.actions.map((action) => action.status)).toEqual([
+      'succeeded',
+      'succeeded'
+    ]);
+  });
+
   it('locks background scrolling while open and restores its prior style when closed', () => {
     expect(document.body.style.overflow).toBe('hidden');
 

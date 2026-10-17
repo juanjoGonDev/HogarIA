@@ -5744,7 +5744,7 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
     let hadFailure = false;
 
     try {
-      for (const action of this.selectedActions()) {
+      for (const action of this.selectedActionsInDependencyOrder()) {
         if (!['pending', 'failed', 'blocked'].includes(action.status)) continue;
         const dependencies = action.dependsOn.map(
           (id) => this.plan()?.actions.find((candidate) => candidate.id === id) ?? null
@@ -5781,6 +5781,32 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
       this.loading.set(false);
       this.executing.set(false);
     }
+  }
+
+  private selectedActionsInDependencyOrder(): AssistantAction[] {
+    const remaining = this.selectedActions().filter((action) => action.status !== 'succeeded');
+    const succeededIds = new Set(
+      this.plan()
+        ?.actions.filter((action) => action.status === 'succeeded')
+        .map((action) => action.id) ?? []
+    );
+    const ordered: AssistantAction[] = [];
+    const orderedIds = new Set<string>();
+
+    while (remaining.length) {
+      const readyIndex = remaining.findIndex((action) =>
+        action.dependsOn.every(
+          (dependencyId) => succeededIds.has(dependencyId) || orderedIds.has(dependencyId)
+        )
+      );
+      if (readyIndex < 0) return [...ordered, ...remaining];
+
+      const [readyAction] = remaining.splice(readyIndex, 1);
+      ordered.push(readyAction);
+      orderedIds.add(readyAction.id);
+    }
+
+    return ordered;
   }
 
   private mapExecutionError(error: unknown): TranslationKey {

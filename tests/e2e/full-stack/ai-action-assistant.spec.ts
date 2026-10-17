@@ -1890,6 +1890,80 @@ test('asistente global: aprobación parcial conserva dependencia lista-artículo
   );
 });
 
+test('asistente global: ejecuta primero los prerrequisitos aunque el proveedor invierta el orden', async ({
+  page
+}) => {
+  const actionRequests: Array<{ method: string; pathname: string; actionId: string }> = [];
+  await page.route('**/api/ai/assistant/proposals', async (route) => {
+    const response = allDomainProposal();
+    const actions = response.data.actions;
+    response.data.actions = [actions[1], actions[0], ...actions.slice(2)];
+    await route.fulfill({ json: response });
+  });
+  page.on('request', (request) => {
+    const actionId = request.headers()['x-assistant-action-id'];
+    if (actionId && ['POST', 'PUT', 'PATCH'].includes(request.method())) {
+      actionRequests.push({
+        method: request.method(),
+        pathname: new URL(request.url()).pathname,
+        actionId
+      });
+    }
+  });
+
+  await registerUser(page, 'Asistente orden de dependencias E2E');
+  await createHousehold(page, 'Hogar orden de dependencias sintético');
+  await page.goto('/dashboard');
+  const token = await tokenOf(page);
+  const before = assistantDatabaseSnapshot();
+
+  await page.locator('[data-test="ai-assistant-open"]').click();
+  await page
+    .locator('[data-test="ai-assistant-prompt"]')
+    .fill('Crea una lista de compra y añade manzanas a esa lista.');
+  await page.locator('[data-test="ai-assistant-submit"] button').click();
+  await expect(page.locator('[data-test="ai-assistant-review"]')).toBeVisible();
+
+  const listAction = page.locator(`[data-action-id="${ACTION_IDS[0]}"]`);
+  const itemAction = page.locator(`[data-action-id="${ACTION_IDS[1]}"]`);
+  await expect(itemAction).toBeVisible();
+  await listAction.getByRole('checkbox').click();
+  await itemAction.getByRole('checkbox').click();
+  await expect(page.locator('[data-test="ai-assistant-continue"] button')).toBeEnabled();
+  expect(assistantDatabaseSnapshot()).toEqual(before);
+
+  await page.locator('[data-test="ai-assistant-continue"] button').click();
+  const confirmation = page.locator('[data-test="ai-assistant-confirm"]');
+  const rows = confirmation.locator('.assistant__confirm-list > li');
+  await expect(rows).toHaveCount(2);
+  await page.locator('[data-test="ai-assistant-confirm-submit"] button').click();
+  await expect(rows.nth(0).locator('.assistant__confirm-status').first()).toHaveText('Completada');
+  await expect(rows.nth(1).locator('.assistant__confirm-status').first()).toHaveText('Completada');
+
+  expect(actionRequests.map(({ actionId }) => actionId)).toEqual([ACTION_IDS[0], ACTION_IDS[1]]);
+  expect(actionRequests.map(({ pathname }) => pathname)).toEqual([
+    '/api/shopping/lists',
+    expect.stringMatching(/^\/api\/shopping\/lists\/[^/]+\/items$/)
+  ]);
+  const savedLists = await shoppingListsByName(page, token, 'Lista de dominio QA');
+  expect(savedLists).toHaveLength(1);
+  const savedList = await page.request.get(
+    `/api/shopping/lists/${encodeURIComponent(savedLists[0].id)}`,
+    { headers: { authorization: `Bearer ${token}` } }
+  );
+  expect(savedList.status()).toBe(200);
+  expect((await savedList.json()).data.items).toEqual(
+    expect.arrayContaining([expect.objectContaining({ name: 'Manzanas QA', quantity: 2 })])
+  );
+  const after = assistantDatabaseSnapshot();
+  expect(after.shopping_lists).toHaveLength((before.shopping_lists ?? []).length + 1);
+  expect(after.shopping_list_items).toHaveLength((before.shopping_list_items ?? []).length + 1);
+  expect(after.ai_jobs ?? []).toEqual(before.ai_jobs ?? []);
+
+  await page.reload();
+  expect(await shoppingListsByName(page, token, 'Lista de dominio QA')).toHaveLength(1);
+});
+
 test('asistente global: actualiza solo la tarea resuelta y persiste tras recargar', async ({
   page
 }, testInfo) => {
