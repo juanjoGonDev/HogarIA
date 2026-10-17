@@ -2482,6 +2482,7 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
   readonly mealShoppingApprovals = signal<Record<string, HouseholdMealShoppingApproval>>({});
   readonly mealShoppingErrors = signal<Record<string, TranslationKey | null>>({});
   private proposalHouseholdId: string | null = null;
+  private readonly closeConfirmationPending = signal(false);
 
   readonly selectedActions = computed(
     () => this.plan()?.actions.filter((action) => action.selected) ?? []
@@ -2531,7 +2532,7 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
       .subscribe(() => this.cancelVoice());
     this.pantry.loadCategories();
     effect(() => {
-      if (this.modalOpen()) this.lockBodyScroll();
+      if (this.modalOpen() || this.closeConfirmationPending()) this.lockBodyScroll();
       else this.restoreBodyScroll();
     });
   }
@@ -5339,6 +5340,7 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
   }
 
   async requestClose(): Promise<void> {
+    if (this.closeConfirmationPending()) return;
     this.cancelVoice();
     if (!this.prompt().trim() && !this.plan()) {
       this.modalOpen.set(false);
@@ -5347,24 +5349,30 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
     }
     const hasExecutionResults =
       this.plan()?.actions.some((action) => action.status !== 'pending') ?? false;
+    this.closeConfirmationPending.set(true);
     this.modalOpen.set(false);
-    const discard = await this.confirmService.confirm({
-      title: this.i18n.t(
-        hasExecutionResults
-          ? 'ai_assistant.close_after_execution_title'
-          : 'ai_assistant.discard_title'
-      ),
-      message: this.i18n.t(
-        hasExecutionResults
-          ? 'ai_assistant.close_after_execution_copy'
-          : 'ai_assistant.discard_copy'
-      ),
-      confirmText: this.i18n.t(
-        hasExecutionResults ? 'ai_assistant.close_action' : 'ai_assistant.discard_action'
-      ),
-      cancelText: this.i18n.t('ai_assistant.cancel'),
-      variant: hasExecutionResults ? 'primary' : 'danger'
-    });
+    let discard: boolean;
+    try {
+      discard = await this.confirmService.confirm({
+        title: this.i18n.t(
+          hasExecutionResults
+            ? 'ai_assistant.close_after_execution_title'
+            : 'ai_assistant.discard_title'
+        ),
+        message: this.i18n.t(
+          hasExecutionResults
+            ? 'ai_assistant.close_after_execution_copy'
+            : 'ai_assistant.discard_copy'
+        ),
+        confirmText: this.i18n.t(
+          hasExecutionResults ? 'ai_assistant.close_action' : 'ai_assistant.discard_action'
+        ),
+        cancelText: this.i18n.t('ai_assistant.cancel'),
+        variant: hasExecutionResults ? 'primary' : 'danger'
+      });
+    } finally {
+      this.closeConfirmationPending.set(false);
+    }
     if (discard) {
       this.requestSubscription?.unsubscribe();
       this.mealRequestSubscriptions.forEach((subscription) => subscription.unsubscribe());

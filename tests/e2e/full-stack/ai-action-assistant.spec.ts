@@ -1530,6 +1530,81 @@ test('asistente global: refina un grupo de dominio o el lote completo sin escrib
   expect(await shoppingListsByName(page, token, 'Lista QA confirmada')).toEqual([]);
 });
 
+test('asistente global: cancelar el cierre conserva el borrador ante botón, Escape y backdrop', async ({
+  page
+}, testInfo) => {
+  await page.route('**/api/ai/assistant/proposals', async (route) => {
+    await route.fulfill({ json: proposal() });
+  });
+
+  await registerUser(page, 'Asistente descartar borrador E2E');
+  await createHousehold(page, 'Hogar sintético descartar borrador');
+  await page.goto('/dashboard');
+  const bodyOverflowBeforeAssistant = await page
+    .locator('body')
+    .evaluate((body) => body.style.overflow);
+  await page.locator('[data-test="ai-assistant-open"]').click();
+
+  const assistantDialog = page.getByRole('dialog', { name: 'Asistente de acciones' });
+  const databaseBeforeProposal = assistantDatabaseSnapshot();
+  await page.locator('[data-test="ai-assistant-prompt"]').fill('Añade lentejas a la despensa.');
+  await page.locator('[data-test="ai-assistant-submit"] button').click();
+  await expect(page.locator('[data-test="ai-assistant-review"]')).toBeVisible();
+  await expect(page.locator(`[data-action-id="${ACTION_IDS[0]}"]`)).toContainText('garbanzos');
+  expect(assistantDatabaseSnapshot()).toEqual(databaseBeforeProposal);
+
+  const discardDialog = page.getByRole('dialog', { name: '¿Descartar este borrador?' });
+  await page.getByRole('button', { name: 'Cerrar asistente' }).click();
+  await expect(discardDialog).toBeVisible();
+  await expect
+    .poll(() => page.locator('body').evaluate((body) => body.style.overflow))
+    .toBe('hidden');
+  await capture(page, testInfo, 'assistant-dismissal-confirmation');
+  await discardDialog.getByRole('button', { name: 'Cancelar' }).click();
+  await expect(assistantDialog).toBeVisible();
+  await expect
+    .poll(() => page.locator('body').evaluate((body) => body.style.overflow))
+    .toBe('hidden');
+  await expect(page.locator('[data-test="ai-assistant-review"]')).toBeVisible();
+
+  await page.keyboard.press('Escape');
+  await expect(discardDialog).toBeVisible();
+  await expect
+    .poll(() => page.locator('body').evaluate((body) => body.style.overflow))
+    .toBe('hidden');
+  await discardDialog.getByRole('button', { name: 'Cancelar' }).click();
+  await expect(assistantDialog).toBeVisible();
+  await expect
+    .poll(() => page.locator('body').evaluate((body) => body.style.overflow))
+    .toBe('hidden');
+  await expect(page.locator('[data-test="ai-assistant-review"]')).toBeVisible();
+
+  await page
+    .locator('.modal-overlay')
+    .last()
+    .click({ position: { x: 4, y: 4 } });
+  await expect(discardDialog).toBeVisible();
+  await expect
+    .poll(() => page.locator('body').evaluate((body) => body.style.overflow))
+    .toBe('hidden');
+  await discardDialog.getByRole('button', { name: 'Cancelar' }).click();
+  await expect(assistantDialog).toBeVisible();
+  await expect
+    .poll(() => page.locator('body').evaluate((body) => body.style.overflow))
+    .toBe('hidden');
+  await expect(page.locator('[data-test="ai-assistant-review"]')).toBeVisible();
+  expect(assistantDatabaseSnapshot()).toEqual(databaseBeforeProposal);
+
+  await page.getByRole('button', { name: 'Cerrar asistente' }).click();
+  await expect(discardDialog).toBeVisible();
+  await discardDialog.getByRole('button', { name: 'Descartar borrador' }).click();
+  await expect(assistantDialog).toBeHidden();
+  await expect
+    .poll(() => page.locator('body').evaluate((body) => body.style.overflow))
+    .toBe(bodyOverflowBeforeAssistant);
+  expect(assistantDatabaseSnapshot()).toEqual(databaseBeforeProposal);
+});
+
 test('asistente global: ejecuta acciones de todos los dominios solo tras confirmar', async ({
   page
 }) => {
