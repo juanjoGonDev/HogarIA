@@ -37,6 +37,7 @@ const FOCUSABLE_SELECTOR =
         [class]="getModalClasses()"
         role="dialog"
         [attr.aria-label]="title"
+        [attr.aria-describedby]="descriptionId || null"
         tabindex="-1"
       >
         <div class="modal__header">
@@ -223,6 +224,7 @@ export class ModalComponent implements OnChanges, AfterViewChecked, OnDestroy {
 
   @Input() isOpen = false;
   @Input() title = '';
+  @Input() descriptionId: string | null = null;
   @Input() size: ModalSize = 'md';
   @Input() closable = true;
   @Input() showFooter = false;

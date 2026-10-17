@@ -50,10 +50,23 @@ describe('ConfirmDialogComponent', () => {
     expect(confirmService.accept).toHaveBeenCalledTimes(1);
   });
 
+  it('associates a confirmation warning with its dialog description', () => {
+    const dialog = fixture.nativeElement.querySelector('[role="dialog"]') as HTMLElement;
+    const message = fixture.nativeElement.querySelector('.confirm__message') as HTMLElement;
+
+    expect(message.id).toBe('confirm-dialog-message');
+    expect(dialog.getAttribute('aria-describedby')).toBe('confirm-dialog-message');
+  });
+
   it('handles a request without optional message or button text', () => {
     request.set({ title: 'Confirm without details' });
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('Confirm without details');
     expect(fixture.nativeElement.querySelector('.confirm__message')).toBeNull();
+    expect(
+      (fixture.nativeElement.querySelector('[role="dialog"]') as HTMLElement).hasAttribute(
+        'aria-describedby'
+      )
+    ).toBeFalse();
   });
 });

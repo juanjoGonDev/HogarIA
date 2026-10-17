@@ -1640,6 +1640,11 @@ test('asistente global: cancelar el cierre conserva el borrador ante botón, Esc
   const discardDialog = page.getByRole('dialog', { name: '¿Descartar este borrador?' });
   await page.getByRole('button', { name: 'Cerrar asistente' }).click();
   await expect(discardDialog).toBeVisible();
+  const discardDescriptionId = await discardDialog.getAttribute('aria-describedby');
+  expect(discardDescriptionId).toBeTruthy();
+  const discardDescription = page.locator(`[id="${discardDescriptionId}"]`);
+  await expect(discardDescription).toBeVisible();
+  await expect(discardDescription).not.toBeEmpty();
   await expect
     .poll(() => page.locator('body').evaluate((body) => body.style.overflow))
     .toBe('hidden');

@@ -18,11 +18,14 @@ import { TranslatePipe } from '../../../../core/pipes/translate.pipe';
     <app-modal
       [isOpen]="!!confirmService.request()"
       [title]="confirmService.request()?.title || ('common.confirmar' | t)"
+      [descriptionId]="confirmService.request()?.message ? 'confirm-dialog-message' : null"
       size="sm"
       (onClose)="confirmService.cancel()"
     >
       <div class="confirm" *ngIf="confirmService.request() as request">
-        <p class="confirm__message" *ngIf="request.message">{{ request.message }}</p>
+        <p id="confirm-dialog-message" class="confirm__message" *ngIf="request.message">
+          {{ request.message }}
+        </p>
 
         <div class="confirm__actions">
           <app-button variant="ghost" [touchTarget]="true" (onClick)="confirmService.cancel()">
@@ -39,20 +42,22 @@ import { TranslatePipe } from '../../../../core/pipes/translate.pipe';
       </div>
     </app-modal>
   `,
-  styles: [`
-    .confirm__message {
-      margin: 0 0 var(--space-5);
-      font-size: var(--text-sm);
-      color: var(--text-secondary);
-      line-height: 1.5;
-    }
+  styles: [
+    `
+      .confirm__message {
+        margin: 0 0 var(--space-5);
+        font-size: var(--text-sm);
+        color: var(--text-secondary);
+        line-height: 1.5;
+      }
 
-    .confirm__actions {
-      display: flex;
-      justify-content: flex-end;
-      gap: var(--space-3);
-    }
-  `]
+      .confirm__actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: var(--space-3);
+      }
+    `
+  ]
 })
 export class ConfirmDialogComponent {
   confirmService = inject(ConfirmService);
