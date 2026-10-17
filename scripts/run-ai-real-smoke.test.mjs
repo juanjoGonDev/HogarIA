@@ -238,7 +238,7 @@ test('recipe-only coordinator pins a strict generated_recipe smoke to one comple
   });
 });
 
-test('assistant-only coordinator requires ten strict action-plan completions and cleans credentials', async () => {
+test('assistant-only coordinator requires the complete strict action-plan matrix and cleans credentials', async () => {
   const events = [];
   const successMessages = [];
   const errors = [];

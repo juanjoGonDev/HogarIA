@@ -1,6 +1,9 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { AI_LIVE_SMOKE_DEADLINES } from './ai-live-smoke-contract.mjs';
+import {
+  AI_LIVE_ASSISTANT_ACTION_KINDS,
+  AI_LIVE_SMOKE_DEADLINES
+} from './ai-live-smoke-contract.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const runner = fileURLToPath(new URL('./run-isolated-playwright.mjs', import.meta.url));
@@ -59,7 +62,26 @@ const SAFE_ASSISTANT_PROPOSAL_CHECKS = Object.freeze([
   'payload-unit',
   'questions'
 ]);
-
+const SAFE_ASSISTANT_ACTION_STATE_FIELDS = Object.freeze([
+  'domain',
+  'selection',
+  'status',
+  'dependencies',
+  'payload'
+]);
+const SAFE_ASSISTANT_SEMANTIC_CHECKS = Object.freeze([
+  'pantry-name',
+  'pantry-quantity',
+  'pantry-unit',
+  'pantry-category',
+  'task-date',
+  'event-date',
+  'event-time',
+  'shopping-dependency',
+  'recipe-name',
+  'recipe-ingredients',
+  'meal-week'
+]);
 const SAFE_RUNNER_PROGRESS = Object.freeze({
   'run-dir-created': 'Entorno aislado temporal preparado.',
   'isolated-stack-starting': 'Iniciando la aplicación aislada.',
@@ -145,6 +167,25 @@ const SAFE_RUNNER_PROGRESS = Object.freeze({
     'Último hito E2E: iniciando la cuenta sintética del asistente.',
   'test-phase:assistant-only-configured':
     'Último hito E2E: proveedor temporal preparado para el asistente.',
+  'test-phase:assistant-only-household-ready':
+    'Último hito E2E: hogar sintético preparado para la matriz.',
+  'test-phase:assistant-only-pantry-seeded':
+    'Último hito E2E: target sintético de despensa preparado.',
+  'test-phase:assistant-only-shopping-list-seeded':
+    'Último hito E2E: target sintético de lista preparado.',
+  'test-phase:assistant-only-shopping-item-seeded':
+    'Último hito E2E: target sintético de compra preparado.',
+  'test-phase:assistant-only-task-seeded': 'Último hito E2E: target sintético de tarea preparado.',
+  'test-phase:assistant-only-calendar-seeded':
+    'Último hito E2E: target sintético de calendario preparado.',
+  'test-phase:assistant-only-recipe-seeded':
+    'Último hito E2E: target sintético de receta preparado.',
+  'test-phase:assistant-only-snapshot-start':
+    'Último hito E2E: registrando snapshot de lectura inicial.',
+  'test-phase:assistant-only-snapshot-captured':
+    'Último hito E2E: snapshot de lectura inicial registrado.',
+  'test-phase:assistant-only-baseline-ready':
+    'Último hito E2E: snapshot SQLite inicial registrado.',
   'test-phase:assistant-proposal-request-start':
     'Último hito E2E: iniciando propuesta transitoria del asistente.',
   'test-phase:assistant-proposal-response-ok':
@@ -175,8 +216,32 @@ const SAFE_RUNNER_PROGRESS = Object.freeze({
       `Último hito E2E: la comprobación segura ${check} de la propuesta no pasó.`
     ])
   ),
+  'test-phase:assistant-proposal-action-kinds-match':
+    'Último hito E2E: los tipos de acción coinciden con el escenario.',
+  'test-phase:assistant-proposal-action-kinds-mismatch':
+    'Último hito E2E: los tipos de acción no coinciden con el escenario.',
+  'test-phase:assistant-proposal-action-state-valid':
+    'Último hito E2E: las acciones siguen pendientes y sin seleccionar.',
+  'test-phase:assistant-proposal-action-state-invalid':
+    'Último hito E2E: una acción no quedó pendiente y sin seleccionar.',
+  ...Object.fromEntries(
+    SAFE_ASSISTANT_SEMANTIC_CHECKS.map((check) => [
+      `test-phase:assistant-proposal-semantic-invalid-${check}`,
+      `Último hito E2E: falló la comprobación semántica sintética ${check}.`
+    ])
+  ),
+  'test-phase:assistant-proposal-clarification-valid':
+    'Último hito E2E: la petición ambigua quedó sin acciones y con pregunta.',
+  'test-phase:assistant-proposal-clarification-invalid':
+    'Último hito E2E: la petición ambigua no pidió aclaración segura.',
+  'test-phase:assistant-proposal-semantics-valid':
+    'Último hito E2E: se validaron fecha, cantidad y campos de acción.',
+  'test-phase:assistant-proposal-snapshot-unchanged':
+    'Último hito E2E: la propuesta no alteró ninguna tabla SQLite.',
+  'test-phase:assistant-proposal-snapshot-changed':
+    'Último hito E2E: la propuesta alteró una tabla SQLite.',
   'test-phase:assistant-proposals-read-only-validated':
-    'Último hito E2E: las diez propuestas no escribieron datos.',
+    'Último hito E2E: la matriz de propuestas no escribió datos.',
   'test-phase:connection-tested': 'Último hito E2E: conexión IA comprobada.',
   'test-phase:multiple-recipes-request-start': 'Último hito E2E: generando recetas múltiples.',
   'test-phase:multiple-recipes-response-ok': 'Último hito E2E: API devolvió recetas múltiples.',
@@ -251,6 +316,55 @@ const SAFE_RUNNER_PROGRESS = Object.freeze({
     'Último hito E2E: los tickets seleccionados y su revisión quedaron verificados.',
   'runner-error': 'Falló una fase del entorno E2E; se está limpiando.'
 });
+
+function safeRunnerProgressMessage(phase) {
+  if (typeof phase !== 'string') return undefined;
+  const staticMessage = SAFE_RUNNER_PROGRESS[phase];
+  if (staticMessage) return staticMessage;
+
+  const prefix = 'test-phase:assistant-proposal-action-kinds-mismatch-';
+  if (phase.startsWith(prefix)) {
+    const summary = phase.slice(prefix.length);
+    if (summary === 'none')
+      return 'Último hito E2E: WebAPI no devolvió acciones para el escenario.';
+    if (summary === 'none-with-questions') {
+      return 'Último hito E2E: WebAPI pidió aclaración y no propuso acciones para el escenario.';
+    }
+    if (summary === 'unrecognized') {
+      return 'Último hito E2E: WebAPI devolvió un tipo de acción no reconocido.';
+    }
+    if (summary === 'too-many') {
+      return 'Último hito E2E: WebAPI devolvió más acciones que tipos allowlist.';
+    }
+
+    const kinds = summary.split('|');
+    if (
+      kinds.length > AI_LIVE_ASSISTANT_ACTION_KINDS.length ||
+      kinds.some((kind) => !AI_LIVE_ASSISTANT_ACTION_KINDS.includes(kind))
+    ) {
+      return undefined;
+    }
+    return `Último hito E2E: tipos allowlist devueltos por WebAPI no coinciden: ${kinds.join(', ')}.`;
+  }
+
+  const statePrefix = 'test-phase:assistant-proposal-action-state-invalid:';
+  if (!phase.startsWith(statePrefix)) return undefined;
+  const [kind, fieldsText, ...extra] = phase.slice(statePrefix.length).split(':');
+  const fields = fieldsText?.split('|') ?? [];
+  if (
+    extra.length > 0 ||
+    (!AI_LIVE_ASSISTANT_ACTION_KINDS.includes(kind) && kind !== 'unrecognized') ||
+    fields.length === 0 ||
+    fields.length > SAFE_ASSISTANT_ACTION_STATE_FIELDS.length ||
+    fields.some((field) => !SAFE_ASSISTANT_ACTION_STATE_FIELDS.includes(field))
+  ) {
+    return undefined;
+  }
+  if (kind === 'unrecognized') {
+    return `Último hito E2E: estado no válido en acción con tipo no reconocido (${fields.join(', ')}).`;
+  }
+  return `Último hito E2E: estado de ${kind} no válido: ${fields.join(', ')}.`;
+}
 
 /** Send cleanup confirmation and close the dedicated IPC channel so the child can exit. */
 export function sendAiLiveSmokeRunnerCompletion({ processLike = process, cleaned } = {}) {
@@ -359,7 +473,7 @@ export function runAiLiveSmokeRunner({
         runnerCleaned = message.cleaned;
       }
       if (message?.type === AI_LIVE_SMOKE_RUNNER_PROGRESS_MESSAGE) {
-        const safeMessage = SAFE_RUNNER_PROGRESS[message.phase];
+        const safeMessage = safeRunnerProgressMessage(message.phase);
         if (safeMessage) report(safeMessage);
       }
     });

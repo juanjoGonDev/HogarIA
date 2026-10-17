@@ -151,7 +151,7 @@ test('assistant-only smoke requires its isolated mode and rejects every competin
   );
 });
 
-test('assistant-only success requires ten consecutive strict action-plan responses and cleanup', () => {
+test('assistant-only success requires the complete strict action-plan matrix and cleanup', () => {
   const runnerExit = { code: 0, timedOut: false, cancelled: false, runnerCleaned: true };
   const call = {
     status: 200,

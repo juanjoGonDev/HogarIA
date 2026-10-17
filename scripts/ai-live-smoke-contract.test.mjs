@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 import {
+  AI_LIVE_ASSISTANT_ACTION_KINDS,
   AI_LIVE_SMOKE_DEADLINES,
   assertAiLiveSmokeDeadlineContract
 } from './ai-live-smoke-contract.mjs';
@@ -19,6 +20,11 @@ test('real smoke deadlines leave a strictly increasing margin across each bounda
   assert.ok(AI_LIVE_SMOKE_DEADLINES.watchdogMs > AI_LIVE_SMOKE_DEADLINES.globalMs);
   assert.equal(AI_LIVE_SMOKE_DEADLINES.recipeMaxTokens, 4096);
   assert.ok(AI_LIVE_SMOKE_COMPLETION_BUDGET <= 10);
+});
+
+test('assistant live smoke contract lists all supported action kinds once', () => {
+  assert.equal(AI_LIVE_ASSISTANT_ACTION_KINDS.length, 13);
+  assert.equal(new Set(AI_LIVE_ASSISTANT_ACTION_KINDS).size, 13);
 });
 
 test('deadline contract rejects a request layer that can expire before its inner dependency', () => {

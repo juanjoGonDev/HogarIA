@@ -190,6 +190,39 @@ test('runner exposes only allowlisted progress labels from its child', async () 
   });
   child.emit('message', {
     type: AI_LIVE_SMOKE_RUNNER_PROGRESS_MESSAGE,
+    phase:
+      'test-phase:assistant-proposal-action-kinds-mismatch-pantry.add_ingredient|shopping.add_item',
+    secret: 'must-not-be-forwarded'
+  });
+  child.emit('message', {
+    type: AI_LIVE_SMOKE_RUNNER_PROGRESS_MESSAGE,
+    phase:
+      'test-phase:assistant-proposal-action-kinds-mismatch-pantry.add_ingredient|prompt-secret',
+    secret: 'must-not-be-forwarded'
+  });
+  child.emit('message', {
+    type: AI_LIVE_SMOKE_RUNNER_PROGRESS_MESSAGE,
+    phase: 'test-phase:assistant-proposal-action-kinds-mismatch-none-with-questions',
+    secret: 'must-not-be-forwarded'
+  });
+  child.emit('message', {
+    type: AI_LIVE_SMOKE_RUNNER_PROGRESS_MESSAGE,
+    phase:
+      'test-phase:assistant-proposal-action-state-invalid:shopping.add_item:dependencies|payload',
+    secret: 'must-not-be-forwarded'
+  });
+  child.emit('message', {
+    type: AI_LIVE_SMOKE_RUNNER_PROGRESS_MESSAGE,
+    phase: 'test-phase:assistant-proposal-action-state-invalid:shopping.add_item:prompt-secret',
+    secret: 'must-not-be-forwarded'
+  });
+  child.emit('message', {
+    type: AI_LIVE_SMOKE_RUNNER_PROGRESS_MESSAGE,
+    phase: 'test-phase:assistant-proposal-semantic-invalid-shopping-dependency',
+    secret: 'must-not-be-forwarded'
+  });
+  child.emit('message', {
+    type: AI_LIVE_SMOKE_RUNNER_PROGRESS_MESSAGE,
     phase: 'test-phase:assistant-proposal-error-secret-value',
     secret: 'must-not-be-forwarded'
   });
@@ -288,7 +321,11 @@ test('runner exposes only allowlisted progress labels from its child', async () 
     'Último hito E2E: propuesta falló con código API AI_PROVIDER_ERROR.',
     'Último hito E2E: el campo category del payload no pasó la validación (invalid_type).',
     'Último hito E2E: la comprobación segura action-count de la propuesta no pasó.',
-    'Último hito E2E: las diez propuestas no escribieron datos.',
+    'Último hito E2E: tipos allowlist devueltos por WebAPI no coinciden: pantry.add_ingredient, shopping.add_item.',
+    'Último hito E2E: WebAPI pidió aclaración y no propuso acciones para el escenario.',
+    'Último hito E2E: estado de shopping.add_item no válido: dependencies, payload.',
+    'Último hito E2E: falló la comprobación semántica sintética shopping-dependency.',
+    'Último hito E2E: la matriz de propuestas no escribió datos.',
     'Último hito E2E: la respuesta del proveedor no fue JSON utilizable.',
     'Último hito E2E: el borrador generado no contenía una receta utilizable.',
     'Último hito E2E: la receta generada no cumplió el esquema completo.',

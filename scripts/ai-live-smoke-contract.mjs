@@ -8,6 +8,22 @@ export const AI_LIVE_SMOKE_DEADLINES = Object.freeze({
   watchdogMs: 22 * 60_000
 });
 
+export const AI_LIVE_ASSISTANT_ACTION_KINDS = Object.freeze([
+  'pantry.add_ingredient',
+  'pantry.update_ingredient',
+  'shopping.create_list',
+  'shopping.add_item',
+  'shopping.update_list',
+  'shopping.update_item',
+  'household.create_task',
+  'household.update_task',
+  'household.plan_meals',
+  'calendar.create_event',
+  'calendar.update_event',
+  'recipes.create_draft',
+  'recipes.update_content'
+]);
+
 const DEADLINE_KEYS = ['configMs', 'proxyMs', 'requestMs', 'testMs', 'globalMs', 'watchdogMs'];
 
 export function assertAiLiveSmokeDeadlineContract(deadlines = AI_LIVE_SMOKE_DEADLINES) {
