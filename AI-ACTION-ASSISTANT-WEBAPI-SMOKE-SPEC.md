@@ -7,6 +7,7 @@
 
 - Usar solo el WebAPI local activo y su proveedor externo ya configurado; crear cuenta/configuración/token temporales dentro del runner aislado.
 - Usar SQLite temporal y nombres sintéticos. No leer, enviar ni persistir datos reales de hogar, despensa o recetas.
+- Decisión de contrato interno: pedir `actions[].payloadJson` como JSON en texto para mantener pequeño el esquema estricto del proveedor; parsearlo y validarlo con el esquema Zod completo antes de resolver o devolver acciones. La API pública sigue entregando `payload` como objeto.
 - Desactivar temporalmente el logging/captura de detalles autorizado por el usuario; registrar sus valores originales en memoria y restaurarlos/verificarlos en `finally`. Grabación de sesión y HTML diagnóstico siguen apagados.
 - No guardar ni imprimir bearer, prompts, respuesta completa, secretos, contenido personal ni capturas del smoke real.
 
