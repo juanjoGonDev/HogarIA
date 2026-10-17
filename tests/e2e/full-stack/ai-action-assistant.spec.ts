@@ -2829,6 +2829,7 @@ test('asistente global: rechazar no escribe y renombrar una lista solo persiste 
     version: seededList.version,
     snapshot: { name: seededList.name, store: seededList.store }
   });
+  const beforeAssistant = assistantDatabaseSnapshot();
 
   const readList = async () => {
     const response = await page.request.get(`/api/shopping/lists/${list.id}`, {
@@ -2843,6 +2844,7 @@ test('asistente global: rechazar no escribe y renombrar una lista solo persiste 
   await page.locator('[data-test="ai-assistant-submit"] button').click();
   const review = page.locator('[data-test="ai-assistant-review"]');
   await expect(review).toBeVisible();
+  expect(assistantDatabaseSnapshot()).toEqual(beforeAssistant);
   await expect(review.locator('[data-test="ai-assistant-shopping-target"]')).toContainText(
     'Compra privada QA'
   );
@@ -2854,6 +2856,7 @@ test('asistente global: rechazar no escribe y renombrar una lista solo persiste 
   await expect(page.getByRole('dialog', { name: '¿Descartar este borrador?' })).toBeVisible();
   await page.getByRole('button', { name: 'Descartar borrador' }).click();
   await expect(review).not.toBeVisible();
+  expect(assistantDatabaseSnapshot()).toEqual(beforeAssistant);
   expect(await readList()).toMatchObject({ name: 'Compra privada QA', store: 'Lidl' });
   expect(assistantWrites).toEqual([]);
 
@@ -2861,6 +2864,7 @@ test('asistente global: rechazar no escribe y renombrar una lista solo persiste 
   await page.locator('[data-test="ai-assistant-prompt"]').fill('Renombra Compra privada QA.');
   await page.locator('[data-test="ai-assistant-submit"] button').click();
   await expect(review).toBeVisible();
+  expect(assistantDatabaseSnapshot()).toEqual(beforeAssistant);
   const actionDetails = page.locator(
     '[data-test="ai-assistant-action-details-88888888-8888-4888-8888-888888888888"]'
   );
@@ -2885,6 +2889,7 @@ test('asistente global: rechazar no escribe y renombrar una lista solo persiste 
   await expect(editFields.nth(1)).toBeFocused();
   expect(await readList()).toMatchObject({ name: 'Compra privada QA', store: 'Lidl' });
   expect(assistantWrites).toEqual([]);
+  expect(assistantDatabaseSnapshot()).toEqual(beforeAssistant);
   await capture(page, testInfo, 'shopping-update-review');
 
   await page.getByRole('button', { name: 'Seleccionar todas' }).click();
@@ -2895,6 +2900,7 @@ test('asistente global: rechazar no escribe y renombrar una lista solo persiste 
   await expect(confirmation).toContainText('Alcampo');
   expect(await readList()).toMatchObject({ name: 'Compra privada QA', store: 'Lidl' });
   expect(assistantWrites).toEqual([]);
+  expect(assistantDatabaseSnapshot()).toEqual(beforeAssistant);
   await capture(page, testInfo, 'shopping-update-confirm');
 
   await page.locator('[data-test="ai-assistant-confirm-submit"] button').click();
