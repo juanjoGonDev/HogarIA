@@ -1432,6 +1432,56 @@ describe('AiActionAssistantDialogComponent', () => {
     expect(component.prompt()).toBe('Añade 500 g de garbanzos');
   });
 
+  it('keeps the final speech result emitted after stopping recognition', () => {
+    const recognitions = mountWithSpeech(FakeSpeechRecognition);
+    component.voiceConsent.set(true);
+    component.startVoice();
+    const recognition = recognitions[0];
+    recognition.onresult?.({
+      results: [{ 0: { transcript: 'Añade avena' }, isFinal: false }]
+    });
+
+    component.stopVoice();
+    expect(recognition.stopped).toBeTrue();
+    recognition.onresult?.({
+      results: [{ 0: { transcript: 'Añade 500 g de avena' }, isFinal: true }]
+    });
+
+    expect(component.prompt()).toBe('Añade 500 g de avena');
+  });
+
+  it('aborts pending finalization and ignores any later speech result when cancelled', () => {
+    const recognitions = mountWithSpeech(FakeSpeechRecognition);
+    component.voiceConsent.set(true);
+    component.startVoice();
+    const recognition = recognitions[0];
+
+    component.stopVoice();
+    component.cancelVoice();
+    recognition.onresult?.({
+      results: [{ 0: { transcript: 'No debe guardarse' }, isFinal: true }]
+    });
+
+    expect(recognition.aborted).toBeTrue();
+    expect(component.prompt()).toBe('');
+  });
+
+  it('ignores end events from a cancelled recognition after a new voice session starts', () => {
+    const recognitions = mountWithSpeech(FakeSpeechRecognition);
+    component.voiceConsent.set(true);
+    component.startVoice();
+    const cancelledRecognition = recognitions[0];
+    component.cancelVoice();
+
+    component.startVoice();
+    expect(component.voiceState()).toBe('listening');
+    expect(component.supportsPause()).toBeTrue();
+    cancelledRecognition.onend?.();
+
+    expect(component.voiceState()).toBe('listening');
+    expect(component.supportsPause()).toBeTrue();
+  });
+
   it('aborts active speech recognition as soon as voice consent is revoked', () => {
     const recognitions = mountWithSpeech(FakeSpeechRecognition);
     component.voiceConsent.set(true);

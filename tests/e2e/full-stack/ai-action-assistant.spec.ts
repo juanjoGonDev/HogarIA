@@ -10,6 +10,13 @@ import { shoppingNewListAction } from '../helpers/shopping-ui';
 const TOKEN_KEY = 'hogar:v1:auth_token';
 const SCREENSHOT_DIR = process.env.E2E_SCREENSHOT_DIR;
 
+type BrowserSpeechStubControl = {
+  stopped: boolean;
+  aborted: boolean;
+  emitFinal(transcript: string): void;
+  finish(): void;
+};
+
 // Intercept only the deterministic AI response; domain writes still reach the real backend.
 // Blocking the PWA worker lets Playwright observe and fulfill that API request reliably.
 test.use({ serviceWorkers: 'block' });
@@ -665,6 +672,56 @@ async function tokenOf(page: Page): Promise<string> {
   return token as string;
 }
 
+async function installSpeechRecognitionStub(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    type SpeechResult = { isFinal: boolean; 0?: { transcript?: string } };
+    type SpeechEvent = { results: ArrayLike<SpeechResult> };
+    class FakeSpeechRecognition {
+      continuous = false;
+      interimResults = false;
+      lang = '';
+      stopped = false;
+      aborted = false;
+      onresult: ((event: SpeechEvent) => void) | null = null;
+      onerror: ((event: { error?: string }) => void) | null = null;
+      onend: (() => void) | null = null;
+
+      start(): void {
+        Object.defineProperty(window, '__assistantSpeechRecognition', {
+          configurable: true,
+          value: this
+        });
+      }
+
+      stop(): void {
+        this.stopped = true;
+      }
+
+      abort(): void {
+        this.aborted = true;
+      }
+
+      pause(): void {}
+
+      resume(): void {}
+
+      emitFinal(transcript: string): void {
+        this.onresult?.({ results: [{ 0: { transcript }, isFinal: true }] });
+      }
+
+      finish(): void {
+        this.onend?.();
+      }
+    }
+
+    Object.defineProperty(window, 'SpeechRecognition', {
+      configurable: true,
+      writable: true,
+      value: FakeSpeechRecognition
+    });
+  });
+}
+
 async function pantryByName(page: Page, token: string, name: string): Promise<any[]> {
   const response = await page.request.get(
     `/api/pantry/ingredients?search=${encodeURIComponent(name)}&page=1&pageSize=100`,
@@ -828,6 +885,136 @@ function contrastRatio(foreground: string, background: string): number {
   const darker = Math.min(foregroundLuminance, backgroundLuminance);
   return (lighter + 0.05) / (darker + 0.05);
 }
+
+test('asistente global: conserva el resultado final al parar dictado y descarta el cancelado', async ({
+  page
+}, testInfo) => {
+  await installSpeechRecognitionStub(page);
+  const pageErrors: string[] = [];
+  let proposalRequests = 0;
+  page.on('pageerror', (error) => pageErrors.push(`${error.name}: ${error.message}`));
+  page.on('request', (request) => {
+    if (
+      request.method() === 'POST' &&
+      new URL(request.url()).pathname === '/api/ai/assistant/proposals'
+    ) {
+      proposalRequests += 1;
+    }
+  });
+
+  const viewport =
+    testInfo.project.name === 'chromium'
+      ? { width: 1440, height: 900 }
+      : { width: 320, height: 568 };
+  await page.setViewportSize(viewport);
+  await registerUser(page, 'Asistente voz síntesis');
+  await createHousehold(page, 'Hogar sintético voz');
+  await page.goto('/dashboard');
+  await page.locator('[data-test="ai-assistant-open"]').click();
+
+  const dialog = page.locator('.modal[role="dialog"]');
+  const voiceControls = dialog.locator('.assistant__voice-controls');
+  const prompt = dialog.locator('[data-test="ai-assistant-prompt"]');
+  const finalizing = dialog.getByText('Finalizando el dictado…', { exact: true });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator('.assistant__voice-note')).toContainText(
+    'procesar el audio fuera de tu dispositivo'
+  );
+  await expect(voiceControls.getByRole('button', { name: 'Dictar petición' })).toBeDisabled();
+
+  await dialog.locator('.assistant__consent input').check();
+  await voiceControls.getByRole('button', { name: 'Dictar petición' }).click();
+  await expect(
+    dialog.getByRole('status').filter({ hasText: 'Escuchando; puedes corregir la transcripción' })
+  ).toBeVisible();
+  const recognitionStarted = await page.evaluate(() =>
+    Boolean(
+      (window as typeof window & { __assistantSpeechRecognition?: BrowserSpeechStubControl })
+        .__assistantSpeechRecognition
+    )
+  );
+  expect(recognitionStarted).toBe(true);
+  await voiceControls.getByRole('button', { name: 'Terminar dictado' }).click();
+  await expect(finalizing).toBeVisible();
+  await expect(voiceControls.getByRole('button', { name: 'Terminar dictado' })).toBeDisabled();
+
+  const stopped = await page.evaluate((transcript) => {
+    const recognition = (
+      window as typeof window & {
+        __assistantSpeechRecognition?: BrowserSpeechStubControl;
+      }
+    ).__assistantSpeechRecognition;
+    if (!recognition) throw new Error('Speech recognition stub was not started');
+    recognition.emitFinal(transcript);
+    return recognition.stopped;
+  }, 'Añade 500 g de avena');
+  expect(stopped).toBe(true);
+  await expect(prompt).toHaveValue('Añade 500 g de avena');
+  const statusGeometry = await finalizing.evaluate((element) => {
+    const status = element.getBoundingClientRect();
+    const body = element.closest('.modal__body')?.getBoundingClientRect();
+    const footer = element
+      .closest('.modal')
+      ?.querySelector('.modal__footer')
+      ?.getBoundingClientRect();
+    return {
+      top: status.top,
+      bottom: status.bottom,
+      bodyTop: body?.top ?? 0,
+      bodyBottom: body?.bottom ?? window.innerHeight,
+      footerTop: footer?.top ?? window.innerHeight
+    };
+  });
+  expect(statusGeometry.top).toBeGreaterThanOrEqual(statusGeometry.bodyTop - 1);
+  expect(statusGeometry.bottom).toBeLessThanOrEqual(statusGeometry.bodyBottom + 1);
+  expect(statusGeometry.bottom).toBeLessThanOrEqual(statusGeometry.footerTop + 1);
+  await capture(page, testInfo, `voice-finalizing-${viewport.width}x${viewport.height}`);
+
+  await page.evaluate(() => {
+    (
+      window as typeof window & {
+        __assistantSpeechRecognition?: BrowserSpeechStubControl;
+      }
+    ).__assistantSpeechRecognition?.finish();
+  });
+  await expect(finalizing).toHaveCount(0);
+  await expect(
+    dialog.getByRole('status').filter({ hasText: 'Escuchando; puedes corregir la transcripción' })
+  ).toHaveCount(0);
+
+  await voiceControls.getByRole('button', { name: 'Dictar petición' }).click();
+  await voiceControls.getByRole('button', { name: 'Terminar dictado' }).click();
+  await expect(finalizing).toBeVisible();
+  await voiceControls.getByRole('button', { name: 'Cancelar' }).click();
+  const aborted = await page.evaluate(() => {
+    const recognition = (
+      window as typeof window & {
+        __assistantSpeechRecognition?: BrowserSpeechStubControl;
+      }
+    ).__assistantSpeechRecognition;
+    if (!recognition) throw new Error('Speech recognition stub was not started');
+    recognition.emitFinal('No debe entrar la transcripción cancelada');
+    return recognition.aborted;
+  });
+  expect(aborted).toBe(true);
+  await expect(prompt).toHaveValue('Añade 500 g de avena');
+  await expect(finalizing).toHaveCount(0);
+  expect(proposalRequests).toBe(0);
+
+  const geometry = await dialog.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return {
+      viewportWidth: window.visualViewport?.width ?? window.innerWidth,
+      documentWidth: document.documentElement.scrollWidth,
+      left: rect.left,
+      right: rect.right
+    };
+  });
+  expect(geometry.documentWidth).toBeLessThanOrEqual(geometry.viewportWidth + 1);
+  expect(geometry.left).toBeGreaterThanOrEqual(0);
+  expect(geometry.right).toBeLessThanOrEqual(geometry.viewportWidth + 1);
+  expect(pageErrors).toEqual([]);
+});
 
 test('asistente global: lote revisable, refino aislado y aprobación selectiva real', async ({
   page

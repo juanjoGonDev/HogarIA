@@ -24,6 +24,7 @@ export const aiActionAssistantEs = {
     'No se concedió permiso para usar el micrófono. Puedes continuar escribiendo.',
   'ai_assistant.voice_error':
     'No se pudo reconocer la voz. Puedes corregir el texto o escribir la petición.',
+  'ai_assistant.voice_finalizing': 'Finalizando el dictado…',
   'ai_assistant.listening': 'Escuchando; puedes corregir la transcripción antes de enviarla.',
   'ai_assistant.processing': 'Preparando propuestas…',
   'ai_assistant.review_title': 'Revisa las propuestas',
@@ -305,6 +306,7 @@ export const aiActionAssistantEn: Record<keyof typeof aiActionAssistantEs, strin
     'Microphone permission was not granted. You can continue by typing.',
   'ai_assistant.voice_error':
     'Speech could not be recognised. You can edit the text or type your request.',
+  'ai_assistant.voice_finalizing': 'Finishing dictation…',
   'ai_assistant.listening': 'Listening; you can edit the transcript before submitting it.',
   'ai_assistant.processing': 'Preparing proposals…',
   'ai_assistant.review_title': 'Review proposals',

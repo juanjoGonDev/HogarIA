@@ -342,6 +342,18 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
               </p>
             </div>
 
+            <p
+              *ngIf="voiceState() === 'listening'"
+              class="assistant__status"
+              role="status"
+              aria-live="polite"
+            >
+              {{
+                (voiceStopPending() ? 'ai_assistant.voice_finalizing' : 'ai_assistant.listening')
+                  | t
+              }}
+            </p>
+
             <div class="assistant__voice-controls" *ngIf="voiceSupported(); else voiceFallback">
               <app-button
                 *ngIf="voiceState() !== 'listening' && voiceState() !== 'paused'"
@@ -357,6 +369,7 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
                 *ngIf="voiceState() === 'listening'"
                 variant="secondary"
                 [touchTarget]="true"
+                [disabled]="loading() || voiceStopPending()"
                 (onClick)="stopVoice()"
               >
                 {{ 'ai_assistant.voice_stop' | t }}
@@ -365,6 +378,7 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
                 *ngIf="voiceState() === 'listening' && supportsPause()"
                 variant="ghost"
                 [touchTarget]="true"
+                [disabled]="loading() || voiceStopPending()"
                 (onClick)="pauseVoice()"
                 >{{ 'ai_assistant.voice_pause' | t }}</app-button
               >
@@ -387,14 +401,6 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
               <p class="assistant__hint" role="note">{{ 'ai_assistant.voice_unsupported' | t }}</p>
             </ng-template>
 
-            <p
-              *ngIf="voiceState() === 'listening'"
-              class="assistant__status"
-              role="status"
-              aria-live="polite"
-            >
-              {{ 'ai_assistant.listening' | t }}
-            </p>
             <p *ngIf="voiceError() as voiceErrorKey" class="assistant__error" role="alert">
               {{ voiceErrorKey | t }}
             </p>
@@ -2429,6 +2435,7 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
   readonly refinementScopeValue = signal(ACTION_REFINEMENT_SCOPE);
   readonly voiceConsent = signal(false);
   readonly voiceState = signal<'idle' | 'listening' | 'paused' | 'error'>('idle');
+  readonly voiceStopPending = signal(false);
   readonly voiceError = signal<TranslationKey | null>(null);
   readonly executionMessage = signal<TranslationKey | null>(null);
   readonly completedCount = signal(0);
@@ -5141,7 +5148,7 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
   }
 
   startVoice(): void {
-    if (!this.voiceConsent()) return;
+    if (!this.voiceConsent() || this.recognition) return;
     const Recognition = this.speechRecognitionConstructor();
     if (!Recognition) {
       this.voiceError.set('ai_assistant.voice_unsupported');
@@ -5163,6 +5170,8 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
       };
       recognition.onerror = (event) => {
         if (this.recognition !== recognition || !this.voiceConsent()) return;
+        this.voiceStopPending.set(false);
+        this.supportsPause.set(false);
         this.voiceError.set(
           event.error === 'not-allowed' || event.error === 'service-not-allowed'
             ? 'ai_assistant.voice_permission'
@@ -5172,13 +5181,16 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
         this.recognition = null;
       };
       recognition.onend = () => {
+        if (this.recognition !== recognition) return;
         if (this.voiceState() === 'listening' || this.voiceState() === 'paused') {
           this.voiceState.set('idle');
         }
         this.supportsPause.set(false);
-        if (this.recognition === recognition) this.recognition = null;
+        this.voiceStopPending.set(false);
+        this.recognition = null;
       };
       this.recognition = recognition;
+      this.voiceStopPending.set(false);
       this.supportsPause.set(Boolean(recognition.pause && recognition.resume));
       recognition.start();
       this.voiceState.set('listening');
@@ -5186,18 +5198,26 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
       this.voiceError.set('ai_assistant.voice_permission');
       this.voiceState.set('error');
       this.recognition = null;
+      this.voiceStopPending.set(false);
+      this.supportsPause.set(false);
     }
   }
 
   stopVoice(): void {
-    if (!this.recognition) return;
+    if (!this.recognition || this.voiceStopPending()) return;
     const recognition = this.recognition;
-    this.recognition = null;
-    this.voiceState.set('idle');
-    recognition.stop();
+    this.voiceStopPending.set(true);
+    try {
+      recognition.stop();
+    } catch {
+      this.cancelVoice();
+      this.voiceError.set('ai_assistant.voice_error');
+      this.voiceState.set('error');
+    }
   }
 
   pauseVoice(): void {
+    if (this.voiceStopPending()) return;
     this.recognition?.pause?.();
     if (this.recognition?.pause) this.voiceState.set('paused');
   }
@@ -5212,6 +5232,7 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
     this.recognition = null;
     this.voiceState.set('idle');
     this.supportsPause.set(false);
+    this.voiceStopPending.set(false);
     recognition?.abort();
   }
 
