@@ -496,17 +496,29 @@ function recipeUpdateRefinementCandidate(
   });
 }
 
-async function startDeterministicAiProvider(initialContent: string) {
+async function startDeterministicAiProvider(initialContent: string, responseDelayMs = 0) {
   let content = initialContent;
   const requests: string[] = [];
+  const responseTimers = new Set<ReturnType<typeof setTimeout>>();
   const server = createServer((request, response) => {
     let body = '';
     request.setEncoding('utf8');
     request.on('data', (chunk: string) => (body += chunk));
     request.on('end', () => {
       requests.push(body);
-      response.writeHead(200, { 'content-type': 'application/json' });
-      response.end(JSON.stringify({ choices: [{ message: { content } }] }));
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const respond = () => {
+        if (timer) responseTimers.delete(timer);
+        if (response.destroyed) return;
+        response.writeHead(200, { 'content-type': 'application/json' });
+        response.end(JSON.stringify({ choices: [{ message: { content } }] }));
+      };
+      if (responseDelayMs > 0) {
+        timer = setTimeout(respond, responseDelayMs);
+        responseTimers.add(timer);
+      } else {
+        respond();
+      }
     });
   });
   await new Promise<void>((resolveListen, rejectListen) => {
@@ -520,10 +532,13 @@ async function startDeterministicAiProvider(initialContent: string) {
     setContent(nextContent: string) {
       content = nextContent;
     },
-    close: () =>
-      new Promise<void>((resolveClose, rejectClose) => {
+    close: () => {
+      for (const timer of responseTimers) clearTimeout(timer);
+      responseTimers.clear();
+      return new Promise<void>((resolveClose, rejectClose) => {
         server.close((error) => (error ? rejectClose(error) : resolveClose()));
-      })
+      });
+    }
   };
 }
 
@@ -4194,4 +4209,62 @@ test('asistente global: difiere el diálogo hasta abrir y reutiliza el código a
   expect(assistantChunkUrls.size).toBe(1);
   expect(scriptRequests.filter((url) => url === assistantChunkUrl)).toHaveLength(1);
   expect(scriptRequests).toHaveLength(scriptsAfterFirstOpen);
+});
+
+test('asistente global: una ráfaga de envíos genera una sola petición efímera', async ({
+  page
+}) => {
+  const provider = await startDeterministicAiProvider(pantryAddCandidate(), 500);
+  let proposalRequests = 0;
+  const proposalStatuses: number[] = [];
+  page.on('request', (request) => {
+    if (
+      request.method() === 'POST' &&
+      new URL(request.url()).pathname === '/api/ai/assistant/proposals'
+    ) {
+      proposalRequests += 1;
+    }
+  });
+  page.on('response', (response) => {
+    if (new URL(response.url()).pathname === '/api/ai/assistant/proposals') {
+      proposalStatuses.push(response.status());
+    }
+  });
+
+  try {
+    await registerUser(page, 'Asistente deduplicación E2E');
+    await createHousehold(page, 'Hogar deduplicación sintético');
+    await page.goto('/dashboard');
+    const token = await tokenOf(page);
+    await configureDeterministicAi(page, token, provider.baseUrl);
+
+    const databaseBeforeProposal = assistantDatabaseSnapshot();
+    await page.locator('[data-test="ai-assistant-open"]').click();
+    await page.locator('[data-test="ai-assistant-prompt"]').fill('Añade lentejas a la despensa.');
+    const submit = page.locator('[data-test="ai-assistant-submit"] button');
+    await expect(submit).toBeEnabled();
+    const dispatchedClicks = await submit.evaluate((button) => {
+      let count = 0;
+      const onClick = () => count++;
+      button.addEventListener('click', onClick, { capture: true });
+      for (let index = 0; index < 2; index += 1) {
+        button.dispatchEvent(
+          new MouseEvent('click', { bubbles: true, cancelable: true, view: window })
+        );
+      }
+      button.removeEventListener('click', onClick, { capture: true });
+      return count;
+    });
+    expect(dispatchedClicks).toBe(2);
+
+    await expect.poll(() => provider.requests.length).toBe(1);
+    await page.waitForTimeout(150);
+    expect(proposalRequests).toBe(1);
+    expect(provider.requests).toHaveLength(1);
+    await expect(page.locator('[data-test="ai-assistant-review"]')).toBeVisible();
+    expect(proposalStatuses).toEqual([200]);
+    expect(assistantDatabaseSnapshot()).toEqual(databaseBeforeProposal);
+  } finally {
+    await provider.close();
+  }
 });
