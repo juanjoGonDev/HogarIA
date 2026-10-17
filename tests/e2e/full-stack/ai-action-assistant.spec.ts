@@ -3092,8 +3092,15 @@ test('asistente global: cancelar propuesta/refino aborta proveedor, no escribe y
     await action.locator('[data-test="ai-assistant-refine"] button').click();
     await expect(page.locator('[data-test="ai-assistant-refine-stage"]')).toBeVisible();
     await page.locator('#ai-assistant-refine-input').fill('Ajusta la cantidad a 750 g.');
-    await page.getByRole('button', { name: 'Actualizar propuestas' }).click();
+    const refineButton = page.getByRole('button', { name: 'Actualizar propuestas' });
+    await refineButton.click();
     await expect.poll(() => provider.requests.length, { timeout: 10_000 }).toBe(3);
+    await expect(refineButton).toBeDisabled();
+    // Exercise the handler guard too; native users cannot click the disabled button again.
+    await refineButton.dispatchEvent('click');
+    await page.waitForTimeout(250);
+    expect(provider.requests).toHaveLength(3);
+    expect(assistantDatabaseSnapshot()).toEqual(before);
     await page.locator('.modal[role="dialog"] .modal__close').click();
     await expect(page.getByRole('dialog', { name: '¿Descartar este borrador?' })).toBeVisible();
     await page.getByRole('button', { name: 'Descartar borrador' }).click();
