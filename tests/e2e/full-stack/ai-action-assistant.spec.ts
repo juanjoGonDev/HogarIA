@@ -500,15 +500,18 @@ async function startDeterministicAiProvider(initialContent: string, responseDela
   let content = initialContent;
   const requests: string[] = [];
   const responseTimers = new Set<ReturnType<typeof setTimeout>>();
+  const pendingResponses = new Set<ServerResponse>();
   const server = createServer((request, response) => {
     let body = '';
     request.setEncoding('utf8');
     request.on('data', (chunk: string) => (body += chunk));
     request.on('end', () => {
       requests.push(body);
+      pendingResponses.add(response);
       let timer: ReturnType<typeof setTimeout> | undefined;
       const respond = () => {
         if (timer) responseTimers.delete(timer);
+        pendingResponses.delete(response);
         if (response.destroyed) return;
         response.writeHead(200, { 'content-type': 'application/json' });
         response.end(JSON.stringify({ choices: [{ message: { content } }] }));
@@ -535,6 +538,8 @@ async function startDeterministicAiProvider(initialContent: string, responseDela
     close: () => {
       for (const timer of responseTimers) clearTimeout(timer);
       responseTimers.clear();
+      for (const response of pendingResponses) response.destroy();
+      pendingResponses.clear();
       return new Promise<void>((resolveClose, rejectClose) => {
         server.close((error) => (error ? rejectClose(error) : resolveClose()));
       });
@@ -4267,4 +4272,53 @@ test('asistente global: una ráfaga de envíos genera una sola petición efímer
   } finally {
     await provider.close();
   }
+});
+
+test('asistente global: cerrar aborta el dictado y descarta callbacks tardíos', async ({
+  page
+}) => {
+  await installSpeechRecognitionStub(page);
+  let proposalRequests = 0;
+  page.on('request', (request) => {
+    if (
+      request.method() === 'POST' &&
+      new URL(request.url()).pathname === '/api/ai/assistant/proposals'
+    ) {
+      proposalRequests += 1;
+    }
+  });
+
+  await registerUser(page, 'Asistente cierre de voz E2E');
+  await createHousehold(page, 'Hogar cierre de voz sintético');
+  await page.goto('/dashboard');
+  const launcher = page.locator('[data-test="ai-assistant-open"]');
+  await launcher.click();
+
+  const dialog = page.locator('.modal[role="dialog"]');
+  await expect(dialog).toBeVisible();
+  const voiceControls = dialog.locator('.assistant__voice-controls');
+  await dialog.locator('.assistant__consent input').check();
+  await voiceControls.getByRole('button', { name: 'Dictar petición' }).click();
+  await expect(
+    dialog.getByRole('status').filter({ hasText: 'Escuchando; puedes corregir la transcripción' })
+  ).toBeVisible();
+
+  await page.getByRole('button', { name: 'Cerrar asistente' }).click();
+  await expect(dialog).toBeHidden();
+  const abortedOnClose = await page.evaluate(() => {
+    const recognition = (
+      window as typeof window & { __assistantSpeechRecognition?: BrowserSpeechStubControl }
+    ).__assistantSpeechRecognition;
+    if (!recognition) throw new Error('Speech recognition stub was not started');
+    recognition.emitFinal('Transcripción tardía que debe descartarse');
+    return recognition.aborted;
+  });
+  expect(abortedOnClose).toBe(true);
+  expect(proposalRequests).toBe(0);
+
+  await launcher.click();
+  const reopenedPrompt = page.locator('[data-test="ai-assistant-prompt"]');
+  await expect(reopenedPrompt).toBeVisible();
+  await expect(reopenedPrompt).toHaveValue('');
+  expect(proposalRequests).toBe(0);
 });
