@@ -56,6 +56,7 @@ function task(overrides: Partial<HouseholdTaskOccurrence> = {}): HouseholdTaskOc
     spaceId: 'kitchen',
     scheduledDate: '2026-10-05',
     assignedMemberId: null,
+    priority: 'medium',
     completed: false,
     ...overrides
   };
@@ -262,6 +263,98 @@ describe('household task week routes', () => {
     expect(
       db.prepare('SELECT tasks_json FROM household_task_weeks WHERE household_id = ?').get('home-a')
     ).toEqual({ tasks_json: JSON.stringify([updated]) });
+  });
+
+  it('defaults legacy stored tasks to medium and persists only validated priorities', async () => {
+    makeHousehold('home-a');
+    const editor = makeUser('editor-a', 'home-a', { calendar: { edit: true } });
+    const { priority: _priority, ...legacyTask } = task({ spaceId: null });
+    db.prepare(
+      `INSERT INTO household_task_weeks (household_id, week_start, version, tasks_json, updated_by)
+       VALUES (?, ?, ?, ?, ?)`
+    ).run('home-a', '2026-10-05', 3, JSON.stringify([legacyTask]), editor.id);
+
+    const read = await call(editor, 'GET');
+    expect(await read.json()).toMatchObject({
+      success: true,
+      data: { version: 3, tasks: [{ id: legacyTask.id, priority: 'medium' }] }
+    });
+
+    const compatibleSave = await call(editor, 'PUT', {
+      baseVersion: 3,
+      weekStart: '2026-10-05',
+      tasks: [legacyTask]
+    });
+    expect(compatibleSave.status).toBe(200);
+    expect(await compatibleSave.json()).toMatchObject({
+      success: true,
+      data: { version: 4, tasks: [{ id: legacyTask.id, priority: 'medium' }] }
+    });
+
+    const saved = await call(
+      editor,
+      'PUT',
+      saveBody([{ ...task(legacyTask), priority: 'high' }], 4)
+    );
+    expect(saved.status).toBe(200);
+    expect(await saved.json()).toMatchObject({
+      success: true,
+      data: { version: 5, tasks: [{ id: legacyTask.id, priority: 'high' }] }
+    });
+    const stored = db
+      .prepare('SELECT tasks_json FROM household_task_weeks WHERE household_id = ?')
+      .get('home-a') as { tasks_json: string };
+    expect(JSON.parse(stored.tasks_json)).toEqual([{ ...legacyTask, priority: 'high' }]);
+
+    const invalid = await call(editor, 'PUT', {
+      baseVersion: 5,
+      weekStart: '2026-10-05',
+      tasks: [{ ...legacyTask, priority: 'urgent' }]
+    });
+    expect(invalid.status).toBe(400);
+    expect(
+      db.prepare('SELECT version FROM household_task_weeks WHERE household_id = ?').get('home-a')
+    ).toEqual({ version: 5 });
+  });
+
+  it('includes priority in assistant task preimage checks and idempotent updates', async () => {
+    makeHousehold('home-a');
+    const editor = makeUser('editor-a', 'home-a', { calendar: { edit: true } });
+    const before = task({ spaceId: null, priority: 'low' });
+    db.prepare(
+      `INSERT INTO household_task_weeks (household_id, week_start, version, tasks_json, updated_by)
+       VALUES (?, ?, ?, ?, ?)`
+    ).run('home-a', '2026-10-05', 3, JSON.stringify([before]), editor.id);
+    const actionId = '123e4567-e89b-42d3-a456-426614174009';
+    const updated = { ...before, priority: 'high' as const };
+    const body = {
+      ...saveBody([updated], 3),
+      assistantAction: { operation: 'update_task' as const, targetId: before.id, before }
+    };
+
+    const response = await callAssistantUpdate(editor, body, actionId);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      success: true,
+      data: { tasks: [{ id: before.id, priority: 'high' }] }
+    });
+    const replay = await callAssistantUpdate(editor, body, actionId);
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toMatchObject({ success: true, idempotent: true });
+
+    const stalePriority = await callAssistantUpdate(
+      editor,
+      {
+        ...saveBody([{ ...updated, title: 'No debe guardar' }], 4),
+        assistantAction: { operation: 'update_task', targetId: before.id, before }
+      },
+      '123e4567-e89b-42d3-a456-426614174010'
+    );
+    expect(stalePriority.status).toBe(409);
+    expect(await stalePriority.json()).toMatchObject({
+      success: false,
+      code: 'TASK_TARGET_CHANGED'
+    });
   });
 
   it('rejects a stale task snapshot without changing the newer week', async () => {

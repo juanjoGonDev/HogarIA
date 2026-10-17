@@ -581,6 +581,7 @@ describe('POST /api/ai/assistant/proposals', () => {
                 title: null,
                 details: null,
                 scheduledDate: '2026-10-20',
+                priority: null,
                 spaceName: null,
                 assignedMemberName: null
               }
@@ -1209,6 +1210,7 @@ describe('POST /api/ai/assistant/proposals', () => {
                 title: null,
                 details: null,
                 scheduledDate: '2026-10-20',
+                priority: null,
                 spaceName: null,
                 assignedMemberName: null
               }
@@ -1694,6 +1696,76 @@ describe('POST /api/ai/assistant/meal-proposals', () => {
     expect(persistedSnapshot()).toEqual(before);
   });
 
+  it('validates and refines a draft containing an unsaved recipe without writes', async () => {
+    prepareMealHousehold();
+    const before = persistedSnapshot();
+    const candidate = mealProposalCandidate();
+    const provider = stubProvider(JSON.stringify(candidate));
+    const events = (candidate as any).events.map((event: any, index: number) => ({
+      ...event,
+      id: `draft-event-${index + 1}`,
+      participantIds: [alice.id]
+    }));
+    const response = await call(
+      'POST',
+      '/meal-proposals/refine',
+      {
+        proposalId: 'meal-refine-new-recipe',
+        weekStart: '2026-10-19',
+        householdMemberIds: ['assistant-membership'],
+        recipes: [
+          {
+            alias: 'N1',
+            source: 'new',
+            recipeId: null,
+            recipe: mealRecipe('Receta nueva sin guardar')
+          }
+        ],
+        events,
+        instructions: 'Refina esta propuesta con una receta nueva.'
+      },
+      alice.token,
+      { 'x-assistant-household-id': 'assistant-home' }
+    );
+
+    expect(response.status).toBe(200);
+    expect(provider).toHaveBeenCalledTimes(1);
+    expect(await response.json()).toMatchObject({ success: true });
+    expect(persistedSnapshot()).toEqual(before);
+  });
+
+  it('rejects a meal draft whose recipe aliases are incomplete before AI refinement', async () => {
+    prepareMealHousehold();
+    const before = persistedSnapshot();
+    const provider = vi.fn();
+    vi.stubGlobal('fetch', provider);
+    const candidate = mealProposalCandidate() as any;
+    const events = candidate.events.map((event: any, index: number) => ({
+      ...event,
+      id: `invalid-draft-event-${index + 1}`,
+      participantIds: [alice.id]
+    }));
+    const response = await call(
+      'POST',
+      '/meal-proposals/refine',
+      {
+        proposalId: 'meal-refine-missing-recipe',
+        weekStart: '2026-10-19',
+        householdMemberIds: ['assistant-membership'],
+        recipes: [],
+        events,
+        instructions: 'Refina esta propuesta.'
+      },
+      alice.token,
+      { 'x-assistant-household-id': 'assistant-home' }
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: 'INVALID_ASSISTANT_MEAL_REFINEMENT' });
+    expect(provider).not.toHaveBeenCalled();
+    expect(persistedSnapshot()).toEqual(before);
+  });
+
   it('rejects generation when the supplied household snapshot does not match the active household', async () => {
     prepareMealHousehold();
     const before = persistedCounts();
@@ -1738,6 +1810,7 @@ describe('POST /api/ai/assistant/refine', () => {
           title: null,
           details: null,
           scheduledDate: '2026-10-20',
+          priority: null,
           spaceName: null,
           assignedMemberName: null
         }
@@ -1906,6 +1979,171 @@ describe('POST /api/ai/assistant/refine', () => {
     expect(persistedCounts()).toEqual(before);
   });
 
+  it('changes task priority only when refinement explicitly scopes that field', async () => {
+    addConfig(alice);
+    const before = persistedCounts();
+    const action = {
+      kind: 'household.update_task',
+      title: 'Cambiar reciclaje',
+      summary: 'Ajusta una tarea existente.',
+      payload: {
+        targetTitle: 'Bajar reciclaje',
+        targetScheduledDate: '2026-10-19',
+        changes: {
+          title: null,
+          details: 'Dejar el vidrio aparte.',
+          scheduledDate: null,
+          priority: null,
+          spaceName: null,
+          assignedMemberName: null
+        }
+      },
+      dependsOn: [],
+      warnings: []
+    };
+    const priorityReplacement = {
+      ...action,
+      payload: {
+        ...action.payload,
+        changes: { ...action.payload.changes, priority: 'high' }
+      }
+    };
+    const allowedProvider = stubProvider(
+      JSON.stringify({
+        summary: 'Prioridad alta.',
+        replacement: priorityReplacement,
+        questions: []
+      })
+    );
+    const allowed = await call('POST', '/refine', {
+      actionId: 'task-priority-refinement',
+      instruction: 'Marca la tarea como prioritaria.',
+      action,
+      scope: { kind: 'field', path: ['changes', 'priority'] }
+    });
+    expect(allowed.status, await allowed.clone().text()).toBe(200);
+    expect(((await allowed.json()) as any).data.replacement.payload.changes.priority).toBe('high');
+    expect(allowedProvider).toHaveBeenCalledTimes(1);
+
+    const outOfScopeReplacement = {
+      ...priorityReplacement,
+      payload: {
+        ...priorityReplacement.payload,
+        changes: {
+          ...priorityReplacement.payload.changes,
+          details: 'Añade también una nota no solicitada.'
+        }
+      }
+    };
+    const outOfScopeProvider = stubProvider(
+      JSON.stringify({
+        summary: 'Cambio fuera del ámbito.',
+        replacement: outOfScopeReplacement,
+        questions: []
+      })
+    );
+    const outOfScope = await call('POST', '/refine', {
+      actionId: 'task-priority-refinement',
+      instruction: 'Marca la tarea como prioritaria.',
+      action,
+      scope: { kind: 'field', path: ['changes', 'details'] }
+    });
+    expect(outOfScope.status).toBe(502);
+    expect(await outOfScope.json()).toMatchObject({ code: 'INVALID_AI_RESULT' });
+    expect(outOfScopeProvider).toHaveBeenCalledTimes(1);
+    expect(persistedCounts()).toEqual(before);
+  });
+
+  it('rejects malformed batch bodies and maps batch busy/cancelled requests without writes', async () => {
+    addConfig(alice);
+    const before = persistedCounts();
+    const pantryAction = (assistantCandidate() as any).actions[0];
+    const shoppingAction = {
+      kind: 'shopping.create_list',
+      title: 'Crear compra',
+      summary: 'Crea una lista.',
+      payload: { name: 'Compra semanal', store: null },
+      dependsOn: [],
+      warnings: []
+    };
+    const batchRequest = {
+      instruction: 'Simplifica el lote.',
+      scope: { kind: 'batch' },
+      actions: [
+        { actionId: 'ui-pantry', action: pantryAction },
+        { actionId: 'ui-shopping', action: shoppingAction }
+      ]
+    };
+    const malformed = await callRaw('/refine-batch', '{');
+    expect(malformed.status).toBe(400);
+    expect(await malformed.json()).toMatchObject({ code: 'INVALID_ASSISTANT_BATCH_REFINEMENT' });
+
+    let enterFetch!: () => void;
+    let releaseFetch!: () => void;
+    const fetchEntered = new Promise<void>((resolve) => (enterFetch = resolve));
+    const fetchGate = new Promise<void>((resolve) => (releaseFetch = resolve));
+    const providerContent = JSON.stringify({
+      summary: 'Lote simplificado.',
+      replacements: [pantryAction, shoppingAction],
+      questions: []
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        enterFetch();
+        await fetchGate;
+        return new Response(
+          JSON.stringify({ choices: [{ message: { content: providerContent } }] }),
+          {
+            status: 200
+          }
+        );
+      })
+    );
+    const first = call('POST', '/refine-batch', batchRequest);
+    await fetchEntered;
+    const busy = await call('POST', '/refine-batch', batchRequest);
+    expect(busy.status).toBe(409);
+    expect(await busy.json()).toMatchObject({ code: 'ASSISTANT_BUSY' });
+    releaseFetch();
+    expect((await first).status).toBe(200);
+
+    const controller = new AbortController();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        controller.abort();
+        throw new Error('cancelled by request');
+      })
+    );
+    const cancelled = await callRaw(
+      '/refine-batch',
+      JSON.stringify(batchRequest),
+      controller.signal
+    );
+    expect(cancelled.status).toBe(400);
+    expect(await cancelled.json()).toMatchObject({ code: 'AI_CANCELLED' });
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () => new Response('provider failure', { status: 502, statusText: 'Bad Gateway' })
+      )
+    );
+    const providerFailure = await call('POST', '/refine-batch', batchRequest);
+    expect(providerFailure.status).toBe(502);
+    expect(await providerFailure.json()).toMatchObject({ code: 'AI_PROVIDER_ERROR' });
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('not JSON', { status: 200 }))
+    );
+    const invalidProviderResult = await call('POST', '/refine-batch', batchRequest);
+    expect(invalidProviderResult.status).toBe(502);
+    expect(await invalidProviderResult.json()).toMatchObject({ code: 'INVALID_AI_RESULT' });
+    expect(persistedCounts()).toEqual(before);
+  });
+
   it('refines a batch as one read-only operation and maps ordered replacements to app IDs', async () => {
     addConfig(alice);
     const before = persistedCounts();
@@ -2064,6 +2302,7 @@ describe('POST /api/ai/assistant/refine', () => {
           title: null,
           details: 'Dejar el vidrio aparte',
           scheduledDate: '2026-10-20',
+          priority: null,
           spaceName: null,
           assignedMemberName: null
         }
@@ -2079,6 +2318,7 @@ describe('POST /api/ai/assistant/refine', () => {
         title: 'Preparar reciclaje',
         details: null,
         scheduledDate: '2026-10-20',
+        priority: 'medium',
         spaceName: null,
         assignedMemberName: null
       },

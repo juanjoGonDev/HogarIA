@@ -3,6 +3,41 @@
   min-width: 0;
 }
 
+.task-card__priority {
+  display: inline-flex;
+  width: max-content;
+  align-items: center;
+  min-height: 24px;
+  padding-inline: var(--space-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-full);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-tight);
+}
+
+.task-card__priority[data-priority='medium'] {
+  border-color: var(--color-warning-100);
+  background: var(--warning-subtle);
+  color: var(--color-warning-700);
+}
+
+.task-card__priority[data-priority='high'] {
+  border-color: var(--color-error-100);
+  background: var(--error-subtle);
+  color: var(--color-error-700);
+}
+
+.task-card__details summary {
+  display: flex;
+  width: max-content;
+  min-width: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+}
+
 .tasks-create__reveal {
   display: none;
 }
@@ -83,6 +118,10 @@
     grid-template-columns: minmax(48px, 0.2fr) minmax(0, 1fr);
     min-height: 44px;
     border-bottom: 0;
+  }
+
+  .task-card:has(.task-card__details[open]) {
+    min-height: max-content;
   }
 
   .tasks-day__header {

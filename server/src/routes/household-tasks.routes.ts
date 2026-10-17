@@ -203,7 +203,14 @@ function isSafeAssistantTaskUpdate(
   after: HouseholdTaskOccurrence
 ): boolean {
   if (before.id !== after.id || before.completed !== after.completed) return false;
-  const allowed = new Set(['title', 'details', 'scheduledDate', 'spaceId', 'assignedMemberId']);
+  const allowed = new Set([
+    'title',
+    'details',
+    'scheduledDate',
+    'spaceId',
+    'assignedMemberId',
+    'priority'
+  ]);
   const keys = Object.keys(before) as Array<keyof typeof before>;
   if (keys.some((key) => !allowed.has(key) && !isDeepStrictEqual(before[key], after[key])))
     return false;

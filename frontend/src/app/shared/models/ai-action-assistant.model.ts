@@ -1,5 +1,6 @@
 import type { AIRecipeResponse } from './ai-config.model';
 import type { RecipeStep } from './recipe.model';
+import type { HouseholdTaskPriority } from './household-task.model';
 
 export type AssistantRecipeInstructionLevel = 'legacy' | 'basic' | 'intermediate' | 'expert';
 
@@ -156,6 +157,7 @@ export interface HouseholdTaskPayload {
   title: string;
   details: string | null;
   scheduledDate: string;
+  priority: HouseholdTaskPriority;
   spaceName: string | null;
   assignedMemberName: string | null;
 }
@@ -172,6 +174,7 @@ export interface HouseholdTaskUpdatePayload {
     title: string | null;
     details: string | null;
     scheduledDate: string | null;
+    priority: HouseholdTaskPriority | null;
     spaceName: string | null;
     assignedMemberName: string | null;
   };
@@ -189,6 +192,7 @@ export interface AssistantTaskUpdateExecutionTarget {
     spaceId: string | null;
     scheduledDate: string;
     assignedMemberId: string | null;
+    priority: HouseholdTaskPriority;
     completed: boolean;
   };
 }

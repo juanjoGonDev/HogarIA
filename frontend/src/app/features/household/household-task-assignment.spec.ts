@@ -9,6 +9,7 @@ function occurrence(id: string, scheduledDate: string): HouseholdTaskOccurrence 
     spaceId: null,
     scheduledDate,
     assignedMemberId: null,
+    priority: 'medium',
     completed: false
   };
 }

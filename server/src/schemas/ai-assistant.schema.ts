@@ -2,7 +2,16 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { aiRecipeOutputSchema } from './recipe-ai-output.schema.js';
 import { createAiResponseFormat } from './ai-response-format.js';
-import type { HouseholdTaskOccurrence } from './household-task.schema.js';
+import {
+  householdTaskPrioritySchema,
+  type HouseholdTaskOccurrence
+} from './household-task.schema.js';
+import {
+  assistantRecipeContentUpdatePayloadSchema,
+  type AssistantRecipeUpdateExecutionTarget
+} from './ai-assistant-recipe-update.schema.js';
+
+export type { AssistantRecipeUpdateExecutionTarget } from './ai-assistant-recipe-update.schema.js';
 
 const routeHintSchema = z.enum([
   'dashboard',
@@ -33,6 +42,11 @@ const pantryUnitSchema = z.enum([
   'piece'
 ]);
 const pantryLocationSchema = z.enum(['fridge', 'freezer', 'pantry', 'counter']);
+const calendarEventKindSchema = z.enum(['appointment', 'home', 'shopping', 'personal', 'other']);
+const calendarEventTimeSchema = z
+  .string()
+  .regex(/^([01]\d|2[0-3]):[0-5]\d$/)
+  .nullable();
 
 const actionMetaSchema = {
   title: z.string().trim().min(1).max(100),
@@ -211,6 +225,7 @@ const assistantActionCandidateSchema = z.union([
           title: z.string().trim().min(1).max(160),
           details: z.string().trim().max(500).nullable(),
           scheduledDate: dateSchema,
+          priority: householdTaskPrioritySchema,
           spaceName: z.string().trim().max(120).nullable(),
           assignedMemberName: z.string().trim().max(120).nullable()
         })
@@ -230,6 +245,7 @@ const assistantActionCandidateSchema = z.union([
               title: z.string().trim().min(1).max(160).nullable(),
               details: z.string().trim().max(500).nullable(),
               scheduledDate: dateSchema.nullable(),
+              priority: householdTaskPrioritySchema.nullable(),
               spaceName: z.string().trim().max(120).nullable(),
               assignedMemberName: z.string().trim().max(120).nullable()
             })
@@ -269,6 +285,59 @@ const assistantActionCandidateSchema = z.union([
           notes: z.string().trim().max(500).nullable()
         })
         .strict()
+    })
+    .strict(),
+  z
+    .object({
+      ...actionMetaSchema,
+      kind: z.literal('calendar.update_event'),
+      payload: z
+        .object({
+          targetTitle: z.string().trim().min(1).max(120),
+          targetDate: dateSchema,
+          targetStartTime: calendarEventTimeSchema,
+          changes: z
+            .object({
+              title: z.string().trim().min(1).max(120).optional(),
+              kind: calendarEventKindSchema.optional(),
+              date: dateSchema.optional(),
+              startTime: calendarEventTimeSchema.optional(),
+              endTime: calendarEventTimeSchema.optional(),
+              allDay: z.boolean().optional(),
+              notes: z.string().trim().max(500).nullable().optional(),
+              location: z.string().trim().max(120).nullable().optional()
+            })
+            .strict()
+            .superRefine((changes, context) => {
+              if (Object.keys(changes).length === 0) {
+                context.addIssue({
+                  code: 'custom',
+                  message: 'At least one calendar event field must change'
+                });
+              }
+              if (
+                changes.startTime !== undefined &&
+                changes.endTime !== undefined &&
+                changes.startTime !== null &&
+                changes.endTime !== null &&
+                changes.endTime < changes.startTime
+              ) {
+                context.addIssue({
+                  code: 'custom',
+                  path: ['endTime'],
+                  message: 'endTime cannot be earlier than startTime'
+                });
+              }
+            })
+        })
+        .strict()
+    })
+    .strict(),
+  z
+    .object({
+      ...actionMetaSchema,
+      kind: z.literal('recipes.update_content'),
+      payload: assistantRecipeContentUpdatePayloadSchema
     })
     .strict(),
   z
@@ -439,7 +508,9 @@ export type AssistantAction = AssistantActionCandidate & {
   executionTarget?:
     | AssistantTaskUpdateExecutionTarget
     | AssistantShoppingListUpdateExecutionTarget
-    | AssistantPantryIngredientUpdateExecutionTarget;
+    | AssistantPantryIngredientUpdateExecutionTarget
+    | AssistantCalendarEventUpdateExecutionTarget
+    | AssistantRecipeUpdateExecutionTarget;
 };
 
 export interface AssistantPantryIngredientUpdateExecutionTarget {
@@ -472,6 +543,28 @@ export interface AssistantShoppingListUpdateExecutionTarget {
   snapshot: { name: string; store: string | null };
 }
 
+export interface AssistantCalendarEventUpdateExecutionTarget {
+  kind: 'calendar-event';
+  id: string;
+  householdId: string | null;
+  updatedAt: string | null;
+  snapshot: {
+    title: string;
+    kind: string;
+    date: string;
+    startTime: string | null;
+    endTime: string | null;
+    allDay: boolean;
+    color: string | null;
+    notes: string | null;
+    location: string | null;
+    recurrence: string;
+    recurrenceRule: string | null;
+    exceptions: string;
+    source: string;
+  };
+}
+
 export interface AssistantActionPlan {
   id: string;
   summary: string;
@@ -487,6 +580,8 @@ export function normalizeAssistantActionPlan(
     | AssistantTaskUpdateExecutionTarget
     | AssistantShoppingListUpdateExecutionTarget
     | AssistantPantryIngredientUpdateExecutionTarget
+    | AssistantCalendarEventUpdateExecutionTarget
+    | AssistantRecipeUpdateExecutionTarget
   > = new Map()
 ): AssistantActionPlan {
   const ids = candidate.actions.map(() => createId());
@@ -509,6 +604,12 @@ export function normalizeAssistantActionPlan(
       executionTarget?.kind !== 'pantry-ingredient'
     ) {
       throw new Error('Missing server-resolved pantry ingredient update target');
+    }
+    if (action.kind === 'calendar.update_event' && executionTarget?.kind !== 'calendar-event') {
+      throw new Error('Missing server-resolved calendar event update target');
+    }
+    if (action.kind === 'recipes.update_content' && executionTarget?.kind !== 'recipe') {
+      throw new Error('Missing server-resolved recipe update target');
     }
     const [domain, actionType] = action.kind.split('.', 2);
     return {

@@ -12,6 +12,7 @@ const task = {
   spaceId: 'kitchen',
   scheduledDate: '2026-10-05',
   assignedMemberId: 'member-a',
+  priority: 'medium',
   completed: false
 };
 
@@ -46,6 +47,18 @@ describe('household task week contracts', () => {
       householdTaskOccurrencesSchema.safeParse(
         Array.from({ length: 201 }, (_, index) => ({ ...task, id: `task-${index}` }))
       ).success
+    ).toBe(false);
+  });
+
+  it('normalizes legacy omissions to medium and rejects unknown priorities', () => {
+    const { priority: _priority, ...legacyTask } = task;
+
+    expect(householdTaskOccurrencesSchema.parse([legacyTask])[0]).toMatchObject({
+      ...legacyTask,
+      priority: 'medium'
+    });
+    expect(
+      householdTaskOccurrencesSchema.safeParse([{ ...task, priority: 'urgent' }]).success
     ).toBe(false);
   });
 });

@@ -155,6 +155,7 @@ function allDomainProposal() {
       title: 'Tarea de dominio QA',
       details: 'Creada tras confirmación.',
       scheduledDate: '2026-10-20',
+      priority: 'medium',
       spaceName: null,
       assignedMemberName: null
     }
@@ -270,6 +271,7 @@ function taskUpdateProposal(executionTarget: Record<string, any>) {
         title: 'Revisar alacena',
         details: null,
         scheduledDate: null,
+        priority: null,
         spaceName: null,
         assignedMemberName: null
       }
@@ -1171,7 +1173,7 @@ test('asistente global: ejecuta acciones de todos los dominios solo tras confirm
       }
     });
     expect(response.status()).toBe(200);
-    return (await response.json()).data.tasks as Array<{ title: string }>;
+    return (await response.json()).data.tasks as Array<{ title: string; priority: string }>;
   };
   const readEvents = async () => {
     const response = await page.request.get('/api/calendar/events?from=2026-10-20&to=2026-10-20', {
@@ -1241,7 +1243,9 @@ test('asistente global: ejecuta acciones de todos los dominios solo tras confirm
     expect.arrayContaining([expect.objectContaining({ name: 'Manzanas QA', quantity: 2 })])
   );
   expect(await readTaskWeek()).toEqual(
-    expect.arrayContaining([expect.objectContaining({ title: 'Tarea de dominio QA' })])
+    expect.arrayContaining([
+      expect.objectContaining({ title: 'Tarea de dominio QA', priority: 'medium' })
+    ])
   );
   expect(await readEvents()).toEqual(
     expect.arrayContaining([expect.objectContaining({ title: 'Evento de dominio QA' })])
@@ -1298,6 +1302,7 @@ test('asistente global: actualiza solo la tarea resuelta y persiste tras recarga
         spaceId: string | null;
         scheduledDate: string;
         assignedMemberId: string | null;
+        priority: 'low' | 'medium' | 'high';
         completed: boolean;
       }>;
     };
@@ -1312,6 +1317,7 @@ test('asistente global: actualiza solo la tarea resuelta y persiste tras recarga
       spaceId: null,
       scheduledDate: '2026-10-20',
       assignedMemberId: null,
+      priority: 'medium',
       completed: false
     },
     {
@@ -1321,6 +1327,7 @@ test('asistente global: actualiza solo la tarea resuelta y persiste tras recarga
       spaceId: null,
       scheduledDate: '2026-10-21',
       assignedMemberId: null,
+      priority: 'medium',
       completed: false
     }
   ];
@@ -1420,6 +1427,12 @@ test('asistente global: actualiza solo la tarea resuelta y persiste tras recarga
   );
   await secondActionDetails.locator('summary').click();
   await secondActionDetails.locator('input[type="text"]').first().fill('Revisar alacena QA');
+  const priorityPicker = secondActionDetails.getByRole('button', { name: /Prioridad/ });
+  await priorityPicker.click();
+  await page.getByRole('option', { name: 'Alta', exact: true }).click();
+  await expect(secondAction.locator('[data-test="ai-assistant-task-priority"]')).toContainText(
+    'Alta'
+  );
   await secondAction.getByRole('checkbox').click();
   expect(await readWeek()).toEqual(seededWeek);
   expect(taskWrites).toEqual([]);
@@ -1448,7 +1461,7 @@ test('asistente global: actualiza solo la tarea resuelta y persiste tras recarga
   const persisted = await readWeek();
   expect(persisted.version).toBe(seededWeek.version + 1);
   expect(persisted.tasks).toEqual([
-    { ...target, title: 'Revisar alacena QA' },
+    { ...target, title: 'Revisar alacena QA', priority: 'high' },
     seededWeek.tasks[1]
   ]);
 
@@ -1482,6 +1495,20 @@ test('asistente global: actualiza solo la tarea resuelta y persiste tras recarga
 
   await page.reload();
   expect(await readWeek()).toEqual(persisted);
+  const writesBeforeTaskRejection = taskWrites.length;
+  await page.locator('[data-test="ai-assistant-open"]').click();
+  await page
+    .locator('[data-test="ai-assistant-prompt"]')
+    .fill('Cambia el título de Revisar despensa a Revisar alacena.');
+  await page.locator('[data-test="ai-assistant-submit"] button').click();
+  await expect(page.locator('[data-test="ai-assistant-review"]')).toBeVisible();
+  const rejectedTaskAction = page.locator(
+    '[data-action-id="77777777-7777-4777-8777-777777777777"]'
+  );
+  await rejectedTaskAction.locator('[data-test="ai-assistant-remove"]').click();
+  await expect(rejectedTaskAction).toHaveCount(0);
+  expect(await readWeek()).toEqual(persisted);
+  expect(taskWrites).toHaveLength(writesBeforeTaskRejection);
 });
 
 test('asistente global: propone, refina y confirma comidas con participantes explícitos', async ({

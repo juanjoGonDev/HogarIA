@@ -403,6 +403,16 @@
                   (valueChange)="newSpaceId.set($event ?? '')"
                 />
               </div>
+              <div class="tasks-editor__field">
+                <span>{{ 'household.tasks_priority' | t }}</span>
+                <app-picker
+                  id="household-tasks-new-priority"
+                  [label]="'household.tasks_priority' | t"
+                  [options]="priorityPickerOptions()"
+                  [value]="newPriority()"
+                  (valueChange)="setNewPriority($event)"
+                />
+              </div>
               <div class="tasks-editor__field" *ngIf="!randomAssignmentMode()">
                 <span>{{ 'household.tasks_assignee' | t }}</span>
                 <app-picker
@@ -520,7 +530,22 @@
                     }}</span>
                   </div>
                   <details class="task-card__details">
-                    <summary [attr.aria-label]="'household.tasks_edit_details' | t">
+                    <summary
+                      [attr.aria-label]="
+                        ('household.tasks_priority' | t) +
+                        ': ' +
+                        taskPriorityLabel(task.priority) +
+                        '. ' +
+                        ('household.tasks_edit_details' | t)
+                      "
+                    >
+                      <span
+                        class="task-card__priority"
+                        [attr.data-priority]="task.priority"
+                        aria-hidden="true"
+                      >
+                        {{ taskPriorityLabel(task.priority) }}
+                      </span>
                       <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                         <circle cx="5" cy="12" r="1.5" fill="currentColor" />
                         <circle cx="12" cy="12" r="1.5" fill="currentColor" />
@@ -548,6 +573,18 @@
                           [value]="task.assignedMemberId ?? ''"
                           [disabled]="!canEdit || saving()"
                           (valueChange)="updateTask(task.id, { assignedMemberId: $event || null })"
+                        />
+                      </div>
+                      <div class="tasks-editor__field">
+                        <span>{{ 'household.tasks_priority' | t }}</span>
+                        <app-picker
+                          [id]="'household-task-priority-' + task.id"
+                          [attr.data-test]="'household-task-priority-' + task.id"
+                          [label]="('household.tasks_priority' | t) + ': ' + task.title"
+                          [options]="priorityPickerOptions()"
+                          [value]="task.priority"
+                          [disabled]="!canEdit || saving()"
+                          (valueChange)="setTaskPriority(task.id, $event)"
                         />
                       </div>
                       <div class="tasks-editor__field">

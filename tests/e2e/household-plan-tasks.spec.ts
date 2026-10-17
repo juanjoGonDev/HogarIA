@@ -4028,12 +4028,84 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   await choosePickerOption(page, /^Asignada a:/, manualAssigneeName);
   for (const [index, title] of taskTitles.entries()) {
     await createForm.getByLabel('Nombre de la tarea').fill(title);
+    if (index === 0) await choosePickerOption(page, /^Prioridad:/, 'Alta');
     await createForm.getByRole('button', { name: /^Día:/ }).click();
     await page.getByRole('option').nth(index).click();
     await createForm.getByRole('button', { name: /^Zona:/ }).click();
     await page.getByRole('option', { name: /^Cocina/ }).click();
     await page.getByRole('button', { name: 'Añadir a la semana' }).click();
   }
+  const secondTaskCard = page.locator('.task-card').nth(1);
+  const taskDetailsSummary = secondTaskCard.locator('.task-card__details summary');
+  const priorityLauncher = page.locator('[data-test="ai-assistant-open"]');
+  await taskDetailsSummary.scrollIntoViewIfNeeded();
+  const [launcherBox, summaryBox] = await Promise.all([
+    priorityLauncher.boundingBox(),
+    taskDetailsSummary.boundingBox()
+  ]);
+  expect(launcherBox).toBeTruthy();
+  expect(summaryBox).toBeTruthy();
+  if (!launcherBox || !summaryBox) throw new Error('The assistant or task details are not visible');
+  expect(
+    launcherBox.x < summaryBox.x + summaryBox.width &&
+      launcherBox.x + launcherBox.width > summaryBox.x &&
+      launcherBox.y < summaryBox.y + summaryBox.height &&
+      launcherBox.y + launcherBox.height > summaryBox.y,
+    'the global assistant must not cover the task details control'
+  ).toBe(false);
+  await screenshot(page, `task-priority-edit-${mobile ? 'mobile' : 'desktop'}`, viewport);
+  await taskDetailsSummary.click();
+  const taskPriorityTrigger = page.getByRole('button', {
+    name: /^Prioridad: .+: Media$/
+  });
+  await taskPriorityTrigger.evaluate((element) =>
+    element.scrollIntoView({ block: 'center', inline: 'nearest' })
+  );
+  const [taskPriorityBox, scheduleFooterBox] = await Promise.all([
+    taskPriorityTrigger.boundingBox(),
+    page.locator('.tasks-schedule__footer').boundingBox()
+  ]);
+  expect(taskPriorityBox).toBeTruthy();
+  expect(scheduleFooterBox).toBeTruthy();
+  if (!taskPriorityBox || !scheduleFooterBox) {
+    throw new Error('The priority control or sticky schedule footer is not visible');
+  }
+  const [taskCardBox, taskFieldsBox] = await Promise.all([
+    secondTaskCard.boundingBox(),
+    secondTaskCard.locator('.task-card__fields').boundingBox()
+  ]);
+  expect(taskCardBox).toBeTruthy();
+  expect(taskFieldsBox).toBeTruthy();
+  if (!taskCardBox || !taskFieldsBox) throw new Error('Expanded task details are not measurable');
+  if (mobile) {
+    expect(
+      taskCardBox.y + taskCardBox.height,
+      'expanded task details stay inside task card flow instead of spilling over following content'
+    ).toBeGreaterThanOrEqual(taskFieldsBox.y + taskFieldsBox.height - 1);
+  }
+  expect(
+    taskPriorityBox.y >= 0 && taskPriorityBox.y + taskPriorityBox.height <= viewport.height,
+    `the priority control is fully visible after scrolling: ${JSON.stringify({
+      taskPriorityBox,
+      viewport
+    })}`
+  ).toBe(true);
+  expect(
+    taskPriorityBox.y + taskPriorityBox.height <= scheduleFooterBox.y,
+    `the sticky schedule footer must not obscure task priority controls: ${JSON.stringify({
+      taskPriorityBox,
+      scheduleFooterBox
+    })}`
+  ).toBe(true);
+  await screenshot(
+    page,
+    `task-priority-controls-${mobile ? 'mobile' : 'desktop'}`,
+    viewport,
+    false
+  );
+  await choosePickerOption(page, /^Prioridad: .+: Media$/, 'Baja');
+  await expect(secondTaskCard.locator('[data-test^="household-task-priority-"]')).toHaveCount(1);
+  await expect(secondTaskCard.locator('.task-card__priority')).toHaveText('Baja');
   await planningOptions.locator('summary').click();
   await expect(page.locator('[data-test="tasks-save"]')).toBeEnabled();
   const manualSaveResponsePromise = page.waitForResponse(
@@ -4045,6 +4117,15 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   const manualSaveResponse = await manualSaveResponsePromise;
   expect(manualSaveResponse.status()).toBe(200);
   const manualSaveEnvelope = await manualSaveResponse.json();
+  expect(manualSaveEnvelope.data.tasks.map((task: { priority: string }) => task.priority)).toEqual([
+    'high',
+    'low',
+    'medium',
+    'medium',
+    'medium',
+    'medium',
+    'medium'
+  ]);
   expect(manualSaveEnvelope.data.tasks).toHaveLength(7);
   const manualAssignedMemberIds = [
     ...new Set(

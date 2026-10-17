@@ -56,7 +56,116 @@ const pantryUpdateAction = {
   warnings: []
 };
 
+const calendarUpdateAction = {
+  kind: 'calendar.update_event',
+  title: 'Mover la cita',
+  summary: 'Cambia la hora de la cita del martes.',
+  payload: {
+    targetTitle: 'Revisión del coche',
+    targetDate: '2026-10-20',
+    targetStartTime: '09:00',
+    changes: { startTime: '10:30' }
+  },
+  dependsOn: [],
+  warnings: []
+};
+
 describe('ai assistant proposal schemas', () => {
+  it('accepts strict calendar event patches but never model-owned IDs or unsupported fields', () => {
+    expect(
+      assistantActionPlanCandidateSchema.safeParse({
+        summary: 'Mueve la revisión del coche.',
+        actions: [calendarUpdateAction],
+        questions: []
+      }).success
+    ).toBe(true);
+
+    const invalidActions = [
+      {
+        ...calendarUpdateAction,
+        payload: { ...calendarUpdateAction.payload, targetId: 'model-id' }
+      },
+      {
+        ...calendarUpdateAction,
+        payload: {
+          ...calendarUpdateAction.payload,
+          targetStartTime: '25:00'
+        }
+      },
+      {
+        ...calendarUpdateAction,
+        payload: {
+          ...calendarUpdateAction.payload,
+          changes: { ...calendarUpdateAction.payload.changes, recurrence: 'weekly' }
+        }
+      },
+      {
+        ...calendarUpdateAction,
+        payload: {
+          ...calendarUpdateAction.payload,
+          changes: {
+            ...calendarUpdateAction.payload.changes,
+            startTime: '18:00',
+            endTime: '17:00'
+          }
+        }
+      }
+    ];
+
+    for (const action of invalidActions) {
+      expect(
+        assistantActionPlanCandidateSchema.safeParse({
+          summary: 'Acción inválida.',
+          actions: [action],
+          questions: []
+        }).success
+      ).toBe(false);
+    }
+  });
+
+  it('requires a server-resolved calendar target when normalizing an update', () => {
+    const candidate = {
+      summary: 'Mueve la revisión del coche.',
+      actions: [calendarUpdateAction],
+      questions: []
+    };
+    expect(() => normalizeAssistantActionPlan(candidate as any)).toThrow(
+      'Missing server-resolved calendar event update target'
+    );
+
+    const plan = normalizeAssistantActionPlan(
+      candidate as any,
+      () => 'generated-id',
+      new Map([
+        [
+          0,
+          {
+            kind: 'calendar-event' as const,
+            id: 'event-1',
+            householdId: 'house-1',
+            updatedAt: '2026-10-16 09:00:00',
+            snapshot: {
+              title: 'Revisión del coche',
+              kind: 'appointment',
+              date: '2026-10-20',
+              startTime: '09:00',
+              endTime: '10:00',
+              allDay: false,
+              color: null,
+              notes: null,
+              location: null,
+              recurrence: 'none',
+              recurrenceRule: null,
+              exceptions: '[]',
+              source: 'user'
+            }
+          }
+        ]
+      ])
+    );
+    expect(plan.actions[0].executionTarget?.kind).toBe('calendar-event');
+  });
+
   it('accepts only a strict pantry update patch, including explicit zero and clear values', () => {
     expect(
       assistantActionPlanCandidateSchema.safeParse({
@@ -359,6 +468,7 @@ describe('ai assistant proposal schemas', () => {
           title: 'Preparar cena',
           details: null,
           scheduledDate: '2026-10-20',
+          priority: 'medium',
           spaceName: null,
           assignedMemberName: null
         },
@@ -458,6 +568,7 @@ describe('ai assistant proposal schemas', () => {
           title: null,
           details: null,
           scheduledDate: '2026-10-20',
+          priority: null,
           spaceName: null,
           assignedMemberName: null
         }
@@ -498,6 +609,7 @@ describe('ai assistant proposal schemas', () => {
                 title: null,
                 details: null,
                 scheduledDate: null,
+                priority: null,
                 spaceName: null,
                 assignedMemberName: null
               }
@@ -509,13 +621,28 @@ describe('ai assistant proposal schemas', () => {
     ).toBe(false);
     expect(
       assistantActionPlanCandidateSchema.safeParse({
-        summary: 'No se inventa prioridad.',
+        summary: 'Acepta un nivel de prioridad permitido.',
         actions: [
           {
             ...updateTask,
             payload: {
               ...updateTask.payload,
               changes: { ...updateTask.payload.changes, priority: 'high' }
+            }
+          }
+        ],
+        questions: []
+      }).success
+    ).toBe(true);
+    expect(
+      assistantActionPlanCandidateSchema.safeParse({
+        summary: 'Rechaza una prioridad desconocida.',
+        actions: [
+          {
+            ...updateTask,
+            payload: {
+              ...updateTask.payload,
+              changes: { ...updateTask.payload.changes, priority: 'urgent' }
             }
           }
         ],

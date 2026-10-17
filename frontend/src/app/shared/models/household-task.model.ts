@@ -1,3 +1,6 @@
+export const HOUSEHOLD_TASK_PRIORITIES = ['low', 'medium', 'high'] as const;
+export type HouseholdTaskPriority = (typeof HOUSEHOLD_TASK_PRIORITIES)[number];
+
 export interface HouseholdTaskOccurrence {
   id: string;
   title: string;
@@ -5,6 +8,7 @@ export interface HouseholdTaskOccurrence {
   spaceId: string | null;
   scheduledDate: string;
   assignedMemberId: string | null;
+  priority: HouseholdTaskPriority;
   completed: boolean;
 }
 

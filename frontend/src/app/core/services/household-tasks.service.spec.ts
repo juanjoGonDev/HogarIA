@@ -14,6 +14,7 @@ const task: HouseholdTaskOccurrence = {
   spaceId: 'kitchen',
   scheduledDate: '2026-10-05',
   assignedMemberId: 'member-a',
+  priority: 'high',
   completed: false
 };
 

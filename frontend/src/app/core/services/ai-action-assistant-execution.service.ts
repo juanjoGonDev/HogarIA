@@ -302,6 +302,7 @@ export class AiActionAssistantExecutionService {
       scheduledDate: action.payload.scheduledDate,
       spaceId,
       assignedMemberId,
+      priority: action.payload.priority,
       completed: false
     };
     const existing = week.tasks.find((item) => item.id === id);
@@ -380,7 +381,8 @@ export class AiActionAssistantExecutionService {
       details: changes.details ?? target.snapshot.details,
       scheduledDate,
       spaceId,
-      assignedMemberId
+      assignedMemberId,
+      priority: changes.priority ?? target.snapshot.priority
     };
     if (this.sameTask(updated, target.snapshot)) throw new Error('ASSISTANT_TASK_NO_CHANGE');
 
@@ -673,6 +675,7 @@ export class AiActionAssistantExecutionService {
       left.scheduledDate === right.scheduledDate &&
       left.spaceId === right.spaceId &&
       left.assignedMemberId === right.assignedMemberId &&
+      left.priority === right.priority &&
       left.completed === right.completed
     );
   }

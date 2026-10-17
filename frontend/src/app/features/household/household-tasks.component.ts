@@ -35,6 +35,7 @@ import type {
   HouseholdPlanSpace
 } from '../../shared/models/household-plan.model';
 import type {
+  HouseholdTaskPriority,
   HouseholdTaskOccurrence,
   VersionedHouseholdTaskWeek
 } from '../../shared/models/household-task.model';
@@ -107,6 +108,7 @@ export class HouseholdTasksComponent implements OnChanges {
   readonly newDate = signal(this.weekStart());
   readonly newSpaceId = signal('');
   readonly newMemberId = signal('');
+  readonly newPriority = signal<HouseholdTaskPriority>('medium');
   readonly randomAssignmentMode = signal(false);
   readonly showTaskCreationForm = signal(false);
   readonly randomPreview = signal<HouseholdTaskOccurrence[] | null>(null);
@@ -158,6 +160,11 @@ export class HouseholdTasksComponent implements OnChanges {
   readonly filterSpacePickerOptions = computed<PickerOption[]>(() => [
     { value: '', label: this.i18n.t('household.tasks_all_areas') },
     ...this.spaces().map((space) => ({ value: space.id, label: this.areaName(space.id) }))
+  ]);
+  readonly priorityPickerOptions = computed<PickerOption[]>(() => [
+    { value: 'low', label: this.i18n.t('household.tasks_priority_low') },
+    { value: 'medium', label: this.i18n.t('household.tasks_priority_medium') },
+    { value: 'high', label: this.i18n.t('household.tasks_priority_high') }
   ]);
   readonly visibleTasks = computed(() => {
     const spaceId = this.filterSpaceId();
@@ -268,12 +275,14 @@ export class HouseholdTasksComponent implements OnChanges {
       spaceId: this.newSpaceId() || null,
       scheduledDate: this.newDate(),
       assignedMemberId: this.randomAssignmentMode() ? null : this.newMemberId() || null,
+      priority: this.newPriority(),
       completed: false
     };
     this.draftTasks.update((tasks) => [...tasks, task]);
     this.showTaskCreationForm.set(true);
     this.newTitle.set('');
     this.newDetails.set('');
+    this.newPriority.set('medium');
     this.randomPreview.set(null);
     this.errorKey.set(null);
   }
@@ -285,6 +294,18 @@ export class HouseholdTasksComponent implements OnChanges {
     );
     this.randomPreview.set(null);
     this.errorKey.set(null);
+  }
+
+  setNewPriority(value: string | null): void {
+    if (isHouseholdTaskPriority(value)) this.newPriority.set(value);
+  }
+
+  setTaskPriority(taskId: string, value: string | null): void {
+    if (isHouseholdTaskPriority(value)) this.updateTask(taskId, { priority: value });
+  }
+
+  taskPriorityLabel(priority: HouseholdTaskPriority): string {
+    return this.i18n.t(`household.tasks_priority_${priority}` as TranslationKey);
   }
 
   deleteTask(taskId: string): void {
@@ -664,6 +685,10 @@ function addDaysIso(isoDate: string, days: number): string {
 function parseLocalDate(isoDate: string): Date {
   const [year, month, day] = isoDate.split('-').map(Number);
   return new Date(year, month - 1, day);
+}
+
+function isHouseholdTaskPriority(value: string | null): value is HouseholdTaskPriority {
+  return value === 'low' || value === 'medium' || value === 'high';
 }
 
 function formatLocalDate(date: Date): string {

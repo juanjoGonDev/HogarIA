@@ -4,6 +4,7 @@ import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { HouseholdService } from './household.service';
 import type { AssistantAction } from '../../shared/models/ai-action-assistant.model';
+import type { Household } from '../../shared/models/household.model';
 import type { HouseholdMealProposal } from './household-meal-proposal.service';
 import { AiActionAssistantExecutionService } from './ai-action-assistant-execution.service';
 
@@ -12,13 +13,13 @@ describe('AiActionAssistantExecutionService', () => {
   let http: HttpTestingController;
   let householdContext: {
     activeHouseholdId: ReturnType<typeof signal<string | null>>;
-    household: ReturnType<typeof signal<null>>;
+    household: ReturnType<typeof signal<Household | null>>;
   };
 
   beforeEach(() => {
     householdContext = {
       activeHouseholdId: signal<string | null>(null),
-      household: signal<null>(null)
+      household: signal<Household | null>(null)
     };
     TestBed.configureTestingModule({
       providers: [
@@ -271,6 +272,7 @@ describe('AiActionAssistantExecutionService', () => {
       spaceId: null,
       scheduledDate: '2026-10-05',
       assignedMemberId: null,
+      priority: 'medium',
       completed: false
     };
     const other = { ...before, id: 'task-2', title: 'Regar plantas', scheduledDate: '2026-10-06' };
@@ -284,6 +286,7 @@ describe('AiActionAssistantExecutionService', () => {
           title: null,
           details: 'Separar vidrio también',
           scheduledDate: null,
+          priority: null,
           spaceName: null,
           assignedMemberName: null
         }
@@ -321,6 +324,181 @@ describe('AiActionAssistantExecutionService', () => {
     });
     expect(save.request.headers.get('x-assistant-action-id')).toBe(action.id);
     expect(save.request.headers.get('x-household-id')).toBe('home-a');
+    save.flush({ success: true, data: { weekStart: '2026-10-05', version: 5, tasks: [] } });
+    await expectAsync(execution).toBeResolvedTo(undefined);
+  });
+
+  it('creates a reviewed household task with its proposed priority through the versioned week API', async () => {
+    householdContext.activeHouseholdId.set('home-a');
+    const action = {
+      ...actionBase('household.create_task', 'household', 'create_task'),
+      kind: 'household.create_task',
+      payload: {
+        title: 'Limpiar cocina',
+        details: null,
+        scheduledDate: '2026-10-07',
+        priority: 'high',
+        spaceName: null,
+        assignedMemberName: null
+      }
+    } as AssistantAction;
+
+    const execution = service.execute(action, 'home-a');
+    const read = http.expectOne(
+      (request) =>
+        request.method === 'GET' &&
+        request.url === '/api/household/tasks' &&
+        request.params.get('weekStart') === '2026-10-05'
+    );
+    read.flush({
+      success: true,
+      data: { weekStart: '2026-10-05', version: 2, tasks: [] }
+    });
+    await Promise.resolve();
+
+    const save = http.expectOne(
+      (request) => request.method === 'PUT' && request.url === '/api/household/tasks'
+    );
+    expect(save.request.body).toEqual({
+      weekStart: '2026-10-05',
+      baseVersion: 2,
+      tasks: [
+        {
+          id: `assistant-${action.id}`,
+          title: 'Limpiar cocina',
+          details: null,
+          scheduledDate: '2026-10-07',
+          spaceId: null,
+          assignedMemberId: null,
+          priority: 'high',
+          completed: false
+        }
+      ]
+    });
+    expect(save.request.headers.get('x-assistant-action-id')).toBe(action.id);
+    expect(save.request.headers.get('x-household-id')).toBe('home-a');
+    save.flush({ success: true, data: { weekStart: '2026-10-05', version: 3, tasks: [] } });
+    await expectAsync(execution).toBeResolvedTo(undefined);
+  });
+
+  it('resolves reviewed household task space and active assignee names before saving', async () => {
+    householdContext.activeHouseholdId.set('home-a');
+    householdContext.household.set({
+      id: 'home-a',
+      members: [{ id: 'membership-a', userId: 'user-a', name: 'Ana', isActive: true }]
+    } as unknown as Household);
+    const action = {
+      ...actionBase('household.create_task', 'household', 'create_task'),
+      kind: 'household.create_task',
+      payload: {
+        title: 'Limpiar cocina',
+        details: null,
+        scheduledDate: '2026-10-07',
+        priority: 'high',
+        spaceName: 'Cocina',
+        assignedMemberName: 'Ana'
+      }
+    } as AssistantAction;
+
+    const execution = service.execute(action, 'home-a');
+    const read = http.expectOne(
+      (request) =>
+        request.method === 'GET' &&
+        request.url === '/api/household/tasks' &&
+        request.params.get('weekStart') === '2026-10-05'
+    );
+    read.flush({
+      success: true,
+      data: { weekStart: '2026-10-05', version: 2, tasks: [] }
+    });
+    await Promise.resolve();
+
+    const plan = http.expectOne('/api/household/plan');
+    expect(plan.request.headers.get('x-household-id')).toBe('home-a');
+    plan.flush({
+      success: true,
+      data: { plan: { floors: [{ spaces: [{ id: 'space-1', label: 'Cocina' }] }] } }
+    });
+    await Promise.resolve();
+
+    const save = http.expectOne(
+      (request) => request.method === 'PUT' && request.url === '/api/household/tasks'
+    );
+    expect(save.request.body.tasks).toEqual([
+      {
+        id: `assistant-${action.id}`,
+        title: 'Limpiar cocina',
+        details: null,
+        scheduledDate: '2026-10-07',
+        spaceId: 'space-1',
+        assignedMemberId: 'user-a',
+        priority: 'high',
+        completed: false
+      }
+    ]);
+    save.flush({ success: true, data: { weekStart: '2026-10-05', version: 3, tasks: [] } });
+    await expectAsync(execution).toBeResolvedTo(undefined);
+  });
+
+  it('persists only the explicitly reviewed task-priority change with its preimage', async () => {
+    householdContext.activeHouseholdId.set('home-a');
+    const before = {
+      id: 'task-1',
+      title: 'Bajar reciclaje',
+      details: null,
+      spaceId: null,
+      scheduledDate: '2026-10-05',
+      assignedMemberId: null,
+      priority: 'medium',
+      completed: false
+    };
+    const action = {
+      ...actionBase('household.update_task', 'household', 'update_task'),
+      kind: 'household.update_task',
+      payload: {
+        targetTitle: before.title,
+        targetScheduledDate: before.scheduledDate,
+        changes: {
+          title: null,
+          details: null,
+          scheduledDate: null,
+          priority: 'high',
+          spaceName: null,
+          assignedMemberName: null
+        }
+      },
+      executionTarget: {
+        kind: 'household-task' as const,
+        id: before.id,
+        weekStart: '2026-10-05',
+        version: 4,
+        snapshot: before
+      }
+    } as AssistantAction;
+
+    const execution = service.execute(action, 'home-a');
+    const read = http.expectOne(
+      (request) =>
+        request.method === 'GET' &&
+        request.url === '/api/household/tasks' &&
+        request.params.get('weekStart') === '2026-10-05'
+    );
+    read.flush({
+      success: true,
+      data: { weekStart: '2026-10-05', version: 4, tasks: [before] }
+    });
+    await Promise.resolve();
+
+    const save = http.expectOne(
+      (request) => request.method === 'PUT' && request.url === '/api/household/tasks'
+    );
+    expect(save.request.body).toEqual({
+      weekStart: '2026-10-05',
+      baseVersion: 4,
+      tasks: [{ ...before, priority: 'high' }],
+      assistantAction: { operation: 'update_task', targetId: before.id, before }
+    });
+    expect(save.request.headers.get('x-assistant-action-id')).toBe(action.id);
     save.flush({ success: true, data: { weekStart: '2026-10-05', version: 5, tasks: [] } });
     await expectAsync(execution).toBeResolvedTo(undefined);
   });
@@ -431,6 +609,7 @@ describe('AiActionAssistantExecutionService', () => {
       spaceId: null,
       scheduledDate: '2026-10-05',
       assignedMemberId: null,
+      priority: 'medium',
       completed: false
     };
     const action = {
@@ -443,6 +622,7 @@ describe('AiActionAssistantExecutionService', () => {
           title: null,
           details: null,
           scheduledDate: '2026-10-12',
+          priority: null,
           spaceName: null,
           assignedMemberName: null
         }

@@ -12,6 +12,8 @@ export const HOUSEHOLD_TASK_LIMITS = {
   maxDetailsLength: 500
 } as const;
 
+export const householdTaskPrioritySchema = z.enum(['low', 'medium', 'high']);
+
 export const householdTaskOccurrenceSchema = z.object({
   id: z.string().trim().min(1).max(80),
   title: z.string().trim().min(1),
@@ -19,6 +21,7 @@ export const householdTaskOccurrenceSchema = z.object({
   spaceId: z.string().trim().min(1).max(80).nullable(),
   scheduledDate: dateSchema,
   assignedMemberId: z.string().trim().min(1).max(80).nullable(),
+  priority: householdTaskPrioritySchema.default('medium'),
   completed: z.boolean()
 });
 

@@ -281,6 +281,7 @@ describe('AiActionAssistantDialogComponent', () => {
           title: 'Revisar alacena',
           details: null,
           scheduledDate: null,
+          priority: null,
           spaceName: null,
           assignedMemberName: null
         }
@@ -297,6 +298,7 @@ describe('AiActionAssistantDialogComponent', () => {
           spaceId: null,
           scheduledDate: '2026-10-20',
           assignedMemberId: null,
+          priority: 'medium',
           completed: false
         }
       },
@@ -321,7 +323,21 @@ describe('AiActionAssistantDialogComponent', () => {
     expect(review.textContent).toContain('Revisar despensa');
     expect(review.textContent).toContain('2026-10-20');
     expect(review.textContent).toContain('Reponer garbanzos');
+    expect(
+      fixture.nativeElement.querySelector('[data-test="ai-assistant-task-priority"]')?.textContent
+    ).toContain('Media');
+    expect(
+      component.editableFields(action).some((field) => field.path.join('.') === 'changes.priority')
+    ).toBeTrue();
     expect(component.isActionValid(action)).toBeTrue();
+    expect(execution.execute).not.toHaveBeenCalled();
+
+    component.updateField(action.id, ['changes', 'priority'], 'high', 'select');
+    fixture.detectChanges();
+    const edited = component.plan()!.actions[0];
+    if (edited.kind !== 'household.update_task') throw new Error('Expected task update action');
+    expect(component.taskPriority(edited)).toBe('high');
+    expect(component.isActionValid(edited)).toBeTrue();
     expect(execution.execute).not.toHaveBeenCalled();
 
     component.setSelected(action.id, true);
@@ -335,6 +351,92 @@ describe('AiActionAssistantDialogComponent', () => {
     expect(confirmation.textContent).toContain('Reponer garbanzos');
     expect(confirmation.textContent).toContain('Revisar alacena');
     expect(execution.execute).not.toHaveBeenCalled();
+  });
+
+  it('reviews and edits a new task priority before the explicit assistant confirmation', async () => {
+    const action: AssistantAction = {
+      id: 'task-create-priority-1',
+      kind: 'household.create_task',
+      domain: 'household',
+      actionType: 'create_task',
+      title: 'Crear tarea doméstica',
+      summary: 'Crea una tarea con prioridad alta.',
+      payload: {
+        title: 'Limpiar cocina',
+        details: null,
+        scheduledDate: '2026-10-19',
+        priority: 'medium',
+        spaceName: null,
+        assignedMemberName: null
+      },
+      dependsOn: [],
+      warnings: [],
+      selected: false,
+      status: 'pending'
+    };
+    const plan: AssistantActionPlan = {
+      id: 'task-create-priority-plan',
+      summary: 'Crea una tarea doméstica.',
+      actions: [action],
+      questions: []
+    };
+    component.plan.set(plan);
+    component.stage.set('review');
+    fixture.detectChanges();
+
+    const priorityField = component
+      .editableFields(action)
+      .find((field) => field.path.join('.') === 'priority');
+    expect(priorityField?.kind).toBe('select');
+    expect(priorityField?.choices?.map((choice) => choice.value)).toEqual([
+      'low',
+      'medium',
+      'high'
+    ]);
+    expect(
+      fixture.nativeElement.querySelector('[data-test="ai-assistant-task-priority"]')?.textContent
+    ).toContain('Media');
+    for (const priority of ['low', 'medium', 'high']) {
+      const candidate = {
+        ...action,
+        payload: { ...action.payload, priority }
+      } as AssistantAction;
+      expect(component.isActionValid(candidate)).toBeTrue();
+    }
+
+    component.updateField(action.id, ['priority'], 'high', 'select');
+    fixture.detectChanges();
+    const edited = component.plan()!.actions[0];
+    if (edited.kind !== 'household.create_task') throw new Error('Expected task creation action');
+    expect(edited.payload.priority).toBe('high');
+    expect(component.taskPriority(edited)).toBe('high');
+    expect(
+      fixture.nativeElement.querySelector('[data-test="ai-assistant-task-priority"]')?.textContent
+    ).toContain('Alta');
+    expect(
+      component.isActionValid({
+        ...edited,
+        payload: { ...edited.payload, priority: 'urgent' }
+      } as unknown as AssistantAction)
+    ).toBeFalse();
+    expect(execution.execute).not.toHaveBeenCalled();
+
+    component.setSelected(action.id, true);
+    component.goToConfirmation();
+    fixture.detectChanges();
+    const confirmation = fixture.nativeElement.querySelector(
+      '[data-test="ai-assistant-confirm"]'
+    ) as HTMLElement;
+    expect(confirmation.textContent).toContain('Alta');
+    expect(execution.execute).not.toHaveBeenCalled();
+
+    click('[data-test="ai-assistant-confirm-submit"]');
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(execution.execute).toHaveBeenCalledTimes(1);
+    expect(execution.execute.calls.mostRecent().args[0].payload).toEqual(
+      jasmine.objectContaining({ priority: 'high' })
+    );
   });
 
   it('shows and edits the resolved shopping list without writing before explicit approval', () => {
@@ -422,6 +524,46 @@ describe('AiActionAssistantDialogComponent', () => {
     expect(execution.execute).not.toHaveBeenCalled();
   });
 
+  it('validates shopping-item lengths and optional quantity/unit/category values', () => {
+    const action: AssistantAction = {
+      id: 'shopping-item-validation',
+      kind: 'shopping.add_item',
+      domain: 'shopping',
+      actionType: 'add_item',
+      title: 'Añadir arroz',
+      summary: 'Añade arroz a la lista de la compra.',
+      payload: {
+        listName: 'Compra semanal',
+        name: 'Arroz',
+        quantity: 2,
+        unit: 'kg',
+        category: 'pantry'
+      },
+      dependsOn: [],
+      warnings: [],
+      selected: false,
+      status: 'pending'
+    };
+    expect(component.isActionValid(action)).toBeTrue();
+    expect(
+      component.isActionValid({
+        ...action,
+        payload: { ...action.payload, quantity: null, unit: null, category: null }
+      })
+    ).toBeTrue();
+    for (const payload of [
+      { ...action.payload, listName: 'x'.repeat(81) },
+      { ...action.payload, name: 'x'.repeat(201) },
+      { ...action.payload, quantity: 0 },
+      { ...action.payload, quantity: 100001 },
+      { ...action.payload, unit: 'x'.repeat(49) },
+      { ...action.payload, category: 'x'.repeat(49) }
+    ]) {
+      expect(component.isActionValid({ ...action, payload })).toBeFalse();
+    }
+    expect(execution.execute).not.toHaveBeenCalled();
+  });
+
   it('shows an ingredient preimage and keeps its reviewed pantry patch editable until approval', () => {
     const action: AssistantAction = {
       id: 'pantry-update-1',
@@ -484,6 +626,40 @@ describe('AiActionAssistantDialogComponent', () => {
     expect(target.textContent).toContain('2 unit');
     expect(target.textContent).toContain('Desayuno');
     expect(component.isActionValid(action)).toBeTrue();
+    const unchangedFields = {
+      name: null,
+      setName: false,
+      category: null,
+      setCategory: false,
+      quantity: null,
+      setQuantity: false,
+      unit: null,
+      setUnit: false,
+      expirationDate: null,
+      setExpirationDate: false,
+      location: null,
+      setLocation: false,
+      notes: null,
+      setNotes: false
+    };
+    const singleFieldChanges: Array<
+      Extract<AssistantAction, { kind: 'pantry.update_ingredient' }>['payload']['changes']
+    > = [
+      { ...unchangedFields, category: 'other', setCategory: true },
+      { ...unchangedFields, quantity: 1, setQuantity: true },
+      { ...unchangedFields, unit: 'g', setUnit: true },
+      { ...unchangedFields, expirationDate: '2026-10-21', setExpirationDate: true },
+      { ...unchangedFields, location: 'pantry', setLocation: true },
+      { ...unchangedFields, notes: 'Tienda', setNotes: true }
+    ];
+    for (const changes of singleFieldChanges) {
+      expect(
+        component.isActionValid({
+          ...action,
+          payload: { ...action.payload, changes }
+        })
+      ).toBeTrue();
+    }
     const categoryField = component
       .editableFields(action)
       .find((field) => field.path[1] === 'category');
@@ -1343,6 +1519,32 @@ describe('AiActionAssistantDialogComponent', () => {
     expect(options.map((option) => option.label)).toContain('Campo: Dificultad');
   });
 
+  it('validates a complete recipe draft while keeping review read-only until confirmation', () => {
+    const action = recipeAction();
+    if (action.kind !== 'recipes.create_draft') throw new Error('Expected recipe draft action');
+    action.payload.recipe.instructionsByLevel = {
+      basic: [recipeStep('Bate los huevos.')],
+      intermediate: [recipeStep('Mezcla bien los huevos.')],
+      expert: [recipeStep('Cuaja la tortilla.')]
+    };
+    component.plan.set({
+      id: 'recipe-draft-plan',
+      summary: 'Prepara una tortilla.',
+      actions: [action],
+      questions: []
+    });
+    component.stage.set('review');
+    fixture.detectChanges();
+
+    expect(component.isActionValid(action)).toBeTrue();
+    expect(execution.execute).not.toHaveBeenCalled();
+    component.setSelected(action.id, true);
+    component.goToConfirmation();
+    fixture.detectChanges();
+    expect(component.stage()).toBe('confirm');
+    expect(execution.execute).not.toHaveBeenCalled();
+  });
+
   it('shows and edits recipe preimages, then carries only reviewed edits to confirmation', () => {
     const action = recipeUpdateAction();
     component.plan.set({ id: 'recipe-update-plan', summary: '', actions: [action], questions: [] });
@@ -1902,6 +2104,20 @@ function recipeAction(): AssistantAction {
     warnings: [],
     selected: false,
     status: 'pending'
+  };
+}
+
+function recipeStep(instruction: string): AIRecipeResponse['instructionsByLevel']['basic'][number] {
+  return {
+    stepNumber: 1,
+    instruction,
+    duration: null,
+    temperature: null,
+    timerRequired: false,
+    timerDuration: null,
+    tips: null,
+    warning: null,
+    illustration: null
   };
 }
 

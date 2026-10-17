@@ -20,28 +20,37 @@ Añadir prioridad real a las tareas del hogar y al registro del asistente. El ob
 
 ### Contrato y persistencia
 
-- [ ] El modelo compartido y el esquema Zod admiten únicamente `low | medium | high`.
-- [ ] Datos guardados sin prioridad se leen como `medium`, sin perder ninguna otra propiedad ni invalidar la semana.
-- [ ] La API acepta omisión compatible como `medium` y rechaza prioridades desconocidas; guardar persiste la prioridad normalizada.
-- [ ] El CAS de actualización compara también prioridad; contexto obsoleto, otro cambio concurrente o replay con cuerpo distinto no sobrescriben datos.
-- [ ] Crear/editar manualmente, asignación justa, cambio de semana y recarga conservan prioridad.
+- [x] El modelo compartido y el esquema Zod admiten únicamente `low | medium | high`.
+- [x] Datos guardados sin prioridad se leen como `medium`, sin perder ninguna otra propiedad ni invalidar la semana.
+- [x] La API acepta omisión compatible como `medium` y rechaza prioridades desconocidas; guardar persiste la prioridad normalizada.
+- [x] El CAS de actualización compara también prioridad; contexto obsoleto, otro cambio concurrente o replay con cuerpo distinto no sobrescriben datos.
+- [x] Crear/editar manualmente, asignación justa, cambio de semana y recarga conservan prioridad.
 
 ### Asistente HITL
 
-- [ ] `household.create_task` propone prioridad explícita; si la instrucción no indica una, propone `medium`.
-- [ ] `household.update_task` puede cambiar prioridad y mantiene el resto del payload estricto; el refinamiento solo modifica la prioridad cuando el scope lo permite.
-- [ ] La UI permite revisar/editar la prioridad antes de aprobar; selección, edición, refinamiento, rechazo y cierre no escriben en SQLite ni `ai_jobs`.
-- [ ] Solo la confirmación explícita escribe, mediante la API existente; autorización de hogar, preimagen/CAS e idempotencia siguen vigentes.
-- [ ] Rechazo, aprobación parcial, doble clic, repetición, prioridad inválida y cambio concurrente tienen pruebas de regresión.
+- [x] `household.create_task` propone prioridad explícita; si la instrucción no indica una, propone `medium`.
+- [x] `household.update_task` puede cambiar prioridad y mantiene el resto del payload estricto; el refinamiento solo modifica la prioridad cuando el scope lo permite.
+- [x] La UI permite revisar/editar la prioridad antes de aprobar; selección, edición, refinamiento, rechazo y cierre no escriben en SQLite ni `ai_jobs`.
+- [x] Solo la confirmación explícita escribe, mediante la API existente; autorización de hogar, preimagen/CAS e idempotencia siguen vigentes.
+- [x] Rechazo, aprobación parcial, doble clic, repetición, prioridad inválida y cambio concurrente tienen pruebas de regresión.
 
 ### UX y verificación
 
-- [ ] Labels y opciones de prioridad están en ES/EN; controles usan labels accesibles, teclado y patrones visuales existentes.
-- [ ] En móvil, al expandir los detalles de una tarea, tarjeta y fila crecen en el flujo; el pie sticky de guardado no tapa sus controles.
-- [ ] Playwright real contra app/API y SQLite temporal cubre crear, editar, recargar, rechazo sin escritura, confirmar y replay en desktop y móvil.
-- [ ] Capturas sintéticas desktop/móvil se inspeccionan y guardan fuera de Git; el cambio no introduce overflow ni rompe geometría compartida.
-- [ ] Coverage de archivos del alcance ≥70 % en statements, branches, functions y lines; suites completas, `check:ui`, typecheck, build y hooks registrados.
-- [ ] Commit atómico y push no forzado a `feat/household-floorplan`; PR #47 permanece Draft.
+- [x] Labels y opciones de prioridad están en ES/EN; controles usan labels accesibles, teclado y patrones visuales existentes.
+- [x] En móvil, al expandir los detalles de una tarea, tarjeta y fila crecen en el flujo; el pie sticky de guardado no tapa sus controles.
+- [x] Playwright real contra app/API y SQLite temporal cubre crear, editar, recargar, rechazo sin escritura, confirmar y replay en desktop y móvil.
+- [x] Capturas sintéticas desktop/móvil se inspeccionan y guardan fuera de Git; el cambio no introduce overflow ni rompe geometría compartida.
+- [x] Coverage de archivos del alcance ≥70 % en statements, branches, functions y lines; suites completas, `check:ui`, typecheck, build y hooks registrados.
+- [x] Commit atómico y push no forzado a `feat/household-floorplan`; PR #47 permanece Draft.
+
+## Resultados de validación (2026-10-17)
+
+- `pnpm run test:client`: 1.659 pruebas correctas; cobertura global S/B/F/L 90,57/81,10/92,05/93,05 %.
+- `pnpm run test:server:coverage`: 120 archivos aprobados, 1 omitido; 2.043 pruebas correctas y 1 omitida. Cobertura del alcance ≥70 % en las cuatro métricas (por ejemplo, `household-tasks.component.ts`: 92,37/82,31/91,67/95,07 %; `ai-action-assistant-dialog.component.ts`: 78,58/72,05/85,45/82,30 %; rutas/esquemas/store de servidor: ≥70 %).
+- `pnpm run check:ui`: 262 ficheros, 21 reglas, sin incidencias. `pnpm run typecheck:e2e` y Prettier de los archivos del alcance: correctos. `pnpm run build`: correcto, sin tocar budgets; conserva avisos de tamaño de bundle y Angular existentes.
+- Playwright aislado con SQLite temporal: el flujo de tarea del asistente (edición de prioridad, descarte, confirmación, replay, recarga y rechazo de la acción sin escritura) y el lote con creación de tarea por defecto `medium` pasan en proyectos `chromium` y `mobile-chrome`. También pasa el flujo manual de tareas en ambos proyectos, con alta/baja/media, guardado y recarga.
+- Capturas sintéticas inspeccionadas y excluidas de Git: `.e2e-screenshots/household-plan-tasks/chromium/task-priority-controls-desktop.png` y `.e2e-screenshots/household-plan-tasks/mobile-chrome/task-priority-controls-mobile.png`.
+- `server/src/routes/ai-assistant.routes.spec.ts`: prueba focal de refinamiento permite cambiar prioridad solo con scope `changes.priority`, rechaza el cambio fuera de scope y compara el snapshot SQLite para confirmar cero escrituras.
 
 ## Fuera de alcance
 

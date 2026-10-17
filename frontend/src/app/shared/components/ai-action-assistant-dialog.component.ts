@@ -45,6 +45,7 @@ import type { TranslationKey } from '../../core/i18n';
 import { pantryCategoryLabel } from '../../core/i18n/labels';
 import { TranslatePipe } from '../../core/pipes/translate.pipe';
 import type { HouseholdMember } from '../models/household.model';
+import type { HouseholdTaskPriority } from '../models/household-task.model';
 import { ButtonComponent } from './ui/button/button.component';
 import { CheckboxComponent } from './ui/checkbox/checkbox.component';
 import { IconComponent } from './ui/icon/icon.component';
@@ -70,6 +71,11 @@ const PANTRY_CHANGE_FLAGS: Record<PantryIngredientChangeField, string> = {
 const ACTION_REFINEMENT_SCOPE = '__action__';
 const BATCH_REFINEMENT_SCOPE = '__batch__';
 const GROUP_REFINEMENT_SCOPE = '__group__';
+const HOUSEHOLD_TASK_PRIORITY_LABELS: Record<HouseholdTaskPriority, TranslationKey> = {
+  low: 'ai_assistant.priority.low',
+  medium: 'ai_assistant.priority.medium',
+  high: 'ai_assistant.priority.high'
+};
 
 interface AssistantField {
   path: Array<string | number>;
@@ -78,6 +84,10 @@ interface AssistantField {
   value: AssistantFieldValue;
   required?: boolean;
   choices?: Array<{ value: string; label: string }>;
+}
+
+function isHouseholdTaskPriority(value: unknown): value is HouseholdTaskPriority {
+  return value === 'low' || value === 'medium' || value === 'high';
 }
 
 interface SpeechRecognitionResultLike {
@@ -133,6 +143,7 @@ type AssistantFieldKey =
   | 'store'
   | 'listName'
   | 'title'
+  | 'priority'
   | 'details'
   | 'scheduledDate'
   | 'weekStart'
@@ -171,6 +182,7 @@ const FIELD_LABELS: Record<AssistantFieldKey, TranslationKey> = {
   store: 'ai_assistant.field.store',
   listName: 'ai_assistant.field.listName',
   title: 'ai_assistant.field.title',
+  priority: 'ai_assistant.field.priority',
   details: 'ai_assistant.field.details',
   scheduledDate: 'ai_assistant.field.scheduledDate',
   weekStart: 'ai_assistant.field.weekStart',
@@ -487,6 +499,13 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
                     </div>
                   </header>
                   <p class="assistant__action-summary">{{ action.summary }}</p>
+                  <p
+                    *ngIf="taskPriority(action) as priority"
+                    class="assistant__action-summary"
+                    data-test="ai-assistant-task-priority"
+                  >
+                    {{ 'ai_assistant.field.priority' | t }}: {{ taskPriorityLabel(priority) }}
+                  </p>
                   <p
                     *ngIf="action.kind === 'household.update_task'"
                     class="assistant__action-summary"
@@ -2998,6 +3017,14 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
       case 'household.create_task':
         return [
           this.field('title', ['title'], action.payload.title, 'text', true),
+          this.field(
+            'priority',
+            ['priority'],
+            action.payload.priority,
+            'select',
+            true,
+            this.householdTaskPriorityChoices()
+          ),
           this.field('details', ['details'], action.payload.details, 'textarea'),
           this.field(
             'scheduledDate',
@@ -3017,6 +3044,14 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
       case 'household.update_task':
         return [
           this.field('title', ['changes', 'title'], action.payload.changes.title, 'text'),
+          this.field(
+            'priority',
+            ['changes', 'priority'],
+            action.payload.changes.priority ?? action.executionTarget.snapshot.priority,
+            'select',
+            true,
+            this.householdTaskPriorityChoices()
+          ),
           this.field('details', ['changes', 'details'], action.payload.changes.details, 'textarea'),
           this.field(
             'scheduledDate',
@@ -3573,6 +3608,7 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
     if (action.kind === 'household.create_task') {
       return (
         this.isIsoDate(action.payload.scheduledDate) &&
+        isHouseholdTaskPriority(action.payload.priority) &&
         action.payload.title.trim().length <= 160 &&
         (action.payload.details === null || action.payload.details.length <= 500) &&
         (action.payload.spaceName === null || action.payload.spaceName.length <= 120) &&
@@ -3588,6 +3624,7 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
         this.isIsoDate(action.executionTarget.snapshot.scheduledDate) &&
         this.isIsoDate(newDate) &&
         this.mondayOf(newDate) === action.executionTarget.weekStart &&
+        (changes.priority === null || isHouseholdTaskPriority(changes.priority)) &&
         (changes.title === null || changes.title.trim().length <= 160) &&
         (changes.details === null || changes.details.length <= 500) &&
         (changes.spaceName === null || changes.spaceName.length <= 120) &&
@@ -4061,6 +4098,18 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
     return ACTION_LABELS[action.actionType];
   }
 
+  taskPriority(action: AssistantAction): HouseholdTaskPriority | null {
+    if (action.kind === 'household.create_task') return action.payload.priority;
+    if (action.kind === 'household.update_task') {
+      return action.payload.changes.priority ?? action.executionTarget.snapshot.priority;
+    }
+    return null;
+  }
+
+  taskPriorityLabel(priority: HouseholdTaskPriority): string {
+    return this.i18n.t(HOUSEHOLD_TASK_PRIORITY_LABELS[priority]);
+  }
+
   fieldKey(key: AssistantFieldKey): TranslationKey {
     return FIELD_LABELS[key];
   }
@@ -4092,6 +4141,13 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
     choices?: AssistantField['choices']
   ): AssistantField {
     return { key: this.fieldKey(key), path, value, kind, required, choices };
+  }
+
+  private householdTaskPriorityChoices(): PickerOption[] {
+    return (['low', 'medium', 'high'] as const).map((priority) => ({
+      value: priority,
+      label: this.taskPriorityLabel(priority)
+    }));
   }
 
   private updateActions(

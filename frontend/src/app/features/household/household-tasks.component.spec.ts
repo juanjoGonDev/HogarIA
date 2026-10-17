@@ -193,6 +193,7 @@ describe('HouseholdTasksComponent', () => {
         spaceId: 'kitchen',
         scheduledDate: component.weekStart(),
         assignedMemberId: 'ada',
+        priority: 'medium',
         completed: false
       }
     ]);
@@ -233,6 +234,9 @@ describe('HouseholdTasksComponent', () => {
 
   it('adds and edits a household-week task locally and saves it with the versioned API', async () => {
     await mount();
+    expect(
+      fixture.nativeElement.querySelector('#household-tasks-new-priority') as HTMLElement | null
+    ).not.toBeNull();
     component.newTitle.set('Barrer cocina');
     component.newSpaceId.set('kitchen');
     component.newMemberId.set('ada');
@@ -244,12 +248,19 @@ describe('HouseholdTasksComponent', () => {
         title: 'Barrer cocina',
         spaceId: 'kitchen',
         assignedMemberId: 'ada',
+        priority: 'medium',
         completed: false
       })
     );
     expect(tasksService.save).not.toHaveBeenCalled();
 
-    component.updateTask(component.draftTasks()[0].id, { completed: true });
+    component.updateTask(component.draftTasks()[0].id, { completed: true, priority: 'high' });
+    fixture.detectChanges();
+    expect(
+      fixture.nativeElement.querySelector(
+        `[data-test="household-task-priority-${component.draftTasks()[0].id}"]`
+      ) as HTMLElement | null
+    ).not.toBeNull();
     const savedTasks = structuredClone(component.draftTasks());
     component.saveWeek();
 
@@ -325,6 +336,7 @@ describe('HouseholdTasksComponent', () => {
       spaceId: null,
       scheduledDate: date,
       assignedMemberId: null,
+      priority: 'medium' as const,
       completed: false
     };
     const kitchenTask = { ...homeTask, id: 'kitchen-task', title: 'Fregar', spaceId: 'kitchen' };
@@ -371,6 +383,7 @@ describe('HouseholdTasksComponent', () => {
       spaceId: null,
       scheduledDate: date,
       assignedMemberId: null,
+      priority: 'medium' as const,
       completed: false
     }));
     component.draftTasks.set(tasks);
@@ -399,6 +412,7 @@ describe('HouseholdTasksComponent', () => {
         spaceId: null,
         scheduledDate: date,
         assignedMemberId: null,
+        priority: 'medium',
         completed: false
       },
       {
@@ -408,6 +422,7 @@ describe('HouseholdTasksComponent', () => {
         spaceId: null,
         scheduledDate: component.weekDays()[1].date,
         assignedMemberId: null,
+        priority: 'medium',
         completed: false
       }
     ]);
@@ -622,6 +637,7 @@ describe('HouseholdTasksComponent', () => {
       spaceId: 'removed-space',
       scheduledDate: component.weekStart(),
       assignedMemberId: 'missing-member',
+      priority: 'high',
       completed: true
     };
     component.draftTasks.set([task]);
@@ -653,6 +669,7 @@ describe('HouseholdTasksComponent', () => {
       spaceId: 'kitchen',
       scheduledDate,
       assignedMemberId: 'ada',
+      priority: 'medium',
       completed: false
     });
     component.draftTasks.set([
