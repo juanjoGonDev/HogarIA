@@ -292,6 +292,7 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
       [closable]="!executing()"
       [closeOnOverlay]="!executing()"
       [showFooter]="true"
+      [adaptToVisualViewport]="true"
       (onClose)="requestClose()"
     >
       @switch (stage()) {

@@ -800,6 +800,17 @@ async function capture(
 
 async function assertViewport(page: Page, width: number, height: number, dialogOpen: boolean) {
   await page.setViewportSize({ width, height });
+  if (width <= 1023) {
+    await expect(page.locator('#primary-sidebar')).toHaveAttribute('aria-hidden', 'true');
+  }
+  if (dialogOpen) {
+    await page.waitForFunction((viewportHeight) => {
+      const overlay = document.querySelector<HTMLElement>('.modal-overlay--visual-viewport');
+      return (
+        overlay !== null && Number.parseFloat(getComputedStyle(overlay).height) <= viewportHeight
+      );
+    }, height);
+  }
   const metrics = await page.evaluate((hasDialog) => {
     const viewportWidth = window.visualViewport?.width ?? window.innerWidth;
     const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
@@ -3839,6 +3850,10 @@ test('asistente global: edita una receta propia tras revisión explícita y prot
       { width: 568, height: 320 }
     ]) {
       await page.setViewportSize(viewport);
+      await page.waitForFunction((height) => {
+        const overlay = document.querySelector<HTMLElement>('.modal-overlay--visual-viewport');
+        return overlay !== null && Number.parseFloat(getComputedStyle(overlay).height) <= height;
+      }, viewport.height);
       const geometry = await page.evaluate(() => {
         const modal = document.querySelector<HTMLElement>('.modal[role="dialog"]');
         const body = modal?.querySelector<HTMLElement>('.modal__body');
@@ -3871,9 +3886,15 @@ test('asistente global: edita una receta propia tras revisión explícita y prot
         `sin overflow en ${viewport.width}×${viewport.height}`
       ).toBeLessThanOrEqual(geometry.viewportWidth + 1);
       expect(geometry.modalLeft).toBeGreaterThanOrEqual(0);
-      expect(geometry.modalRight).toBeLessThanOrEqual(geometry.viewportWidth + 1);
+      expect(
+        geometry.modalRight,
+        `modal dentro del ancho en ${viewport.width}×${viewport.height}`
+      ).toBeLessThanOrEqual(geometry.viewportWidth + 1);
       expect(geometry.modalTop).toBeGreaterThanOrEqual(0);
-      expect(geometry.modalBottom).toBeLessThanOrEqual(geometry.viewportHeight + 1);
+      expect(
+        geometry.modalBottom,
+        `modal dentro del alto en ${viewport.width}×${viewport.height}`
+      ).toBeLessThanOrEqual(geometry.viewportHeight + 1);
       expect(
         geometry.bodyScrollWidth,
         `sin overflow interno en ${viewport.width}×${viewport.height}: ${JSON.stringify(geometry.overflowingChildren)}`
@@ -4983,4 +5004,78 @@ test('asistente global: oculta el FAB cuando visualViewport reduce espacio móvi
     visualViewport.dispatchEvent(new Event('resize'));
   });
   await expect(launcher).toBeVisible();
+});
+
+test('asistente global: adapta el diálogo cuando aparece el teclado virtual', async ({
+  page
+}, testInfo) => {
+  const viewport = { width: 393, height: 851 };
+  const desktopViewport = { width: 1440, height: 900 };
+  await page.setViewportSize(testInfo.project.name === 'chromium' ? desktopViewport : viewport);
+  await registerUser(page, 'Asistente teclado modal E2E');
+  await createHousehold(page, 'Hogar teclado modal sintético');
+  await page.goto('/dashboard');
+
+  const launcher = page.locator('[data-test="ai-assistant-open"]');
+  await launcher.click();
+  const dialog = page.locator('.modal[role="dialog"]');
+  await expect(dialog).toBeVisible();
+  if (testInfo.project.name === 'chromium') {
+    await capture(page, testInfo, 'assistant-modal-desktop');
+  }
+  await page.setViewportSize(viewport);
+  const prompt = dialog.locator('[data-test="ai-assistant-prompt"]');
+  await prompt.focus();
+  await expect(prompt).toBeFocused();
+
+  await page.evaluate(() => {
+    const visualViewport = window.visualViewport;
+    if (!visualViewport) throw new Error('Visual viewport is unavailable');
+    Object.defineProperty(visualViewport, 'height', {
+      configurable: true,
+      get: () => window.innerHeight - 250
+    });
+    visualViewport.dispatchEvent(new Event('resize'));
+  });
+  await expect(launcher).toBeHidden();
+
+  const geometry = await page.evaluate(() => {
+    const visualViewport = window.visualViewport;
+    const dialog = document.querySelector<HTMLElement>('.modal[role="dialog"]');
+    const body = document.querySelector<HTMLElement>('.modal__body');
+    const footer = document.querySelector<HTMLElement>('.modal__footer');
+    const prompt = document.querySelector<HTMLElement>('[data-test="ai-assistant-prompt"]');
+    const rect = (element: HTMLElement | null) => {
+      if (!element) return null;
+      const bounds = element.getBoundingClientRect();
+      return { top: bounds.top, bottom: bounds.bottom };
+    };
+    return {
+      visualViewportHeight: visualViewport?.height ?? window.innerHeight,
+      layoutViewportHeight: window.innerHeight,
+      documentWidth: document.documentElement.scrollWidth,
+      viewportWidth: visualViewport?.width ?? window.innerWidth,
+      dialog: rect(dialog),
+      prompt: rect(prompt),
+      footer: rect(footer),
+      bodyClientHeight: body?.clientHeight ?? 0,
+      bodyScrollHeight: body?.scrollHeight ?? 0,
+      promptFocused: document.activeElement === prompt
+    };
+  });
+
+  await capture(page, testInfo, 'assistant-modal-virtual-keyboard');
+  expect(geometry.visualViewportHeight).toBeLessThan(geometry.layoutViewportHeight - 160);
+  expect(geometry.documentWidth).toBeLessThanOrEqual(geometry.viewportWidth + 1);
+  expect(geometry.dialog?.top ?? -1).toBeGreaterThanOrEqual(0);
+  expect(geometry.dialog?.bottom ?? Infinity).toBeLessThanOrEqual(
+    geometry.visualViewportHeight + 1
+  );
+  expect(geometry.footer?.bottom ?? Infinity).toBeLessThanOrEqual(
+    geometry.visualViewportHeight + 1
+  );
+  expect(geometry.prompt?.top ?? -1).toBeGreaterThanOrEqual(geometry.dialog?.top ?? 0);
+  expect(geometry.prompt?.bottom ?? Infinity).toBeLessThanOrEqual(geometry.footer?.top ?? -1);
+  expect(geometry.bodyClientHeight).toBeGreaterThan(0);
+  expect(geometry.promptFocused).toBe(true);
 });

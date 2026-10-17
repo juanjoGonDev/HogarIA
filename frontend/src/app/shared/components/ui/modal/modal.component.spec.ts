@@ -27,6 +27,53 @@ describe('ModalComponent', () => {
     expect(overlay).toBeFalsy();
   });
 
+  it('tracks the visual viewport while an opted-in modal is open and releases its listeners', () => {
+    const previousDescriptor = Object.getOwnPropertyDescriptor(window, 'visualViewport');
+    const viewport = new EventTarget() as VisualViewport;
+    let height = 560;
+    Object.defineProperties(viewport, {
+      width: { configurable: true, get: () => 393 },
+      height: { configurable: true, get: () => height },
+      offsetLeft: { configurable: true, get: () => 0 },
+      offsetTop: { configurable: true, get: () => 12 }
+    });
+    const removeEventListener = spyOn(viewport, 'removeEventListener').and.callThrough();
+    const removeWindowEventListener = spyOn(window, 'removeEventListener').and.callThrough();
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: viewport
+    });
+
+    try {
+      fixture.componentRef.setInput('adaptToVisualViewport', true);
+      fixture.componentRef.setInput('isOpen', true);
+      fixture.detectChanges();
+
+      const overlay = fixture.nativeElement.querySelector('.modal-overlay') as HTMLElement;
+      expect(overlay.classList).toContain('modal-overlay--visual-viewport');
+      expect(overlay.style.getPropertyValue('--modal-visual-viewport-top')).toBe('12px');
+      expect(overlay.style.getPropertyValue('--modal-visual-viewport-height')).toBe(
+        `${Math.min(560, window.innerHeight)}px`
+      );
+
+      height = 300;
+      viewport.dispatchEvent(new Event('resize'));
+      expect(overlay.style.getPropertyValue('--modal-visual-viewport-height')).toBe('300px');
+
+      fixture.componentRef.setInput('isOpen', false);
+      fixture.detectChanges();
+      expect(removeEventListener).toHaveBeenCalledWith('resize', jasmine.any(Function));
+      expect(removeEventListener).toHaveBeenCalledWith('scroll', jasmine.any(Function));
+      expect(removeWindowEventListener).toHaveBeenCalledWith('resize', jasmine.any(Function));
+    } finally {
+      if (previousDescriptor) {
+        Object.defineProperty(window, 'visualViewport', previousDescriptor);
+      } else {
+        Reflect.deleteProperty(window, 'visualViewport');
+      }
+    }
+  });
+
   it('should render when isOpen is true', () => {
     fixture.componentRef.setInput('isOpen', true);
     fixture.detectChanges();

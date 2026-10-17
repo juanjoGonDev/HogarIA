@@ -5,6 +5,7 @@ import {
   EventEmitter,
   HostListener,
   Input,
+  OnDestroy,
   OnChanges,
   Output,
   SimpleChanges,
@@ -24,7 +25,13 @@ const FOCUSABLE_SELECTOR =
   standalone: true,
   imports: [TranslatePipe, CommonModule, IconComponent],
   template: `
-    <div *ngIf="isOpen" class="modal-overlay" (click)="onOverlayClick($event)">
+    <div
+      *ngIf="isOpen"
+      #overlay
+      class="modal-overlay"
+      [class.modal-overlay--visual-viewport]="adaptToVisualViewport"
+      (click)="onOverlayClick($event)"
+    >
       <div
         #dialog
         [class]="getModalClasses()"
@@ -70,6 +77,16 @@ const FOCUSABLE_SELECTOR =
         animation: fadeIn var(--duration-200) var(--ease-out);
       }
 
+      .modal-overlay--visual-viewport {
+        inset: auto;
+        top: var(--modal-visual-viewport-top, 0px);
+        left: 0;
+        right: 0;
+        bottom: auto;
+        height: var(--modal-visual-viewport-height, 100vh);
+        box-sizing: border-box;
+      }
+
       .modal {
         background: var(--bg-secondary);
         border-radius: var(--radius-2xl);
@@ -108,6 +125,17 @@ const FOCUSABLE_SELECTOR =
       .modal--full {
         width: 95vw;
         height: 90vh;
+      }
+
+      .modal-overlay--visual-viewport .modal {
+        box-sizing: border-box;
+        min-width: 0;
+        min-height: 0;
+        max-height: calc(100% - 2rem);
+      }
+
+      .modal-overlay--visual-viewport .modal--full {
+        height: calc(100% - 2rem);
       }
 
       .modal__header {
@@ -188,7 +216,8 @@ const FOCUSABLE_SELECTOR =
     `
   ]
 })
-export class ModalComponent implements OnChanges, AfterViewChecked {
+export class ModalComponent implements OnChanges, AfterViewChecked, OnDestroy {
+  @ViewChild('overlay') private _overlayRef?: ElementRef<HTMLElement>;
   @ViewChild('dialog') private _dialogRef?: ElementRef<HTMLElement>;
   @ViewChild('body') private _bodyRef?: ElementRef<HTMLElement>;
 
@@ -198,12 +227,18 @@ export class ModalComponent implements OnChanges, AfterViewChecked {
   @Input() closable = true;
   @Input() showFooter = false;
   @Input() closeOnOverlay = true;
+  @Input() adaptToVisualViewport = false;
 
   @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() onClose = new EventEmitter<void>();
 
   private _previouslyFocusedElement: HTMLElement | null = null;
   private _focusOnOpen = false;
+  private _trackedVisualViewport: VisualViewport | null = null;
+  private _trackedOverlay: HTMLElement | null = null;
+  private readonly _handleVisualViewportChange = (): void => {
+    this._applyVisualViewportGeometry();
+  };
 
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['isOpen']?.currentValue === true && changes['isOpen'].previousValue !== true) {
@@ -216,12 +251,17 @@ export class ModalComponent implements OnChanges, AfterViewChecked {
   }
 
   ngAfterViewChecked(): void {
+    this._syncVisualViewportTracking();
     this._updateAccessibilityAttributes();
 
     if (this._focusOnOpen && this.isOpen) {
       this._focusOnOpen = false;
       this._focusFirstElement();
     }
+  }
+
+  ngOnDestroy(): void {
+    this._stopVisualViewportTracking();
   }
 
   @HostListener('document:keydown.escape', ['$event'])
@@ -355,5 +395,85 @@ export class ModalComponent implements OnChanges, AfterViewChecked {
     dialog.removeAttribute('aria-modal');
     dialog.setAttribute('aria-hidden', 'true');
     dialog.setAttribute('inert', '');
+  }
+
+  private _syncVisualViewportTracking(): void {
+    if (!this.isOpen || !this.adaptToVisualViewport) {
+      this._stopVisualViewportTracking();
+      return;
+    }
+
+    const overlay = this._overlayRef?.nativeElement;
+    const visualViewport = window.visualViewport;
+    if (!overlay || !visualViewport) {
+      this._stopVisualViewportTracking();
+      return;
+    }
+
+    if (this._trackedVisualViewport !== visualViewport || this._trackedOverlay !== overlay) {
+      this._stopVisualViewportTracking();
+      this._trackedVisualViewport = visualViewport;
+      this._trackedOverlay = overlay;
+      visualViewport.addEventListener('resize', this._handleVisualViewportChange, {
+        passive: true
+      });
+      visualViewport.addEventListener('scroll', this._handleVisualViewportChange, {
+        passive: true
+      });
+      window.addEventListener('resize', this._handleVisualViewportChange, { passive: true });
+    }
+
+    this._applyVisualViewportGeometry();
+  }
+
+  private _applyVisualViewportGeometry(): void {
+    const overlay = this._trackedOverlay;
+    const visualViewport = this._trackedVisualViewport;
+    if (!overlay || !visualViewport) return;
+
+    overlay.style.setProperty('--modal-visual-viewport-top', `${visualViewport.offsetTop}px`);
+    overlay.style.setProperty(
+      '--modal-visual-viewport-height',
+      `${Math.min(visualViewport.height, window.innerHeight)}px`
+    );
+    this._ensureFocusedElementIsVisible();
+  }
+
+  private _stopVisualViewportTracking(): void {
+    this._trackedVisualViewport?.removeEventListener('resize', this._handleVisualViewportChange);
+    this._trackedVisualViewport?.removeEventListener('scroll', this._handleVisualViewportChange);
+    window.removeEventListener('resize', this._handleVisualViewportChange);
+    this._trackedOverlay?.style.removeProperty('--modal-visual-viewport-top');
+    this._trackedOverlay?.style.removeProperty('--modal-visual-viewport-height');
+    this._trackedVisualViewport = null;
+    this._trackedOverlay = null;
+  }
+
+  private _ensureFocusedElementIsVisible(): void {
+    const body = this._bodyRef?.nativeElement;
+    const dialog = this._dialogRef?.nativeElement;
+    const activeElement = document.activeElement;
+    if (
+      !body ||
+      !dialog ||
+      !(activeElement instanceof HTMLElement) ||
+      !dialog.contains(activeElement)
+    ) {
+      return;
+    }
+
+    const bodyRect = body.getBoundingClientRect();
+    const activeRect = activeElement.getBoundingClientRect();
+    const visibleTop = bodyRect.top + body.clientTop;
+    const footerTop = dialog
+      .querySelector<HTMLElement>('.modal__footer')
+      ?.getBoundingClientRect().top;
+    const visibleBottom =
+      Math.min(visibleTop + body.clientHeight, footerTop ?? bodyRect.bottom) - 8;
+    if (activeRect.top < visibleTop) {
+      body.scrollTop -= visibleTop - activeRect.top;
+    } else if (activeRect.bottom > visibleBottom) {
+      body.scrollTop += activeRect.bottom - visibleBottom;
+    }
   }
 }
