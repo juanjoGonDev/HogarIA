@@ -42,6 +42,8 @@ El checklist anterior de este archivo decía que la unidad de recetas no ampliab
 
 ### P1 — Cobertura de dominios y UX
 
+- [ ] Unidad B.1: las compras derivadas quedan fuera de la confirmación inicial. No mostrar preview ni crear acciones de compra derivada antes de persistir las comidas; después, leer faltantes del inventario real y exigir una aprobación de compra separada. Regresión observada (2026-10-17): el E2E integrado actual incluye lista y artículo en la misma confirmación. Actualizar flujo y prueba conforme a `AI-ACTION-ASSISTANT-EXTENSION-SPEC.md` antes de cerrar esta unidad.
+
 - [ ] Registrar y verificar capacidades compatibles del producto: despensa/inventario (artículos, cantidad, categoría/unidad), compras (listas/artículos/cantidad/organización), tareas (crear/editar/fecha; prioridad solo cuando exista en el contrato), eventos/calendario (crear/editar/fecha/hora/lugar/descripción), recetas (borrador/generar/editar ingredientes e instrucciones) y planificación del hogar cuando su contrato permita propuesta y confirmación seguras. Excluir capacidades sin API de dominio reutilizable o sin autorización verificable y documentar el motivo.
 - [ ] Un solo FAB accesible en rutas bajo `MainLayout`; no duplicado por página, no tapa navegación inferior/controles, teclado ni aviso flotante existente; safe-area, target táctil, nombre/tooltip y estados listo/escuchando/procesando/error. Animación reducida respeta `prefers-reduced-motion`.
 - [ ] Entrada por texto y voz opcional con mismo pipeline. Estados visibles de permiso, soporte, grabación, parcial cuando exista, pausa solo si la API lo admite, parada, cancelación y fallo. No iniciar micrófono accidentalmente; detener/release reconocimiento al cancelar, navegar o cerrar.
