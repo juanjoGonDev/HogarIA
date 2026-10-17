@@ -1,6 +1,6 @@
 # Propuesta de faltantes de compra desde comidas — Asistente global
 
-**Estado:** contrato activo; implementación en verificación. Mantener PR #47 en Draft.
+**Estado:** contrato activo; implementación verificada para este alcance. Mantener PR #47 en Draft.
 **Alcance:** componer la propuesta efímera de comidas con una vista previa exacta de faltantes de despensa y acciones de compra revisables.
 **Idioma:** interfaz ES/EN mediante i18n existente; esta spec en español.
 
@@ -29,7 +29,7 @@ No se reutiliza el endpoint de vista previa de comidas persistidas: la propuesta
 - [x] TDD: pruebas de schema, permisos, hogar cambiado, fechas/raciones inválidas, cero escrituras SQLite/`ai_jobs`, errores y cancelación de solicitudes.
 - [x] Playwright aislado con usuario, hogar, recetas, despensa y lista sintéticos: preview no escribe; se proponen solo faltantes; selección parcial confirma solo lo elegido; rechazo deja cero escrituras; dependencias y replay impiden duplicados; recarga muestra persistencia.
 - [x] Validar PC/móvil, teclado y foco, mensajes ES/EN, errores, overflow y capturas sintéticas ignoradas por Git.
-- [ ] Ejecutar coverage aplicable (≥70 % S/B/F/L), typecheck, `check:ui`, build y hooks. Registrar resultados sin afirmar pruebas de modelo/micrófono real que no se ejecuten.
+- [x] Ejecutar coverage aplicable (≥70 % S/B/F/L), typecheck, `check:ui`, build y hooks. Registrar resultados sin afirmar pruebas de modelo/micrófono real que no se ejecuten.
 
 ## Límites explícitos
 
@@ -40,8 +40,9 @@ No se reutiliza el endpoint de vista previa de comidas persistidas: la propuesta
 ## Evidencia
 
 - `pnpm --filter @hogaria/server run test:coverage`: 121 archivos pasaron, 2.071 pruebas pasaron; cobertura global 89,60 % statements, 81,80 % branches, 95,74 % functions y 92,54 % lines. Umbral local del servidor: 70 % por archivo y métrica.
-- `pnpm run test:client:coverage`: 1.676 pruebas pasaron; cobertura global 90,41 % statements, 80,49 % branches, 92,03 % functions y 92,96 % lines. El componente del asistente superó 70 % en las cuatro métricas.
+- `pnpm run test:client:coverage`: 1.676 pruebas pasaron; cobertura global 90,42 % statements, 80,51 % branches, 92,03 % functions y 92,96 % lines. El componente del asistente superó 70 % en las cuatro métricas.
 - `pnpm run typecheck:e2e`, `pnpm run check:ui` y `pnpm run build`: pasaron. El build conserva avisos de tamaño/lint previos, no errores.
 - Playwright full-stack aislado: caso de comidas y caso de selección parcial/reintento pasaron; caso de revisión/refino/teclado/foco pasó. El runner usó DB y usuarios sintéticos temporales.
 - Capturas sintéticas ignoradas por Git: `test-results/assistant-meal-shopping/chromium/` (escritorio 1440 px, móvil 320 px y tablet 768 px).
-- Modelo local sigue sin ejecutar. Tras consentimiento explícito, se intentó una sola frase sintética `es-ES` con `SpeechRecognition` real en Chromium aislado: API/contexto seguro/dispositivos disponibles y consentimiento de la app confirmados, pero no llegó transcripción en 30 s ni error visible. No se usó micrófono físico ni hubo POST de propuesta; WAV sintético temporal eliminado. Voz física sigue pendiente. PR Draft; hooks de commit/push aún por validar.
+- Modelo local sigue sin ejecutar. Tras consentimiento explícito, se intentó una sola frase sintética `es-ES` con `SpeechRecognition` real en Chromium aislado: API/contexto seguro/dispositivos disponibles y consentimiento de la app confirmados, pero no llegó transcripción en 30 s ni error visible. No se usó micrófono físico ni hubo POST de propuesta; WAV sintético temporal eliminado. Voz física sigue pendiente.
+- Hooks verdes: pre-commit ejecutó Prettier y `check:ui`; pre-push revisó 11 rutas y pasó `check:ui` (263 ficheros/21 reglas), build, `typecheck:e2e` y `pnpm run test` (1.676 cliente; 2.071 servidor, 1 omitida). Build conserva avisos Angular/tamaño; inicial 974,45 kB y CSS del diálogo 11,70 kB; budgets intactos. Push de `1a76cce` a `origin/feat/household-floorplan` pasó. PR #47 sigue Draft.
