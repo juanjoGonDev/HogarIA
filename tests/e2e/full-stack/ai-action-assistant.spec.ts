@@ -4456,6 +4456,50 @@ test('asistente global: explica que falta configurar IA sin escribir datos', asy
   await capture(page, testInfo, 'missing-ai-provider-error');
 });
 
+test('asistente global: muestra en inglés el error de proveedor sin configurar', async ({
+  page
+}, testInfo) => {
+  await registerUser(page, 'Assistant without provider E2E');
+  await createHousehold(page, 'Synthetic household without provider');
+  await page.addInitScript(() => localStorage.setItem('hogar:v1:language', 'en'));
+  await page.goto('/dashboard');
+  await page.locator('[data-test="ai-assistant-open"]').click();
+
+  const dialog = page.getByRole('dialog', { name: 'Action assistant' });
+  await expect(
+    dialog.getByRole('heading', { name: 'What would you like to organise?' })
+  ).toBeVisible();
+  const databaseBeforeRequest = assistantDatabaseSnapshot();
+  const proposalResponse = page.waitForResponse((response) => {
+    const request = response.request();
+    return (
+      request.method() === 'POST' &&
+      new URL(response.url()).pathname === '/api/ai/assistant/proposals'
+    );
+  });
+  await dialog.locator('[data-test="ai-assistant-prompt"]').fill('Add rice to the pantry.');
+  await dialog.locator('[data-test="ai-assistant-submit"] button').click();
+
+  const response = await proposalResponse;
+  expect(response.status()).toBe(503);
+  await expect(response.json()).resolves.toMatchObject({
+    success: false,
+    code: 'AI_NOT_CONFIGURED'
+  });
+  const assistantError = dialog.locator('[data-test="ai-assistant-error"]');
+  await expect(assistantError).toHaveText('Configure an AI provider before using the assistant.');
+  const errorBounds = await assistantError.boundingBox();
+  const bodyBounds = await dialog.locator('.modal__body').boundingBox();
+  expect(errorBounds).not.toBeNull();
+  expect(bodyBounds).not.toBeNull();
+  expect(errorBounds!.y).toBeGreaterThanOrEqual(bodyBounds!.y);
+  expect(errorBounds!.y + errorBounds!.height).toBeLessThanOrEqual(
+    bodyBounds!.y + bodyBounds!.height
+  );
+  expect(assistantDatabaseSnapshot()).toEqual(databaseBeforeRequest);
+  await capture(page, testInfo, 'missing-ai-provider-error-en');
+});
+
 test('asistente global: una ráfaga de envíos genera una sola petición efímera', async ({
   page
 }) => {
