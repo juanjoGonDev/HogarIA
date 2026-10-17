@@ -86,6 +86,27 @@ describe('AiActionAssistantExecutionService', () => {
     await expectAsync(retry).toBeResolvedTo(undefined);
   });
 
+  it('coalesces concurrent approval calls into one domain write', async () => {
+    const action = pantryAction();
+    const firstExecution = service.execute(action, null);
+    const secondExecution = service.execute(action, null);
+
+    expect(secondExecution).toBe(firstExecution);
+    const request = http.expectOne('/api/pantry/ingredients');
+    expect(request.request.method).toBe('POST');
+    expect(request.request.headers.get('x-assistant-action-id')).toBe(action.id);
+    request.flush(
+      { success: true, data: { id: 'ingredient-1' } },
+      { status: 201, statusText: 'Created' }
+    );
+
+    await expectAsync(Promise.all([firstExecution, secondExecution])).toBeResolvedTo([
+      undefined,
+      undefined
+    ]);
+    http.expectNone('/api/pantry/ingredients');
+  });
+
   it('creates only a private calendar event and never sends attendee IDs', async () => {
     const action = {
       ...actionBase('calendar.create_event', 'calendar', 'create_event'),
