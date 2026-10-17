@@ -1,7 +1,8 @@
 import { mkdirSync } from 'node:fs';
-import { createServer } from 'node:http';
+import Database from 'better-sqlite3';
+import { createServer, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { expect, test, type Page } from '../fixtures';
 import { createHousehold, registerUser } from '../helpers/auth';
 import { shoppingNewListAction } from '../helpers/shopping-ui';
@@ -121,6 +122,31 @@ function proposal() {
       ]
     }
   };
+}
+
+function pantryAddCandidate(): string {
+  return JSON.stringify({
+    summary: 'Añade lentejas a la despensa.',
+    questions: [],
+    actions: [
+      {
+        kind: 'pantry.add_ingredient',
+        title: 'Añadir lentejas',
+        summary: 'Añade lentejas a la despensa.',
+        payload: {
+          name: 'Lentejas QA',
+          category: 'other',
+          quantity: 500,
+          unit: 'g',
+          expirationDate: null,
+          location: 'pantry',
+          notes: null
+        },
+        dependsOn: [],
+        warnings: []
+      }
+    ]
+  });
 }
 
 function allDomainProposal() {
@@ -513,6 +539,88 @@ async function configureDeterministicAi(page: Page, token: string, baseUrl: stri
   expect(response.status(), await response.text()).toBe(201);
 }
 
+async function startCancellableAiProvider(retryContent: string) {
+  const requests: string[] = [];
+  const heldResponses = new Set<ServerResponse>();
+  const heldRequestNumbers = new Set([1, 3]);
+  let abortedRequests = 0;
+  const server = createServer((request, response) => {
+    let body = '';
+    request.setEncoding('utf8');
+    request.on('data', (chunk: string) => (body += chunk));
+    request.on('end', () => {
+      requests.push(body);
+      const requestNumber = requests.length;
+      response.on('close', () => {
+        heldResponses.delete(response);
+        if (heldRequestNumbers.has(requestNumber) && !response.writableEnded) {
+          abortedRequests += 1;
+        }
+      });
+
+      if (heldRequestNumbers.has(requestNumber)) {
+        heldResponses.add(response);
+        return;
+      }
+
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ choices: [{ message: { content: retryContent } }] }));
+    });
+  });
+  await new Promise<void>((resolveListen, rejectListen) => {
+    server.once('error', rejectListen);
+    server.listen(0, '127.0.0.1', resolveListen);
+  });
+  const address = server.address() as AddressInfo;
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    requests,
+    get abortedRequests() {
+      return abortedRequests;
+    },
+    close: async () => {
+      for (const response of heldResponses) response.destroy();
+      await new Promise<void>((resolveClose, rejectClose) => {
+        server.close((error) => (error ? rejectClose(error) : resolveClose()));
+      });
+    }
+  };
+}
+
+function assistantDatabaseSnapshot(): Record<string, string[]> {
+  const runDirectory = process.env.E2E_RUN_DIR;
+  const databasePath = process.env.DATABASE_PATH;
+  if (!runDirectory || !databasePath) throw new Error('E2E requiere SQLite temporal aislada');
+  const relativeDatabasePath = relative(resolve(runDirectory), resolve(databasePath));
+  if (
+    !relativeDatabasePath ||
+    isAbsolute(relativeDatabasePath) ||
+    relativeDatabasePath === '..' ||
+    relativeDatabasePath.startsWith(`..${sep}`)
+  ) {
+    throw new Error('DATABASE_PATH debe permanecer dentro del directorio aislado del test');
+  }
+
+  const database = new Database(databasePath, { readonly: true, fileMustExist: true });
+  try {
+    const tables = database
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+      .all() as { name: string }[];
+    return Object.fromEntries(
+      tables.map(({ name }) => {
+        const quotedName = `"${name.replaceAll('"', '""')}"`;
+        const rows = database.prepare(`SELECT * FROM ${quotedName}`).all() as Record<
+          string,
+          unknown
+        >[];
+        return [name, rows.map((row) => JSON.stringify(row)).sort()];
+      })
+    );
+  } finally {
+    database.close();
+  }
+}
+
 async function createCalendarEvent(
   page: Page,
   token: string,
@@ -830,12 +938,21 @@ test('asistente global: lote revisable, refino aislado y aprobación selectiva r
     '/pantry',
     '/shopping',
     '/recipes',
+    '/receipts',
     '/calendar',
     '/household',
+    '/ai-config',
+    '/logs',
+    '/account',
     '/preferences',
     '/settings'
   ]) {
     await page.goto(route);
+    const pathname = new URL(page.url()).pathname;
+    expect(
+      pathname === route || pathname.startsWith(`${route}/`),
+      `la ruta autenticada ${route} debe permanecer accesible`
+    ).toBe(true);
     const routeLauncher = page.locator('[data-test="ai-assistant-open"]');
     await expect(routeLauncher, `FAB global único en ${route}`).toBeVisible();
     await expect(
@@ -2233,6 +2350,73 @@ test('asistente global: edición segura de artículo requiere aprobación y tole
     expect(await readList()).toMatchObject({ version: initial.version + 1, items: saved.items });
     expect(pageErrors).toEqual([]);
     await capture(page, testInfo, 'shopping-item-update-saved');
+  } finally {
+    await provider.close();
+  }
+});
+
+test('asistente global: cancelar propuesta/refino aborta proveedor, no escribe y libera reintentos', async ({
+  page
+}) => {
+  const provider = await startCancellableAiProvider(pantryAddCandidate());
+  try {
+    await registerUser(page, 'Asistente cancelación E2E');
+    await createHousehold(page, 'Hogar sintético para cancelación');
+    await page.goto('/dashboard');
+    const token = await tokenOf(page);
+    await configureDeterministicAi(page, token, provider.baseUrl);
+
+    await page.locator('[data-test="ai-assistant-open"]').click();
+    const dialog = page.locator('.modal[role="dialog"]');
+    await expect(dialog).toBeVisible();
+    await page.getByRole('button', { name: 'Cerrar asistente' }).click();
+    await expect(dialog).not.toBeVisible();
+    const before = assistantDatabaseSnapshot();
+
+    const submitProposal = async () => {
+      await page.locator('[data-test="ai-assistant-open"]').click();
+      await page
+        .locator('[data-test="ai-assistant-prompt"]')
+        .fill('Añade lentejas a la despensa y revisa la propuesta.');
+      await page.locator('[data-test="ai-assistant-submit"] button').click();
+    };
+
+    await submitProposal();
+    await expect.poll(() => provider.requests.length, { timeout: 10_000 }).toBe(1);
+    await page.locator('.modal[role="dialog"] .modal__close').click();
+    await expect(page.getByRole('dialog', { name: '¿Descartar este borrador?' })).toBeVisible();
+    await page.getByRole('button', { name: 'Descartar borrador' }).click();
+    await expect(page.locator('[data-test="ai-assistant-open"]')).toBeVisible();
+    await expect.poll(() => provider.abortedRequests, { timeout: 10_000 }).toBe(1);
+    expect(assistantDatabaseSnapshot()).toEqual(before);
+
+    await submitProposal();
+    await expect(page.locator('[data-test="ai-assistant-review"]')).toBeVisible();
+    expect(provider.requests).toHaveLength(2);
+    expect(assistantDatabaseSnapshot()).toEqual(before);
+
+    const action = page.locator('[data-action-id]').first();
+    await action.locator('[data-test="ai-assistant-refine"] button').click();
+    await expect(page.locator('[data-test="ai-assistant-refine-stage"]')).toBeVisible();
+    await page.locator('#ai-assistant-refine-input').fill('Ajusta la cantidad a 750 g.');
+    await page.getByRole('button', { name: 'Actualizar propuestas' }).click();
+    await expect.poll(() => provider.requests.length, { timeout: 10_000 }).toBe(3);
+    await page.locator('.modal[role="dialog"] .modal__close').click();
+    await expect(page.getByRole('dialog', { name: '¿Descartar este borrador?' })).toBeVisible();
+    await page.getByRole('button', { name: 'Descartar borrador' }).click();
+    await expect(page.locator('[data-test="ai-assistant-open"]')).toBeVisible();
+    await expect.poll(() => provider.abortedRequests, { timeout: 10_000 }).toBe(2);
+    expect(assistantDatabaseSnapshot()).toEqual(before);
+
+    await submitProposal();
+    await expect(page.locator('[data-test="ai-assistant-review"]')).toBeVisible();
+    expect(provider.requests).toHaveLength(4);
+    expect(assistantDatabaseSnapshot()).toEqual(before);
+
+    await page.getByRole('button', { name: 'Cerrar asistente' }).click();
+    await expect(page.getByRole('dialog', { name: '¿Descartar este borrador?' })).toBeVisible();
+    await page.getByRole('button', { name: 'Descartar borrador' }).click();
+    expect(assistantDatabaseSnapshot()).toEqual(before);
   } finally {
     await provider.close();
   }
