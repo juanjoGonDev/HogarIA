@@ -4519,7 +4519,7 @@ test('asistente global: muestra error si el dictado termina sin transcripción',
   });
 
   const voiceError = dialog.locator('.assistant__error[role="alert"]');
-  await expect(voiceError).toContainText('No se pudo reconocer la voz.');
+  await expect(voiceError).toContainText('No se recibió voz.');
   await expect(voiceControls.getByRole('button', { name: 'Dictar petición' })).toBeVisible();
   await expect(voiceControls.getByRole('button', { name: 'Terminar dictado' })).toHaveCount(0);
   const errorBounds = await voiceError.boundingBox();

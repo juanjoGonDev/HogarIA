@@ -2310,8 +2310,29 @@ describe('AiActionAssistantDialogComponent', () => {
     fixture.detectChanges();
 
     expect(component.voiceState()).toBe('error');
-    expect(component.voiceError()).toBe('ai_assistant.voice_error');
+    expect(component.voiceError()).toBe('ai_assistant.voice_no_transcript');
     expect(fixture.nativeElement.querySelector('[role="alert"]')).not.toBeNull();
+  });
+
+  it('explains native recognition failures that end dictation immediately', () => {
+    const cases = [
+      ['no-speech', 'ai_assistant.voice_no_transcript'],
+      ['audio-capture', 'ai_assistant.voice_no_microphone'],
+      ['network', 'ai_assistant.voice_service_unavailable'],
+      ['service-not-allowed', 'ai_assistant.voice_service_unavailable']
+    ] as const;
+
+    for (const [error, expected] of cases) {
+      const recognitions = mountWithSpeech(FakeSpeechRecognition);
+      component.voiceConsent.set(true);
+      component.startVoice();
+      recognitions[0].onerror?.({ error });
+      fixture.detectChanges();
+
+      expect(component.voiceState()).toBe('error');
+      expect(component.voiceError()).toBe(expected);
+      expect(fixture.nativeElement.querySelector('[role="alert"]')).not.toBeNull();
+    }
   });
 
   it('reports denied microphone permission and falls back to text when unsupported', () => {

@@ -5174,6 +5174,23 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
     return voiceWindow.SpeechRecognition ?? voiceWindow.webkitSpeechRecognition ?? null;
   }
 
+  private mapVoiceError(error?: string): TranslationKey {
+    switch (error) {
+      case 'not-allowed':
+        return 'ai_assistant.voice_permission';
+      case 'service-not-allowed':
+        return 'ai_assistant.voice_service_unavailable';
+      case 'no-speech':
+        return 'ai_assistant.voice_no_transcript';
+      case 'audio-capture':
+        return 'ai_assistant.voice_no_microphone';
+      case 'network':
+        return 'ai_assistant.voice_service_unavailable';
+      default:
+        return 'ai_assistant.voice_error';
+    }
+  }
+
   private showVoiceError(errorKey: TranslationKey): void {
     this.voiceError.set(errorKey);
     this.voiceState.set('error');
@@ -5218,11 +5235,7 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
         if (this.recognition !== recognition || !this.voiceConsent()) return;
         this.voiceStopPending.set(false);
         this.supportsPause.set(false);
-        this.showVoiceError(
-          event.error === 'not-allowed' || event.error === 'service-not-allowed'
-            ? 'ai_assistant.voice_permission'
-            : 'ai_assistant.voice_error'
-        );
+        this.showVoiceError(this.mapVoiceError(event.error));
         this.recognition = null;
       };
       recognition.onend = () => {
@@ -5233,7 +5246,7 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
           if (hasVoiceTranscript) {
             this.voiceState.set('idle');
           } else {
-            this.showVoiceError('ai_assistant.voice_error');
+            this.showVoiceError('ai_assistant.voice_no_transcript');
           }
         }
         this.supportsPause.set(false);

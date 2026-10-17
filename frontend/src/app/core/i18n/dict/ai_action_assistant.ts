@@ -22,6 +22,12 @@ export const aiActionAssistantEs = {
     'El reconocimiento de voz no está disponible en este navegador. Puedes escribir la petición.',
   'ai_assistant.voice_permission':
     'No se concedió permiso para usar el micrófono. Puedes continuar escribiendo.',
+  'ai_assistant.voice_no_transcript':
+    'No se recibió voz. Revisa el micrófono y el permiso del sitio; reintenta o escribe.',
+  'ai_assistant.voice_no_microphone':
+    'No se detectó micrófono. Conecta o selecciona uno y revisa el permiso del sitio; también puedes escribir.',
+  'ai_assistant.voice_service_unavailable':
+    'El servicio de dictado no responde. Comprueba la conexión o prueba otro navegador; también puedes escribir.',
   'ai_assistant.voice_error':
     'No se pudo reconocer la voz. Puedes corregir el texto o escribir la petición.',
   'ai_assistant.voice_finalizing': 'Finalizando el dictado…',
@@ -304,6 +310,12 @@ export const aiActionAssistantEn: Record<keyof typeof aiActionAssistantEs, strin
     'Speech recognition is unavailable in this browser. You can type your request.',
   'ai_assistant.voice_permission':
     'Microphone permission was not granted. You can continue by typing.',
+  'ai_assistant.voice_no_transcript':
+    'No speech was received. Check the microphone and site permission; retry or type.',
+  'ai_assistant.voice_no_microphone':
+    'No microphone detected. Connect or select one and check this site’s permission; you can also type.',
+  'ai_assistant.voice_service_unavailable':
+    'The speech service is not responding. Check your connection or try another browser; you can also type your request.',
   'ai_assistant.voice_error':
     'Speech could not be recognised. You can edit the text or type your request.',
   'ai_assistant.voice_finalizing': 'Finishing dictation…',
