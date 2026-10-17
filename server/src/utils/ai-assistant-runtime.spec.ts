@@ -30,7 +30,7 @@ function response(content: string): Response {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('callAssistantAITransient', () => {
-  it('uses Ollama JSON mode with the exact server schema only for loopback Ollama', async () => {
+  it('passes the server JSON Schema to loopback Ollama without duplicating it in the prompt', async () => {
     let requestBody: Record<string, any> | undefined;
     vi.stubGlobal(
       'fetch',
@@ -52,11 +52,104 @@ describe('callAssistantAITransient', () => {
       })
     ).resolves.toBe('{"ok":true}');
 
-    expect(requestBody?.response_format).toEqual({ type: 'json_object' });
-    expect(requestBody?.messages[0].content).toContain(
-      JSON.stringify(responseFormat.json_schema.schema)
+    expect(requestBody?.response_format).toEqual(responseFormat);
+    expect(requestBody?.messages).toEqual([
+      { role: 'system', content: 'System contract.' },
+      { role: 'user', content: 'Synthetic prompt.' }
+    ]);
+  });
+
+  it('simplifies Ollama constraints without dropping action payload structure', async () => {
+    let requestBody: Record<string, any> | undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_input: unknown, init?: RequestInit) => {
+        requestBody = JSON.parse(String(init?.body));
+        return response('{"ok":true}');
+      })
     );
-    expect(requestBody?.messages[1].content).toBe('Synthetic prompt.');
+    const actionPlanFormat = {
+      type: 'json_schema' as const,
+      json_schema: {
+        name: 'ai_action_plan',
+        strict: true as const,
+        schema: {
+          type: 'object',
+          properties: {
+            actions: {
+              type: 'array',
+              items: {
+                anyOf: [
+                  {
+                    type: 'object',
+                    properties: {
+                      kind: { type: 'string', const: 'pantry.add_ingredient' },
+                      payload: {
+                        type: 'object',
+                        properties: {
+                          name: { type: 'string', minLength: 1 },
+                          quantity: { type: 'number' },
+                          unit: { type: 'string', enum: ['g', 'kg'] },
+                          expirationDate: {
+                            anyOf: [
+                              { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+                              { type: 'null' }
+                            ]
+                          }
+                        },
+                        required: ['name', 'quantity', 'unit', 'expirationDate'],
+                        additionalProperties: false
+                      }
+                    },
+                    required: ['kind', 'payload'],
+                    additionalProperties: false
+                  },
+                  {
+                    type: 'object',
+                    properties: {
+                      kind: { type: 'string', const: 'shopping.create_list' },
+                      payload: { type: 'object', properties: { name: { type: 'string' } } }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    };
+
+    await callAssistantAITransient({
+      userId: 'u-ollama-plan',
+      config: { ...config, base_url: 'http://127.0.0.1:11434/v1' },
+      messages: [
+        { role: 'system', content: 'System contract.' },
+        { role: 'user', content: 'Synthetic prompt.' }
+      ],
+      responseFormat: actionPlanFormat
+    });
+
+    expect(requestBody?.reasoning_effort).toBe('none');
+    const actionUnion =
+      requestBody?.response_format.json_schema.schema.properties.actions.items.anyOf;
+    expect(actionUnion).toHaveLength(2);
+    expect(actionUnion[0].properties.kind).toEqual({
+      type: 'string',
+      const: 'pantry.add_ingredient'
+    });
+    expect(actionUnion[0].properties.payload.properties).toMatchObject({
+      name: { type: 'string' },
+      unit: { type: 'string', enum: ['g', 'kg'] },
+      expirationDate: { anyOf: [{ type: 'string' }, { type: 'null' }] }
+    });
+    expect(actionUnion[0].properties.payload.properties.name).not.toHaveProperty('minLength');
+    expect(actionUnion[0].properties.payload.properties.expirationDate.anyOf[0]).not.toHaveProperty(
+      'pattern'
+    );
+    expect(requestBody?.messages).toEqual([
+      { role: 'system', content: 'System contract.' },
+      { role: 'user', content: 'Synthetic prompt.' }
+    ]);
   });
 
   it('keeps strict provider response formats for non-loopback custom endpoints', async () => {
@@ -78,6 +171,7 @@ describe('callAssistantAITransient', () => {
 
     expect(requestBody?.response_format).toEqual(responseFormat);
     expect(requestBody?.messages).toEqual([{ role: 'system', content: 'System contract.' }]);
+    expect(requestBody?.reasoning_effort).toBeUndefined();
   });
 
   it('gates one request per user/provider and releases the gate after completion', async () => {

@@ -38,6 +38,8 @@ export type AiJobKind =
   | 'household_plan'
   | 'connection_test';
 
+export type AiProviderRequestOptions = { reasoning_effort?: 'none' };
+
 export interface AiConfigRow {
   id: string;
   user_id?: string;
@@ -227,7 +229,8 @@ export async function callAIWithConfig(
   active: AiConfigRow,
   messages: AiMessage[],
   responseFormat: AiCallResponseFormat,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  requestOptions?: AiProviderRequestOptions
 ): Promise<string> {
   const apiKey = resolveProviderApiKey(active.base_url, active.api_key);
   let response: Response;
@@ -238,7 +241,9 @@ export async function callAIWithConfig(
         'Content-Type': 'application/json',
         Authorization: `Bearer ${apiKey}`
       },
-      body: JSON.stringify(chatBody(active, { messages, response_format: responseFormat })),
+      body: JSON.stringify(
+        chatBody(active, { messages, response_format: responseFormat, ...requestOptions })
+      ),
       signal: señalConTimeout(signal, active.timeout ?? DEFAULT_TIMEOUT_MS)
     });
   } catch (error) {

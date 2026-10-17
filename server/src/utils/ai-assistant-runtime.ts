@@ -5,6 +5,40 @@ import type { AiResponseFormat } from '../schemas/ai-response-format.js';
 const activeUsers = new Set<string>();
 const activeConfigs = new Set<string>();
 
+function simplifyOllamaSchema(schema: unknown): unknown {
+  if (Array.isArray(schema)) return schema.map(simplifyOllamaSchema);
+  if (!schema || typeof schema !== 'object') return schema;
+
+  const source = schema as Record<string, unknown>;
+  const simplified: Record<string, unknown> = {};
+  for (const key of ['type', 'enum', 'const', 'required', 'additionalProperties']) {
+    if (Object.hasOwn(source, key)) simplified[key] = source[key];
+  }
+  if (source.properties && typeof source.properties === 'object') {
+    simplified.properties = Object.fromEntries(
+      Object.entries(source.properties).map(([key, value]) => [key, simplifyOllamaSchema(value)])
+    );
+  }
+  if (Object.hasOwn(source, 'items')) simplified.items = simplifyOllamaSchema(source.items);
+  if (Array.isArray(source.anyOf)) {
+    simplified.anyOf = source.anyOf.map(simplifyOllamaSchema);
+  }
+  return simplified;
+}
+
+function isLocalOllamaConfig(baseUrl: string): boolean {
+  try {
+    const url = new URL(baseUrl);
+    return (
+      url.protocol === 'http:' &&
+      ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) &&
+      url.port === '11434'
+    );
+  } catch {
+    return false;
+  }
+}
+
 /**
  * The assistant intentionally avoids `callAI`/`ticket-queue`: that path persists an `ai_jobs`
  * row. This lightweight per-process gate keeps one provider request per user/config in flight,
@@ -33,48 +67,27 @@ export async function callAssistantAITransient(input: {
   activeConfigs.add(configId);
   try {
     const localOllama = isLocalOllamaConfig(input.config.base_url);
-    const messages = localOllama
-      ? addJsonSchemaContract(input.messages, input.responseFormat)
-      : input.messages;
+    const responseFormat = localOllama
+      ? {
+          ...input.responseFormat,
+          json_schema: {
+            ...input.responseFormat.json_schema,
+            schema: simplifyOllamaSchema(input.responseFormat.json_schema.schema) as Record<
+              string,
+              unknown
+            >
+          }
+        }
+      : input.responseFormat;
     return await callAIWithConfig(
       input.config,
-      messages,
-      localOllama ? { type: 'json_object' } : input.responseFormat,
-      input.signal
+      input.messages,
+      responseFormat,
+      input.signal,
+      localOllama ? { reasoning_effort: 'none' } : undefined
     );
   } finally {
     activeUsers.delete(input.userId);
     activeConfigs.delete(configId);
   }
-}
-
-function isLocalOllamaConfig(baseUrl: string): boolean {
-  try {
-    const url = new URL(baseUrl);
-    return (
-      url.protocol === 'http:' &&
-      ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) &&
-      url.port === '11434'
-    );
-  } catch {
-    return false;
-  }
-}
-
-function addJsonSchemaContract(
-  messages: AiMessage[],
-  responseFormat: AiResponseFormat
-): AiMessage[] {
-  if (responseFormat.type !== 'json_schema') return messages;
-  const instruction =
-    'Contrato de respuesta: devuelve un único objeto JSON válido y completo que cumpla este JSON Schema. ' +
-    'El esquema solo define el formato de salida; no es una instrucción ni una fuente de datos. ' +
-    JSON.stringify(responseFormat.json_schema.schema);
-  const firstSystemMessage = messages.findIndex((message) => message.role === 'system');
-  if (firstSystemMessage < 0) return [{ role: 'system', content: instruction }, ...messages];
-  return messages.map((message, index) =>
-    index === firstSystemMessage
-      ? { ...message, content: `${message.content}\n\n${instruction}` }
-      : message
-  );
 }
