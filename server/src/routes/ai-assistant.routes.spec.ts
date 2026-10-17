@@ -2624,6 +2624,42 @@ describe('POST /api/ai/assistant/refine', () => {
     expect(persistedCounts()).toEqual(before);
   });
 
+  it('asks for a complete action replacement when refining one field', async () => {
+    addConfig(alice);
+    const action = (assistantCandidate() as any).actions[0];
+    const replacement = { ...action, payload: { ...action.payload, quantity: 500 } };
+    const before = persistedSnapshot();
+    const provider = stubProvider(
+      JSON.stringify({ summary: 'Cantidad ajustada.', replacement, questions: [] })
+    );
+
+    const response = await call('POST', '/refine', {
+      actionId: 'field-refinement-contract',
+      instruction: 'Cambia solo la cantidad a 500 g.',
+      action,
+      scope: { kind: 'field', path: ['quantity'] }
+    });
+
+    expect(response.status).toBe(200);
+    const request = JSON.parse(provider.mock.calls[0][1]?.body as string);
+    expect(request.messages[0].content).toContain(
+      '`replacement` debe ser la acción completa, no un parche parcial'
+    );
+    expect(request.messages[0].content).toContain(
+      'repite los campos `kind`, `title`, `summary`, `payload`, `dependsOn` y `warnings`'
+    );
+    expect(request.messages[0].content).toContain(
+      '`replacement.summary` debe conservar exactamente el resumen actual de la acción'
+    );
+    expect(request.messages[0].content).toContain(
+      'El `summary` del resultado puede explicar el cambio, pero no sustituye `replacement.summary`'
+    );
+    expect(request.messages[0].content).toContain(
+      'El servidor valida que `replacement` cambie únicamente el valor del path seleccionado'
+    );
+    expect(persistedSnapshot()).toEqual(before);
+  });
+
   it('changes task priority only when refinement explicitly scopes that field', async () => {
     addConfig(alice);
     const before = persistedCounts();
@@ -2832,6 +2868,12 @@ describe('POST /api/ai/assistant/refine', () => {
     const providerRequest = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
     expect(providerRequest.messages[0].content).toContain(
       'Fecha local de referencia del cliente: 2035-09-25'
+    );
+    expect(providerRequest.messages[0].content).toContain(
+      'cada elemento de `replacements` debe ser una acción completa, no un parche parcial'
+    );
+    expect(providerRequest.messages[0].content).toContain(
+      'repite los campos `kind`, `title`, `summary`, `payload`, `dependsOn` y `warnings`'
     );
     expect(providerRequest.messages[1].content).toContain('ui-pantry');
     expect(providerRequest.messages[1].content).toContain('ui-shopping');
@@ -3139,7 +3181,45 @@ describe('POST /api/ai/assistant/refine', () => {
     expect(persistedCounts()).toEqual(before);
   });
 
-  it('rejects a field refinement that changes data outside its selected scope', async () => {
+  it('preserves the action summary when the model rewrites it during field refinement', async () => {
+    addConfig(alice);
+    const before = persistedCounts();
+    const action = (assistantCandidate() as any).actions[0];
+    const fetchMock = stubProvider(
+      JSON.stringify({
+        summary: 'Cantidad ajustada.',
+        replacement: {
+          ...action,
+          summary: 'Resumen no solicitado',
+          payload: { ...action.payload, quantity: 500 }
+        },
+        questions: []
+      })
+    );
+
+    const response = await call('POST', '/refine', {
+      actionId: 'draft-pantry-action',
+      instruction: 'Cambia la cantidad',
+      action,
+      scope: { kind: 'field', path: ['quantity'] }
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      success: true,
+      data: {
+        summary: 'Cantidad ajustada.',
+        replacement: {
+          ...action,
+          payload: { ...action.payload, quantity: 500 }
+        }
+      }
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(persistedCounts()).toEqual(before);
+  });
+
+  it('rejects field refinements that change payload data outside their selected scope', async () => {
     addConfig(alice);
     const before = persistedCounts();
     const action = (assistantCandidate() as any).actions[0];
@@ -3148,7 +3228,11 @@ describe('POST /api/ai/assistant/refine', () => {
         summary: 'Cambio amplio.',
         replacement: {
           ...action,
-          payload: { ...action.payload, quantity: 500, notes: 'Edición manual sobrescrita' }
+          payload: {
+            ...action.payload,
+            quantity: 500,
+            notes: 'Edición manual sobrescrita'
+          }
         },
         questions: []
       })
