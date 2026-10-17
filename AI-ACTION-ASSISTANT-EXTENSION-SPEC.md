@@ -28,6 +28,16 @@ La capacidad inicial del asistente crea seis tipos de registro. Esta extensión 
 - El usuario puede ajustar las raciones en el borrador (1–100 por turno); la refinación conserva esos ajustes salvo petición explícita de cambiar raciones, y la confirmación persiste lo revisado.
 - Confirmar comidas usa el endpoint existente de confirmación, con su idempotencia. La lista de compras es una segunda revisión/aprobación separada que usa el preview/aprobación existente; la confirmación de comidas no compra ni modifica listas automáticamente.
 
+### Unidad B.1 — continuar a ingredientes faltantes desde el asistente
+
+- Tras confirmar una propuesta de comidas desde el asistente, ofrecer una acción explícita para abrir una revisión de compra del mismo periodo. No pedir al modelo que estime existencias ni que fabrique ingredientes faltantes.
+- Cargar el preview de forma read-only desde el backend usando el rango semanal confirmado, snapshots de receta persistidos, inventario compartido vigente y el servicio existente. Si no se confirmó el plan, no se ofrece el preview derivado.
+- Solo son seleccionables para añadir las filas con `status = not_found` o `status = matched` y `missingQuantity > 0`. En ambos casos el usuario puede excluirlas y ajustar la cantidad. Ingredientes opcionales empiezan excluidos. Ambiguos, unidad incompatible, inventario no compartido o snapshot ausente muestran su limitación y nunca se presentan como faltantes verificables.
+- Aprobar la compra es un segundo acto humano: solo un botón separado y accesible envía las filas seleccionadas al endpoint existente. No se crea/actualiza una lista al confirmar las comidas, al abrir el preview, al editar cantidades o al descartar.
+- La aprobación vuelve a resolver hogar, preview, existencias y lista dentro de la transacción existente; solo acepta claves del preview que sigan siendo faltantes y rechaza claves ambiguas/no compartidas/no disponibles. Preview obsoleto requiere volver a cargar y revisar. Conservar CAS/idempotencia de lista y el límite del source `meal_plan`.
+- Fallo de compra no revierte comidas ya confirmadas ni informa éxito de compra; presenta el fallo por separado y permite recargar/revisar. Fallo/rechazo de comidas nunca expone ingredientes como ya planificados.
+- Esta continuación la deriva el producto tras persistir comidas; no es una nueva acción del allowlist ni acepta datos de stock, cantidades faltantes o `previewId` provistos por el modelo.
+
 ### Otras ediciones de registros
 
 - Los endpoints genéricos de despensa, compras, calendario y recetas tienen distintos riesgos; la extensión no los usa como autorización para el asistente. Despensa, calendario y contenido de recetas usan operaciones de asistente específicas con resolución, preimagen, permisos y protección contra reintentos, documentadas en sus specs verticales. Compras aún necesita CAS atómico/idempotencia antes de habilitar sus ediciones.
@@ -41,6 +51,9 @@ La capacidad inicial del asistente crea seis tipos de registro. Esta extensión 
 - [x] Reintento exacto de edición produce una persistencia; misma clave con parche distinto, dato obsoleto o target ajeno falla sin mutar.
 - [x] E2E Playwright con servidor/API reales y SQLite temporal: preview, refinar, editar localmente y descartar no escriben; aprobación modifica solo el target y persiste al recargar; conflictos/reintentos son seguros.
 - [x] Unidad de comidas usa proveedor transitorio; participantes se eligen expresamente; preview/refinamiento/descarte tienen cero escrituras; confirmar comidas y aprobar compras son pasos separados.
+- [ ] Desde el asistente, después de confirmar comidas, abrir preview de compra solo lectura del mismo rango; seleccionar/excluir/ajustar solo faltantes verificables; ambiguos, sin stock compartido o snapshots no disponibles no se pueden añadir.
+- [ ] TDD del endpoint de aprobación: solicitudes manipuladas para claves no faltantes/no verificables se rechazan sin modificar listas; faltantes válidos siguen admitiendo selección parcial, cantidad revisada, stale-preview y replay idempotente.
+- [ ] E2E aislado con APIs reales: propuesta/confirmación de comidas, preview sin escritura, ausencia de lista antes de aprobación, cancelación/rechazo sin escrituras de compra y aprobación explícita que persiste solo las filas faltantes elegidas; fallo de compra conserva el plan y se reporta aparte.
 - [x] Despensa/calendario usan unidades verticales seguras; recetas tienen contrato vertical seguro separado; compras y prioridad permanecen pendientes.
 - [x] Desktop/móvil, accesibilidad, cobertura mínima de repo, build/typecheck/check:ui, capturas sintéticas y limitaciones quedan documentados en `SPEC.md` antes de cerrar las unidades A/B; la auditoría visual global del shell y las funciones de edición pendientes siguen abiertas en `SPEC.md`.
 
