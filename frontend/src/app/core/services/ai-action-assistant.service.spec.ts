@@ -1,7 +1,7 @@
 import { HttpErrorResponse, provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
-import { signal } from '@angular/core';
+import { signal, type WritableSignal } from '@angular/core';
 import { SILENT_TOAST } from '../interceptors/error.interceptor';
 import { toDayKey } from '../time';
 import { HouseholdService } from './household.service';
@@ -15,13 +15,15 @@ import { AiActionAssistantService } from './ai-action-assistant.service';
 describe('AiActionAssistantService', () => {
   let service: AiActionAssistantService;
   let http: HttpTestingController;
+  let activeHouseholdId: WritableSignal<string | null>;
 
   beforeEach(() => {
+    activeHouseholdId = signal('household-1');
     TestBed.configureTestingModule({
       providers: [
         provideHttpClient(),
         provideHttpClientTesting(),
-        { provide: HouseholdService, useValue: { activeHouseholdId: signal('household-1') } }
+        { provide: HouseholdService, useValue: { activeHouseholdId } }
       ]
     });
     service = TestBed.inject(AiActionAssistantService);
@@ -55,6 +57,34 @@ describe('AiActionAssistantService', () => {
     request.flush({ success: true, data: plan });
 
     expect(result).toEqual(plan);
+  });
+
+  it('sends an empty household header when no household context is active', () => {
+    activeHouseholdId.set(null);
+    service.propose({ prompt: 'Añade lentejas' }).subscribe();
+
+    const request = http.expectOne('/api/ai/assistant/proposals');
+    expect(request.request.headers.get('x-assistant-household-id')).toBe('');
+    request.flush({
+      success: true,
+      data: { id: 'plan-1', summary: '', actions: [], questions: [] }
+    });
+  });
+
+  it('rejects unsuccessful, empty, or null API envelopes', () => {
+    const invalidResponses = [{ success: false, data: undefined }, { success: true }, null];
+
+    for (const response of invalidResponses) {
+      let error: unknown;
+      service
+        .propose({ prompt: 'Añade lentejas' })
+        .subscribe({ error: (value) => (error = value) });
+
+      http.expectOne('/api/ai/assistant/proposals').flush(response as never);
+
+      expect(error).toEqual(jasmine.any(Error));
+      expect((error as Error).message).toBe('AI assistant returned an invalid response');
+    }
   });
 
   it('sends a single scoped refinement and propagates provider errors to the dialog', () => {
