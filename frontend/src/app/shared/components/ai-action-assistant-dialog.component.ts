@@ -2502,6 +2502,7 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
   }
 
   propose(): void {
+    if (this.loading()) return;
     const prompt = this.prompt().trim();
     if (!prompt) {
       this.promptError.set('ai_assistant.prompt_required');
@@ -3359,6 +3360,7 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
   }
 
   refineCurrentAction(): void {
+    if (this.loading()) return;
     const actions = this.refiningActions();
     const instruction = this.refinementPrompt().trim();
     if (!actions.length || !instruction) return;

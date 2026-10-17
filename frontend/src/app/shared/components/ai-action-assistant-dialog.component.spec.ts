@@ -1,7 +1,7 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { signal } from '@angular/core';
-import { of } from 'rxjs';
+import { NEVER, of } from 'rxjs';
 import { AiActionAssistantService } from '../../core/services/ai-action-assistant.service';
 import { AiActionAssistantExecutionService } from '../../core/services/ai-action-assistant-execution.service';
 import { HouseholdService } from '../../core/services/household.service';
@@ -172,6 +172,31 @@ describe('AiActionAssistantDialogComponent', () => {
     const executedAction = execution.execute.calls.mostRecent().args[0] as AssistantAction;
     expect(executedAction.payload).toEqual(jasmine.objectContaining({ quantity: 750 }));
     expect(component.plan()?.actions[0].status).toBe('succeeded');
+  });
+
+  it('does not send duplicate proposal requests while the first request is pending', () => {
+    assistant.propose.and.returnValue(NEVER);
+    component.prompt.set('Añade lentejas');
+
+    component.propose();
+    component.propose();
+
+    expect(assistant.propose).toHaveBeenCalledTimes(1);
+    expect(component.loading()).toBeTrue();
+  });
+
+  it('does not send duplicate refinement requests while the first request is pending', () => {
+    const plan = pantryPlan();
+    component.plan.set(plan);
+    component.beginRefine(plan.actions[0].id);
+    component.refinementPrompt.set('Cambia la cantidad a 750 g');
+    assistant.refine.and.returnValue(NEVER);
+
+    component.refineCurrentAction();
+    component.refineCurrentAction();
+
+    expect(assistant.refine).toHaveBeenCalledTimes(1);
+    expect(component.loading()).toBeTrue();
   });
 
   it('requires explicit meal participants, keeps drafts read-only through refinement, and confirms once', async () => {
