@@ -5614,6 +5614,7 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
     this.voiceError.set(null);
     try {
       const recognition = new Recognition();
+      let hasVoiceTranscript = false;
       recognition.continuous = true;
       recognition.interimResults = true;
       recognition.lang = this.i18n.resolved() === 'es' ? 'es-ES' : 'en-GB';
@@ -5623,6 +5624,7 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
           .map((result) => result[0]?.transcript ?? '')
           .join(' ')
           .trimStart();
+        hasVoiceTranscript ||= transcript.trim().length > 0;
         this.prompt.set(transcript);
       };
       recognition.onerror = (event) => {
@@ -5639,8 +5641,15 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
       };
       recognition.onend = () => {
         if (this.recognition !== recognition) return;
-        if (this.voiceState() === 'listening' || this.voiceState() === 'paused') {
-          this.voiceState.set('idle');
+        const sessionWasActive =
+          this.voiceState() === 'listening' || this.voiceState() === 'paused';
+        if (sessionWasActive) {
+          if (hasVoiceTranscript) {
+            this.voiceState.set('idle');
+          } else {
+            this.voiceError.set('ai_assistant.voice_error');
+            this.voiceState.set('error');
+          }
         }
         this.supportsPause.set(false);
         this.voiceStopPending.set(false);

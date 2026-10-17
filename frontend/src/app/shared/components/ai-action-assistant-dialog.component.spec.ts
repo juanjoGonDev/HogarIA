@@ -1695,8 +1695,11 @@ describe('AiActionAssistantDialogComponent', () => {
     recognition.onresult?.({
       results: [{ 0: { transcript: 'Añade 500 g de avena' }, isFinal: true }]
     });
+    recognition.onend?.();
 
     expect(component.prompt()).toBe('Añade 500 g de avena');
+    expect(component.voiceState()).toBe('idle');
+    expect(component.voiceError()).toBeNull();
   });
 
   it('aborts pending finalization and ignores any later speech result when cancelled', () => {
@@ -2405,6 +2408,19 @@ describe('AiActionAssistantDialogComponent', () => {
     component.cancelVoice();
     expect(component.voiceState()).toBe('idle');
     expect(recognitions[0].aborted).toBeTrue();
+  });
+
+  it('reports an error when recognition ends without a transcript', () => {
+    const recognitions = mountWithSpeech(FakeSpeechRecognition);
+    component.voiceConsent.set(true);
+    component.startVoice();
+
+    recognitions[0].onend?.();
+    fixture.detectChanges();
+
+    expect(component.voiceState()).toBe('error');
+    expect(component.voiceError()).toBe('ai_assistant.voice_error');
+    expect(fixture.nativeElement.querySelector('[role="alert"]')).not.toBeNull();
   });
 
   it('reports denied microphone permission and falls back to text when unsupported', () => {
