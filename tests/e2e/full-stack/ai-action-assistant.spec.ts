@@ -4413,6 +4413,49 @@ test('asistente global: difiere el diálogo hasta abrir y reutiliza el código a
   expect(scriptRequests).toHaveLength(scriptsAfterFirstOpen);
 });
 
+test('asistente global: explica que falta configurar IA sin escribir datos', async ({
+  page
+}, testInfo) => {
+  await registerUser(page, 'Asistente sin proveedor E2E');
+  await createHousehold(page, 'Hogar sin proveedor sintético');
+  await page.goto('/dashboard');
+  await page.locator('[data-test="ai-assistant-open"]').click();
+
+  const dialog = page.locator('.modal[role="dialog"]');
+  await expect(dialog).toBeVisible();
+  const databaseBeforeRequest = assistantDatabaseSnapshot();
+  const proposalResponse = page.waitForResponse((response) => {
+    const request = response.request();
+    return (
+      request.method() === 'POST' &&
+      new URL(response.url()).pathname === '/api/ai/assistant/proposals'
+    );
+  });
+  await dialog.locator('[data-test="ai-assistant-prompt"]').fill('Añade arroz a la despensa.');
+  await dialog.locator('[data-test="ai-assistant-submit"] button').click();
+
+  const response = await proposalResponse;
+  expect(response.status()).toBe(503);
+  await expect(response.json()).resolves.toMatchObject({
+    success: false,
+    code: 'AI_NOT_CONFIGURED'
+  });
+  const assistantError = dialog.locator('[data-test="ai-assistant-error"]');
+  await expect(assistantError).toHaveText(
+    'Configura un proveedor de IA antes de usar el asistente.'
+  );
+  const errorBounds = await assistantError.boundingBox();
+  const bodyBounds = await dialog.locator('.modal__body').boundingBox();
+  expect(errorBounds).not.toBeNull();
+  expect(bodyBounds).not.toBeNull();
+  expect(errorBounds!.y).toBeGreaterThanOrEqual(bodyBounds!.y);
+  expect(errorBounds!.y + errorBounds!.height).toBeLessThanOrEqual(
+    bodyBounds!.y + bodyBounds!.height
+  );
+  expect(assistantDatabaseSnapshot()).toEqual(databaseBeforeRequest);
+  await capture(page, testInfo, 'missing-ai-provider-error');
+});
+
 test('asistente global: una ráfaga de envíos genera una sola petición efímera', async ({
   page
 }) => {
@@ -4611,6 +4654,46 @@ test('asistente global: guía si falla el servicio de dictado del navegador', as
   await expect(voiceError).toBeInViewport();
   expect(assistantDatabaseSnapshot()).toEqual(databaseBeforeVoice);
   await capture(page, testInfo, 'voice-service-fallback');
+});
+
+test('asistente global: traduce el fallback de dictado al inglés', async ({ page }, testInfo) => {
+  await installSpeechRecognitionStub(page);
+  await registerUser(page, 'Assistant English voice fallback E2E');
+  await createHousehold(page, 'Synthetic English voice household');
+  await page.addInitScript(() => localStorage.setItem('hogar:v1:language', 'en'));
+  await page.goto('/dashboard');
+
+  const databaseBeforeVoice = assistantDatabaseSnapshot();
+  await page.locator('[data-test="ai-assistant-open"]').click();
+
+  const dialog = page.getByRole('dialog', { name: 'Action assistant' });
+  await expect(
+    dialog.getByRole('heading', { name: 'What would you like to organise?' })
+  ).toBeVisible();
+  await expect(dialog.locator('.assistant__voice-note')).toContainText('Voice privacy');
+  await dialog.locator('.assistant__consent input').check();
+  const voiceControls = dialog.locator('.assistant__voice-controls');
+  await voiceControls.getByRole('button', { name: 'Dictate request' }).click();
+  await expect(
+    dialog.getByRole('status').filter({ hasText: 'Listening; you can edit the transcript' })
+  ).toBeVisible();
+
+  await page.evaluate(() => {
+    const recognition = (
+      window as typeof window & { __assistantSpeechRecognition?: BrowserSpeechStubControl }
+    ).__assistantSpeechRecognition;
+    if (!recognition) throw new Error('Speech recognition stub was not started');
+    recognition.fail('network');
+  });
+
+  const voiceError = dialog.locator('.assistant__error[role="alert"]');
+  await expect(voiceError).toContainText('If you use Brave');
+  await expect(voiceError).toContainText('Chrome or Edge');
+  await expect(voiceError).toContainText('Win+H');
+  await expect(voiceError).toContainText('online recognition');
+  await expect(voiceError).toBeInViewport();
+  expect(assistantDatabaseSnapshot()).toEqual(databaseBeforeVoice);
+  await capture(page, testInfo, 'voice-service-fallback-en');
 });
 
 test('asistente global: navegar durante dictado libera voz y conserva el borrador', async ({

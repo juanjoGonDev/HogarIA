@@ -1,8 +1,9 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { HttpErrorResponse } from '@angular/common/http';
 import { provideHttpClient } from '@angular/common/http';
 import { signal } from '@angular/core';
 import { NavigationEnd, Router } from '@angular/router';
-import { NEVER, Observable, of, Subject } from 'rxjs';
+import { NEVER, Observable, of, Subject, throwError } from 'rxjs';
 import { AiActionAssistantService } from '../../core/services/ai-action-assistant.service';
 import { AiActionAssistantExecutionService } from '../../core/services/ai-action-assistant-execution.service';
 import { HouseholdService } from '../../core/services/household.service';
@@ -191,6 +192,31 @@ describe('AiActionAssistantDialogComponent', () => {
 
     expect(assistant.propose).toHaveBeenCalledTimes(1);
     expect(component.loading()).toBeTrue();
+  });
+
+  it('preserves assistant-specific errors wrapped by the global HTTP interceptor', () => {
+    const providerError = new HttpErrorResponse({
+      status: 503,
+      statusText: 'Service Unavailable',
+      error: { success: false, code: 'AI_NOT_CONFIGURED' }
+    });
+    assistant.propose.and.returnValue(
+      throwError(() => ({
+        status: providerError.status,
+        message: 'Service unavailable',
+        original: providerError
+      }))
+    );
+    component.prompt.set('Añade lentejas');
+
+    component.propose();
+    fixture.detectChanges();
+
+    expect(component.errorKey()).toBe('ai_assistant.error_not_configured');
+    expect(component.loading()).toBeFalse();
+    expect(
+      fixture.nativeElement.querySelector('[data-test="ai-assistant-error"]')?.textContent
+    ).toContain('Configura un proveedor de IA antes de usar el asistente.');
   });
 
   it('does not send duplicate refinement requests while the first request is pending', () => {

@@ -413,6 +413,7 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
             </p>
 
             <p
+              #assistantErrorAlert
               *ngIf="errorKey() as errorMessageKey"
               class="assistant__error"
               role="alert"
@@ -1144,7 +1145,12 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
                         {{ 'ai_assistant.meals.refine' | t }}
                       </app-button>
                     </ng-container>
-                    <p *ngIf="errorKey() as errorMessageKey" class="assistant__error" role="alert">
+                    <p
+                      #assistantErrorAlert
+                      *ngIf="errorKey() as errorMessageKey"
+                      class="assistant__error"
+                      role="alert"
+                    >
                       {{ errorMessageKey | t }}
                     </p>
                   </section>
@@ -1212,7 +1218,12 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
             <p *ngIf="refinementQuestions().length" class="assistant__questions" role="alert">
               {{ refinementQuestions().join(' ') }}
             </p>
-            <p *ngIf="errorKey() as errorMessageKey" class="assistant__error" role="alert">
+            <p
+              #assistantErrorAlert
+              *ngIf="errorKey() as errorMessageKey"
+              class="assistant__error"
+              role="alert"
+            >
               {{ errorMessageKey | t }}
             </p>
             <p *ngIf="loading()" class="assistant__status" role="status" aria-live="polite">
@@ -1420,7 +1431,12 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
                   </span>
                 </li>
               </ul>
-              <p *ngIf="errorKey() as errorMessageKey" class="assistant__error" role="alert">
+              <p
+                #assistantErrorAlert
+                *ngIf="errorKey() as errorMessageKey"
+                class="assistant__error"
+                role="alert"
+              >
                 {{ errorMessageKey | t }}
               </p>
               <p
@@ -2415,6 +2431,7 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
 export class AiActionAssistantDialogComponent implements OnDestroy {
   private readonly router = inject(Router);
   @ViewChild('stageHeading') private stageHeading?: ElementRef<HTMLElement>;
+  @ViewChild('assistantErrorAlert') private assistantErrorAlert?: ElementRef<HTMLElement>;
   @ViewChild('voiceErrorAlert') private voiceErrorAlert?: ElementRef<HTMLElement>;
 
   @Input() routeHint: AssistantRouteHint | undefined;
@@ -2564,7 +2581,7 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
           this.requestSubscription = null;
         },
         error: (error: unknown) => {
-          this.errorKey.set(this.mapError(error));
+          this.setRequestError(error);
           this.loading.set(false);
           this.requestSubscription = null;
         }
@@ -2989,7 +3006,7 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
           }
           this.mealProposals.update((proposals) => ({ ...proposals, [action.id]: proposal }));
         },
-        error: (error: unknown) => this.errorKey.set(this.mapError(error))
+        error: (error: unknown) => this.setRequestError(error)
       });
     this.mealRequestSubscriptions.push(subscription);
   }
@@ -3044,7 +3061,7 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
           }
           this.setMealRefinementText(action.id, '');
         },
-        error: (error: unknown) => this.errorKey.set(this.mapError(error))
+        error: (error: unknown) => this.setRequestError(error)
       });
     this.mealRequestSubscriptions.push(subscription);
   }
@@ -3442,7 +3459,7 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
             this.finishRefinement();
           },
           error: (error: unknown) => {
-            this.errorKey.set(this.mapError(error));
+            this.setRequestError(error);
             this.loading.set(false);
             this.requestSubscription = null;
           }
@@ -3487,7 +3504,7 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
           this.finishRefinement();
         },
         error: (error: unknown) => {
-          this.errorKey.set(this.mapError(error));
+          this.setRequestError(error);
           this.loading.set(false);
           this.requestSubscription = null;
         }
@@ -5139,8 +5156,12 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
   }
 
   private mapError(error: unknown): TranslationKey {
-    if (error instanceof HttpErrorResponse) {
-      const code = error.error?.code;
+    const response =
+      error instanceof HttpErrorResponse
+        ? error
+        : (error as { original?: unknown } | null | undefined)?.original;
+    if (response instanceof HttpErrorResponse) {
+      const code = response.error?.code;
       if (code === 'AI_NOT_CONFIGURED') return 'ai_assistant.error_not_configured';
       if (code === 'AI_PROVIDER_NOT_CONFIGURED') return 'ai_assistant.error_not_configured';
       if (code === 'ASSISTANT_BUSY') return 'ai_assistant.error_busy';
@@ -5163,6 +5184,18 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
       }
     }
     return 'ai_assistant.error_general';
+  }
+
+  private setRequestError(error: unknown): void {
+    this.errorKey.set(this.mapError(error));
+    this.revealAssistantError();
+  }
+
+  private revealAssistantError(): void {
+    afterNextRender(
+      () => this.assistantErrorAlert?.nativeElement.scrollIntoView({ block: 'nearest' }),
+      { injector: this.injector }
+    );
   }
 
   private speechRecognitionConstructor(): SpeechRecognitionConstructor | null {
@@ -5372,6 +5405,7 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
         } catch (error) {
           this.setActionStatus(action.id, 'failed');
           this.errorKey.set(this.mapExecutionError(error));
+          this.revealAssistantError();
           hadFailure = true;
         }
       }
