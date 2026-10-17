@@ -4144,3 +4144,54 @@ test('asistente global: cambio del hogar invalida la aprobación del evento', as
     await provider.close();
   }
 });
+
+test('asistente global: difiere el diálogo hasta abrir y reutiliza el código al reabrir', async ({
+  page
+}) => {
+  const scriptRequests: string[] = [];
+  const assistantChunkUrls = new Set<string>();
+  const scriptResponseChecks: Promise<void>[] = [];
+  page.on('request', (request) => {
+    if (request.resourceType() === 'script') scriptRequests.push(request.url());
+  });
+  page.on('response', (response) => {
+    if (response.request().resourceType() !== 'script') return;
+    scriptResponseChecks.push(
+      response
+        .text()
+        .then((body) => {
+          if (body.includes('assistant__')) assistantChunkUrls.add(response.url());
+        })
+        .catch(() => undefined)
+    );
+  });
+
+  await registerUser(page, 'Asistente carga diferida E2E');
+  await createHousehold(page, 'Hogar carga diferida sintético');
+  await page.goto('/dashboard');
+
+  const launcher = page.locator('[data-test="ai-assistant-open"]');
+  await expect(launcher).toBeVisible();
+  await page.waitForTimeout(150);
+  await Promise.all(scriptResponseChecks);
+  expect(assistantChunkUrls.size).toBe(0);
+  const scriptsBeforeOpen = scriptRequests.length;
+
+  await launcher.click();
+  const dialog = page.locator('.modal[role="dialog"]');
+  await expect(dialog).toBeVisible();
+  await expect.poll(() => assistantChunkUrls.size).toBe(1);
+  const scriptsAfterFirstOpen = scriptRequests.length;
+  expect(scriptsAfterFirstOpen).toBeGreaterThan(scriptsBeforeOpen);
+  const [assistantChunkUrl] = [...assistantChunkUrls];
+  expect(scriptRequests.filter((url) => url === assistantChunkUrl)).toHaveLength(1);
+
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await launcher.click();
+  await expect(dialog).toBeVisible();
+  await page.waitForTimeout(150);
+  expect(assistantChunkUrls.size).toBe(1);
+  expect(scriptRequests.filter((url) => url === assistantChunkUrl)).toHaveLength(1);
+  expect(scriptRequests).toHaveLength(scriptsAfterFirstOpen);
+});
