@@ -30,6 +30,7 @@ const FOCUSABLE_SELECTOR =
       #overlay
       class="modal-overlay"
       [class.modal-overlay--visual-viewport]="adaptToVisualViewport"
+      [class.modal-overlay--safe-area]="safeAreaAware"
       (click)="onOverlayClick($event)"
     >
       <div
@@ -86,6 +87,13 @@ const FOCUSABLE_SELECTOR =
         bottom: auto;
         height: var(--modal-visual-viewport-height, 100vh);
         box-sizing: border-box;
+      }
+
+      .modal-overlay--safe-area {
+        padding-top: max(var(--space-4), env(safe-area-inset-top, 0px));
+        padding-right: max(var(--space-4), env(safe-area-inset-right, 0px));
+        padding-bottom: max(var(--space-4), env(safe-area-inset-bottom, 0px));
+        padding-left: max(var(--space-4), env(safe-area-inset-left, 0px));
       }
 
       .modal {
@@ -230,6 +238,7 @@ export class ModalComponent implements OnChanges, AfterViewChecked, OnDestroy {
   @Input() showFooter = false;
   @Input() closeOnOverlay = true;
   @Input() adaptToVisualViewport = false;
+  @Input() safeAreaAware = false;
 
   @Output() isOpenChange = new EventEmitter<boolean>();
   @Output() onClose = new EventEmitter<void>();

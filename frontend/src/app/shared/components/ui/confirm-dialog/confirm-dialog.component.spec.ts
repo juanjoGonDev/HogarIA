@@ -51,9 +51,11 @@ describe('ConfirmDialogComponent', () => {
   });
 
   it('associates a confirmation warning with its dialog description', () => {
+    const overlay = fixture.nativeElement.querySelector('.modal-overlay') as HTMLElement;
     const dialog = fixture.nativeElement.querySelector('[role="dialog"]') as HTMLElement;
     const message = fixture.nativeElement.querySelector('.confirm__message') as HTMLElement;
 
+    expect(overlay.classList.contains('modal-overlay--safe-area')).toBeTrue();
     expect(message.id).toBe('confirm-dialog-message');
     expect(dialog.getAttribute('aria-describedby')).toBe('confirm-dialog-message');
   });

@@ -293,6 +293,7 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
       [closeOnOverlay]="!executing()"
       [showFooter]="true"
       [adaptToVisualViewport]="true"
+      [safeAreaAware]="true"
       (onClose)="requestClose()"
     >
       @switch (stage()) {

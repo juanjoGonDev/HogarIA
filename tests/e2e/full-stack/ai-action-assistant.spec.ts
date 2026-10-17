@@ -5084,3 +5084,83 @@ test('asistente global: adapta el diálogo cuando aparece el teclado virtual', a
   expect(geometry.bodyClientHeight).toBeGreaterThan(0);
   expect(geometry.promptFocused).toBe(true);
 });
+
+test('asistente global: respeta safe-area emulada en FAB y diálogo móvil', async ({
+  page
+}, testInfo) => {
+  test.skip(testInfo.project.name !== 'mobile-chrome', 'requiere viewport móvil Chromium');
+
+  const safeArea = { top: 36, right: 20, bottom: 48, left: 20 };
+  await page.setViewportSize({ width: 320, height: 568 });
+  await registerUser(page, 'Asistente safe area E2E');
+  await createHousehold(page, 'Hogar safe area sintético');
+  await page.goto('/dashboard');
+
+  const session = await page.context().newCDPSession(page);
+  await session.send('Emulation.setSafeAreaInsetsOverride', { insets: safeArea });
+  const emulatedInsets = await page.evaluate(() => {
+    const probe = document.createElement('div');
+    probe.style.cssText = `
+      position: fixed;
+      top: env(safe-area-inset-top);
+      right: env(safe-area-inset-right);
+      bottom: env(safe-area-inset-bottom);
+      left: env(safe-area-inset-left);
+    `;
+    document.body.append(probe);
+    const styles = getComputedStyle(probe);
+    const result = {
+      top: Number.parseFloat(styles.top),
+      right: Number.parseFloat(styles.right),
+      bottom: Number.parseFloat(styles.bottom),
+      left: Number.parseFloat(styles.left)
+    };
+    probe.remove();
+    return result;
+  });
+  expect(emulatedInsets).toEqual(safeArea);
+
+  const launcher = page.locator('[data-test="ai-assistant-open"]');
+  await expect(launcher).toBeVisible();
+  const launcherBounds = await launcher.boundingBox();
+  expect(launcherBounds).not.toBeNull();
+  expect(launcherBounds!.x).toBeGreaterThanOrEqual(safeArea.left);
+  expect(launcherBounds!.y).toBeGreaterThanOrEqual(safeArea.top);
+  expect(launcherBounds!.x + launcherBounds!.width).toBeLessThanOrEqual(320 - safeArea.right);
+  expect(launcherBounds!.y + launcherBounds!.height).toBeLessThanOrEqual(568 - safeArea.bottom);
+  await capture(page, testInfo, 'assistant-safe-area-fab');
+
+  await launcher.click();
+  const dialog = page.locator('.modal[role="dialog"]');
+  await expect(dialog).toBeVisible();
+  const geometry = await page.evaluate(() => {
+    const overlay = document.querySelector<HTMLElement>('.modal-overlay--visual-viewport');
+    const dialog = document.querySelector<HTMLElement>('.modal[role="dialog"]');
+    if (!overlay || !dialog) throw new Error('Assistant modal geometry is unavailable');
+    const bounds = dialog.getBoundingClientRect();
+    const styles = getComputedStyle(overlay);
+    return {
+      paddingTop: Number.parseFloat(styles.paddingTop),
+      paddingRight: Number.parseFloat(styles.paddingRight),
+      paddingBottom: Number.parseFloat(styles.paddingBottom),
+      paddingLeft: Number.parseFloat(styles.paddingLeft),
+      left: bounds.left,
+      top: bounds.top,
+      right: bounds.right,
+      bottom: bounds.bottom,
+      viewportWidth: window.visualViewport?.width ?? window.innerWidth,
+      viewportHeight: window.visualViewport?.height ?? window.innerHeight
+    };
+  });
+  expect(geometry.paddingTop).toBeGreaterThanOrEqual(safeArea.top);
+  expect(geometry.paddingRight).toBeGreaterThanOrEqual(safeArea.right);
+  expect(geometry.paddingBottom).toBeGreaterThanOrEqual(safeArea.bottom);
+  expect(geometry.paddingLeft).toBeGreaterThanOrEqual(safeArea.left);
+  expect(geometry.left).toBeGreaterThanOrEqual(safeArea.left);
+  expect(geometry.top).toBeGreaterThanOrEqual(safeArea.top);
+  expect(geometry.right).toBeLessThanOrEqual(geometry.viewportWidth - safeArea.right);
+  expect(geometry.bottom).toBeLessThanOrEqual(geometry.viewportHeight - safeArea.bottom);
+  await capture(page, testInfo, 'assistant-safe-area-dialog');
+
+  await session.detach();
+});

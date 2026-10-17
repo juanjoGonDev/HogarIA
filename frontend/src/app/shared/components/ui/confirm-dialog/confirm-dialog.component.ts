@@ -19,6 +19,7 @@ import { TranslatePipe } from '../../../../core/pipes/translate.pipe';
       [isOpen]="!!confirmService.request()"
       [title]="confirmService.request()?.title || ('common.confirmar' | t)"
       [descriptionId]="confirmService.request()?.message ? 'confirm-dialog-message' : null"
+      [safeAreaAware]="true"
       size="sm"
       (onClose)="confirmService.cancel()"
     >
