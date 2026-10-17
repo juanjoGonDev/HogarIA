@@ -23,11 +23,18 @@ import { AiActionAssistantService } from '../../core/services/ai-action-assistan
 import { AiActionAssistantExecutionService } from '../../core/services/ai-action-assistant-execution.service';
 import { HouseholdService } from '../../core/services/household.service';
 import { HouseholdMealProposalService } from '../../core/services/household-meal-proposal.service';
+import { HouseholdMealShoppingService } from '../../core/services/household-meal-shopping.service';
 import type {
   HouseholdMealProposal,
   HouseholdMealProposalEvent,
   HouseholdMealProposalRecipeReference
 } from '../../core/services/household-meal-proposal.service';
+import type {
+  HouseholdMealShoppingApproval,
+  HouseholdMealShoppingIngredient,
+  HouseholdMealShoppingPreview,
+  HouseholdMealShoppingStockStatus
+} from '../../core/services/household-meal-shopping.service';
 import type {
   AssistantAction,
   AssistantActionCandidate,
@@ -85,6 +92,21 @@ interface AssistantField {
   required?: boolean;
   choices?: Array<{ value: string; label: string }>;
 }
+
+interface AssistantMealShoppingLine extends HouseholdMealShoppingIngredient {
+  key: string;
+  optional: boolean;
+  included: boolean;
+  addQuantity: number;
+}
+
+const MEAL_SHOPPING_STATUS_LABELS: Record<HouseholdMealShoppingStockStatus, TranslationKey> = {
+  matched: 'ai_assistant.meals.shopping_status_matched',
+  not_found: 'ai_assistant.meals.shopping_status_not_found',
+  ambiguous: 'ai_assistant.meals.shopping_status_ambiguous',
+  unit_mismatch: 'ai_assistant.meals.shopping_status_unit_mismatch',
+  pantry_not_shared: 'ai_assistant.meals.shopping_status_pantry_not_shared'
+};
 
 function isHouseholdTaskPriority(value: unknown): value is HouseholdTaskPriority {
   return value === 'low' || value === 'medium' || value === 'high';
@@ -1391,6 +1413,249 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
               >
                 {{ executionMessage()! | t: { count: completedCount() } }}
               </p>
+              <section
+                *ngFor="let action of confirmedMealPlanActions()"
+                class="assistant__meal-shopping"
+                [attr.data-test]="'ai-assistant-meals-shopping-' + action.id"
+              >
+                <h3>{{ 'ai_assistant.meals.shopping_heading' | t }}</h3>
+                <p>{{ 'ai_assistant.meals.shopping_preview_copy' | t }}</p>
+                <app-button
+                  *ngIf="!mealShoppingPreview(action.id) || mealShoppingError(action.id)"
+                  variant="outline"
+                  [touchTarget]="true"
+                  [loading]="mealShoppingLoadingFor(action.id)"
+                  [disabled]="!canOpenMealShopping(action) || executing()"
+                  data-test="ai-assistant-meals-shopping-open"
+                  (onClick)="openMealShoppingReview(action)"
+                >
+                  {{
+                    (mealShoppingError(action.id)
+                      ? 'ai_assistant.meals.shopping_reload'
+                      : 'ai_assistant.meals.shopping_open'
+                    ) | t
+                  }}
+                </app-button>
+                <p
+                  *ngIf="mealShoppingLoadingFor(action.id)"
+                  class="assistant__status"
+                  role="status"
+                  aria-live="polite"
+                >
+                  {{ 'ai_assistant.meals.shopping_loading' | t }}
+                </p>
+                <p
+                  *ngIf="mealShoppingError(action.id) as shoppingError"
+                  class="assistant__error"
+                  role="alert"
+                >
+                  {{ shoppingError | t }}
+                </p>
+                <ng-container *ngIf="mealShoppingPreview(action.id) as shoppingPreview">
+                  <p class="assistant__hint">
+                    {{
+                      'ai_assistant.meals.shopping_range'
+                        | t: { start: shoppingPreview.startDate, end: shoppingPreview.endDate }
+                    }}
+                    ·
+                    {{
+                      'ai_assistant.meals.shopping_meal_count'
+                        | t: { count: shoppingPreview.plannedMealCount }
+                    }}
+                  </p>
+                  <p *ngIf="!shoppingPreview.sharedPantry" class="assistant__hint" role="note">
+                    {{ 'ai_assistant.meals.shopping_stock_unknown' | t }}
+                  </p>
+                  <ul *ngIf="shoppingPreview.warnings.length" class="assistant__shopping-warnings">
+                    <li *ngFor="let warning of shoppingPreview.warnings">
+                      {{
+                        'ai_assistant.meals.shopping_snapshot_warning' | t: { date: warning.date }
+                      }}
+                    </li>
+                  </ul>
+                  <p *ngIf="shoppingPreview.plannedMealCount === 0" class="assistant__hint">
+                    {{ 'ai_assistant.meals.shopping_empty' | t }}
+                  </p>
+                  <ng-container *ngIf="shoppingPreview.plannedMealCount > 0">
+                    <p
+                      *ngIf="!hasSelectableMealShoppingLines(action.id)"
+                      class="assistant__hint"
+                      data-test="ai-assistant-meals-shopping-no-shortages"
+                    >
+                      {{ 'ai_assistant.meals.shopping_no_shortages' | t }}
+                    </p>
+                    <section class="assistant__shopping-group">
+                      <h4>{{ 'ai_assistant.meals.shopping_required' | t }}</h4>
+                      <ul class="assistant__shopping-lines">
+                        <li
+                          *ngFor="
+                            let line of mealShoppingLinesFor(action.id, false);
+                            trackBy: trackMealShoppingLine
+                          "
+                          class="assistant__shopping-line"
+                        >
+                          <label>
+                            <input
+                              type="checkbox"
+                              [checked]="line.included"
+                              [disabled]="
+                                !canAddMealShoppingLine(line) ||
+                                mealShoppingSavingFor(action.id) ||
+                                !!mealShoppingApproval(action.id)
+                              "
+                              [attr.aria-label]="
+                                'ai_assistant.meals.shopping_include' | t: { name: line.name }
+                              "
+                              (change)="
+                                setMealShoppingIncluded(
+                                  action.id,
+                                  line.key,
+                                  $any($event.target).checked
+                                )
+                              "
+                            />
+                            <span>{{ line.name }} · {{ line.quantity }} {{ line.unit }}</span>
+                          </label>
+                          <p>
+                            {{ mealShoppingStatusLabel(line.status) | t }}
+                            <span *ngIf="canAddMealShoppingLine(line)">
+                              ·
+                              {{
+                                'ai_assistant.meals.shopping_missing_quantity'
+                                  | t: { quantity: line.missingQuantity, unit: line.unit }
+                              }}
+                            </span>
+                          </p>
+                          <label
+                            *ngIf="canAddMealShoppingLine(line)"
+                            class="assistant__shopping-quantity"
+                          >
+                            <span>{{ 'ai_assistant.meals.shopping_quantity' | t }}</span>
+                            <input
+                              type="number"
+                              min="0.000001"
+                              max="10000"
+                              step="any"
+                              [value]="line.addQuantity"
+                              [disabled]="
+                                mealShoppingSavingFor(action.id) ||
+                                !!mealShoppingApproval(action.id)
+                              "
+                              [attr.aria-label]="
+                                'ai_assistant.meals.shopping_quantity_for'
+                                  | t: { name: line.name, unit: line.unit }
+                              "
+                              (change)="
+                                setMealShoppingQuantity(action.id, line.key, $any($event.target))
+                              "
+                            />
+                          </label>
+                        </li>
+                      </ul>
+                    </section>
+                    <section
+                      *ngIf="mealShoppingLinesFor(action.id, true).length"
+                      class="assistant__shopping-group"
+                    >
+                      <h4>{{ 'ai_assistant.meals.shopping_optional' | t }}</h4>
+                      <ul class="assistant__shopping-lines">
+                        <li
+                          *ngFor="
+                            let line of mealShoppingLinesFor(action.id, true);
+                            trackBy: trackMealShoppingLine
+                          "
+                          class="assistant__shopping-line"
+                        >
+                          <label>
+                            <input
+                              type="checkbox"
+                              [checked]="line.included"
+                              [disabled]="
+                                !canAddMealShoppingLine(line) ||
+                                mealShoppingSavingFor(action.id) ||
+                                !!mealShoppingApproval(action.id)
+                              "
+                              [attr.aria-label]="
+                                'ai_assistant.meals.shopping_include' | t: { name: line.name }
+                              "
+                              (change)="
+                                setMealShoppingIncluded(
+                                  action.id,
+                                  line.key,
+                                  $any($event.target).checked
+                                )
+                              "
+                            />
+                            <span>{{ line.name }} · {{ line.quantity }} {{ line.unit }}</span>
+                          </label>
+                          <p>
+                            {{ mealShoppingStatusLabel(line.status) | t }}
+                            <span *ngIf="canAddMealShoppingLine(line)">
+                              ·
+                              {{
+                                'ai_assistant.meals.shopping_missing_quantity'
+                                  | t: { quantity: line.missingQuantity, unit: line.unit }
+                              }}
+                            </span>
+                          </p>
+                          <label
+                            *ngIf="canAddMealShoppingLine(line)"
+                            class="assistant__shopping-quantity"
+                          >
+                            <span>{{ 'ai_assistant.meals.shopping_quantity' | t }}</span>
+                            <input
+                              type="number"
+                              min="0.000001"
+                              max="10000"
+                              step="any"
+                              [value]="line.addQuantity"
+                              [disabled]="
+                                mealShoppingSavingFor(action.id) ||
+                                !!mealShoppingApproval(action.id)
+                              "
+                              [attr.aria-label]="
+                                'ai_assistant.meals.shopping_quantity_for'
+                                  | t: { name: line.name, unit: line.unit }
+                              "
+                              (change)="
+                                setMealShoppingQuantity(action.id, line.key, $any($event.target))
+                              "
+                            />
+                          </label>
+                        </li>
+                      </ul>
+                    </section>
+                    <app-button
+                      *ngIf="
+                        !mealShoppingApproval(action.id) &&
+                        hasSelectableMealShoppingLines(action.id)
+                      "
+                      variant="primary"
+                      [touchTarget]="true"
+                      [loading]="mealShoppingSavingFor(action.id)"
+                      [disabled]="!canApproveMealShopping(action.id)"
+                      data-test="ai-assistant-meals-shopping-approve"
+                      (onClick)="approveMealShopping(action.id)"
+                    >
+                      {{
+                        (mealShoppingSavingFor(action.id)
+                          ? 'ai_assistant.meals.shopping_approving'
+                          : 'ai_assistant.meals.shopping_approve'
+                        ) | t
+                      }}
+                    </app-button>
+                    <p
+                      *ngIf="mealShoppingApproval(action.id)"
+                      class="assistant__status"
+                      role="status"
+                      aria-live="polite"
+                      data-test="ai-assistant-meals-shopping-success"
+                    >
+                      {{ 'ai_assistant.meals.shopping_success' | t }}
+                    </p>
+                  </ng-container>
+                </ng-container>
+              </section>
             </section>
           }
         }
@@ -1792,7 +2057,8 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
       }
 
       .assistant__meal-planner,
-      .assistant__meal-confirmation {
+      .assistant__meal-confirmation,
+      .assistant__meal-shopping {
         display: grid;
         gap: var(--space-3);
         min-width: 0;
@@ -1804,8 +2070,93 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
 
       .assistant__meal-planner h3,
       .assistant__meal-planner p,
-      .assistant__meal-confirmation p {
+      .assistant__meal-confirmation p,
+      .assistant__meal-shopping h3,
+      .assistant__meal-shopping h4,
+      .assistant__meal-shopping p {
         margin: 0;
+      }
+
+      .assistant__meal-shopping h3,
+      .assistant__meal-shopping h4 {
+        color: var(--text-primary);
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+      }
+
+      .assistant__shopping-group {
+        display: grid;
+        gap: var(--space-2);
+        min-width: 0;
+      }
+
+      .assistant__shopping-lines,
+      .assistant__shopping-warnings {
+        display: grid;
+        gap: var(--space-2);
+        min-width: 0;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .assistant__shopping-line {
+        display: grid;
+        gap: var(--space-1);
+        min-width: 0;
+        padding: var(--space-2) 0;
+        border-top: 1px solid var(--border-default);
+      }
+
+      .assistant__shopping-line > label:first-child {
+        display: flex;
+        align-items: flex-start;
+        gap: var(--space-2);
+        min-height: 44px;
+        color: var(--text-primary);
+        font-size: var(--text-sm);
+        line-height: var(--leading-normal);
+      }
+
+      .assistant__shopping-line input[type='checkbox'] {
+        width: 20px;
+        height: 20px;
+        flex: 0 0 auto;
+        margin: 0;
+        accent-color: var(--primary);
+      }
+
+      .assistant__shopping-line input:focus-visible {
+        outline: 2px solid var(--primary);
+        outline-offset: 2px;
+      }
+
+      .assistant__shopping-line p,
+      .assistant__shopping-warnings {
+        color: var(--text-secondary);
+        font-size: var(--text-xs);
+        line-height: var(--leading-normal);
+      }
+
+      .assistant__shopping-quantity {
+        display: grid;
+        gap: var(--space-1);
+        min-width: 0;
+        margin-inline-start: calc(20px + var(--space-2));
+        color: var(--text-secondary);
+        font-size: var(--text-xs);
+      }
+
+      .assistant__shopping-quantity input {
+        box-sizing: border-box;
+        width: 100%;
+        min-height: var(--button-control-height);
+        padding: var(--space-2) var(--space-3);
+        border: 1px solid var(--border-default);
+        border-radius: var(--radius-md);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        font: inherit;
       }
 
       .assistant__meal-participants {
@@ -2049,6 +2400,7 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
   private readonly execution = inject(AiActionAssistantExecutionService);
   private readonly household = inject(HouseholdService);
   private readonly mealProposalService = inject(HouseholdMealProposalService);
+  private readonly mealShoppingService = inject(HouseholdMealShoppingService);
   private readonly confirmService = inject(ConfirmService);
   private readonly i18n = inject(I18nService);
   private readonly pantry = inject(PantryService);
@@ -2081,6 +2433,12 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
   readonly mealManualServings = signal<Record<string, Record<string, number>>>({});
   readonly mealRefinementInstructions = signal<Record<string, string>>({});
   readonly mealProposalLoading = signal<Record<string, boolean>>({});
+  readonly mealShoppingPreviews = signal<Record<string, HouseholdMealShoppingPreview>>({});
+  readonly mealShoppingLines = signal<Record<string, AssistantMealShoppingLine[]>>({});
+  readonly mealShoppingLoading = signal<Record<string, boolean>>({});
+  readonly mealShoppingSaving = signal<Record<string, boolean>>({});
+  readonly mealShoppingApprovals = signal<Record<string, HouseholdMealShoppingApproval>>({});
+  readonly mealShoppingErrors = signal<Record<string, TranslationKey | null>>({});
   private proposalHouseholdId: string | null = null;
 
   readonly selectedActions = computed(
@@ -2091,6 +2449,12 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
     () =>
       this.plan()?.actions.filter(
         (action) => action.status !== 'succeeded' && action.kind !== 'household.plan_meals'
+      ) ?? []
+  );
+  readonly confirmedMealPlanActions = computed(
+    () =>
+      this.plan()?.actions.filter(
+        (action) => action.kind === 'household.plan_meals' && action.status === 'succeeded'
       ) ?? []
   );
   readonly refinableDomains = computed(() => {
@@ -2274,6 +2638,270 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
 
   mealProposalFor(actionId: string): HouseholdMealProposal | null {
     return this.mealProposals()[actionId] ?? null;
+  }
+
+  canOpenMealShopping(action: AssistantAction): boolean {
+    return (
+      action.kind === 'household.plan_meals' &&
+      action.status === 'succeeded' &&
+      Boolean(this.proposalHouseholdId) &&
+      this.household.activeHouseholdId() === this.proposalHouseholdId &&
+      !this.mealShoppingLoadingFor(action.id) &&
+      !this.mealShoppingSavingFor(action.id)
+    );
+  }
+
+  openMealShoppingReview(action: AssistantAction): void {
+    if (action.kind !== 'household.plan_meals' || !this.canOpenMealShopping(action)) return;
+    const householdId = this.proposalHouseholdId;
+    if (!householdId) return;
+    const range = this.mealShoppingRange(action.payload.weekStart);
+    if (!range || range.startDate > range.endDate) {
+      this.setMealShoppingError(action.id, 'ai_assistant.meals.shopping_no_future');
+      return;
+    }
+
+    this.mealShoppingPreviews.update((previews) => omitRecordKey(previews, action.id));
+    this.mealShoppingLines.update((lines) => omitRecordKey(lines, action.id));
+    this.mealShoppingApprovals.update((approvals) => omitRecordKey(approvals, action.id));
+    this.setMealShoppingError(action.id, null);
+    this.setMealShoppingLoading(action.id, true);
+    const subscription = this.mealShoppingService
+      .loadPreview(householdId, range.startDate, range.endDate)
+      .pipe(finalize(() => this.setMealShoppingLoading(action.id, false)))
+      .subscribe({
+        next: (preview) => {
+          if (this.household.activeHouseholdId() !== householdId || action.status !== 'succeeded') {
+            this.setMealShoppingError(action.id, 'ai_assistant.error_context_changed');
+            return;
+          }
+          if (!this.isMealShoppingPreviewForRange(preview, range.startDate, range.endDate)) {
+            this.setMealShoppingError(action.id, 'ai_assistant.meals.shopping_invalid_preview');
+            return;
+          }
+          this.mealShoppingPreviews.update((previews) => ({ ...previews, [action.id]: preview }));
+          this.mealShoppingLines.update((lines) => ({
+            ...lines,
+            [action.id]: [
+              ...preview.requiredIngredients.map((item) => this.makeMealShoppingLine(item, false)),
+              ...preview.optionalIngredients.map((item) => this.makeMealShoppingLine(item, true))
+            ]
+          }));
+        },
+        error: (error: unknown) =>
+          this.setMealShoppingError(action.id, this.mapMealShoppingError(error))
+      });
+    this.mealRequestSubscriptions.push(subscription);
+  }
+
+  mealShoppingPreview(actionId: string): HouseholdMealShoppingPreview | null {
+    return this.mealShoppingPreviews()[actionId] ?? null;
+  }
+
+  mealShoppingLinesFor(actionId: string, optional: boolean): AssistantMealShoppingLine[] {
+    return (this.mealShoppingLines()[actionId] ?? []).filter((line) => line.optional === optional);
+  }
+
+  mealShoppingLoadingFor(actionId: string): boolean {
+    return this.mealShoppingLoading()[actionId] === true;
+  }
+
+  mealShoppingSavingFor(actionId: string): boolean {
+    return this.mealShoppingSaving()[actionId] === true;
+  }
+
+  mealShoppingError(actionId: string): TranslationKey | null {
+    return this.mealShoppingErrors()[actionId] ?? null;
+  }
+
+  mealShoppingApproval(actionId: string): HouseholdMealShoppingApproval | null {
+    return this.mealShoppingApprovals()[actionId] ?? null;
+  }
+
+  mealShoppingStatusLabel(status: HouseholdMealShoppingStockStatus): TranslationKey {
+    return MEAL_SHOPPING_STATUS_LABELS[status];
+  }
+
+  canAddMealShoppingLine(line: AssistantMealShoppingLine): boolean {
+    return (
+      (line.status === 'not_found' || line.status === 'matched') &&
+      line.missingQuantity !== null &&
+      line.missingQuantity > 0
+    );
+  }
+
+  hasSelectableMealShoppingLines(actionId: string): boolean {
+    return (
+      this.mealShoppingLines()[actionId]?.some((line) => this.canAddMealShoppingLine(line)) ?? false
+    );
+  }
+
+  setMealShoppingIncluded(actionId: string, key: string, included: boolean): void {
+    this.mealShoppingLines.update((states) => ({
+      ...states,
+      [actionId]: (states[actionId] ?? []).map((line) =>
+        line.key === key && this.canAddMealShoppingLine(line) ? { ...line, included } : line
+      )
+    }));
+  }
+
+  setMealShoppingQuantity(actionId: string, key: string, input: HTMLInputElement): void {
+    const quantity = input.valueAsNumber;
+    if (!Number.isFinite(quantity) || quantity <= 0 || quantity > 10_000) {
+      const current = this.mealShoppingLines()[actionId]?.find((line) => line.key === key);
+      if (current) input.value = String(current.addQuantity);
+      return;
+    }
+    this.mealShoppingLines.update((states) => ({
+      ...states,
+      [actionId]: (states[actionId] ?? []).map((line) =>
+        line.key === key && this.canAddMealShoppingLine(line)
+          ? { ...line, addQuantity: quantity }
+          : line
+      )
+    }));
+  }
+
+  canApproveMealShopping(actionId: string): boolean {
+    const preview = this.mealShoppingPreview(actionId);
+    return (
+      Boolean(preview) &&
+      Boolean(this.proposalHouseholdId) &&
+      this.household.activeHouseholdId() === this.proposalHouseholdId &&
+      !this.mealShoppingLoadingFor(actionId) &&
+      !this.mealShoppingSavingFor(actionId) &&
+      !this.mealShoppingError(actionId) &&
+      this.mealShoppingApproval(actionId) === null &&
+      this.mealShoppingLinesFor(actionId, false)
+        .concat(this.mealShoppingLinesFor(actionId, true))
+        .some((line) => line.included && this.canAddMealShoppingLine(line)) &&
+      this.mealShoppingLinesFor(actionId, false)
+        .concat(this.mealShoppingLinesFor(actionId, true))
+        .every(
+          (line) =>
+            !line.included ||
+            (this.canAddMealShoppingLine(line) &&
+              Number.isFinite(line.addQuantity) &&
+              line.addQuantity > 0 &&
+              line.addQuantity <= 10_000)
+        )
+    );
+  }
+
+  approveMealShopping(actionId: string): void {
+    if (!this.canApproveMealShopping(actionId)) return;
+    const householdId = this.proposalHouseholdId;
+    const preview = this.mealShoppingPreview(actionId);
+    if (!householdId || !preview) return;
+    const items = this.mealShoppingLinesFor(actionId, false)
+      .concat(this.mealShoppingLinesFor(actionId, true))
+      .filter((line) => line.included && this.canAddMealShoppingLine(line))
+      .map((line) => ({ name: line.name, unit: line.unit, quantity: line.addQuantity }));
+
+    this.setMealShoppingError(actionId, null);
+    this.mealShoppingSaving.update((states) => ({ ...states, [actionId]: true }));
+    const subscription = this.mealShoppingService
+      .approve(householdId, {
+        startDate: preview.startDate,
+        endDate: preview.endDate,
+        previewId: preview.previewId,
+        items
+      })
+      .pipe(
+        finalize(() =>
+          this.mealShoppingSaving.update((states) => ({ ...states, [actionId]: false }))
+        )
+      )
+      .subscribe({
+        next: (approval) => {
+          if (this.household.activeHouseholdId() !== householdId) {
+            this.setMealShoppingError(actionId, 'ai_assistant.error_context_changed');
+            return;
+          }
+          this.mealShoppingApprovals.update((approvals) => ({
+            ...approvals,
+            [actionId]: approval
+          }));
+        },
+        error: (error: unknown) =>
+          this.setMealShoppingError(actionId, this.mapMealShoppingError(error))
+      });
+    this.mealRequestSubscriptions.push(subscription);
+  }
+
+  trackMealShoppingLine(_index: number, line: AssistantMealShoppingLine): string {
+    return line.key;
+  }
+
+  private mealShoppingRange(weekStart: string): { startDate: string; endDate: string } | null {
+    const endDate = addIsoDays(weekStart, 6);
+    if (!endDate) return null;
+    const today = new Date().toISOString().slice(0, 10);
+    return { startDate: weekStart < today ? today : weekStart, endDate };
+  }
+
+  private isMealShoppingPreviewForRange(
+    preview: HouseholdMealShoppingPreview,
+    startDate: string,
+    endDate: string
+  ): boolean {
+    return (
+      preview.startDate === startDate &&
+      preview.endDate === endDate &&
+      /^[a-f0-9]{64}$/.test(preview.previewId) &&
+      Number.isInteger(preview.plannedMealCount) &&
+      preview.plannedMealCount >= 0 &&
+      Array.isArray(preview.requiredIngredients) &&
+      Array.isArray(preview.optionalIngredients) &&
+      Array.isArray(preview.warnings)
+    );
+  }
+
+  private makeMealShoppingLine(
+    ingredient: HouseholdMealShoppingIngredient,
+    optional: boolean
+  ): AssistantMealShoppingLine {
+    const canAdd =
+      (ingredient.status === 'not_found' || ingredient.status === 'matched') &&
+      ingredient.missingQuantity !== null &&
+      ingredient.missingQuantity > 0;
+    return {
+      ...ingredient,
+      key: JSON.stringify([normalizeAssistantShoppingName(ingredient.name), ingredient.unit]),
+      optional,
+      included: canAdd && !optional,
+      addQuantity: ingredient.missingQuantity ?? ingredient.quantity
+    };
+  }
+
+  private setMealShoppingLoading(actionId: string, loading: boolean): void {
+    this.mealShoppingLoading.update((states) => ({ ...states, [actionId]: loading }));
+  }
+
+  private setMealShoppingError(actionId: string, error: TranslationKey | null): void {
+    this.mealShoppingErrors.update((errors) => ({ ...errors, [actionId]: error }));
+  }
+
+  private mapMealShoppingError(error: unknown): TranslationKey {
+    if (error instanceof HttpErrorResponse) {
+      const code =
+        typeof error.error === 'object' && error.error !== null && 'code' in error.error
+          ? String((error.error as { code?: unknown }).code)
+          : '';
+      if (error.status === 403 || code === 'HOUSEHOLD_CALENDAR_VIEW_REQUIRED') {
+        return 'ai_assistant.meals.shopping_permission';
+      }
+      if (error.status === 409 && code === 'HOUSEHOLD_CONTEXT_CHANGED') {
+        return 'ai_assistant.error_context_changed';
+      }
+      if (error.status === 409 && code === 'MEAL_SHOPPING_PREVIEW_STALE') {
+        return 'ai_assistant.meals.shopping_stale';
+      }
+      if (error.status === 400 && code === 'MEAL_SHOPPING_ITEM_NOT_IN_PREVIEW') {
+        return 'ai_assistant.meals.shopping_invalid_preview';
+      }
+    }
+    return 'ai_assistant.meals.shopping_error';
   }
 
   mealProposalBusy(actionId: string): boolean {
@@ -4711,4 +5339,22 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
     }
     return 'ai_assistant.error_execution_uncertain';
   }
+}
+
+function omitRecordKey<T>(record: Record<string, T>, key: string): Record<string, T> {
+  if (!Object.prototype.hasOwnProperty.call(record, key)) return record;
+  const next = { ...record };
+  delete next[key];
+  return next;
+}
+
+function addIsoDays(value: string, days: number): string | null {
+  const date = new Date(`${value}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value) return null;
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function normalizeAssistantShoppingName(value: string): string {
+  return value.normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase('es');
 }

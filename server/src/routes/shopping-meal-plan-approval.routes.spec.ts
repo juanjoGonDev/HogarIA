@@ -301,6 +301,77 @@ describe('household meal shopping approval', () => {
     ).toBe(0);
   });
 
+  it('rejects fully stocked, ambiguous, and non-shared inventory rows without creating a list', async () => {
+    const member = addUser();
+    const tomorrow = dateFromNow(1);
+    addMeal(tomorrow, {
+      baseServings: 1,
+      ingredients: [
+        { name: 'Arroz', quantity: 100, unit: 'g' },
+        { name: 'Harina', quantity: 10, unit: 'g' }
+      ]
+    });
+    db.prepare("UPDATE ingredients SET quantity = 500 WHERE id = 'rice-stock'").run();
+    db.prepare(
+      `INSERT INTO ingredients (id, user_id, household_id, name, category, quantity, unit)
+       VALUES ('flour-stock-1', 'owner', 'home', 'Harina', 'other', 1, 'g'),
+              ('flour-stock-2', 'owner', 'home', 'harina', 'other', 1, 'g')`
+    ).run();
+
+    const loaded = await json<{
+      data: {
+        previewId: string;
+        requiredIngredients: Array<{
+          name: string;
+          status: string;
+          missingQuantity: number | null;
+        }>;
+      };
+    }>(await preview(member, tomorrow));
+    expect(loaded.data.requiredIngredients).toEqual([
+      expect.objectContaining({ name: 'Arroz', status: 'matched', missingQuantity: 0 }),
+      expect.objectContaining({ name: 'Harina', status: 'ambiguous', missingQuantity: null })
+    ]);
+
+    for (const name of ['Arroz', 'Harina']) {
+      const rejected = await approve(member, {
+        startDate: tomorrow,
+        endDate: tomorrow,
+        previewId: loaded.data.previewId,
+        items: [{ name, unit: 'g', quantity: 1 }]
+      });
+      expect(rejected.status).toBe(400);
+      expect((await json<{ code: string }>(rejected)).code).toBe(
+        'MEAL_SHOPPING_ITEM_NOT_IN_PREVIEW'
+      );
+    }
+
+    db.prepare("UPDATE households SET shared_pantry = 0 WHERE id = 'home'").run();
+    const privatePantryPreview = await json<{ data: { previewId: string } }>(
+      await preview(member, tomorrow)
+    );
+    const nonShared = await approve(member, {
+      startDate: tomorrow,
+      endDate: tomorrow,
+      previewId: privatePantryPreview.data.previewId,
+      items: [{ name: 'Arroz', unit: 'g', quantity: 1 }]
+    });
+    expect(nonShared.status).toBe(400);
+    expect((await json<{ code: string }>(nonShared)).code).toBe(
+      'MEAL_SHOPPING_ITEM_NOT_IN_PREVIEW'
+    );
+    expect((db.prepare('SELECT COUNT(*) AS n FROM shopping_lists').get() as { n: number }).n).toBe(
+      0
+    );
+    expect(
+      (
+        db.prepare('SELECT COUNT(*) AS n FROM household_meal_shopping_approvals').get() as {
+          n: number;
+        }
+      ).n
+    ).toBe(0);
+  });
+
   it('preserves bought, manual, and other-source rows while reconciling only pending meal-plan rows', async () => {
     const member = addUser();
     const tomorrow = dateFromNow(1);

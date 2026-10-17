@@ -237,7 +237,46 @@ export const aiActionAssistantEs = {
   'ai_assistant.meals.snack': 'Tentempié',
   'ai_assistant.meals.error_members': 'Elige al menos un participante antes de generar.',
   'ai_assistant.meals.error_stale':
-    'Cambió el contexto o la propuesta. Genera un borrador nuevo antes de confirmar.'
+    'Cambió el contexto o la propuesta. Genera un borrador nuevo antes de confirmar.',
+  'ai_assistant.meals.shopping_heading': 'Revisar ingredientes para la compra',
+  'ai_assistant.meals.shopping_preview_copy':
+    'La compra no cambiará hasta que apruebes esta selección por separado.',
+  'ai_assistant.meals.shopping_open': 'Calcular qué falta para comprar',
+  'ai_assistant.meals.shopping_reload': 'Volver a calcular faltantes',
+  'ai_assistant.meals.shopping_loading': 'Consultando comidas e inventario compartido…',
+  'ai_assistant.meals.shopping_range': 'Periodo: {start}–{end}',
+  'ai_assistant.meals.shopping_meal_count': '{count} comidas confirmadas',
+  'ai_assistant.meals.shopping_stock_unknown':
+    'El inventario no se comparte; no podemos saber qué falta y no añadiremos nada automáticamente.',
+  'ai_assistant.meals.shopping_empty': 'No hay comidas futuras confirmadas en este periodo.',
+  'ai_assistant.meals.shopping_required': 'Ingredientes necesarios',
+  'ai_assistant.meals.shopping_optional': 'Ingredientes opcionales',
+  'ai_assistant.meals.shopping_no_shortages':
+    'No hay faltantes verificables para añadir a la compra.',
+  'ai_assistant.meals.shopping_include': 'Incluir {name} en la compra',
+  'ai_assistant.meals.shopping_missing_quantity': 'Faltan {quantity} {unit}',
+  'ai_assistant.meals.shopping_approve': 'Añadir selección a Compra',
+  'ai_assistant.meals.shopping_approving': 'Actualizando Compra…',
+  'ai_assistant.meals.shopping_success': 'Compra actualizada tras tu aprobación.',
+  'ai_assistant.meals.shopping_quantity': 'Cantidad para añadir',
+  'ai_assistant.meals.shopping_quantity_for': 'Cantidad de {name} en {unit}',
+  'ai_assistant.meals.shopping_status_matched': 'Revisar existencias',
+  'ai_assistant.meals.shopping_status_not_found': 'No está en el inventario',
+  'ai_assistant.meals.shopping_status_ambiguous': 'Hay varias coincidencias',
+  'ai_assistant.meals.shopping_status_unit_mismatch': 'La unidad no coincide',
+  'ai_assistant.meals.shopping_status_pantry_not_shared': 'Inventario no compartido',
+  'ai_assistant.meals.shopping_snapshot_warning':
+    'No se pudieron calcular los ingredientes de la comida del {date}; revisa la receta.',
+  'ai_assistant.meals.shopping_permission':
+    'Necesitas permiso para ver el calendario del hogar y revisar la compra compartida.',
+  'ai_assistant.meals.shopping_stale':
+    'Las comidas o las existencias han cambiado. Vuelve a cargar la revisión antes de aprobar.',
+  'ai_assistant.meals.shopping_invalid_preview':
+    'La revisión no es válida o algún ingrediente ya no corresponde al plan. Vuelve a cargarla.',
+  'ai_assistant.meals.shopping_error':
+    'No se pudo actualizar Compra. No se ha cambiado el inventario; puedes volver a intentarlo.',
+  'ai_assistant.meals.shopping_no_future':
+    'Este plan no contiene fechas futuras para calcular faltantes.'
 };
 
 export const aiActionAssistantEn: Record<keyof typeof aiActionAssistantEs, string> = {
@@ -475,5 +514,43 @@ export const aiActionAssistantEn: Record<keyof typeof aiActionAssistantEs, strin
   'ai_assistant.meals.snack': 'Snack',
   'ai_assistant.meals.error_members': 'Choose at least one participant before generating.',
   'ai_assistant.meals.error_stale':
-    'The context or draft changed. Generate a new draft before confirming.'
+    'The context or draft changed. Generate a new draft before confirming.',
+  'ai_assistant.meals.shopping_heading': 'Review ingredients for shopping',
+  'ai_assistant.meals.shopping_preview_copy':
+    'Shopping will not change until you approve this selection separately.',
+  'ai_assistant.meals.shopping_open': 'Calculate what is missing for shopping',
+  'ai_assistant.meals.shopping_reload': 'Recalculate missing ingredients',
+  'ai_assistant.meals.shopping_loading': 'Checking confirmed meals and shared pantry…',
+  'ai_assistant.meals.shopping_range': 'Period: {start}–{end}',
+  'ai_assistant.meals.shopping_meal_count': '{count} confirmed meals',
+  'ai_assistant.meals.shopping_stock_unknown':
+    'The pantry is not shared, so we cannot tell what is missing and will not add anything automatically.',
+  'ai_assistant.meals.shopping_empty': 'There are no confirmed future meals in this period.',
+  'ai_assistant.meals.shopping_required': 'Required ingredients',
+  'ai_assistant.meals.shopping_optional': 'Optional ingredients',
+  'ai_assistant.meals.shopping_no_shortages': 'No verifiable shortages to add to shopping.',
+  'ai_assistant.meals.shopping_include': 'Include {name} in shopping',
+  'ai_assistant.meals.shopping_missing_quantity': '{quantity} {unit} missing',
+  'ai_assistant.meals.shopping_approve': 'Add selection to Shopping',
+  'ai_assistant.meals.shopping_approving': 'Updating Shopping…',
+  'ai_assistant.meals.shopping_success': 'Shopping updated after your approval.',
+  'ai_assistant.meals.shopping_quantity': 'Quantity to add',
+  'ai_assistant.meals.shopping_quantity_for': '{name} quantity in {unit}',
+  'ai_assistant.meals.shopping_status_matched': 'Review stock',
+  'ai_assistant.meals.shopping_status_not_found': 'Not in pantry',
+  'ai_assistant.meals.shopping_status_ambiguous': 'Multiple matches found',
+  'ai_assistant.meals.shopping_status_unit_mismatch': 'Unit does not match',
+  'ai_assistant.meals.shopping_status_pantry_not_shared': 'Pantry is not shared',
+  'ai_assistant.meals.shopping_snapshot_warning':
+    'Could not calculate ingredients for the meal on {date}; review the recipe.',
+  'ai_assistant.meals.shopping_permission':
+    'You need permission to view the household calendar and review shared shopping.',
+  'ai_assistant.meals.shopping_stale':
+    'Meals or pantry stock changed. Reload this review before approval.',
+  'ai_assistant.meals.shopping_invalid_preview':
+    'This review is invalid or an ingredient no longer matches the plan. Reload it.',
+  'ai_assistant.meals.shopping_error':
+    'Shopping could not be updated. The pantry was not changed; you can retry.',
+  'ai_assistant.meals.shopping_no_future':
+    'This plan has no future dates to calculate missing ingredients.'
 };

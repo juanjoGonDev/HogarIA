@@ -72,7 +72,14 @@ export function approveHouseholdMealShopping(
     }
 
     const eligible = new Set(
-      [...preview.requiredIngredients, ...preview.optionalIngredients].map(ingredientKey)
+      [...preview.requiredIngredients, ...preview.optionalIngredients]
+        .filter(
+          (ingredient) =>
+            (ingredient.status === 'not_found' || ingredient.status === 'matched') &&
+            ingredient.missingQuantity !== null &&
+            ingredient.missingQuantity > 0
+        )
+        .map(ingredientKey)
     );
     const requested = new Map<string, (typeof input.items)[number]>();
     for (const item of input.items) {

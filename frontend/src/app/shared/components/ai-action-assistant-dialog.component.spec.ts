@@ -6,6 +6,11 @@ import { AiActionAssistantService } from '../../core/services/ai-action-assistan
 import { AiActionAssistantExecutionService } from '../../core/services/ai-action-assistant-execution.service';
 import { HouseholdService } from '../../core/services/household.service';
 import { HouseholdMealProposalService } from '../../core/services/household-meal-proposal.service';
+import { HouseholdMealShoppingService } from '../../core/services/household-meal-shopping.service';
+import type {
+  HouseholdMealShoppingApproval,
+  HouseholdMealShoppingPreview
+} from '../../core/services/household-meal-shopping.service';
 import { PantryService } from '../../core/services/pantry.service';
 import type { HouseholdMealProposal } from '../../core/services/household-meal-proposal.service';
 import { I18nService } from '../../core/services/i18n.service';
@@ -27,6 +32,7 @@ describe('AiActionAssistantDialogComponent', () => {
   let assistant: jasmine.SpyObj<AiActionAssistantService>;
   let execution: jasmine.SpyObj<AiActionAssistantExecutionService>;
   let mealProposals: jasmine.SpyObj<HouseholdMealProposalService>;
+  let mealShopping: jasmine.SpyObj<HouseholdMealShoppingService>;
   let pantryService: jasmine.SpyObj<PantryService>;
   let householdContext: {
     activeHouseholdId: ReturnType<typeof signal<string | null>>;
@@ -59,6 +65,12 @@ describe('AiActionAssistantDialogComponent', () => {
     );
     mealProposals.createAssistantProposal.and.returnValue(of(emptyMealProposal()));
     mealProposals.refineAssistantProposal.and.returnValue(of(emptyMealProposal()));
+    mealShopping = jasmine.createSpyObj<HouseholdMealShoppingService>(
+      'HouseholdMealShoppingService',
+      ['loadPreview', 'approve']
+    );
+    mealShopping.loadPreview.and.returnValue(of(emptyMealShoppingPreview()));
+    mealShopping.approve.and.returnValue(of(emptyMealShoppingApproval()));
     pantryService = jasmine.createSpyObj<PantryService>('PantryService', ['loadCategories'], {
       categories: signal<PantryCategory[]>([
         {
@@ -101,6 +113,7 @@ describe('AiActionAssistantDialogComponent', () => {
         { provide: AiActionAssistantService, useValue: assistant },
         { provide: AiActionAssistantExecutionService, useValue: execution },
         { provide: HouseholdMealProposalService, useValue: mealProposals },
+        { provide: HouseholdMealShoppingService, useValue: mealShopping },
         { provide: PantryService, useValue: pantryService },
         { provide: HouseholdService, useValue: householdContext }
       ]
@@ -266,6 +279,140 @@ describe('AiActionAssistantDialogComponent', () => {
     fixture.detectChanges();
     expect(execution.execute).toHaveBeenCalledTimes(1);
     expect(execution.execute.calls.mostRecent().args[2]?.events[0].servings).toBe(3);
+  });
+
+  it('derives a separate shopping approval only from a confirmed meal plan and verifiable shortages', async () => {
+    householdContext.activeHouseholdId.set('home-meals');
+    householdContext.household.set(syntheticMealHousehold());
+    const action = mealPlanAction();
+    const weekStart = '2026-10-19';
+    const plan: AssistantActionPlan = {
+      id: 'meal-shopping-plan',
+      summary: 'Planifica y revisa faltantes.',
+      actions: [action],
+      questions: []
+    };
+    assistant.propose.and.returnValue(of(plan));
+    mealProposals.createAssistantProposal.and.returnValue(
+      of(householdMealProposal('shopping-proposal', 2))
+    );
+    const preview: HouseholdMealShoppingPreview = {
+      startDate: weekStart,
+      endDate: '2026-10-25',
+      previewId: 'a'.repeat(64),
+      sharedPantry: true,
+      plannedMealCount: 1,
+      requiredIngredients: [
+        {
+          name: 'Arroz',
+          unit: 'g',
+          quantity: 100,
+          stockQuantity: 25,
+          missingQuantity: 75,
+          status: 'matched'
+        },
+        {
+          name: 'Sal',
+          unit: 'g',
+          quantity: 3,
+          stockQuantity: 10,
+          missingQuantity: 0,
+          status: 'matched'
+        },
+        {
+          name: 'Harina',
+          unit: 'g',
+          quantity: 20,
+          stockQuantity: null,
+          missingQuantity: null,
+          status: 'ambiguous'
+        }
+      ],
+      optionalIngredients: [
+        {
+          name: 'Aceite',
+          unit: 'ml',
+          quantity: 10,
+          stockQuantity: 0,
+          missingQuantity: 10,
+          status: 'not_found'
+        }
+      ],
+      warnings: []
+    };
+    mealShopping.loadPreview.and.returnValue(of(preview));
+    const approval: HouseholdMealShoppingApproval = {
+      listId: 'meal-plan-list',
+      version: 1,
+      created: true,
+      idempotent: false,
+      added: 2,
+      updated: 0,
+      removed: 0
+    };
+    mealShopping.approve.and.returnValue(of(approval));
+
+    enterPrompt('Planifica comidas y dime qué falta para comprar.');
+    fixture.detectChanges();
+    click('[data-test="ai-assistant-submit"]');
+    fixture.detectChanges();
+    const participant = fixture.nativeElement.querySelector(
+      '.assistant__meal-participants input'
+    ) as HTMLInputElement;
+    participant.checked = true;
+    participant.dispatchEvent(new Event('change', { bubbles: true }));
+    fixture.detectChanges();
+    click('[data-test="ai-assistant-meals-generate"]');
+    fixture.detectChanges();
+    component.setSelected(action.id, true);
+    component.goToConfirmation();
+    fixture.detectChanges();
+
+    expect(mealShopping.loadPreview).not.toHaveBeenCalled();
+    expect(mealShopping.approve).not.toHaveBeenCalled();
+    click('[data-test="ai-assistant-confirm-submit"]');
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(component.plan()?.actions[0].status).toBe('succeeded');
+    expect(mealShopping.approve).not.toHaveBeenCalled();
+    click('[data-test="ai-assistant-meals-shopping-open"]');
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(mealShopping.loadPreview).toHaveBeenCalledWith('home-meals', '2026-10-19', '2026-10-25');
+    expect(mealShopping.approve).not.toHaveBeenCalled();
+
+    const lines = Array.from(
+      fixture.nativeElement.querySelectorAll('.assistant__shopping-line')
+    ) as HTMLElement[];
+    const rice = lines.find((line) => line.textContent?.includes('Arroz'))!;
+    const salt = lines.find((line) => line.textContent?.includes('Sal'))!;
+    const flour = lines.find((line) => line.textContent?.includes('Harina'))!;
+    const oil = lines.find((line) => line.textContent?.includes('Aceite'))!;
+    expect((rice.querySelector('input[type="checkbox"]') as HTMLInputElement).checked).toBeTrue();
+    expect((oil.querySelector('input[type="checkbox"]') as HTMLInputElement).checked).toBeFalse();
+    expect((salt.querySelector('input[type="checkbox"]') as HTMLInputElement).disabled).toBeTrue();
+    expect((flour.querySelector('input[type="checkbox"]') as HTMLInputElement).disabled).toBeTrue();
+
+    const oilCheckbox = oil.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    oilCheckbox.checked = true;
+    oilCheckbox.dispatchEvent(new Event('change', { bubbles: true }));
+    fixture.detectChanges();
+    expect(mealShopping.approve).not.toHaveBeenCalled();
+    click('[data-test="ai-assistant-meals-shopping-approve"]');
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(mealShopping.approve).toHaveBeenCalledWith('home-meals', {
+      startDate: '2026-10-19',
+      endDate: '2026-10-25',
+      previewId: 'a'.repeat(64),
+      items: [
+        { name: 'Arroz', unit: 'g', quantity: 75 },
+        { name: 'Aceite', unit: 'ml', quantity: 10 }
+      ]
+    });
+    expect(component.mealShoppingApproval(action.id)).toEqual(approval);
   });
 
   it('shows the existing task preimage in both review and final confirmation', () => {
@@ -1996,6 +2143,63 @@ class FakeSpeechRecognition {
   resume(): void {
     this.resumed = true;
   }
+}
+
+function emptyMealShoppingPreview(): HouseholdMealShoppingPreview {
+  return {
+    startDate: '2026-10-19',
+    endDate: '2026-10-25',
+    previewId: 'a'.repeat(64),
+    sharedPantry: true,
+    plannedMealCount: 0,
+    requiredIngredients: [],
+    optionalIngredients: [],
+    warnings: []
+  };
+}
+
+function emptyMealShoppingApproval(): HouseholdMealShoppingApproval {
+  return {
+    listId: null,
+    version: null,
+    created: false,
+    idempotent: true,
+    added: 0,
+    updated: 0,
+    removed: 0
+  };
+}
+
+function syntheticMealHousehold(): Household {
+  return {
+    id: 'home-meals',
+    name: 'Casa sintética',
+    members: [
+      {
+        id: 'membership-1',
+        userId: 'user-1',
+        name: 'Persona de prueba',
+        email: 'synthetic@example.test',
+        role: 'member',
+        cookingLevel: 'beginner',
+        isActive: true,
+        joinedAt: new Date(0),
+        permissions: {
+          pantry: { view: true, edit: true, manage: false },
+          recipes: { view: true, create: true, edit: true, delete: false, generateAI: true },
+          calendar: { view: true, edit: true },
+          members: { invite: false, kick: false, manageRoles: false },
+          settings: false
+        }
+      }
+    ],
+    inviteCode: '',
+    sharedPantry: true,
+    shareRecipes: true,
+    shareCalendar: true,
+    createdAt: new Date(0),
+    updatedAt: new Date(0)
+  } as Household;
 }
 
 function pantryPlan(): AssistantActionPlan {

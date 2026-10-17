@@ -1841,8 +1841,124 @@ test('asistente global: propone, refina y confirma comidas con participantes exp
   expect(lists.status()).toBe(200);
   expect((await lists.json()).data).toEqual([]);
 
+  const shoppingReview = confirmation.locator(
+    `[data-test="ai-assistant-meals-shopping-${mealActionId}"]`
+  );
+  await expect(shoppingReview).toBeVisible();
+  await shoppingReview.locator('[data-test="ai-assistant-meals-shopping-open"] button').click();
+  await expect(shoppingReview.locator('.assistant__shopping-line')).toHaveCount(1);
+  const missingIngredient = shoppingReview.locator('.assistant__shopping-line').first();
+  await expect(missingIngredient).toContainText('verduras');
+  await expect(missingIngredient).toContainText('1800 g');
+  await expect(missingIngredient.locator('input[type="checkbox"]')).toBeChecked();
+  await missingIngredient.scrollIntoViewIfNeeded();
+  const approveShopping = shoppingReview.locator(
+    '[data-test="ai-assistant-meals-shopping-approve"] button'
+  );
+  await expect(approveShopping).toBeEnabled();
+  await capture(page, testInfo, 'meal-shopping-review');
+
+  const originalViewport = page.viewportSize();
+  expect(originalViewport).toBeTruthy();
+  for (const viewport of [
+    { width: 320, height: 568 },
+    { width: 568, height: 320 }
+  ]) {
+    await page.setViewportSize(viewport);
+    await missingIngredient.scrollIntoViewIfNeeded();
+    await expect(missingIngredient.locator('input[type="checkbox"]')).toBeInViewport();
+    await missingIngredient.locator('input[type="number"]').scrollIntoViewIfNeeded();
+    await expect(missingIngredient.locator('input[type="number"]')).toBeInViewport();
+    await approveShopping.scrollIntoViewIfNeeded();
+    const geometry = await page.evaluate(() => {
+      const modalBody = document.querySelector<HTMLElement>('.modal__body');
+      const footer = document.querySelector<HTMLElement>('.assistant__footer');
+      const approve = document.querySelector<HTMLElement>(
+        '[data-test="ai-assistant-meals-shopping-approve"] button'
+      );
+      return {
+        viewportWidth: window.visualViewport?.width ?? window.innerWidth,
+        documentWidth: document.documentElement.scrollWidth,
+        modalWidth: modalBody?.clientWidth ?? 0,
+        modalScrollWidth: modalBody?.scrollWidth ?? 0,
+        footerTop: footer?.getBoundingClientRect().top ?? 0,
+        approveBottom: approve?.getBoundingClientRect().bottom ?? Number.POSITIVE_INFINITY
+      };
+    });
+    expect(geometry.documentWidth).toBeLessThanOrEqual(geometry.viewportWidth + 1);
+    expect(geometry.modalScrollWidth).toBeLessThanOrEqual(geometry.modalWidth + 1);
+    expect(geometry.approveBottom).toBeLessThanOrEqual(geometry.footerTop + 1);
+  }
+  await page.setViewportSize(originalViewport!);
+
+  const beforeShoppingApproval = await page.request.get('/api/shopping/lists?status=active', {
+    headers: authHeaders
+  });
+  expect(beforeShoppingApproval.status()).toBe(200);
+  expect((await beforeShoppingApproval.json()).data).toEqual([]);
+  await missingIngredient.locator('input[type="checkbox"]').uncheck();
+  await expect(approveShopping).toBeDisabled();
+  const afterRejectingShopping = await page.request.get('/api/shopping/lists?status=active', {
+    headers: authHeaders
+  });
+  expect(afterRejectingShopping.status()).toBe(200);
+  expect((await afterRejectingShopping.json()).data).toEqual([]);
+
+  await missingIngredient.locator('input[type="checkbox"]').check();
+  await page.route('**/api/shopping/meal-plan/approve', async (route) => {
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ code: 'SIMULATED_TEMPORARY_FAILURE' })
+    });
+  });
+  await approveShopping.click();
+  await expect(shoppingReview.locator('.assistant__error')).toBeVisible();
+  await expect(approveShopping).toBeDisabled();
+  expect(await readMeals()).toHaveLength(7);
+  const afterShoppingFailure = await page.request.get('/api/shopping/lists?status=active', {
+    headers: authHeaders
+  });
+  expect(afterShoppingFailure.status()).toBe(200);
+  expect((await afterShoppingFailure.json()).data).toEqual([]);
+  await capture(page, testInfo, 'meal-shopping-error');
+
+  await page.unroute('**/api/shopping/meal-plan/approve');
+  await shoppingReview.locator('[data-test="ai-assistant-meals-shopping-open"] button').click();
+  await expect(shoppingReview.locator('.assistant__shopping-line')).toHaveCount(1);
+  await expect(approveShopping).toBeEnabled();
+  await approveShopping.click();
+  await expect(
+    shoppingReview.locator('[data-test="ai-assistant-meals-shopping-success"]')
+  ).toBeVisible();
+  await capture(page, testInfo, 'meal-shopping-approved');
+  const mealPlanLists = await shoppingListsByName(page, token, 'Plan de comidas');
+  expect(mealPlanLists).toHaveLength(1);
+  const shoppingList = await page.request.get(
+    `/api/shopping/lists/${encodeURIComponent(mealPlanLists[0].id)}`,
+    { headers: mealHeaders }
+  );
+  expect(shoppingList.status(), await shoppingList.text()).toBe(200);
+  expect((await shoppingList.json()).data.items).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ name: 'verduras', quantity: 1800, unit: 'g' })
+    ])
+  );
+
   await page.reload();
   expect(await readMeals()).toHaveLength(7);
+  const persistedShoppingLists = await shoppingListsByName(page, token, 'Plan de comidas');
+  expect(persistedShoppingLists).toHaveLength(1);
+  const persistedShoppingList = await page.request.get(
+    `/api/shopping/lists/${encodeURIComponent(persistedShoppingLists[0].id)}`,
+    { headers: mealHeaders }
+  );
+  expect(persistedShoppingList.status(), await persistedShoppingList.text()).toBe(200);
+  expect((await persistedShoppingList.json()).data.items).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ name: 'verduras', quantity: 1800, unit: 'g' })
+    ])
+  );
 });
 
 function assistantMealDraft(proposalId: string, recipeName: string, memberIds: string[]) {
