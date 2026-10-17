@@ -82,6 +82,7 @@ El checklist anterior de este archivo decía que la unidad de recetas no ampliab
   - Evidencia parcial (2026-10-17): TDD detectó llamadas duplicadas a `propose()` y `refineCurrentAction()` al invocarlas mientras la solicitud anterior seguía pendiente; guardas de `loading()` evitan la concurrencia en un mismo diálogo.
   - `pnpm --filter @hogaria/web exec ng test --no-watch --include=src/app/shared/components/ai-action-assistant-dialog.component.spec.ts --browsers=ChromeHeadless --progress=false` — 40/40; baseline TDD falló 2/40. No cubre pestañas múltiples ni replay de red.
 - [ ] Coverage del alcance ≥70 % en statements/branches/functions/lines sin rebajar gates; ejecutar suites focales, typecheck, `check:ui`, build, E2E requerido y hooks. Anotar comandos/resultados/limitaciones en esta spec.
+  - [ ] Cobertura por archivo de `AiActionAssistantService` y `AiActionAssistantLauncherComponent` ≥70 % en S/B/F/L; cobertura global no compensa ramas/funciones sin cubrir. Baseline LCOV (2026-10-17): servicio **93,75/60/100/93,75 %**; launcher **86,67/46,15/55,56/86,67 %**.
 - [ ] Commits atómicos Conventional Commit de solo archivos de esta unidad; preservar staged/unstaged/sin seguimiento previo, hooks activos, push no forzado a rama actual y árbol limpio respecto a los archivos de la unidad. Mantener PR #47 Draft; no merge/Ready.
 
 ## Secuencia de trabajo
