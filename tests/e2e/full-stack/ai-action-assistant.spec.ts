@@ -280,6 +280,22 @@ function allDomainProposal() {
       }
     }
   );
+  const pantryIngredient = action(
+    ACTION_IDS[5],
+    'pantry.add_ingredient',
+    'pantry',
+    'add_ingredient',
+    'Añadir ingrediente de dominio QA',
+    {
+      name: 'Ingrediente de dominio QA',
+      category: 'other',
+      quantity: 3,
+      unit: 'unit',
+      expirationDate: null,
+      location: 'pantry',
+      notes: null
+    }
+  );
 
   return {
     success: true,
@@ -287,7 +303,7 @@ function allDomainProposal() {
       id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
       summary: 'Lote sintético con acciones cruzadas para QA.',
       questions: [],
-      actions: [list, { ...item, dependsOn: [list.id] }, task, event, recipe]
+      actions: [list, { ...item, dependsOn: [list.id] }, task, event, recipe, pantryIngredient]
     }
   };
 }
@@ -1562,12 +1578,13 @@ test('asistente global: ejecuta acciones de todos los dominios solo tras confirm
   expect(await readEvents()).toEqual([]);
   expect(await readRecipe()).toEqual([]);
   expect(await shoppingListsByName(page, token, 'Lista de dominio QA')).toEqual([]);
+  expect(await pantryByName(page, token, 'Ingrediente de dominio QA')).toEqual([]);
 
   await page.locator('[data-test="ai-assistant-open"]').click();
   await page
     .locator('[data-test="ai-assistant-prompt"]')
     .fill(
-      'Crea una lista, añade sus manzanas, una tarea, un evento y una receta; revisa todo antes de guardar.'
+      'Añade un ingrediente a la despensa, crea una lista, añade sus manzanas, una tarea, un evento y una receta; revisa todo antes de guardar.'
     );
   await page.locator('[data-test="ai-assistant-submit"] button').click();
   await expect(page.locator('[data-test="ai-assistant-review"]')).toBeVisible();
@@ -1579,16 +1596,18 @@ test('asistente global: ejecuta acciones de todos los dominios solo tras confirm
   await expect(confirmation).toContainText('Tarea de dominio QA');
   await expect(confirmation).toContainText('Evento de dominio QA');
   await expect(confirmation).toContainText('Receta de dominio QA');
+  await expect(confirmation).toContainText('Ingrediente de dominio QA');
 
   expect(await shoppingListsByName(page, token, 'Lista de dominio QA')).toEqual([]);
   expect(await readTaskWeek()).toEqual([]);
   expect(await readEvents()).toEqual([]);
   expect(await readRecipe()).toEqual([]);
+  expect(await pantryByName(page, token, 'Ingrediente de dominio QA')).toEqual([]);
 
   await page.locator('[data-test="ai-assistant-confirm-submit"] button').click();
   const actionRows = confirmation.locator('.assistant__confirm-list > li');
-  await expect(actionRows).toHaveCount(5);
-  for (let index = 0; index < 5; index += 1) {
+  await expect(actionRows).toHaveCount(6);
+  for (let index = 0; index < 6; index += 1) {
     await expect(actionRows.nth(index).locator('.assistant__confirm-status').first()).toHaveText(
       'Completada'
     );
@@ -1620,6 +1639,9 @@ test('asistente global: ejecuta acciones de todos los dominios solo tras confirm
   expect(await readRecipe()).toEqual(
     expect.arrayContaining([expect.objectContaining({ name: 'Receta de dominio QA' })])
   );
+  expect(await pantryByName(page, token, 'Ingrediente de dominio QA')).toEqual([
+    expect.objectContaining({ quantity: 3, unit: 'unit', category: 'other' })
+  ]);
 });
 
 test('asistente global: aprobación parcial conserva dependencia lista-artículo', async ({
