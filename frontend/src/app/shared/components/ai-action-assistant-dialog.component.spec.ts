@@ -184,6 +184,27 @@ describe('AiActionAssistantDialogComponent', () => {
     expect((micButton as HTMLButtonElement | null)?.disabled).toBeFalse();
   });
 
+  it('announces the short privacy warning when dictation receives focus', () => {
+    mountWithSpeech(FakeSpeechRecognition);
+    const warning = fixture.nativeElement.querySelector('.assistant__voice-warning') as HTMLElement;
+    const startButton = fixture.nativeElement.querySelector(
+      '[data-test="ai-assistant-voice-start"] button'
+    ) as HTMLButtonElement;
+
+    expect(warning.id).toBe('ai-assistant-voice-warning');
+    expect(startButton.getAttribute('aria-describedby')).toBe(warning.id);
+
+    component.startVoice();
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('.assistant__voice-warning')).toBeNull();
+    expect(
+      fixture.nativeElement
+        .querySelector('[data-test="ai-assistant-voice-stop"] button')
+        ?.getAttribute('aria-describedby')
+    ).toBeNull();
+  });
+
   it('keeps the voice warning beside dictation and grows the compact prompt only as needed', () => {
     mountWithSpeech(FakeSpeechRecognition);
     const compose = fixture.nativeElement.querySelector(

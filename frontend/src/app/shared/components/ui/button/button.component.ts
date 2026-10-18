@@ -13,6 +13,7 @@ export type ButtonSize = 'sm' | 'md' | 'lg' | 'icon';
       [class]="getClasses()"
       [disabled]="disabled || loading"
       [attr.aria-busy]="loading ? 'true' : null"
+      [attr.aria-describedby]="describedBy || null"
       [type]="type"
       (click)="onClick.emit($event)"
     >
@@ -176,6 +177,7 @@ export class ButtonComponent {
   @Input() type: 'button' | 'submit' | 'reset' = 'button';
   @Input() fullWidth = false;
   @Input() touchTarget = false;
+  @Input() describedBy: string | null = null;
 
   @Output() onClick = new EventEmitter<Event>();
 

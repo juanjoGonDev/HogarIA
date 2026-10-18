@@ -58,6 +58,7 @@ test('asistente global: compositor progresivo junto al dictado', async ({ page }
   await expect(compose.locator('.assistant__consent')).toHaveCount(0);
   await expect(compose.locator('input[type="checkbox"]')).toHaveCount(0);
   await expect(micButton).toHaveAccessibleName('Dictar petición');
+  await expect(micButton).toHaveAccessibleDescription('El audio puede salir del dispositivo.');
   await expect(micButton).toBeEnabled();
   await expect
     .poll(() =>

@@ -322,6 +322,7 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
                 <div class="assistant__field-tools">
                   <span
                     *ngIf="voiceState() !== 'listening' && voiceState() !== 'paused'"
+                    id="ai-assistant-voice-warning"
                     class="assistant__voice-warning"
                     role="note"
                   >
@@ -341,6 +342,7 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
                   >
                     <app-button
                       *ngIf="voiceState() !== 'listening' && voiceState() !== 'paused'"
+                      describedBy="ai-assistant-voice-warning"
                       variant="outline"
                       size="icon"
                       [touchTarget]="true"
