@@ -6,7 +6,7 @@
 
 ## Decisión de integración
 
-La capacidad inicial del asistente crea seis tipos de registro. Esta extensión incorpora edición segura y acotada de tareas domésticas (Unidad A), planificación de comidas (Unidad B), despensa/calendario (unidades verticales documentadas por separado) y, con autorización explícita del usuario, contenido de recetas (`recipes.update_content`; contrato y evidencia en `AI-ACTION-ASSISTANT-RECIPE-UPDATE-SPEC.md`). Las ediciones de compras y la prioridad de tareas siguen pendientes: no se habilita un `update_*` genérico; cada dominio debe resolver sus targets desde datos de la app, rechazar cambios concurrentes e implementar idempotencia.
+La capacidad inicial del asistente crea seis tipos de registro. Esta extensión incorpora edición segura y acotada de tareas domésticas (Unidad A), planificación de comidas (Unidad B), despensa/calendario (unidades verticales documentadas por separado) y, con autorización explícita del usuario, contenido de recetas (`recipes.update_content`; contrato y evidencia en `AI-ACTION-ASSISTANT-RECIPE-UPDATE-SPEC.md`). Los contratos verticales ya cubren prioridad de tareas (`AI-ACTION-ASSISTANT-TASK-PRIORITY-SPEC.md`), nombre/tienda de listas (`AI-ACTION-ASSISTANT-SHOPPING-UPDATE-SPEC.md`) y nombre/cantidad absoluta/unidad/categoría de artículos activos no comprados (`AI-ACTION-ASSISTANT-SHOPPING-ITEM-UPDATE-SPEC.md`). No se habilita un `update_*` genérico: el estado de compra, borrar/restaurar, precio/descuento, orden y mover artículos entre listas siguen excluidos; cada operación habilitada resuelve su target desde la app, rechaza cambios concurrentes e implementa idempotencia.
 
 ### Unidad A — editar una tarea doméstica existente
 
@@ -17,7 +17,7 @@ La capacidad inicial del asistente crea seis tipos de registro. Esta extensión 
 - El movimiento queda limitado a la misma semana; cruzar semanas requiere una escritura atómica de dos semanas y queda rechazado en esta unidad.
 - El ledger de idempotencia vincula usuario, acción, hogar, semana, target, preimagen y parche. Repetir el mismo payload devuelve `idempotent: true` sin aplicar otra escritura; reusar la clave con un payload distinto falla con conflicto.
 - Campos iniciales: título, detalles, fecha dentro de la semana, espacio y miembro asignado, sujetos a validación de la API. No cambiar estado de completado, borrar ni inventar campos.
-- **Prioridad pendiente:** el schema/store actual de tareas no persiste `priority`. Aunque el objetivo general la menciona, no se incluye en esta unidad hasta acordar e implementar un cambio vertical al contrato, persistencia, API, UI existente y pruebas.
+- **Prioridad:** esta unidad original no la implementa directamente; el contrato vertical separado ya la integra en `household.create_task`/`household.update_task`, persistencia, CAS, UI y revisión humana. Ver `AI-ACTION-ASSISTANT-TASK-PRIORITY-SPEC.md`.
 
 ### Unidad B — propuesta de planificación de comidas
 
@@ -40,8 +40,8 @@ La capacidad inicial del asistente crea seis tipos de registro. Esta extensión 
 
 ### Otras ediciones de registros
 
-- Los endpoints genéricos de despensa, compras, calendario y recetas tienen distintos riesgos; la extensión no los usa como autorización para el asistente. Despensa, calendario y contenido de recetas usan operaciones de asistente específicas con resolución, preimagen, permisos y protección contra reintentos, documentadas en sus specs verticales. Compras aún necesita CAS atómico/idempotencia antes de habilitar sus ediciones.
-- Mantener compras fuera del registro ejecutable hasta implementar y probar CAS/preimagen, ledger idempotente, autorización, datos obsoletos, reintento y ausencia de escrituras parciales. El objetivo global sigue abierto; esta decisión no lo marca como completado.
+- Los endpoints genéricos de despensa, compras, calendario y recetas tienen distintos riesgos; la extensión no los usa como autorización para el asistente. Las operaciones habilitadas usan contratos específicos con resolución, preimagen, permisos y protección contra reintentos. Ver los contratos verticales de despensa, calendario, recetas y compras.
+- No habilitar operaciones de compra fuera de las allowlists verticales. El estado de compra, borrar/restaurar, precio/descuento, orden y mover artículos entre listas siguen excluidos. El objetivo global permanece abierto hasta cerrar el contrato padre y sus gates; esta decisión no lo marca como completado.
 
 ## Checklist de aceptación
 
@@ -54,8 +54,8 @@ La capacidad inicial del asistente crea seis tipos de registro. Esta extensión 
 - [x] Desde el asistente, después de confirmar comidas, abrir preview de compra solo lectura del mismo rango; seleccionar/excluir/ajustar solo faltantes verificables; ambiguos, sin stock compartido o snapshots no disponibles no se pueden añadir.
 - [x] TDD del endpoint de aprobación: solicitudes manipuladas para claves no faltantes/no verificables se rechazan sin modificar listas; faltantes válidos siguen admitiendo selección parcial, cantidad revisada, stale-preview y replay idempotente.
 - [x] E2E aislado con APIs reales: propuesta/confirmación de comidas, preview sin escritura, ausencia de lista antes de aprobación, deselección sin escrituras de compra y aprobación explícita que persiste solo las filas faltantes elegidas; una falla transitoria conserva el plan y se reporta aparte.
-- [x] Despensa/calendario usan unidades verticales seguras; recetas tienen contrato vertical seguro separado; compras y prioridad permanecen pendientes.
-- [x] Desktop/móvil, accesibilidad, cobertura mínima de repo, build/typecheck/check:ui, capturas sintéticas y limitaciones quedan documentados en `SPEC.md` antes de cerrar las unidades A/B; la auditoría visual global del shell y las funciones de edición pendientes siguen abiertas en `SPEC.md`.
+- [x] Despensa/calendario, recetas, listas y artículos de compra y prioridad de tareas usan contratos verticales con resolución/validación y HITL; los límites de cada allowlist quedan en sus specs. La extensión no habilita operaciones de compra destructivas.
+- [x] Desktop/móvil, accesibilidad, cobertura mínima de repo, build/typecheck/check:ui, capturas sintéticas y limitaciones quedan documentados en `SPEC.md`; la aceptación global sigue abierta mientras falten gates del contrato padre.
 
 ## Evidencia de la unidad B.1 (2026-10-17)
 
