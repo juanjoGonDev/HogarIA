@@ -29,6 +29,58 @@ function nextMonday(date: string): string {
   return addDays(date, daysUntilMonday);
 }
 
+function syntheticRecipe(name: string, ingredientName: string, quantity: number) {
+  const instruction = {
+    stepNumber: 1,
+    instruction: 'Preparación sintética para E2E.',
+    duration: null,
+    temperature: null,
+    timerRequired: false,
+    timerDuration: null,
+    tips: null,
+    warning: null,
+    illustration: null
+  };
+  return {
+    name,
+    description: 'Receta sintética para validar la compra semanal.',
+    difficulty: 'easy',
+    cuisine: 'mediterránea',
+    totalTime: 15,
+    prepTime: 5,
+    cookTime: 10,
+    restTime: null,
+    baseServings: 1,
+    calories: null,
+    ingredients: [
+      {
+        name: ingredientName,
+        quantity,
+        unit: 'g',
+        preparation: null,
+        isOptional: false,
+        substitutes: [],
+        notes: null
+      }
+    ],
+    utensils: ['cacerola'],
+    guidance: {
+      appliances: [],
+      parallelTasks: [],
+      tipsAndVariations: [],
+      batchCookingWarning: null
+    },
+    instructionsByLevel: {
+      basic: [instruction],
+      intermediate: [instruction],
+      expert: [instruction]
+    },
+    nutrition: null,
+    storage: null,
+    tags: ['synthetic-e2e']
+  };
+}
+
 async function registerAndCreateSyntheticHousehold(page: import('@playwright/test').Page) {
   await page.goto('/auth/register');
   await page.locator('input#name').waitFor({ state: 'visible' });
@@ -105,33 +157,50 @@ async function expectMobileShoppingActionReachable(
   await page.setViewportSize(viewport);
   const approveButton = page.locator('[data-test="meal-shopping-approve"] button');
   await expect(approveButton).toBeEnabled();
-  await approveButton.focus();
   await approveButton.scrollIntoViewIfNeeded();
+  await approveButton.focus();
 
   const visibility = await page.evaluate(() => {
     const button = document.querySelector<HTMLElement>(
       '[data-test="meal-shopping-approve"] button'
     );
-    const navigation = document.querySelector<HTMLElement>('.bottom-nav');
-    if (!button || !navigation) return null;
+    if (!button) return null;
     const buttonBounds = button.getBoundingClientRect();
-    const navigationBounds = navigation.getBoundingClientRect();
+    const assistant = document.querySelector<HTMLElement>('[data-test="ai-assistant-open"]');
+    const assistantBounds = assistant?.getBoundingClientRect();
+    const centerX = buttonBounds.left + buttonBounds.width / 2;
+    const centerY = buttonBounds.top + buttonBounds.height / 2;
+    const hitTarget = document.elementFromPoint(centerX, centerY);
     return {
+      buttonLeft: buttonBounds.left,
+      buttonRight: buttonBounds.right,
       buttonTop: buttonBounds.top,
       buttonBottom: buttonBounds.bottom,
+      buttonWidth: buttonBounds.width,
+      buttonHeight: buttonBounds.height,
       viewportHeight: window.innerHeight,
-      navigationTop: navigationBounds.top,
-      navigationBottom: navigationBounds.bottom,
+      viewportWidth: window.innerWidth,
+      assistantOverlap: Boolean(
+        assistantBounds &&
+        buttonBounds.left < assistantBounds.right &&
+        buttonBounds.right > assistantBounds.left &&
+        buttonBounds.top < assistantBounds.bottom &&
+        buttonBounds.bottom > assistantBounds.top
+      ),
+      receivesPointer: Boolean(hitTarget && (hitTarget === button || button.contains(hitTarget))),
       focused: document.activeElement === button
     };
   });
 
   expect(visibility).toBeTruthy();
+  expect(visibility!.buttonLeft).toBeGreaterThanOrEqual(0);
+  expect(visibility!.buttonRight).toBeLessThanOrEqual(visibility!.viewportWidth);
   expect(visibility!.buttonTop).toBeGreaterThanOrEqual(0);
   expect(visibility!.buttonBottom).toBeLessThanOrEqual(visibility!.viewportHeight);
-  expect(visibility!.navigationTop).toBeLessThan(visibility!.viewportHeight);
-  expect(visibility!.navigationBottom).toBeLessThanOrEqual(visibility!.viewportHeight);
-  expect(visibility!.buttonBottom).toBeLessThanOrEqual(visibility!.navigationTop - 1);
+  expect(visibility!.buttonWidth).toBeGreaterThan(0);
+  expect(visibility!.buttonHeight).toBeGreaterThan(0);
+  expect(visibility!.assistantOverlap).toBe(false);
+  expect(visibility!.receivesPointer).toBe(true);
   expect(visibility!.focused).toBe(true);
 }
 
@@ -223,6 +292,12 @@ test('la vista previa suma las comidas futuras individuales y compartidas de tod
     const today = new Date().toISOString().slice(0, 10);
     const weekStart = nextMonday(today);
     const sharedIngredient = 'Ingrediente agregado entre miembros sintético';
+    const recipes: Array<{
+      alias: string;
+      source: 'new';
+      recipeId: null;
+      recipe: ReturnType<typeof syntheticRecipe>;
+    }> = [];
     const event = (
       id: string,
       day: number,
@@ -230,35 +305,27 @@ test('la vista previa suma las comidas futuras individuales y compartidas de tod
       ingredientName: string,
       quantity: number,
       servings: number
-    ) => ({
-      id,
-      date: addDays(weekStart, day),
-      mealType: 'lunch',
-      time: '13:00',
-      recipe: {
-        name: 'Comida de prueba',
-        description: 'Receta sintética para comprobar el alcance doméstico de compra.',
-        baseServings: 1,
-        prepTimeMinutes: 5,
-        cookTimeMinutes: 10,
-        ingredients: [
-          {
-            name: ingredientName,
-            quantity,
-            unit: 'g',
-            preparation: null,
-            isOptional: false,
-            notes: null
-          }
-        ],
-        instructions: ['Preparación sintética para E2E.']
-      },
-      participantAliases,
-      servings,
-      objectiveSummary: 'Comida sintética equilibrada.',
-      status: 'scheduled',
-      reason: null
-    });
+    ) => {
+      const alias = `N${recipes.length + 1}`;
+      recipes.push({
+        alias,
+        source: 'new',
+        recipeId: null,
+        recipe: syntheticRecipe(`Comida de prueba ${id}`, ingredientName, quantity)
+      });
+      return {
+        id,
+        date: addDays(weekStart, day),
+        mealType: 'lunch',
+        time: '13:00',
+        recipeAlias: alias,
+        participantAliases,
+        servings,
+        objectiveSummary: 'Comida sintética equilibrada.',
+        status: 'scheduled',
+        reason: null
+      };
+    };
     const decoyIngredient = 'Ingrediente secundario de prueba';
     const events = [
       event('member-one-meal', 0, ['P1'], sharedIngredient, 10, 1),
@@ -276,6 +343,7 @@ test('la vista previa suma las comidas futuras individuales y compartidas de tod
         proposalId: `shopping-members-e2e-${testInfo.workerIndex}-${testInfo.retry}`,
         weekStart,
         householdMemberIds: [firstMemberId, secondMemberId],
+        recipes,
         events
       }
     });
@@ -398,29 +466,20 @@ test('plan semanal de compra permite revisar, editar, cancelar y aprobar sin toc
       proposalId: `shopping-e2e-${testInfo.workerIndex}-${testInfo.retry}`,
       weekStart,
       householdMemberIds: [memberId],
+      recipes: [
+        {
+          alias: 'N1',
+          source: 'new',
+          recipeId: null,
+          recipe: syntheticRecipe('Comida de prueba', recipeName, 20)
+        }
+      ],
       events: Array.from({ length: 7 }, (_, index) => ({
         id: `synthetic-lunch-event-${index}`,
         date: addDays(weekStart, index),
         mealType: 'lunch',
         time: '13:00',
-        recipe: {
-          name: 'Comida de prueba',
-          description: 'Comida sintética de una ración.',
-          baseServings: 1,
-          prepTimeMinutes: 5,
-          cookTimeMinutes: 10,
-          ingredients: [
-            {
-              name: recipeName,
-              quantity: 20,
-              unit: 'g',
-              preparation: null,
-              isOptional: false,
-              notes: null
-            }
-          ],
-          instructions: ['Preparación sintética para E2E.']
-        },
+        recipeAlias: 'N1',
         participantAliases: ['P1'],
         servings: 1,
         objectiveSummary: 'Comida sintética equilibrada.',

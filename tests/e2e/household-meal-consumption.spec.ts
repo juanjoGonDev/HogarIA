@@ -13,7 +13,10 @@ interface Slot {
 }
 
 interface ProviderRequest {
-  messages?: Array<{ role?: string; content?: string }>;
+  messages?: Array<{
+    role?: string;
+    content?: string | Array<{ type?: string; file?: { filename?: string; file_data?: string } }>;
+  }>;
   response_format?: { type?: string; json_schema?: { strict?: boolean } };
 }
 
@@ -46,36 +49,74 @@ test('registra raciones reales o una comida omitida desde el calendario, en escr
     request.on('end', () => {
       const payload = JSON.parse(body) as ProviderRequest;
       providerRequests.push(payload);
-      const prompt = payload.messages?.find((message) => message.role === 'user')?.content ?? '';
-      const marker = 'Turnos que deben quedar resueltos exactamente una vez por participante:\n';
-      const start = prompt.indexOf(marker);
-      const end = prompt.indexOf('\n\nObjetivo común del hogar', start + marker.length);
+      const userContent = payload.messages?.find((message) => message.role === 'user')?.content;
+      const contextFile = Array.isArray(userContent)
+        ? userContent.find((part) => part.file?.filename === 'meal-planning-context.json')?.file
+            ?.file_data
+        : undefined;
+      const contextPrefix = 'data:application/json;base64,';
       const slots =
-        start >= 0 && end > start
-          ? (JSON.parse(prompt.slice(start + marker.length, end)) as Slot[])
+        contextFile?.startsWith(contextPrefix) === true
+          ? ((
+              JSON.parse(
+                Buffer.from(contextFile.slice(contextPrefix.length), 'base64').toString('utf8')
+              ) as { requiredTurns?: Slot[] }
+            ).requiredTurns ?? [])
           : [];
+      const instruction = {
+        stepNumber: 1,
+        instruction: 'Cocina las lentejas sintéticas hasta que estén tiernas.',
+        duration: null,
+        temperature: null,
+        timerRequired: false,
+        timerDuration: null,
+        tips: null,
+        warning: null,
+        illustration: null
+      };
+      const recipe = {
+        name: 'Plato E2E compartido',
+        description: 'Receta sintética para probar el registro de consumo.',
+        difficulty: 'easy',
+        cuisine: 'casera',
+        totalTime: 30,
+        prepTime: 10,
+        cookTime: 20,
+        restTime: null,
+        baseServings: 1,
+        calories: null,
+        ingredients: [
+          {
+            name: 'lentejas',
+            quantity: 100,
+            unit: 'g',
+            preparation: null,
+            isOptional: false,
+            substitutes: [],
+            notes: null
+          }
+        ],
+        utensils: ['cacerola'],
+        guidance: {
+          appliances: [],
+          parallelTasks: [],
+          tipsAndVariations: [],
+          batchCookingWarning: null
+        },
+        instructionsByLevel: {
+          basic: [instruction],
+          intermediate: [instruction],
+          expert: [instruction]
+        },
+        nutrition: null,
+        storage: null,
+        tags: ['synthetic-e2e']
+      };
       const events = slots.map((slot) => ({
         date: slot.date,
         mealType: slot.mealType,
         time: slot.time,
-        recipe: {
-          name: 'Plato E2E compartido',
-          description: 'Receta sintética para probar el registro de consumo.',
-          baseServings: 1,
-          prepTimeMinutes: 10,
-          cookTimeMinutes: 20,
-          ingredients: [
-            {
-              name: 'lentejas',
-              quantity: 100,
-              unit: 'g',
-              preparation: null,
-              isOptional: false,
-              notes: null
-            }
-          ],
-          instructions: ['Cocina las lentejas sintéticas hasta que estén tiernas.']
-        },
+        recipeAlias: 'N1',
         participantAliases: slot.eligibleParticipants,
         servings: slot.eligibleParticipants.length,
         objectiveSummary: 'Comida sintética.',
@@ -85,7 +126,14 @@ test('registra raciones reales o una comida omitida desde el calendario, en escr
       response.writeHead(200, { 'content-type': 'application/json' });
       response.end(
         JSON.stringify({
-          choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ events }) } }]
+          choices: [
+            {
+              finish_reason: 'stop',
+              message: {
+                content: JSON.stringify({ newRecipes: [{ alias: 'N1', recipe }], events })
+              }
+            }
+          ]
         })
       );
     });
@@ -148,6 +196,12 @@ test('registra raciones reales o una comida omitida desde el calendario, en escr
       data: {
         proposalId: string;
         weekStart: string;
+        recipes: Array<{
+          alias: string;
+          source: 'new' | 'catalog';
+          recipeId: string | null;
+          recipe: Record<string, unknown>;
+        }>;
         events: Array<Record<string, unknown>>;
       };
     };
@@ -164,6 +218,7 @@ test('registra raciones reales o una comida omitida desde el calendario, en escr
         proposalId: proposal.data.proposalId,
         weekStart,
         householdMemberIds: [memberId],
+        recipes: proposal.data.recipes,
         events: proposal.data.events
       }
     });

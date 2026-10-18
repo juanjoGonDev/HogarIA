@@ -2,7 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { expect, test, type Page } from '../fixtures';
 import { registerAndGoto } from '../helpers/auth';
-import { shoppingNavigationLink, shoppingNewListAction } from '../helpers/shopping-ui';
+import { navigateToShopping, shoppingNewListAction } from '../helpers/shopping-ui';
 
 /**
  * El dinero de la cesta, contra el binario que sirve todo.
@@ -102,7 +102,7 @@ test.describe('lo que cuesta, y en que tienda', () => {
       await expect(page).toHaveURL(/tab=hechas/);
       // De vuelta a la bandeja por el enlace del menu: el `href` es lo que el router pinta,
       // y depender de un `data-test` del shell para volver seria inventarse una prueba nueva.
-      await shoppingNavigationLink(page).click();
+      await navigateToShopping(page);
     }
 
     // La tercera lista, en Lidl, vale 0,60 —no el 1,00 anotado despues en Mercadona. Este es

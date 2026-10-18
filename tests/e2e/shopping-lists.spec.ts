@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { Locator, Page, expect } from '@playwright/test';
 import { test } from './fixtures';
 import { registerAndGoto } from './helpers/auth';
-import { shoppingNavigationLink, shoppingNewListAction } from './helpers/shopping-ui';
+import { navigateToShopping, shoppingNewListAction } from './helpers/shopping-ui';
 
 /**
  * La lista de la compra, usada como se usa en la vida real: con un pulgar.
@@ -127,9 +127,7 @@ test.describe('Lista de la compra — bandeja y cesta', () => {
   test('el módulo vivo enlaza la sección y la bandeja empieza vacía', async ({ page }) => {
     await registerAndGoto(page, '/settings', 'shop-nav');
 
-    await expect(shoppingNavigationLink(page)).toBeVisible();
-
-    await shoppingNavigationLink(page).click();
+    await navigateToShopping(page);
     await expect(page).toHaveURL(/\/shopping$/);
     await expect(page.getByRole('heading', { name: /Lista de la compra/i })).toBeVisible();
     await expect(page.locator('[data-test="list-row"]')).toHaveCount(0);
