@@ -431,8 +431,14 @@ $env:HOGARIA_AI_ASSISTANT_LOCAL_SMOKE='1'; node scripts/run-isolated-playwright.
 
 ### Exploración de cuatro prototipos del compositor — alcance aprobado (2026-10-18)
 
-- [ ] Crear cuatro alternativas realmente distintas para el paso de redacción, manteniendo paleta, tipografía y controles de HogarIA. Variar distribución y relación entre texto y dictado, no solo colores.
-- [ ] En las cuatro, agrupar visualmente el consentimiento explícito con el control de micrófono; no dejar el micrófono como una fila aislada debajo ni como una columna lateral que desplace el campo.
-- [ ] Mantener el campo como foco principal, con una sola instrucción breve y hasta dos ejemplos en el placeholder. No duplicar título, pregunta, etiqueta o ayuda.
-- [ ] Mantener privacidad ampliada detrás de «Ver más» y los detalles accesibles; asegurar controles de dictado con nombre accesible y objetivo táctil mínimo de 44 px.
-- [ ] Generar fuentes de vista previa y capturas comparables de escritorio y móvil para las cuatro opciones. Son prototipos de selección: no reemplazar el flujo de producción hasta que el usuario elija una opción.
+- [x] Crear cuatro alternativas realmente distintas para el paso de redacción, manteniendo paleta, tipografía y controles de HogarIA. Variar distribución y relación entre texto y dictado, no solo colores.
+- [x] En las cuatro, agrupar visualmente el consentimiento explícito con el control de micrófono; no dejar el micrófono como una fila aislada debajo ni como una columna lateral que desplace el campo.
+- [x] Mantener el campo como foco principal, con una sola instrucción breve y hasta dos ejemplos en el placeholder. No duplicar título, pregunta, etiqueta o ayuda.
+- [x] Mantener privacidad ampliada detrás de «Ver más» y los detalles accesibles; asegurar controles de dictado con nombre accesible y objetivo táctil mínimo de 44 px.
+- [x] Generar fuentes de vista previa y capturas comparables de escritorio y móvil para las cuatro opciones. Son prototipos de selección: no reemplazar el flujo de producción hasta que el usuario elija una opción.
+
+#### Evidencia de prototipos del compositor (2026-10-18)
+
+- `node .e2e-screenshots/assistant-compose-prototypes-20261018/capture.mjs` — **PASS**, cuatro diseños: `Campo unido` (consentimiento y micrófono en el borde interior inferior), `Permiso contextual` (consentimiento solo al pedir voz), `Herramientas en foco` (grupo en el borde superior interior) y `Entrada progresiva` (campo más compacto que crece al escribir). Verifica heading/label únicos y accesibles, permiso contextual, privacidad desplegable, proximidad consentimiento-micrófono, botones de 44 px y geometría sin overflow a **390×844** y **320×568**.
+- Capturas sintéticas comparables e inspeccionadas, fuera de Git: `.e2e-screenshots/assistant-compose-prototypes-20261018/desktop-comparison.png`, `mobile-comparison.png` y `desktop-1.png`–`desktop-4.png` / `mobile-1.png`–`mobile-4.png`. Fuentes HTML y runner en el mismo directorio ignorado.
+- Esta unidad no altera la implementación productiva ni captura audio. Queda pendiente la elección del usuario antes de aplicar una variante.
