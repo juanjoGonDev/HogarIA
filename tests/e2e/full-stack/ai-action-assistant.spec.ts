@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import Database from 'better-sqlite3';
 import { createServer, type ServerResponse } from 'node:http';
@@ -5273,4 +5274,489 @@ test('asistente global: respeta safe-area emulada en FAB y diálogo móvil', asy
   await capture(page, testInfo, 'assistant-safe-area-dialog');
 
   await session.detach();
+});
+
+test('asistente global: mide heap y listeners tras reaperturas repetidas', async ({
+  page
+}, testInfo) => {
+  test.skip(testInfo.project.name !== 'chromium', 'requiere métricas CDP de Chromium');
+  const requestedReopenings = Number(process.env.HOGARIA_AI_ASSISTANT_HEAP_REOPENINGS ?? 40);
+  expect(
+    Number.isSafeInteger(requestedReopenings) &&
+      requestedReopenings >= 40 &&
+      requestedReopenings <= 200 &&
+      requestedReopenings % 20 === 0,
+    'el target debe ser múltiplo de 20 entre 40 y 200'
+  ).toBe(true);
+  test.setTimeout(90_000 + Math.max(0, requestedReopenings - 40) * 2_000);
+
+  const proposalRequests: string[] = [];
+  const scriptRequests: string[] = [];
+  let receiptQueueRequests = 0;
+  let pantryCategoryRequests = 0;
+  page.on('request', (request) => {
+    if (request.resourceType() === 'script') scriptRequests.push(request.url());
+    const pathname = new URL(request.url()).pathname;
+    if (request.method() === 'GET' && pathname === '/api/receipts/queue') {
+      receiptQueueRequests += 1;
+    }
+    if (request.method() === 'GET' && pathname === '/api/pantry/categories') {
+      pantryCategoryRequests += 1;
+    }
+    if (request.method() !== 'POST') return;
+    if (pathname.startsWith('/api/ai/assistant/')) proposalRequests.push(pathname);
+  });
+
+  await registerUser(page, 'Asistente rendimiento E2E');
+  await createHousehold(page, 'Hogar rendimiento sintético');
+  await page.goto('/dashboard');
+
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Performance.enable');
+  const browser = page.context().browser();
+  if (!browser) throw new Error('Missing Chromium browser for process-level metrics.');
+  const browserCdp = await browser.newBrowserCDPSession();
+
+  const sampleBrowserProcesses = async () => {
+    const { processInfo } = (await browserCdp.send('SystemInfo.getProcessInfo')) as {
+      processInfo: Array<{ id: number; type: string; cpuTime: number }>;
+    };
+    const processIds = processInfo.map(({ id }) => id).filter(Number.isSafeInteger);
+    if (processIds.length === 0) throw new Error('Chromium reported no process IDs.');
+
+    let rssByProcess: Array<{ pid: number; workingSetBytes: number }>;
+    if (process.platform === 'win32') {
+      const output = execFileSync(
+        'powershell.exe',
+        [
+          '-NoLogo',
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          `Get-Process -Id ${processIds.join(',')} -ErrorAction SilentlyContinue | ForEach-Object { Write-Output "$($_.Id):$($_.WorkingSet64)" }`
+        ],
+        { encoding: 'utf8', timeout: 5000, windowsHide: true }
+      );
+      rssByProcess = output
+        .trim()
+        .split(/\r?\n/)
+        .flatMap((line) => {
+          const [pid, bytes] = line.split(':').map(Number);
+          return Number.isSafeInteger(pid) && Number.isFinite(bytes)
+            ? [{ pid, workingSetBytes: bytes }]
+            : [];
+        });
+    } else {
+      const output = execFileSync('ps', ['-o', 'pid=,rss=', '-p', processIds.join(',')], {
+        encoding: 'utf8',
+        timeout: 5000,
+        windowsHide: true
+      });
+      rssByProcess = output
+        .trim()
+        .split(/\r?\n/)
+        .flatMap((line) => {
+          const [pid, kibibytes] = line.trim().split(/\s+/).map(Number);
+          return Number.isSafeInteger(pid) && Number.isFinite(kibibytes)
+            ? [{ pid, workingSetBytes: kibibytes * 1024 }]
+            : [];
+        });
+    }
+
+    const measuredProcesses = new Map(rssByProcess.map((entry) => [entry.pid, entry]));
+    const measured = processInfo.filter(({ id }) => measuredProcesses.has(id));
+    if (measured.length === 0) throw new Error('Could not read Chromium process working sets.');
+
+    return {
+      processCount: measured.length,
+      workingSetMiB: Number(
+        (
+          measured.reduce(
+            (total, { id }) => total + measuredProcesses.get(id)!.workingSetBytes,
+            0
+          ) /
+          1024 /
+          1024
+        ).toFixed(2)
+      ),
+      cpuTimeSeconds: Number(measured.reduce((total, { cpuTime }) => total + cpuTime, 0).toFixed(3))
+    };
+  };
+
+  const captureHeapObjectCounts = async () => {
+    const snapshotCdp = await page.context().newCDPSession(page);
+    const chunks: string[] = [];
+    const onSnapshotChunk = ({ chunk }: { chunk: string }) => chunks.push(chunk);
+    snapshotCdp.on('HeapProfiler.addHeapSnapshotChunk', onSnapshotChunk);
+
+    try {
+      await snapshotCdp.send('HeapProfiler.enable');
+      await snapshotCdp.send('HeapProfiler.collectGarbage');
+      await snapshotCdp.send('HeapProfiler.takeHeapSnapshot', { reportProgress: false });
+      const snapshot = JSON.parse(chunks.join('')) as {
+        snapshot: { meta: { node_fields: string[]; node_types: string[][] } };
+        nodes: number[];
+        strings: string[];
+      };
+      const nodeFields = new Map(snapshot.snapshot.meta.node_fields.map((name, i) => [name, i]));
+      const typeIndex = nodeFields.get('type');
+      const nameIndex = nodeFields.get('name');
+      const sizeIndex = nodeFields.get('self_size');
+      if (typeIndex === undefined || nameIndex === undefined || sizeIndex === undefined) {
+        throw new Error('Chromium heap snapshot did not include node type/name/size fields.');
+      }
+
+      const nodeTypes = snapshot.snapshot.meta.node_types[0];
+      const stride = snapshot.snapshot.meta.node_fields.length;
+      const counts: Record<string, { count: number; selfSizeBytes: number }> = {};
+      for (let offset = 0; offset < snapshot.nodes.length; offset += stride) {
+        const type = nodeTypes[snapshot.nodes[offset + typeIndex]];
+        if (
+          !['array', 'closure', 'code', 'hidden', 'native', 'object', 'regexp', 'string'].includes(
+            type
+          )
+        ) {
+          continue;
+        }
+        const name =
+          type === 'string'
+            ? 'values redacted'
+            : snapshot.strings[snapshot.nodes[offset + nameIndex]];
+        const key = `${type}:${name}`;
+        const current = counts[key] ?? { count: 0, selfSizeBytes: 0 };
+        current.count += 1;
+        current.selfSizeBytes += snapshot.nodes[offset + sizeIndex];
+        counts[key] = current;
+      }
+      return counts;
+    } finally {
+      snapshotCdp.off('HeapProfiler.addHeapSnapshotChunk', onSnapshotChunk);
+      await snapshotCdp.send('HeapProfiler.disable').catch(() => undefined);
+      await snapshotCdp.detach();
+    }
+  };
+
+  const sample = async (phase: string) => {
+    await cdp.send('HeapProfiler.collectGarbage');
+    const [performance, dom] = await Promise.all([
+      cdp.send('Performance.getMetrics'),
+      cdp.send('Memory.getDOMCounters')
+    ]);
+    const metrics = new Map(performance.metrics.map((metric) => [metric.name, metric.value]));
+    const value = (name: string) => {
+      const measurement = metrics.get(name);
+      if (typeof measurement !== 'number') throw new Error(`Missing CDP metric: ${name}`);
+      return measurement;
+    };
+
+    return {
+      phase,
+      jsHeapUsedMiB: Number((value('JSHeapUsedSize') / 1024 / 1024).toFixed(2)),
+      taskDurationSeconds: Number(value('TaskDuration').toFixed(3)),
+      scriptDurationSeconds: Number(value('ScriptDuration').toFixed(3)),
+      nodes: dom.nodes,
+      jsEventListeners: dom.jsEventListeners
+    };
+  };
+
+  const sampleAfterStableCounters = async (phase: string) => {
+    let previous: Awaited<ReturnType<typeof sample>> | undefined;
+    let stableSamples = 0;
+
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const current = await sample(phase);
+      if (
+        previous &&
+        current.nodes === previous.nodes &&
+        current.jsEventListeners === previous.jsEventListeners
+      ) {
+        stableSamples += 1;
+        if (stableSamples >= 2) return current;
+      } else {
+        stableSamples = 0;
+      }
+      previous = current;
+      await page.waitForTimeout(100);
+    }
+
+    throw new Error('DOM nodes/listeners did not stabilize after closing the assistant.');
+  };
+
+  const launcher = page.locator('[data-test="ai-assistant-open"]');
+  await expect(launcher).toBeVisible();
+  await page.waitForTimeout(100);
+  const closedBeforeWarmup = await sample('closed-before-warmup');
+  const dialog = page.locator('.modal[role="dialog"]');
+
+  const openAndClose = async (phase: string, measureOpenProcess = false) => {
+    await launcher.click();
+    await expect(dialog).toBeVisible();
+    const open = await sample(`${phase}-open`);
+    const openProcess = measureOpenProcess ? await sampleBrowserProcesses() : null;
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+    await page.waitForTimeout(250);
+    const closed = await sampleAfterStableCounters(`${phase}-closed`);
+    return { open, closed, openProcess };
+  };
+
+  try {
+    const processBeforeWarmup = await sampleBrowserProcesses();
+    const warmup = await openAndClose('warmup', true);
+    const processAfterWarmup = await sampleBrowserProcesses();
+    const warmedScriptRequestCount = scriptRequests.length;
+    const controlStartedAt = Date.now();
+    const idleControl = [];
+    for (let cycle = 1; cycle <= requestedReopenings; cycle += 1) {
+      await page.waitForTimeout(600);
+      idleControl.push(await sample(`idle-${cycle}`));
+    }
+    const controlDurationSeconds = Number(((Date.now() - controlStartedAt) / 1000).toFixed(2));
+    expect(idleControl).toHaveLength(requestedReopenings);
+    const heapBeforeAssistant = await captureHeapObjectCounts();
+    const processAfterIdleControl = await sampleBrowserProcesses();
+
+    const assistantStartedAt = Date.now();
+    const reopeningsPerGroup = 20;
+    const reopeningGroupCount = requestedReopenings / reopeningsPerGroup;
+    const repeatedCycles: Array<Awaited<ReturnType<typeof openAndClose>>> = [];
+    const heapSnapshots: Array<Awaited<ReturnType<typeof captureHeapObjectCounts>>> = [
+      heapBeforeAssistant
+    ];
+    const reopeningGroups: Array<{
+      group: number;
+      firstReopening: number;
+      lastReopening: number;
+      durationSeconds: number;
+      processBefore: Awaited<ReturnType<typeof sampleBrowserProcesses>>;
+      processDuringOpen: Awaited<ReturnType<typeof sampleBrowserProcesses>>;
+      processAfter: Awaited<ReturnType<typeof sampleBrowserProcesses>>;
+      closedHeapStartMiB: number;
+      closedHeapEndMiB: number;
+      closedHeapDeltaMiB: number;
+    }> = [];
+    let processBeforeGroup = processAfterIdleControl;
+
+    for (let groupIndex = 0; groupIndex < reopeningGroupCount; groupIndex += 1) {
+      const firstReopening = groupIndex * reopeningsPerGroup + 1;
+      const lastReopening = firstReopening + reopeningsPerGroup - 1;
+      const groupStartedAt = Date.now();
+      let processDuringOpen: Awaited<ReturnType<typeof sampleBrowserProcesses>> | undefined;
+
+      for (let cycle = firstReopening; cycle <= lastReopening; cycle += 1) {
+        const cycleResult = await openAndClose(
+          `cycle-${cycle}`,
+          cycle === firstReopening + reopeningsPerGroup / 2 - 1
+        );
+        repeatedCycles.push(cycleResult);
+        if (cycleResult.openProcess) processDuringOpen = cycleResult.openProcess;
+      }
+
+      const durationSeconds = Number(((Date.now() - groupStartedAt) / 1000).toFixed(2));
+      const processAfter = await sampleBrowserProcesses();
+      const heapAfterGroup = await captureHeapObjectCounts();
+      heapSnapshots.push(heapAfterGroup);
+      const closedHeapStartMiB =
+        groupIndex === 0
+          ? idleControl[idleControl.length - 1]!.jsHeapUsedMiB
+          : repeatedCycles[firstReopening - 2]!.closed.jsHeapUsedMiB;
+      const closedHeapEndMiB = repeatedCycles[lastReopening - 1]!.closed.jsHeapUsedMiB;
+      if (!processDuringOpen) {
+        throw new Error(`Missing Chromium process sample in reopening group ${groupIndex + 1}.`);
+      }
+      reopeningGroups.push({
+        group: groupIndex + 1,
+        firstReopening,
+        lastReopening,
+        durationSeconds,
+        processBefore: processBeforeGroup,
+        processDuringOpen,
+        processAfter,
+        closedHeapStartMiB,
+        closedHeapEndMiB,
+        closedHeapDeltaMiB: Number((closedHeapEndMiB - closedHeapStartMiB).toFixed(2))
+      });
+      if (groupIndex + 1 < reopeningGroupCount) {
+        processBeforeGroup = await sampleBrowserProcesses();
+      }
+    }
+
+    expect(repeatedCycles).toHaveLength(requestedReopenings);
+    const firstTwentyDurationSeconds = reopeningGroups[0]!.durationSeconds;
+    const secondTwentyDurationSeconds = reopeningGroups[1]!.durationSeconds;
+    const assistantDurationSeconds = Number(
+      reopeningGroups.reduce((total, group) => total + group.durationSeconds, 0).toFixed(2)
+    );
+    const idleToAssistantDurationRatio = Number(
+      (controlDurationSeconds / assistantDurationSeconds).toFixed(2)
+    );
+    expect(idleToAssistantDurationRatio).toBeGreaterThanOrEqual(0.75);
+    expect(idleToAssistantDurationRatio).toBeLessThanOrEqual(1.35);
+    const processAfterFirstTwenty = reopeningGroups[0]!.processAfter;
+    const processBeforeSecondTwenty = reopeningGroups[1]!.processBefore;
+    const processAfterSecondTwenty = reopeningGroups[1]!.processAfter;
+    const processAfterAssistant = reopeningGroups[reopeningGroups.length - 1]!.processAfter;
+    const heapAfterFirstTwenty = heapSnapshots[1]!;
+    const heapAfterSecondTwenty = heapSnapshots[2]!;
+    const heapAfterAssistant = heapSnapshots[heapSnapshots.length - 1]!;
+    const processDuringFirstTwenty = reopeningGroups[0]!.processDuringOpen;
+    const processDuringSecondTwenty = reopeningGroups[1]!.processDuringOpen;
+
+    const stableNodes = [warmup.closed, ...repeatedCycles.map(({ closed }) => closed)].map(
+      ({ nodes }) => nodes
+    );
+    const stableListeners = [warmup.closed, ...repeatedCycles.map(({ closed }) => closed)].map(
+      ({ jsEventListeners }) => jsEventListeners
+    );
+    console.log(
+      '[assistant-performance-counters]',
+      JSON.stringify({
+        closedNodes: stableNodes[0],
+        closedListeners: stableListeners[0],
+        stableClosedNodes: new Set(stableNodes).size === 1,
+        stableClosedListeners: new Set(stableListeners).size === 1
+      })
+    );
+    expect(new Set(stableNodes).size).toBe(1);
+    expect(new Set(stableListeners).size).toBe(1);
+    expect(scriptRequests).toHaveLength(warmedScriptRequestCount);
+    expect(proposalRequests).toEqual([]);
+    expect(pantryCategoryRequests).toBe(1);
+
+    const closedSamples = [warmup.closed, ...repeatedCycles.map(({ closed }) => closed)];
+    const openSamples = [warmup.open, ...repeatedCycles.map(({ open }) => open)];
+    const closedHeapValues = closedSamples.map(({ jsHeapUsedMiB }) => jsHeapUsedMiB);
+    const idleHeapValues = idleControl.map(({ jsHeapUsedMiB }) => jsHeapUsedMiB);
+    const finalIdle = idleControl[idleControl.length - 1];
+    const finalClosed = closedSamples[closedSamples.length - 1];
+    const summarizeHeapGrowth = (
+      beforeSnapshot: Awaited<ReturnType<typeof captureHeapObjectCounts>>,
+      afterSnapshot: Awaited<ReturnType<typeof captureHeapObjectCounts>>
+    ) =>
+      Object.entries(afterSnapshot)
+        .map(([typeAndName, after]) => {
+          const before = beforeSnapshot[typeAndName] ?? { count: 0, selfSizeBytes: 0 };
+          return {
+            typeAndName,
+            countDelta: after.count - before.count,
+            selfSizeDeltaBytes: after.selfSizeBytes - before.selfSizeBytes
+          };
+        })
+        .filter(({ countDelta, selfSizeDeltaBytes }) => countDelta > 0 || selfSizeDeltaBytes > 4096)
+        .sort((a, b) => b.selfSizeDeltaBytes - a.selfSizeDeltaBytes)
+        .slice(0, 8);
+    const retainedHeapObjectGrowthFirstTwenty = summarizeHeapGrowth(
+      heapBeforeAssistant,
+      heapAfterFirstTwenty
+    );
+    const retainedHeapObjectGrowthSecondTwenty = summarizeHeapGrowth(
+      heapAfterFirstTwenty,
+      heapAfterSecondTwenty
+    );
+    const retainedHeapObjectGrowthByGroup = reopeningGroups.map((group, index) => ({
+      group: group.group,
+      firstReopening: group.firstReopening,
+      lastReopening: group.lastReopening,
+      retainedHeapObjects: summarizeHeapGrowth(heapSnapshots[index]!, heapSnapshots[index + 1]!)
+    }));
+
+    console.log(
+      '[assistant-performance]',
+      JSON.stringify({
+        browser: testInfo.project.name,
+        chromiumProcesses: {
+          beforeWarmup: processBeforeWarmup,
+          afterWarmupOpen: warmup.openProcess,
+          afterWarmupClosed: processAfterWarmup,
+          beforeAssistantAfterIdleControl: processAfterIdleControl,
+          afterFirstTwentyClosed: processAfterFirstTwenty,
+          afterSecondTwentyClosed: processAfterSecondTwenty,
+          beforeSecondTwentyAfterSnapshot: processBeforeSecondTwenty,
+          duringFirstTwentyOpen: processDuringFirstTwenty,
+          duringSecondTwentyOpen: processDuringSecondTwenty,
+          afterAssistantClosed: processAfterAssistant,
+          byReopeningGroup: reopeningGroups.map((group) => ({
+            group: group.group,
+            firstReopening: group.firstReopening,
+            lastReopening: group.lastReopening,
+            before: group.processBefore,
+            duringOpen: group.processDuringOpen,
+            after: group.processAfter,
+            cpuTimeDeltaSeconds: Number(
+              (group.processAfter.cpuTimeSeconds - group.processBefore.cpuTimeSeconds).toFixed(3)
+            )
+          })),
+          firstTwentyCpuTimeDeltaSeconds: Number(
+            (
+              processAfterFirstTwenty.cpuTimeSeconds - processAfterIdleControl.cpuTimeSeconds
+            ).toFixed(3)
+          ),
+          secondTwentyCpuTimeDeltaSeconds: Number(
+            (
+              processAfterSecondTwenty.cpuTimeSeconds - processBeforeSecondTwenty.cpuTimeSeconds
+            ).toFixed(3)
+          )
+        },
+        retainedHeapObjectGrowthFirstTwenty,
+        retainedHeapObjectGrowthSecondTwenty,
+        retainedHeapObjectGrowthByGroup,
+        closedBeforeWarmup,
+        warmupOpen: warmup.open,
+        warmupClosed: warmup.closed,
+        idleControlCycles: idleControl.length,
+        controlDurationSeconds,
+        idleHeapRangeMiB: [Math.min(...idleHeapValues), Math.max(...idleHeapValues)],
+        idleHeapDeltaFromWarmupMiB: Number(
+          (finalIdle.jsHeapUsedMiB - warmup.closed.jsHeapUsedMiB).toFixed(2)
+        ),
+        reopenings: repeatedCycles.length,
+        requestedReopenings,
+        reopeningsPerGroup,
+        reopeningGroupCount,
+        closedHeapDeltaByGroupMiB: reopeningGroups.map(
+          ({ closedHeapDeltaMiB }) => closedHeapDeltaMiB
+        ),
+        reopeningGroupDurationsSeconds: reopeningGroups.map(
+          ({ durationSeconds }) => durationSeconds
+        ),
+        assistantDurationSeconds,
+        idleToAssistantDurationRatio,
+        firstTwentyDurationSeconds,
+        secondTwentyDurationSeconds,
+        closedHeapRangeMiB: [Math.min(...closedHeapValues), Math.max(...closedHeapValues)],
+        closedHeapDeltaFirstTwentyMiB: Number(
+          (repeatedCycles[19].closed.jsHeapUsedMiB - finalIdle.jsHeapUsedMiB).toFixed(2)
+        ),
+        closedHeapDeltaSecondTwentyMiB: Number(
+          (
+            repeatedCycles[39].closed.jsHeapUsedMiB - repeatedCycles[19].closed.jsHeapUsedMiB
+          ).toFixed(2)
+        ),
+        closedHeapDeltaFromWarmupMiB: Number(
+          (finalClosed.jsHeapUsedMiB - warmup.closed.jsHeapUsedMiB).toFixed(2)
+        ),
+        closedHeapDeltaAfterIdleControlMiB: Number(
+          (finalClosed.jsHeapUsedMiB - finalIdle.jsHeapUsedMiB).toFixed(2)
+        ),
+        peakOpenHeapMiB: Math.max(...openSamples.map(({ jsHeapUsedMiB }) => jsHeapUsedMiB)),
+        finalClosed: {
+          jsHeapUsedMiB: finalClosed.jsHeapUsedMiB,
+          nodes: finalClosed.nodes,
+          jsEventListeners: finalClosed.jsEventListeners
+        },
+        taskDurationDeltaSeconds: Number(
+          (finalClosed.taskDurationSeconds - closedBeforeWarmup.taskDurationSeconds).toFixed(3)
+        ),
+        scriptDurationDeltaSeconds: Number(
+          (finalClosed.scriptDurationSeconds - closedBeforeWarmup.scriptDurationSeconds).toFixed(3)
+        ),
+        proposalRequests: proposalRequests.length,
+        newScriptsAfterWarmup: scriptRequests.length - warmedScriptRequestCount,
+        receiptQueueRequests,
+        pantryCategoryRequests
+      })
+    );
+  } finally {
+    await Promise.all([cdp.detach(), browserCdp.detach()]);
+  }
 });
