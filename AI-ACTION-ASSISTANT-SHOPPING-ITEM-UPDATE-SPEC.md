@@ -29,7 +29,7 @@ La acción existente `shopping.update_list` no sustituye esta capacidad: una cam
 - [x] TDD de propuesta sin escritura, descarte, edición manual, confirmación, conflicto/preimagen stale, replay exacto y reutilización del ID con otro payload.
 - [x] E2E Playwright contra frontend/API reales y SQLite temporal: crear lista/artículo por interacción, revisar, descartar con cero PATCH, editar, confirmar, recargar y replay; Chromium escritorio y Chromium móvil.
 - [x] Verificar selección parcial/dependencias con una propuesta multiacción.
-- [ ] `SPEC.md` y cuerpo de PR #47 enlazan este contrato; cobertura del alcance ≥70 % S/B/F/L, typecheck, `check:ui`, build, formato/hooks y PR Draft comprobados antes de cerrar.
+- [x] `SPEC.md` y cuerpo de PR #47 enlazan este contrato; cobertura del alcance ≥70 % S/B/F/L, typecheck, `check:ui`, build, formato/hooks y PR Draft comprobados antes de cerrar.
 
 ## Hallazgo y evidencia reproducible
 
@@ -39,6 +39,8 @@ La acción existente `shopping.update_list` no sustituye esta capacidad: una cam
 - Regresión TDD del proveedor determinista (2026-10-18): la E2E del artículo devolvió `INVALID_AI_RESULT` (**0/2** en Chromium/Mobile Chrome) porque sus fixtures enviaban `payload` objeto, mientras el contrato de salida estricto exige `payloadJson` string. Se actualizaron los fixtures de despensa, artículo de compra, calendario y receta (incluido refinamiento); no se relajó el esquema de producción. Reejecución de estas seis rutas E2E — **12/12**, app/API reales, SQLite temporal y cleanup confirmado.
 - Cobertura completa medida: servidor 89.66 % statements / 81.86 % branches / 95.82 % functions / 92.60 % lines; cliente 90.57 % / 80.96 % / 92.06 % / 93.08 %, respectivamente. Suites focales, `typecheck:e2e`, `tsc --noEmit` del servidor y `check:ui` pasan. Los 8 tests de ambos scripts de formato/hook pasan.
 - Hallazgo de build ya resuelto: el baseline previo excedía el budget inicial por 641 B. Diferir el diccionario del asistente dejó el bundle inicial bajo el límite de error de 1 MB, sin rebajar budgets; ver “Seguimiento de carga diferida”.
+- Cierre de gates (2026-10-18, código en HEAD `f2ea9a7`): cliente `KARMA_COVERAGE_DIR=<OS-TEMP>; pnpm --filter @hogaria/web exec ng test --no-watch --code-coverage --browsers=ChromeHeadless --progress=false` — **1.707/1.707**, **90,61/80,96/91,73/93,18 % S/B/F/L**. Servidor `$env:DATABASE_PATH=':memory:'; pnpm --filter @hogaria/server exec vitest run --coverage --maxWorkers=2 --coverage.reportsDirectory=<OS-TEMP-único> --reporter=dot` — **2.081 aprobadas / 1 omitida**, **89,57/81,70/95,72/92,52 %**; `ai-assistant.routes.ts` **83,36/71,51/88,73/85,15 %** y `shopping.routes.ts` **92,10/80,38/95,45/94,75 %**. Supera el 70 % en las cuatro métricas.
+- `pnpm run typecheck:e2e`, `pnpm run check:ui` (**266 ficheros/21 reglas**), build de producción, Prettier, `git diff --check` y hooks pre-commit/pre-push pasan. Build: **473.443 B raw** inicial frente al budget sin cambiar de **500.000 B**. Verificación GitHub: PR #47 abierto, Draft y HEAD remoto `f2ea9a7`; `SPEC.md` y cuerpo del PR enlazan este contrato.
 
 ## Evidencia de código que motiva la unidad
 
