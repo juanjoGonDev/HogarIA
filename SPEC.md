@@ -458,7 +458,7 @@ $env:HOGARIA_AI_ASSISTANT_LOCAL_SMOKE='1'; node scripts/run-isolated-playwright.
 
 - [x] El textarea comienza compacto y crece con el texto hasta un máximo; al alcanzar el máximo, el contenido se desplaza dentro del campo. Con el campo vacío no reserva altura visual innecesaria.
 - [x] Aviso breve, «Ver más» y controles de voz agrupados al borde inferior del campo; sin checkbox, fila aislada ni columna lateral. A 320 px no hay solapamiento ni desbordamiento horizontal. El aviso se oculta mientras se dicta para dejar espacio a los controles.
-- [x] Un nombre accesible, instrucción breve y ejemplos aprobados; sin ayudas redundantes. Una pulsación explícita del micrófono inicia el reconocimiento directamente; no se captura audio antes. Errores y estado siguen accesibles.
+- [x] Un nombre accesible; el placeholder breve aprobado es «Pídele a la IA qué hacer. Ej.: añade leche o crea una tarea.»; sin ayudas redundantes. Una pulsación explícita del micrófono inicia el reconocimiento directamente; no se captura audio antes. Errores y estado siguen accesibles.
 - [x] Regresiones unitarias y Playwright con app/API reales y DB temporal para crecimiento, límite, aviso/disclosure y voz en escritorio, móvil y 320 px. Capturas sintéticas de PC/móvil guardadas e inspeccionadas.
 - [x] Revalidar los breakpoints afectados, orientación, teclado/foco, accesibilidad, i18n y gates requeridos.
 
