@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from './fixtures';
-import { createHousehold, logout, registerToOnboarding, registerUser } from './helpers/auth';
+import { createHousehold, logout, registerAndGoto, registerUser } from './helpers/auth';
 import { waitForStableView } from './helpers/recipe-fixtures';
 
 function collectFirstPartyBrowserErrors(page: import('@playwright/test').Page): string[] {
@@ -103,9 +103,7 @@ test('onboarding y preferencias conservan emojis de comida y usan SVG para objet
       ]
     : [{ width: 1440, height: 900 }];
 
-  await registerToOnboarding(page, 'qa-onboarding-icons');
-  await createHousehold(page, 'Hogar sintético onboarding iconos');
-  await page.goto('/onboarding');
+  await registerAndGoto(page, '/onboarding', 'qa-onboarding-icons');
   await waitForRouterViewTransition(page);
   await waitForStableView(page);
   const onboardingLogo = page.locator('.onboarding__logo app-icon[name="home"]');

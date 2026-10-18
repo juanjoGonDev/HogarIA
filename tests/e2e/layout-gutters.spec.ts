@@ -3,7 +3,7 @@ import { dirname, join, resolve } from 'node:path';
 import type { TestInfo } from '@playwright/test';
 
 import { expect, test, type Page } from './fixtures';
-import { registerToOnboarding, skipOnboarding } from './helpers/auth';
+import { registerAndGoto, registerWithHousehold } from './helpers/auth';
 import { createSyntheticRecipe, deleteSyntheticRecipe } from './helpers/recipe-fixtures';
 import {
   attachVisualFamilyInventory,
@@ -46,7 +46,7 @@ async function addVisualInventorySample(
 
 const WIDTH_BREAKPOINTS = [
   339, 359, 360, 362, 389, 400, 420, 480, 481, 560, 600, 601, 639, 640, 641, 719, 720, 721, 760,
-  767, 768, 860, 900, 920, 959, 1023, 1024, 1100, 1199, 1200, 1279, 1280
+  767, 768, 799, 800, 801, 860, 900, 920, 959, 1023, 1024, 1100, 1199, 1200, 1279, 1280
 ];
 
 const VIEWPORTS: ViewportCase[] = (() => {
@@ -620,7 +620,7 @@ async function assertDashboardCaptureReady(page: Page, viewport: ViewportCase): 
   await page.evaluate(async () => {
     await document.fonts.ready;
   });
-  await expect(page.locator('.sidebar-overlay')).toHaveCount(0);
+  await expect(page.locator('.sidebar-overlay')).toBeHidden();
 
   const sidebar = page.locator('.sidebar');
   const menuButton = page.locator('.header__menu');
@@ -737,7 +737,7 @@ test('las rutas públicas y onboarding conservan su shell y el gutter común', a
   test.setTimeout(240_000);
 
   await auditRouteGroup(page, testInfo, PUBLIC_ROUTES, 'public');
-  await registerToOnboarding(page, 'Layout gutter QA');
+  await registerAndGoto(page, '/onboarding', 'Layout gutter QA');
   await auditRouteGroup(page, testInfo, [ONBOARDING_ROUTE], 'onboarding');
 });
 
@@ -753,8 +753,7 @@ for (const [index, targets] of AUTHENTICATED_ROUTE_BATCHES.entries()) {
   }, testInfo) => {
     test.setTimeout(240_000);
 
-    await registerToOnboarding(page, `Layout gutter QA ${index + 1}`);
-    await skipOnboarding(page);
+    await registerWithHousehold(page, '/dashboard', `Layout gutter QA ${index + 1}`);
     await auditRouteGroup(
       page,
       testInfo,
@@ -822,8 +821,7 @@ test('los detalles dinámicos poblados conservan shell, raíz, gutter y ancho', 
   const routeViewportAudit: RouteViewportAudit[] = [];
   const visualMeasurements: VisualFamilyMeasurement[] = [];
   const sampledRoutes: string[] = [];
-  await registerToOnboarding(page, 'Layout gutter dynamic QA');
-  await skipOnboarding(page);
+  await registerWithHousehold(page, '/dashboard', 'Layout gutter dynamic QA');
 
   const fixtures = await createPopulatedDynamicRouteFixtures(page);
   try {

@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures';
-import { registerToOnboarding, registerUser } from './helpers/auth';
+import { registerAndGoto } from './helpers/auth';
 
 /**
  * Configuración inicial, nada más registrarse: perfil (nivel y qué se quiere
@@ -20,8 +20,10 @@ import { registerToOnboarding, registerUser } from './helpers/auth';
  * distinto del castellano en el primer render.
  */
 test.describe('Onboarding — gustos, alergias y objetivo', () => {
-  test('el registro lleva a la configuración inicial y se puede saltar', async ({ page }) => {
-    await registerToOnboarding(page, 'Salta Tester');
+  test('la configuración inicial se abre tras crear un hogar y se puede saltar', async ({
+    page
+  }) => {
+    await registerAndGoto(page, '/onboarding', 'Salta Tester');
 
     await expect(page.locator('.onboarding__title')).toHaveText('Configura tu HogarIA');
     await expect(page.locator('.onboarding__step-label')).toContainText('Paso 1 de 6 · Perfil');
@@ -49,7 +51,7 @@ test.describe('Onboarding — gustos, alergias y objetivo', () => {
   test('guarda alergias (también una escrita a mano), gustos, objetivo y utensilios', async ({
     page
   }) => {
-    await registerToOnboarding(page, 'Perfil Tester');
+    await registerAndGoto(page, '/onboarding', 'Perfil Tester');
 
     // ── Paso 1 · perfil: cuánto se cocina y qué se quiere llevar
     await page.locator('[data-level="none"]').click();
@@ -229,7 +231,7 @@ test.describe('Onboarding — gustos, alergias y objetivo', () => {
   test('una alergia escrita a mano se conserva al volver atrás y se puede quitar', async ({
     page
   }) => {
-    await registerToOnboarding(page, 'Chip Tester');
+    await registerAndGoto(page, '/onboarding', 'Chip Tester');
 
     // Se entra en el paso de alergias (el 1 es el perfil)
     await page.getByRole('button', { name: 'Siguiente →' }).click();
@@ -253,7 +255,7 @@ test.describe('Onboarding — gustos, alergias y objetivo', () => {
   });
 
   test('se puede saltar un paso concreto sin cerrar el tour', async ({ page }) => {
-    await registerToOnboarding(page, 'Salto Tester');
+    await registerAndGoto(page, '/onboarding', 'Salto Tester');
 
     // Se entra en alergias y se salta ESA pregunta: el tour continua, no se va al dashboard.
     await page.getByRole('button', { name: 'Siguiente →' }).click();
@@ -293,9 +295,7 @@ test.describe('Onboarding — gustos, alergias y objetivo', () => {
   });
 
   test('los horarios del tour y de Preferencias son el mismo ajuste', async ({ page }) => {
-    await registerUser(page, 'Horarios Tester');
-
-    await page.goto('/preferences?tab=meals');
+    await registerAndGoto(page, '/preferences?tab=meals', 'Horarios Tester');
     await expect(page.locator('#meal-breakfast')).toHaveValue('09:00');
     await expect(page.locator('#meal-snack')).toHaveValue('17:00');
 
@@ -326,9 +326,7 @@ test.describe('Onboarding — gustos, alergias y objetivo', () => {
   });
 
   test('lo guardado en Preferencias es el punto de partida del planificador', async ({ page }) => {
-    await registerUser(page, 'Plan Tester');
-
-    await page.goto('/preferences?tab=goal');
+    await registerAndGoto(page, '/preferences?tab=goal', 'Plan Tester');
     await page.locator('.preferences__goal', { hasText: 'Ganar músculo' }).click();
     await expect(page.locator('.preferences__state')).toContainText('Hay cambios sin guardar');
     await page.getByRole('button', { name: 'Guardar preferencias' }).click();

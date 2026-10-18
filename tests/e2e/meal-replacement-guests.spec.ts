@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { expect, test } from './fixtures';
 import { expectAiParticipantsSafetyNoteGeometry } from './helpers/ai-participants';
-import { createHousehold, registerAndGoto } from './helpers/auth';
+import { registerAndGoto } from './helpers/auth';
 
 const dateOfToday = (): string => {
   const date = new Date();
@@ -17,8 +17,6 @@ test('sustituye una sola comida con restricciones efímeras de invitados tras re
   if (testInfo.project.name === 'chromium')
     await page.setViewportSize({ width: 1440, height: 1000 });
   await registerAndGoto(page, '/calendar', 'Reemplazo con invitados');
-  await createHousehold(page, 'Hogar de sustitución sintético');
-  await page.goto('/calendar');
   const token = await page.evaluate(() => localStorage.getItem('hogar:v1:auth_token'));
   expect(token).toBeTruthy();
 

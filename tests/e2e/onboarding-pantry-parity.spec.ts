@@ -1,7 +1,7 @@
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect, test } from './fixtures';
-import { registerToOnboarding } from './helpers/auth';
+import { registerAndGoto } from './helpers/auth';
 
 test.describe('paridad entre onboarding y Despensa', () => {
   test.use({ serviceWorkers: 'block' });
@@ -19,7 +19,7 @@ test.describe('paridad entre onboarding y Despensa', () => {
       }
     });
 
-    await registerToOnboarding(page, 'Pantry Parity Tester');
+    await registerAndGoto(page, '/onboarding', 'Pantry Parity Tester');
     await page.locator('[data-level="none"]').click();
     for (let step = 0; step < 5; step += 1) {
       await page.getByRole('button', { name: 'Siguiente →' }).click();

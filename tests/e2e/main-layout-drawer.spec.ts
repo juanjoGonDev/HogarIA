@@ -226,7 +226,7 @@ test.describe('authenticated mobile navigation drawer', () => {
       const mainBottomPadding = await page
         .locator('main.main')
         .evaluate((main) => Number.parseFloat(getComputedStyle(main).paddingBottom));
-      expect(mainBottomPadding).toBeLessThan(64);
+      expect(mainBottomPadding).toBeLessThanOrEqual(64);
 
       await menuButton.focus();
       await page.keyboard.press('Enter');

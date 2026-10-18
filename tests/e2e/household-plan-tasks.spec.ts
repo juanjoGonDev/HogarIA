@@ -30,6 +30,10 @@ async function registerForHousehold(page: Page, name: string): Promise<void> {
   await page.goto('/household');
 }
 
+async function mobileViewportBottom(page: Page): Promise<number> {
+  return page.evaluate(() => window.innerHeight);
+}
+
 function fitSyntheticPlan(
   source: HouseholdPlan,
   shape: 'landscape' | 'portrait' | 'photo' | 'task' | 'task-mobile'
@@ -788,7 +792,6 @@ test('el menú del plano alinea sus acciones y distingue la eliminación', async
       expect.soft(bounds!.x).toBeGreaterThanOrEqual(8);
       expect.soft(bounds!.x + bounds!.width).toBeLessThanOrEqual(size.width - 8);
       const menuFlow = await menu.evaluate((element) => {
-        const dock = document.querySelector('.bottom-nav')?.getBoundingClientRect();
         const header = document.querySelector('.header')?.getBoundingClientRect();
         const bounds = element.getBoundingClientRect();
         const styles = getComputedStyle(element);
@@ -796,20 +799,20 @@ test('el menú del plano alinea sus acciones y distingue la eliminación', async
           top: bounds.top,
           bottom: bounds.bottom,
           headerBottom: header?.bottom ?? 0,
-          dockTop: dock?.top ?? Number.POSITIVE_INFINITY,
+          viewportBottom: window.innerHeight,
           clientHeight: element.clientHeight,
           scrollHeight: element.scrollHeight,
           overflowY: styles.overflowY
         };
       });
-      const menuAvoidsDock = menuFlow.bottom <= menuFlow.dockTop - 8;
+      const menuFitsViewport = menuFlow.bottom <= menuFlow.viewportBottom - 8;
       const menuCanScroll =
         menuFlow.scrollHeight > menuFlow.clientHeight &&
         ['auto', 'scroll'].includes(menuFlow.overflowY);
       expect
         .soft(
-          menuAvoidsDock || menuCanScroll,
-          `menu stays above the dock or has its own scroll at ${size.width}×${size.height}: ${JSON.stringify(menuFlow)}`
+          menuFitsViewport || menuCanScroll,
+          `menu fits the viewport or has its own scroll at ${size.width}×${size.height}: ${JSON.stringify(menuFlow)}`
         )
         .toBe(true);
       if (size.height <= 400) {
@@ -849,24 +852,12 @@ test('el menú del plano alinea sus acciones y distingue la eliminación', async
         expect
           .soft(finalActionBounds!.y + finalActionBounds!.height)
           .toBeLessThanOrEqual(visibleMenuBounds!.y + visibleMenuBounds!.height + 1);
-        const dockOverlap = await finalAction.evaluate((element) => {
+        const viewportOverflow = await finalAction.evaluate((element) => {
           const action = element.getBoundingClientRect();
-          const dock = document.querySelector('.bottom-nav');
-          if (!dock) return false;
-          const dockStyle = getComputedStyle(dock);
-          const dockBounds = dock.getBoundingClientRect();
-          if (dockStyle.display === 'none' || dockBounds.width === 0 || dockBounds.height === 0) {
-            return false;
-          }
-          return (
-            action.left < dockBounds.right &&
-            action.right > dockBounds.left &&
-            action.top < dockBounds.bottom &&
-            action.bottom > dockBounds.top
-          );
+          return action.top < -1 || action.bottom > window.innerHeight + 1;
         });
         expect
-          .soft(dockOverlap, 'the final menu action is not covered by the bottom navigation')
+          .soft(viewportOverflow, 'the final menu action remains inside the viewport')
           .toBe(false);
         if (size.width === 568 && size.height === 320) {
           await screenshot(page, '08-options-menu-568x320-final-action', size);
@@ -1233,10 +1224,9 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   await screenshot(page, '01-plan-start', viewport);
   if (mobile) {
     const startButton = await page.locator('[data-test="plan-start"]').boundingBox();
-    const bottomNavigation = await page.locator('.bottom-nav').boundingBox();
+    const viewportBottom = await mobileViewportBottom(page);
     expect(startButton).not.toBeNull();
-    expect(bottomNavigation).not.toBeNull();
-    expect(startButton!.y + startButton!.height).toBeLessThanOrEqual(bottomNavigation!.y - 8);
+    expect(startButton!.y + startButton!.height).toBeLessThanOrEqual(viewportBottom - 8);
     await captureResponsiveScreenshot(page, '01-plan-start-320x568', { width: 320, height: 568 });
     await page.setViewportSize(viewport);
   }
@@ -1815,7 +1805,7 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
         actions: bounds('.plan-canvas__freeform-actions'),
         toolbar: bounds('.plan-canvas-toolbar'),
         preview: bounds('.plan-canvas__preview-action'),
-        navigation: bounds('.bottom-nav'),
+        viewportBottom: window.innerHeight,
         workspace: workspace ? getComputedStyle(workspace).display : 'missing',
         editorGap: editor ? getComputedStyle(editor).rowGap : 'missing',
         canvasColumn: document
@@ -1827,13 +1817,13 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     for (const region of [mobileEditorFirstView.actions, mobileEditorFirstView.toolbar]) {
       expect(
         region.bottom,
-        'mobile freeform actions and both dock rows stay above bottom navigation'
-      ).toBeLessThanOrEqual(mobileEditorFirstView.navigation.top - 8);
+        'mobile freeform actions and both toolbar rows stay inside the viewport'
+      ).toBeLessThanOrEqual(mobileEditorFirstView.viewportBottom - 8);
     }
     expect(
       mobileEditorFirstView.preview.bottom,
       'mobile preview remains visible in the freeform first view'
-    ).toBeLessThanOrEqual(mobileEditorFirstView.navigation.top - 8);
+    ).toBeLessThanOrEqual(mobileEditorFirstView.viewportBottom - 8);
   }
   if (!mobile) {
     const freeformPreview = await page.locator('.plan-canvas__preview-action').boundingBox();
@@ -2020,9 +2010,8 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     const narrowPreviewButton = page.locator('.plan-canvas__preview-action');
     await narrowPreviewButton.scrollIntoViewIfNeeded();
     const narrowPreview = await narrowPreviewButton.boundingBox();
-    const narrowNavigation = await page.locator('.bottom-nav').boundingBox();
+    const viewportBottom = await mobileViewportBottom(page);
     expect(narrowPreview).not.toBeNull();
-    expect(narrowNavigation).not.toBeNull();
     const narrowScrollMetrics = await page.evaluate(() => {
       const preview = document.querySelector<HTMLElement>('.plan-canvas__preview-action');
       const main = document.querySelector<HTMLElement>('.main');
@@ -2043,8 +2032,8 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     ).toBeGreaterThanOrEqual(0);
     expect(
       narrowPreview!.y + narrowPreview!.height,
-      'the primary preview action scrolls clear of mobile navigation at 320 px'
-    ).toBeLessThanOrEqual(narrowNavigation!.y - 8);
+      'the primary preview action scrolls inside the viewport at 320 px'
+    ).toBeLessThanOrEqual(viewportBottom - 8);
     await screenshot(
       page,
       '02-plan-editor-freeform-320x568',
@@ -2140,10 +2129,9 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
       );
     }
     const previewAction = await page.locator('.plan-canvas__preview-action').boundingBox();
-    const bottomNavigation = await page.locator('.bottom-nav').boundingBox();
+    const viewportBottom = await mobileViewportBottom(page);
     expect(previewAction).not.toBeNull();
-    expect(bottomNavigation).not.toBeNull();
-    expect(previewAction!.y + previewAction!.height).toBeLessThanOrEqual(bottomNavigation!.y - 8);
+    expect(previewAction!.y + previewAction!.height).toBeLessThanOrEqual(viewportBottom - 8);
   }
   await expect(page.locator('.plan-file input')).toHaveAttribute(
     'accept',
@@ -2402,10 +2390,9 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     const saveBounds = await assignmentSheet
       .locator('[data-test="plan-zone-assignment-save"]')
       .boundingBox();
-    const bottomNavBounds = await page.locator('app-bottom-nav, .bottom-nav').first().boundingBox();
+    const viewportBottom = await mobileViewportBottom(page);
     expect(saveBounds).not.toBeNull();
-    if (bottomNavBounds)
-      expect(saveBounds!.y + saveBounds!.height).toBeLessThanOrEqual(bottomNavBounds.y);
+    expect(saveBounds!.y + saveBounds!.height).toBeLessThanOrEqual(viewportBottom - 8);
   } else {
     const memberButtons = zoneAssignment.locator(
       '[data-test="plan-zone-member"], .plan-zone-member--shared'
@@ -2999,25 +2986,24 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
       .locator('[data-test="plan-proposal-continue"]')
       .boundingBox();
     const stickyActions = await page.locator('.plan-review__actions--photo').boundingBox();
-    const initialBottomNavigation = await page.locator('.bottom-nav').boundingBox();
+    const viewportBottom = await mobileViewportBottom(page);
     await screenshot(page, '03-photo-layout-audit', viewport);
     expect(initialApply).not.toBeNull();
     expect(initialChat).not.toBeNull();
     expect(initialContinue).not.toBeNull();
     expect(stickyActions).not.toBeNull();
-    expect(initialBottomNavigation).not.toBeNull();
     expect(
       initialApply!.y + initialApply!.height,
       'photo review apply action should be visible without scrolling'
-    ).toBeLessThanOrEqual(initialBottomNavigation!.y - 8);
+    ).toBeLessThanOrEqual(viewportBottom - 8);
     expect(
       initialChat!.y + initialChat!.height,
       'photo review chat action should be visible without scrolling'
-    ).toBeLessThanOrEqual(initialBottomNavigation!.y - 8);
+    ).toBeLessThanOrEqual(viewportBottom - 8);
     expect(
       initialContinue!.y + initialContinue!.height,
-      'continue editing stays above mobile navigation'
-    ).toBeLessThanOrEqual(initialBottomNavigation!.y - 8);
+      'continue editing stays inside the mobile viewport'
+    ).toBeLessThanOrEqual(viewportBottom - 8);
     expect(
       initialApply!.y + initialApply!.height,
       'proposal decision remains visible above the sticky continue actions'
@@ -3046,21 +3032,19 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     const compactContinue = await page
       .locator('[data-test="plan-proposal-continue"]')
       .boundingBox();
-    const compactNavigation = await page.locator('.bottom-nav').boundingBox();
+    const compactViewportBottom = await mobileViewportBottom(page);
     expect(compactDecision).not.toBeNull();
     expect(compactSticky).not.toBeNull();
     expect(compactContinue).not.toBeNull();
-    expect(compactNavigation).not.toBeNull();
     expect(compactDecision!.y + compactDecision!.height).toBeLessThanOrEqual(compactSticky!.y - 8);
     await page.locator('[data-test="plan-proposal-continue"]').scrollIntoViewIfNeeded();
     const scrolledContinue = await page
       .locator('[data-test="plan-proposal-continue"]')
       .boundingBox();
-    const scrolledNavigation = await page.locator('.bottom-nav').boundingBox();
+    const scrolledViewportBottom = await mobileViewportBottom(page);
     expect(scrolledContinue).not.toBeNull();
-    expect(scrolledNavigation).not.toBeNull();
     expect(scrolledContinue!.y + scrolledContinue!.height).toBeLessThanOrEqual(
-      scrolledNavigation!.y - 8
+      scrolledViewportBottom - 8
     );
     await screenshot(
       page,
@@ -3112,15 +3096,16 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     await page.locator('[data-test="plan-proposal-chat"]').scrollIntoViewIfNeeded();
     const applyButton = await page.locator('[data-test="plan-proposal-apply"]').boundingBox();
     const chatButton = await page.locator('[data-test="plan-proposal-chat"]').boundingBox();
-    const bottomNavigation = await page.locator('.bottom-nav').boundingBox();
+    const photoActionsViewportBottom = await mobileViewportBottom(page);
     expect(applyButton).not.toBeNull();
     expect(chatButton).not.toBeNull();
-    expect(bottomNavigation).not.toBeNull();
-    expect(applyButton!.y + applyButton!.height).toBeLessThanOrEqual(bottomNavigation!.y - 8);
+    expect(applyButton!.y + applyButton!.height).toBeLessThanOrEqual(
+      photoActionsViewportBottom - 8
+    );
     expect(
       chatButton!.y + chatButton!.height,
-      'photo review actions remain reachable above the mobile navigation'
-    ).toBeLessThanOrEqual(bottomNavigation!.y - 8);
+      'photo review actions remain reachable inside the mobile viewport'
+    ).toBeLessThanOrEqual(photoActionsViewportBottom - 8);
     await screenshot(page, '03-photo-proposal-actions-mobile', viewport, false);
   } else {
     await page.evaluate(() => window.scrollTo(0, 0));
@@ -3420,16 +3405,13 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     const applyButton = await page
       .locator('.plan-chat [data-test="plan-proposal-apply"]')
       .boundingBox();
-    const bottomNavigation = await page.locator('.bottom-nav').boundingBox();
+    const viewportBottom = await mobileViewportBottom(page);
     expect(userMessage).not.toBeNull();
     expect(assistantMessage).not.toBeNull();
     expect(applyButton).not.toBeNull();
-    expect(bottomNavigation).not.toBeNull();
-    expect(userMessage!.y + userMessage!.height).toBeLessThanOrEqual(bottomNavigation!.y - 8);
-    expect(assistantMessage!.y + assistantMessage!.height).toBeLessThanOrEqual(
-      bottomNavigation!.y - 8
-    );
-    expect(applyButton!.y + applyButton!.height).toBeLessThanOrEqual(bottomNavigation!.y - 8);
+    expect(userMessage!.y + userMessage!.height).toBeLessThanOrEqual(viewportBottom - 8);
+    expect(assistantMessage!.y + assistantMessage!.height).toBeLessThanOrEqual(viewportBottom - 8);
+    expect(applyButton!.y + applyButton!.height).toBeLessThanOrEqual(viewportBottom - 8);
     const chatTouchTargets = await page
       .locator(
         [
@@ -3465,10 +3447,8 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
       );
     expect(continuationButtons).toHaveLength(4);
     expect(
-      continuationButtons.every(
-        (bounds) => bounds.top >= 0 && bounds.bottom <= bottomNavigation!.y - 8
-      ),
-      `all chat follow-up choices should be visible above mobile navigation: ${JSON.stringify({ continuationButtons, navigationTop: bottomNavigation!.y })}`
+      continuationButtons.every((bounds) => bounds.top >= 0 && bounds.bottom <= viewportBottom - 8),
+      `all chat follow-up choices should be visible inside the viewport: ${JSON.stringify({ continuationButtons, viewportBottom })}`
     ).toBe(true);
   }
   const previewControls = page.locator('[data-test="plan-chat-map-controls"]');
@@ -3774,7 +3754,7 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     const taskTitleRow = await page.locator('.tasks-create__primary-row').boundingBox();
     const taskTitleCaption = await page.locator('.tasks-create__title-caption').boundingBox();
     const taskTitleInput = await page.locator('.tasks-create__title input').boundingBox();
-    const bottomNavigation = await page.locator('.bottom-nav').boundingBox();
+    const viewportBottom = await mobileViewportBottom(page);
     const scheduleTop = await page
       .locator('.tasks-schedule')
       .evaluate((element) => element.getBoundingClientRect().top);
@@ -3791,14 +3771,13 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     expect(taskTitleRow).not.toBeNull();
     expect(taskTitleCaption).not.toBeNull();
     expect(taskTitleInput).not.toBeNull();
-    expect(bottomNavigation).not.toBeNull();
     expect(
       taskTitleCaption!.y + taskTitleCaption!.height,
       'the visible task label sits above the input without adding a second flow row'
     ).toBeLessThanOrEqual(taskTitleInput!.y + 1);
     expect(taskTitleRow!.y + taskTitleRow!.height).toBeLessThanOrEqual(assignmentSettings!.y);
     expect(assignmentSettings!.y + assignmentSettings!.height).toBeLessThanOrEqual(
-      bottomNavigation!.y - 8
+      viewportBottom - 8
     );
   }
   if (mobile) {
@@ -4238,9 +4217,7 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   const taskCards = page.locator('.task-card');
   await expect(taskCards).toHaveCount(7);
   const taskCardsFit = await taskCards.evaluateAll((cards) => {
-    const bottomNavigation = document.querySelector('.bottom-nav')?.getBoundingClientRect();
-    const visibleBottom =
-      bottomNavigation && bottomNavigation.height > 0 ? bottomNavigation.top : window.innerHeight;
+    const visibleBottom = window.innerHeight;
     const rows = cards.map((card) => {
       const bounds = card.getBoundingClientRect();
       return { top: Math.round(bounds.top), bottom: Math.round(bounds.bottom) };
@@ -4303,10 +4280,9 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     expect(editTarget!.height).toBeGreaterThanOrEqual(44);
     await page.evaluate(() => window.scrollTo(0, 0));
     const firstTaskRow = await taskCards.first().boundingBox();
-    const visibleNavigation = await page.locator('.bottom-nav').boundingBox();
+    const viewportBottom = await mobileViewportBottom(page);
     const weekActions = await page.locator('.tasks-schedule__footer').boundingBox();
     expect(firstTaskRow).not.toBeNull();
-    expect(visibleNavigation).not.toBeNull();
     expect(weekActions).not.toBeNull();
     await expect(page.locator('.tasks-schedule__footer')).toHaveCSS('position', 'sticky');
     const taskRowsLayout = await taskCards.evaluateAll((cards) => {
@@ -4329,26 +4305,70 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     ).toBeGreaterThanOrEqual(3);
     console.info(`[visual:tasks-week-three-rows] ${JSON.stringify(taskRowsLayout)}`);
     await screenshot(page, 'tasks-week-three-rows', viewport);
+    for (const size of [viewport, { width: 320, height: 568 }, { width: 568, height: 320 }]) {
+      await page.setViewportSize(size);
+      await page.locator('.tasks-schedule__footer').scrollIntoViewIfNeeded();
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) => {
+            requestAnimationFrame(() =>
+              requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+            );
+          })
+      );
+      const floatingLayout = await page.evaluate(() => {
+        const launcher = document
+          .querySelector<HTMLElement>('[data-test="ai-assistant-open"]')
+          ?.getBoundingClientRect();
+        const footer = document
+          .querySelector<HTMLElement>('.tasks-schedule__footer')
+          ?.getBoundingClientRect();
+        const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+        if (!launcher || !footer)
+          throw new Error('The assistant launcher and task footer must exist');
+        return {
+          viewportHeight,
+          launcherBottom: launcher.bottom,
+          footerTop: footer.top,
+          footerBottom: footer.bottom,
+          overlaps:
+            launcher.left < footer.right &&
+            launcher.right > footer.left &&
+            launcher.top < footer.bottom &&
+            launcher.bottom > footer.top
+        };
+      });
+      expect(
+        floatingLayout.footerBottom,
+        `task save controls remain visible at ${size.width}×${size.height}: ${JSON.stringify(floatingLayout)}`
+      ).toBeLessThanOrEqual(floatingLayout.viewportHeight + 1);
+      expect(
+        floatingLayout.overlaps,
+        `the global assistant FAB does not cover the sticky task controls at ${size.width}×${size.height}: ${JSON.stringify(floatingLayout)}`
+      ).toBe(false);
+      await page.evaluate(() => window.scrollTo(0, 0));
+    }
+    await page.setViewportSize(viewport);
+    await page.evaluate(() => window.scrollTo(0, 0));
     await taskCards.last().evaluate((element) => element.scrollIntoView({ block: 'center' }));
     const lastTaskBounds = await taskCards.last().boundingBox();
     const scrolledWeekActions = await page.locator('.tasks-schedule__footer').boundingBox();
-    const scrolledBottomNavigation = await page.locator('.bottom-nav').boundingBox();
+    const scrolledViewportBottom = await mobileViewportBottom(page);
     expect(lastTaskBounds).not.toBeNull();
     expect(scrolledWeekActions).not.toBeNull();
-    expect(scrolledBottomNavigation).not.toBeNull();
     expect(
       lastTaskBounds!.y + lastTaskBounds!.height,
       'scrolling exposes the last assignment row above the sticky save actions'
     ).toBeLessThanOrEqual(scrolledWeekActions!.y - 8);
     expect(
       scrolledWeekActions!.y + scrolledWeekActions!.height,
-      'sticky save actions stay above the application navigation'
-    ).toBeLessThanOrEqual(scrolledBottomNavigation!.y - 8);
+      'sticky save actions stay inside the viewport'
+    ).toBeLessThanOrEqual(scrolledViewportBottom - 8);
     await page.evaluate(() => window.scrollTo(0, 0));
     expect(
       firstTaskRow!.y + firstTaskRow!.height,
       'at least one planned task should appear unobscured below the interactive plan without scrolling'
-    ).toBeLessThanOrEqual(visibleNavigation!.y - 8);
+    ).toBeLessThanOrEqual(viewportBottom - 8);
     const firstTaskHit = await taskCards.first().evaluate((element) => {
       const bounds = element.getBoundingClientRect();
       const hit = document.elementFromPoint(
@@ -4538,14 +4558,13 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
       .evaluate((element) => element.scrollIntoView({ block: 'center', inline: 'nearest' }));
     const lastTask = await page.locator('.task-card').last().boundingBox();
     const saveButton = await page.locator('[data-test="tasks-save"]').boundingBox();
-    const bottomNavigation = await page.locator('.bottom-nav').boundingBox();
+    const viewportBottom = await mobileViewportBottom(page);
     expect(lastTask).not.toBeNull();
     expect(saveButton).not.toBeNull();
-    expect(bottomNavigation).not.toBeNull();
     await expect(page.locator('.task-card').last()).toBeInViewport({ ratio: 0.5 });
     expect(lastTask!.y).toBeGreaterThanOrEqual(0);
-    expect(lastTask!.y + lastTask!.height).toBeLessThanOrEqual(bottomNavigation!.y - 8);
-    expect(saveButton!.y + saveButton!.height).toBeLessThanOrEqual(bottomNavigation!.y - 8);
+    expect(lastTask!.y + lastTask!.height).toBeLessThanOrEqual(viewportBottom - 8);
+    expect(saveButton!.y + saveButton!.height).toBeLessThanOrEqual(viewportBottom - 8);
   }
   await screenshot(page, 'tasks-saved-desktop-or-mobile', viewport, !mobile);
   if (mobile) await screenshot(page, 'tasks-agenda-mobile', viewport, false);

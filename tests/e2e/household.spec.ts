@@ -15,7 +15,6 @@ test.describe('Household sharing & invite flow', () => {
     await page.fill('input#password', 'Test1234');
     await page.click('button[type="submit"]');
     await skipOnboarding(page);
-    await page.waitForURL(/.*dashboard/);
 
     // Create household
     await page.goto('/household');
@@ -227,7 +226,6 @@ test.describe('Household sharing & invite flow', () => {
     await ownerPage.fill('input#password', 'Test1234');
     await ownerPage.click('button[type="submit"]');
     await skipOnboarding(ownerPage);
-    await ownerPage.waitForURL(/.*dashboard/);
     await ownerPage.goto('/household');
     await ownerPage.getByRole('button', { name: /Crear hogar/i }).click();
     await ownerPage.fill('input#householdName', 'Familia López');

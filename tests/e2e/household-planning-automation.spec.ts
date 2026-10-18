@@ -529,14 +529,16 @@ test('publica una propuesta desde el editor pasando por el scheduler y worker re
 
     const target = dueMadridSchedule();
     const weekdayPicker = panel.locator('[data-test="planning-automation-weekday"] button');
-    await weekdayPicker.focus();
-    await page.keyboard.press('ArrowDown');
+    await weekdayPicker.click();
     const weekdayList = panel.getByRole('listbox', { name: 'Día de la semana' });
     await expect(weekdayList).toBeVisible();
-    for (let index = 0; index < target.weekday - 1; index += 1) {
-      await page.keyboard.press('ArrowDown');
-    }
-    await page.keyboard.press('Enter');
+    await weekdayList
+      .getByRole('option', { name: weekdayLabels[target.weekday - 1], exact: true })
+      .click();
+    await expect(weekdayPicker).toHaveAttribute(
+      'aria-label',
+      `Día de la semana: ${weekdayLabels[target.weekday - 1]}`
+    );
     await panel.locator('[data-test="planning-automation-local-time"]').fill(target.localTime);
     await panel.locator('[data-test="planning-automation-time-zone"]').fill('Europe/Madrid');
 
