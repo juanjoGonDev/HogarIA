@@ -660,3 +660,11 @@ $env:HOGARIA_AI_ASSISTANT_LOCAL_SMOKE='1'; node scripts/run-isolated-playwright.
 - Los cuatro shards E2E fallan fuera del caso del asistente: shard 1 **1** fallo de scheduler; shard 2 **32** (incluye rutas protegidas sin hogar en precondiciones, títulos de Settings inexistentes, shell de onboarding/layout y un overflow en Planning); shard 3 **14** de recetas/libro/cocina; shard 4 **2**: `.bottom-nav` obsoleto en `safe-area-layout.spec.ts` y `.btn--sm` inexistente en `/logs` en `ui-shared-button-geometry.spec.ts`. No debilitar guards ni alterar producto ajeno sin reproducir y demostrar necesidad.
 - Full assistant E2E local sobre SQLite temporal: **77 passed / 5 skipped**; test focal de comidas **2/2** (Chromium y móvil, 320×568, 568×320, 768×1024), sin desbordamiento. WebAPI real ya se había probado con **13/13** tipos funcionales; no repetir llamadas externas para un fix CSS.
 - [ ] Resolver/atribuir los fallos de los shards fuera del asistente y completar análisis comparativo del heap antes de cerrar el gate integral. No presentar PR/CI como verde ni coverage de código como 100 %; mantener PR #47 Draft.
+
+### Shard 4: alinear las regresiones E2E con el shell actual
+
+- Alcance: corregir solo las pruebas que usan selectores/precondiciones ya obsoletos; sin cambiar navegación ni estilos del producto.
+- [ ] Safe-area: comprobar header móvil, contenido y drawer actual en retrato/paisaje, incluida navegación real dentro de `.sidebar__nav`; conservar medidas de safe-area en los cuatro bordes y desktop.
+- [ ] Geometría de botones: crear hogar sintético tras `registerUser()` antes de abrir rutas protegidas; conservar verificación comparativa de `sm/md/lg` en rutas que renderizan realmente esos controles.
+- [ ] TDD: reproducir localmente los dos fallos reportados por CI, actualizar aserciones/precondiciones, validar Chromium y Mobile Chrome con DB temporal y revisar capturas sintéticas PC/móvil si el test las genera.
+- [ ] No relajar tolerancias de geometría, guards ni coverage. Reejecutar CI remota y mantener abierta la spec integral mientras fallen otros shards o heap.
