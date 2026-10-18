@@ -448,15 +448,16 @@ $env:HOGARIA_AI_ASSISTANT_LOCAL_SMOKE='1'; node scripts/run-isolated-playwright.
 **Decisión del usuario (2026-10-18):** aplicar el prototipo 4, «Entrada progresiva».
 
 - [x] El textarea comienza compacto y crece con el texto hasta un máximo; al alcanzar el máximo, el contenido se desplaza dentro del campo. Con el campo vacío no reserva altura visual innecesaria.
-- [x] Controles de voz y acceso «Ver más» agrupados en el borde inferior del campo; sin fila aislada ni columna lateral. A 320 px no hay solapamiento ni desbordamiento horizontal.
-- [ ] Mantener un único nombre accesible, la instrucción breve y ejemplos aprobados; retirar ayudas redundantes. Mostrar junto al micro un aviso breve de posible procesamiento fuera del dispositivo y ampliar privacidad con «Ver más». Sin checkbox: una pulsación del micro inicia dictado directamente; no se captura audio antes de esa acción. Errores y estado siguen accesibles.
-- [ ] Añadir/ajustar regresiones unitarias y Playwright con app/API reales y DB temporal para crecimiento, límite, aviso/disclosure y dictado en escritorio, móvil y 320 px. Guardar e inspeccionar capturas sintéticas PC/móvil.
-- [ ] Revalidar los breakpoints afectados, orientación, teclado/foco, accesibilidad, i18n y gates requeridos.
+- [x] Aviso breve, «Ver más» y controles de voz agrupados al borde inferior del campo; sin checkbox, fila aislada ni columna lateral. A 320 px no hay solapamiento ni desbordamiento horizontal. El aviso se oculta mientras se dicta para dejar espacio a los controles.
+- [x] Un nombre accesible, instrucción breve y ejemplos aprobados; sin ayudas redundantes. Una pulsación explícita del micrófono inicia el reconocimiento directamente; no se captura audio antes. Errores y estado siguen accesibles.
+- [x] Regresiones unitarias y Playwright con app/API reales y DB temporal para crecimiento, límite, aviso/disclosure y voz en escritorio, móvil y 320 px. Capturas sintéticas de PC/móvil guardadas e inspeccionadas.
+- [x] Revalidar los breakpoints afectados, orientación, teclado/foco, accesibilidad, i18n y gates requeridos.
 
 **Evidencia (2026-10-18):**
 
-- TDD base: la nueva aserción falló al encontrar la ayuda redundante; suite focal posterior **54/54**. Coverage global tras `pnpm run test:client`: **90,70/80,95/92,30/93,19 %** statements/branches/functions/lines; diálogo **79,98/71,27/87,25/83,70 %** (>70 %).
-- Verificación base antes del ajuste solicitado hoy: `pnpm run build`, `pnpm run typecheck:e2e`, `pnpm run check:ui` (263 archivos / 21 reglas) y `git diff --check` pasaron. E2E full-stack pasó **2/2**, SQLite temporal y cleanup; cubrió 1440×900, 851×393, 641/640 px, 393×851 y 320×568, crecimiento/límite, disclosure por teclado, geometría y cero POST de propuestas.
-- Capturas base inspeccionadas: `.e2e-screenshots/assistant-compose-progressive-20261018/chromium/assistant-compose-1440px.png` y `.e2e-screenshots/assistant-compose-progressive-20261018/mobile-chrome/assistant-compose-393px.png`. Deben regenerarse tras quitar el checkbox.
-- **Esta evidencia cubre el diseño anterior con checkbox y no verifica el nuevo inicio directo del dictado.** Repetir suite focal y E2E antes de marcar las casillas restantes.
-- Limitación: no se capturó audio ni se llamó a un proveedor de IA; esta unidad valida interfaz. La build conserva avisos de presupuesto (bundle inicial 980,32 kB y CSS del diálogo 13,51 kB frente a 10 kB); ningún umbral se relajó.
+- TDD: las aserciones de aviso sin consentimiento, micrófono habilitado y aviso oculto durante dictado fallaron primero contra el flujo anterior; tras el cambio, suite focal del diálogo **54/54**.
+- `pnpm run test:client` — **1.693/1.693**; cobertura global **90,68/80,91/92,30/93,19 % S/B/F/L**. `pnpm run build`, `pnpm run typecheck:e2e`, `pnpm run check:ui` (**263 archivos/21 reglas**), Prettier focal y `git diff --check` pasan. Build mantiene avisos existentes de presupuesto global **980,32 kB/500 kB** y CSS del diálogo **13,42 kB/10 kB**; no se relajaron.
+- Playwright con app/API reales y SQLite temporal: compositor progresivo **2/2** en Chromium y móvil; cubre **1440×900, 851×393, 641/640×800, 393×851 y 320×568**, disclosure por teclado, geometría, target mínimo de 44 px, crecimiento/límite y cero POST de propuestas. Runner confirmó limpieza.
+- Regresión full-stack de dictado y compositor: **14/14** en Chromium/móvil; stubs sintéticos confirman inicio en un clic, cancelar/parar, transcripción final, error sin transcripción, fallback ES/EN y navegación. No se capturó audio real.
+- Capturas sintéticas inspeccionadas, ignoradas por Git: `.e2e-screenshots/assistant-compose-progressive-20261018/chromium/assistant-compose-1440px.png`, `.e2e-screenshots/assistant-compose-progressive-20261018/mobile-chrome/assistant-compose-393px.png` y `assistant-compose-320px.png`.
+- Limitación: validación de voz solo con `FakeSpeechRecognition`/stub; no se capturó audio ni se llamó a proveedor de IA. La suite visual cubre interfaz, no la matriz global de rendimiento.

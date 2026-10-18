@@ -4,6 +4,7 @@ import {
   Component,
   ElementRef,
   EventEmitter,
+  HostListener,
   Input,
   Injector,
   OnDestroy,
@@ -299,53 +300,124 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
       @switch (stage()) {
         @case ('compose') {
           <section class="assistant__compose" data-test="ai-assistant-compose">
-            <label class="assistant__consent">
-              <input
-                type="checkbox"
-                [checked]="voiceConsent()"
-                (change)="setVoiceConsent($any($event.target).checked)"
-              />
-              <span>{{ 'ai_assistant.voice_consent' | t }}</span>
-            </label>
-
-            <details class="assistant__privacy">
-              <summary>{{ 'ai_assistant.privacy_title' | t }}</summary>
-              <div class="assistant__voice-note" role="note">
-                <app-icon name="help_outline" [size]="18" [label]="null" />
-                <div>
-                  <p>{{ 'ai_assistant.privacy_copy' | t }}</p>
-                </div>
-              </div>
-            </details>
-
             <div class="assistant__input-group">
               <label class="visually-hidden" for="ai-assistant-prompt">
                 {{ 'ai_assistant.prompt_label' | t }}
               </label>
-              <textarea
-                id="ai-assistant-prompt"
-                #composePrompt
-                class="assistant__prompt"
-                rows="4"
-                maxlength="2000"
-                [value]="prompt()"
-                [placeholder]="'ai_assistant.prompt_placeholder' | t"
-                [disabled]="loading()"
-                aria-describedby="ai-assistant-prompt-help"
-                [attr.aria-invalid]="promptError() ? 'true' : null"
-                data-test="ai-assistant-prompt"
-                (input)="updatePrompt($event)"
-              ></textarea>
-              <div class="assistant__input-meta">
-                <span id="ai-assistant-prompt-help" class="assistant__hint">
-                  {{ 'ai_assistant.compose_hint' | t }}
-                </span>
+              <div class="assistant__prompt-shell">
+                <textarea
+                  id="ai-assistant-prompt"
+                  #composePrompt
+                  class="assistant__prompt"
+                  rows="1"
+                  maxlength="2000"
+                  [value]="prompt()"
+                  [placeholder]="'ai_assistant.prompt_placeholder' | t"
+                  [disabled]="loading()"
+                  [attr.aria-describedby]="promptError() ? 'ai-assistant-prompt-error' : null"
+                  [attr.aria-invalid]="promptError() ? 'true' : null"
+                  data-test="ai-assistant-prompt"
+                  (input)="updatePrompt($event)"
+                ></textarea>
+                <div class="assistant__field-tools">
+                  <span
+                    *ngIf="voiceState() !== 'listening' && voiceState() !== 'paused'"
+                    class="assistant__voice-warning"
+                    role="note"
+                  >
+                    {{ 'ai_assistant.voice_warning' | t }}
+                  </span>
+                  <details class="assistant__privacy">
+                    <summary>{{ 'ai_assistant.privacy_title' | t }}</summary>
+                    <div class="assistant__voice-note" role="note">
+                      <app-icon name="help_outline" [size]="18" [label]="null" />
+                      <p>{{ 'ai_assistant.privacy_copy' | t }}</p>
+                    </div>
+                  </details>
+
+                  <div
+                    class="assistant__voice-controls"
+                    *ngIf="voiceSupported(); else voiceFallback"
+                  >
+                    <app-button
+                      *ngIf="voiceState() !== 'listening' && voiceState() !== 'paused'"
+                      variant="outline"
+                      size="icon"
+                      [touchTarget]="true"
+                      [disabled]="loading()"
+                      [attr.title]="'ai_assistant.voice_start' | t"
+                      data-test="ai-assistant-voice-start"
+                      (onClick)="startVoice()"
+                    >
+                      <app-icon name="mic" [size]="20" [label]="null" />
+                      <span class="visually-hidden">{{ 'ai_assistant.voice_start' | t }}</span>
+                    </app-button>
+                    <app-button
+                      *ngIf="voiceState() === 'listening'"
+                      variant="danger"
+                      size="icon"
+                      [touchTarget]="true"
+                      [disabled]="loading() || voiceStopPending()"
+                      [attr.title]="'ai_assistant.voice_stop' | t"
+                      data-test="ai-assistant-voice-stop"
+                      (onClick)="stopVoice()"
+                    >
+                      <app-icon name="stop" [size]="18" [label]="null" />
+                      <span class="visually-hidden">{{ 'ai_assistant.voice_stop' | t }}</span>
+                    </app-button>
+                    <app-button
+                      *ngIf="voiceState() === 'listening' && supportsPause()"
+                      variant="ghost"
+                      size="icon"
+                      [touchTarget]="true"
+                      [disabled]="loading() || voiceStopPending()"
+                      [attr.title]="'ai_assistant.voice_pause' | t"
+                      (onClick)="pauseVoice()"
+                    >
+                      <app-icon name="pause" [size]="18" [label]="null" />
+                      <span class="visually-hidden">{{ 'ai_assistant.voice_pause' | t }}</span>
+                    </app-button>
+                    <app-button
+                      *ngIf="voiceState() === 'paused'"
+                      variant="secondary"
+                      size="icon"
+                      [touchTarget]="true"
+                      [attr.title]="'ai_assistant.voice_resume' | t"
+                      (onClick)="resumeVoice()"
+                    >
+                      <app-icon name="play_arrow" [size]="20" [label]="null" />
+                      <span class="visually-hidden">{{ 'ai_assistant.voice_resume' | t }}</span>
+                    </app-button>
+                    <app-button
+                      *ngIf="voiceState() === 'listening' || voiceState() === 'paused'"
+                      variant="ghost"
+                      size="icon"
+                      [touchTarget]="true"
+                      [attr.title]="'ai_assistant.cancel' | t"
+                      (onClick)="cancelVoice()"
+                    >
+                      <app-icon name="close" [size]="18" [label]="null" />
+                      <span class="visually-hidden">{{ 'ai_assistant.cancel' | t }}</span>
+                    </app-button>
+                  </div>
+                </div>
+              </div>
+              <div *ngIf="prompt().length" class="assistant__input-meta">
                 <span class="assistant__counter">{{ prompt().length }}/2000</span>
               </div>
-              <p *ngIf="promptError() as promptErrorKey" class="assistant__error" role="alert">
+              <p
+                *ngIf="promptError() as promptErrorKey"
+                id="ai-assistant-prompt-error"
+                class="assistant__error"
+                role="alert"
+              >
                 {{ promptErrorKey | t }}
               </p>
             </div>
+
+            <ng-template #voiceFallback>
+              <p class="assistant__hint" role="note">{{ 'ai_assistant.voice_unsupported' | t }}</p>
+            </ng-template>
 
             <p
               *ngIf="voiceState() === 'listening'"
@@ -358,72 +430,6 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
                   | t
               }}
             </p>
-
-            <div class="assistant__voice-controls" *ngIf="voiceSupported(); else voiceFallback">
-              <app-button
-                *ngIf="voiceState() !== 'listening' && voiceState() !== 'paused'"
-                variant="outline"
-                size="icon"
-                [touchTarget]="true"
-                [disabled]="loading() || !voiceConsent()"
-                [attr.title]="'ai_assistant.voice_start' | t"
-                data-test="ai-assistant-voice-start"
-                (onClick)="startVoice()"
-              >
-                <app-icon name="mic" [size]="20" [label]="null" />
-                <span class="visually-hidden">{{ 'ai_assistant.voice_start' | t }}</span>
-              </app-button>
-              <app-button
-                *ngIf="voiceState() === 'listening'"
-                variant="danger"
-                size="icon"
-                [touchTarget]="true"
-                [disabled]="loading() || voiceStopPending()"
-                [attr.title]="'ai_assistant.voice_stop' | t"
-                data-test="ai-assistant-voice-stop"
-                (onClick)="stopVoice()"
-              >
-                <app-icon name="stop" [size]="18" [label]="null" />
-                <span class="visually-hidden">{{ 'ai_assistant.voice_stop' | t }}</span>
-              </app-button>
-              <app-button
-                *ngIf="voiceState() === 'listening' && supportsPause()"
-                variant="ghost"
-                size="icon"
-                [touchTarget]="true"
-                [disabled]="loading() || voiceStopPending()"
-                [attr.title]="'ai_assistant.voice_pause' | t"
-                (onClick)="pauseVoice()"
-              >
-                <app-icon name="pause" [size]="18" [label]="null" />
-                <span class="visually-hidden">{{ 'ai_assistant.voice_pause' | t }}</span>
-              </app-button>
-              <app-button
-                *ngIf="voiceState() === 'paused'"
-                variant="secondary"
-                size="icon"
-                [touchTarget]="true"
-                [attr.title]="'ai_assistant.voice_resume' | t"
-                (onClick)="resumeVoice()"
-              >
-                <app-icon name="play_arrow" [size]="20" [label]="null" />
-                <span class="visually-hidden">{{ 'ai_assistant.voice_resume' | t }}</span>
-              </app-button>
-              <app-button
-                *ngIf="voiceState() === 'listening' || voiceState() === 'paused'"
-                variant="ghost"
-                size="icon"
-                [touchTarget]="true"
-                [attr.title]="'ai_assistant.cancel' | t"
-                (onClick)="cancelVoice()"
-              >
-                <app-icon name="close" [size]="18" [label]="null" />
-                <span class="visually-hidden">{{ 'ai_assistant.cancel' | t }}</span>
-              </app-button>
-            </div>
-            <ng-template #voiceFallback>
-              <p class="assistant__hint" role="note">{{ 'ai_assistant.voice_unsupported' | t }}</p>
-            </ng-template>
 
             <p
               #voiceErrorAlert
@@ -1835,10 +1841,6 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
         color: var(--text-primary);
       }
 
-      .assistant__voice-note > div {
-        min-width: 0;
-      }
-
       .assistant__voice-note strong,
       .assistant__summary-label {
         font-size: var(--text-sm);
@@ -1854,14 +1856,19 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
       }
 
       .assistant__privacy > summary {
-        width: fit-content;
+        width: max-content;
         min-height: 44px;
         padding: 0 var(--space-2);
         border-radius: var(--radius-sm);
         color: var(--text-secondary);
         font-size: var(--text-xs);
         line-height: var(--button-control-height);
+        white-space: nowrap;
         cursor: pointer;
+      }
+
+      .assistant__privacy {
+        flex: 0 0 auto;
       }
 
       .assistant__privacy > summary:hover {
@@ -1875,20 +1882,46 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
       }
 
       .assistant__privacy .assistant__voice-note {
-        margin-top: var(--space-2);
+        position: absolute;
+        right: 0;
+        bottom: calc(100% + var(--space-2));
+        z-index: 3;
+        width: min(22rem, calc(100% - 2 * var(--space-3)));
+        margin: 0;
+        box-shadow: var(--shadow-md);
       }
 
-      .assistant__consent {
+      .assistant__prompt-shell {
+        position: relative;
+        min-width: 0;
+      }
+
+      .assistant__field-tools {
+        position: absolute;
+        right: var(--space-2);
+        bottom: var(--space-1);
+        left: var(--space-2);
+        z-index: 1;
         display: flex;
-        align-items: flex-start;
-        gap: var(--space-3);
-        min-height: 44px;
+        align-items: center;
+        justify-content: flex-end;
+        gap: var(--space-1);
+        min-width: 0;
+        min-height: var(--button-control-height);
+      }
+
+      .assistant__voice-warning {
+        display: flex;
+        align-items: center;
+        flex: 1 1 auto;
+        min-width: 0;
+        min-height: var(--button-control-height);
         color: var(--text-secondary);
         font-size: var(--text-xs);
-        line-height: var(--leading-normal);
+        line-height: 1.1;
+        overflow-wrap: anywhere;
       }
 
-      .assistant__consent input,
       .assistant__field input[type='checkbox'] {
         width: 20px;
         height: 20px;
@@ -1938,7 +1971,13 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
       }
 
       .assistant__input-group .assistant__prompt {
-        min-height: 132px;
+        display: block;
+        height: 116px;
+        min-height: 116px;
+        max-height: 240px;
+        resize: none;
+        overflow-y: hidden;
+        padding-bottom: calc(var(--button-control-height) + var(--space-3));
         border-radius: var(--radius-lg);
         border-color: color-mix(in srgb, var(--primary) 24%, var(--border-default));
         background: color-mix(in srgb, var(--primary) 3%, var(--bg-primary));
@@ -1955,17 +1994,17 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
       }
 
       .assistant__input-group .assistant__prompt:focus-visible {
-        border-color: var(--primary);
+        border-color: var(--border-default);
         background: var(--bg-primary);
-        box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 16%, transparent);
+        box-shadow: none;
+        outline-offset: 1px;
       }
 
       .assistant__input-group textarea:focus-visible,
       .assistant__refine textarea:focus-visible,
       .assistant__field input:focus-visible,
       .assistant__field textarea:focus-visible,
-      .assistant__field select:focus-visible,
-      .assistant__consent input:focus-visible {
+      .assistant__field select:focus-visible {
         outline: 2px solid var(--primary);
         outline-offset: 2px;
       }
@@ -2004,6 +2043,12 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
         flex-wrap: wrap;
         justify-content: flex-end;
         gap: var(--space-2);
+      }
+
+      .assistant__voice-controls {
+        flex: 0 0 auto;
+        flex-wrap: nowrap;
+        gap: var(--space-1);
       }
 
       .assistant__status,
@@ -2533,7 +2578,6 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
   readonly refiningActionIds = signal<string[]>([]);
   readonly refinementBatchScope = signal<AssistantBatchRefinementScope | null>(null);
   readonly refinementScopeValue = signal(ACTION_REFINEMENT_SCOPE);
-  readonly voiceConsent = signal(false);
   readonly voiceState = signal<'idle' | 'listening' | 'paused' | 'error'>('idle');
   readonly voiceStopPending = signal(false);
   readonly voiceError = signal<TranslationKey | null>(null);
@@ -2614,9 +2658,40 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
   }
 
   updatePrompt(event: Event): void {
-    this.prompt.set((event.target as HTMLTextAreaElement).value);
+    const prompt = event.target as HTMLTextAreaElement;
+    this.prompt.set(prompt.value);
+    this.resizePrompt();
     this.promptError.set(null);
     this.errorKey.set(null);
+  }
+
+  @HostListener('window:resize')
+  onViewportResize(): void {
+    this.resizePrompt();
+  }
+
+  private resizePrompt(value?: string): void {
+    const prompt = this.composePrompt?.nativeElement;
+    if (!prompt) return;
+    if (value !== undefined) prompt.value = value;
+
+    prompt.style.height = 'auto';
+    const styles = getComputedStyle(prompt);
+    const minimumHeight = Number.parseFloat(styles.minHeight);
+    const maximumHeight = Number.parseFloat(styles.maxHeight);
+    const borderHeight =
+      Number.parseFloat(styles.borderTopWidth) + Number.parseFloat(styles.borderBottomWidth);
+    const contentHeight =
+      styles.boxSizing === 'border-box'
+        ? prompt.scrollHeight
+        : prompt.scrollHeight + (Number.isFinite(borderHeight) ? borderHeight : 0);
+    const height = Math.min(
+      Number.isFinite(maximumHeight) ? maximumHeight : contentHeight,
+      Math.max(Number.isFinite(minimumHeight) ? minimumHeight : 0, contentHeight)
+    );
+
+    prompt.style.height = String(height) + 'px';
+    prompt.style.overflowY = contentHeight > height ? 'auto' : 'hidden';
   }
 
   propose(): void {
@@ -5303,16 +5378,8 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
     );
   }
 
-  setVoiceConsent(consented: boolean): void {
-    this.voiceConsent.set(consented);
-    if (!consented) {
-      this.cancelVoice();
-      this.voiceError.set(null);
-    }
-  }
-
   startVoice(): void {
-    if (!this.voiceConsent() || this.recognition) return;
+    if (this.recognition) return;
     const Recognition = this.speechRecognitionConstructor();
     if (!Recognition) {
       this.showVoiceError('ai_assistant.voice_unsupported');
@@ -5326,16 +5393,17 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
       recognition.interimResults = true;
       recognition.lang = this.i18n.resolved() === 'es' ? 'es-ES' : 'en-GB';
       recognition.onresult = (event) => {
-        if (this.recognition !== recognition || !this.voiceConsent()) return;
+        if (this.recognition !== recognition) return;
         const transcript = Array.from(event.results)
           .map((result) => result[0]?.transcript ?? '')
           .join(' ')
           .trimStart();
         hasVoiceTranscript ||= transcript.trim().length > 0;
         this.prompt.set(transcript);
+        this.resizePrompt(transcript);
       };
       recognition.onerror = (event) => {
-        if (this.recognition !== recognition || !this.voiceConsent()) return;
+        if (this.recognition !== recognition) return;
         this.voiceStopPending.set(false);
         this.supportsPause.set(false);
         this.showVoiceError(this.mapVoiceError(event.error));
@@ -5410,6 +5478,7 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
             ? this.composePrompt?.nativeElement
             : this.stageHeading?.nativeElement;
         focusTarget?.focus();
+        if (stage === 'compose') this.resizePrompt();
       },
       {
         injector: this.injector

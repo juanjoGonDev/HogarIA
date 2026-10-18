@@ -161,12 +161,11 @@ describe('AiActionAssistantDialogComponent', () => {
       '[data-test="ai-assistant-prompt"]'
     ) as HTMLTextAreaElement;
     expect(prompt.getAttribute('placeholder')).toBe(
-      'Pídele a la IA qué quieres hacer.\nEjemplos:\n• Añade leche a la compra.\n• Crea una tarea para el viernes.'
+      'Pídele a la IA qué hacer.\nEj.: añade leche o crea una tarea.'
     );
-    expect(prompt.getAttribute('aria-describedby')).toBe('ai-assistant-prompt-help');
-    expect(compose.querySelector('#ai-assistant-prompt-help')?.textContent?.trim()).toBe(
-      'Revisarás cada propuesta antes de confirmar.'
-    );
+    expect(prompt.getAttribute('aria-describedby')).toBeNull();
+    expect(compose.querySelector('#ai-assistant-prompt-help')).toBeNull();
+    expect(compose.querySelector('.assistant__input-meta')).toBeNull();
 
     const disclosure = compose.querySelector('details.assistant__privacy') as HTMLDetailsElement;
     expect(disclosure).not.toBeNull();
@@ -174,14 +173,83 @@ describe('AiActionAssistantDialogComponent', () => {
     expect(disclosure.querySelector('summary')?.textContent).toContain('Ver más');
     expect(disclosure.textContent).toContain('puede procesar el audio fuera de tu dispositivo');
 
-    const consent = compose.querySelector('.assistant__consent') as HTMLLabelElement;
-    expect(consent.textContent).toContain('fuera del dispositivo');
+    const warning = compose.querySelector('.assistant__voice-warning') as HTMLElement;
+    expect(warning.textContent).toContain('puede salir del dispositivo');
+    expect(compose.querySelector('.assistant__consent')).toBeNull();
     const micButton = compose.querySelector('[data-test="ai-assistant-voice-start"] button');
     expect(micButton?.querySelector('app-icon[name="mic"]')).not.toBeNull();
     expect(micButton?.querySelector('.visually-hidden')?.textContent?.trim()).toBe(
       'Dictar petición'
     );
-    expect((micButton as HTMLButtonElement | null)?.disabled).toBeTrue();
+    expect((micButton as HTMLButtonElement | null)?.disabled).toBeFalse();
+  });
+
+  it('keeps the voice warning beside dictation and grows the compact prompt only as needed', () => {
+    mountWithSpeech(FakeSpeechRecognition);
+    const compose = fixture.nativeElement.querySelector(
+      '[data-test="ai-assistant-compose"]'
+    ) as HTMLElement;
+    const prompt = compose.querySelector(
+      '[data-test="ai-assistant-prompt"]'
+    ) as HTMLTextAreaElement;
+    const tools = compose.querySelector('.assistant__field-tools') as HTMLElement | null;
+    const warning = compose.querySelector('.assistant__voice-warning') as HTMLElement | null;
+    const privacy = compose.querySelector('.assistant__privacy') as HTMLElement | null;
+    const voiceControls = compose.querySelector('.assistant__voice-controls') as HTMLElement | null;
+    const micButton = compose.querySelector('[data-test="ai-assistant-voice-start"] button');
+
+    expect(tools).not.toBeNull();
+    expect(warning?.parentElement).toBe(tools);
+    expect(compose.querySelector('.assistant__consent')).toBeNull();
+    expect(privacy?.parentElement).toBe(tools);
+    expect(voiceControls?.parentElement).toBe(tools);
+    expect(micButton?.closest('.assistant__voice-controls')).toBe(voiceControls);
+    expect(prompt.getBoundingClientRect().height).toBeLessThan(132);
+
+    const styles = getComputedStyle(prompt);
+    const minimumHeight = Number.parseFloat(styles.minHeight);
+    const maximumHeight = Number.parseFloat(styles.maxHeight);
+    let measuredContentHeight = minimumHeight;
+    Object.defineProperty(prompt, 'scrollHeight', {
+      configurable: true,
+      get: () => measuredContentHeight
+    });
+
+    prompt.value = 'Añade leche a la compra';
+    measuredContentHeight = minimumHeight + 32;
+    prompt.dispatchEvent(new Event('input', { bubbles: true }));
+    fixture.detectChanges();
+    expect(Number.parseFloat(prompt.style.height)).toBeGreaterThan(minimumHeight);
+    expect(prompt.style.overflowY).toBe('hidden');
+
+    prompt.value = 'Texto largo '.repeat(200);
+    measuredContentHeight = maximumHeight + 80;
+    prompt.dispatchEvent(new Event('input', { bubbles: true }));
+    fixture.detectChanges();
+    expect(Number.parseFloat(prompt.style.height)).toBeLessThanOrEqual(maximumHeight);
+    expect(prompt.style.overflowY).toBe('auto');
+
+    prompt.value = '';
+    measuredContentHeight = minimumHeight;
+    prompt.dispatchEvent(new Event('input', { bubbles: true }));
+    fixture.detectChanges();
+    expect(Number.parseFloat(prompt.style.height)).toBe(minimumHeight);
+    expect(prompt.style.overflowY).toBe('hidden');
+  });
+
+  it('associates prompt validation with the field without adding helper copy', () => {
+    mountWithSpeech(FakeSpeechRecognition);
+    const prompt = fixture.nativeElement.querySelector(
+      '[data-test="ai-assistant-prompt"]'
+    ) as HTMLTextAreaElement;
+
+    component.propose();
+    fixture.detectChanges();
+
+    expect(prompt.getAttribute('aria-describedby')).toBe('ai-assistant-prompt-error');
+    const error = fixture.nativeElement.querySelector('#ai-assistant-prompt-error') as HTMLElement;
+    expect(error.getAttribute('role')).toBe('alert');
+    expect(error.textContent).toContain('Escribe una petición');
   });
 
   it('keeps interpretation and review read-only until the final explicit confirmation', async () => {
@@ -1602,37 +1670,39 @@ describe('AiActionAssistantDialogComponent', () => {
     expect(document.body.style.overflow).toBe(bodyOverflowBeforeFixture);
   });
 
-  it('starts browser recognition only after voice consent and keeps transcript editable', () => {
+  it('starts browser recognition with one microphone click and keeps transcript editable', () => {
     const recognitions = mountWithSpeech(FakeSpeechRecognition);
+    const micButton = fixture.nativeElement.querySelector(
+      '[data-test="ai-assistant-voice-start"] button'
+    ) as HTMLButtonElement;
 
-    expect(
-      (
-        fixture.nativeElement.querySelector(
-          '[data-test="ai-assistant-voice-start"] button'
-        ) as HTMLButtonElement
-      ).disabled
-    ).toBeTrue();
-    component.startVoice();
+    expect(micButton.disabled).toBeFalse();
     expect(recognitions.length).toBe(0);
 
-    component.voiceConsent.set(true);
-    fixture.detectChanges();
     click('[data-test="ai-assistant-voice-start"]');
     fixture.detectChanges();
     expect(recognitions.length).toBe(1);
     expect(recognitions[0].started).toBeTrue();
     expect(component.voiceState()).toBe('listening');
+    expect(fixture.nativeElement.querySelector('.assistant__voice-warning')).toBeNull();
+
+    const prompt = fixture.nativeElement.querySelector(
+      '[data-test="ai-assistant-prompt"]'
+    ) as HTMLTextAreaElement;
+    const minimumHeight = Number.parseFloat(getComputedStyle(prompt).minHeight);
+    Object.defineProperty(prompt, 'scrollHeight', {
+      configurable: true,
+      get: () => (prompt.value.length > 10 ? minimumHeight + 40 : minimumHeight)
+    });
 
     recognitions[0].onresult?.({
       results: [{ 0: { transcript: 'Añade garbanzos' }, isFinal: false }]
     });
     fixture.detectChanges();
     expect(component.prompt()).toBe('Añade garbanzos');
+    expect(Number.parseFloat(prompt.style.height)).toBeGreaterThan(minimumHeight);
     expect(assistant.propose).not.toHaveBeenCalled();
 
-    const prompt = fixture.nativeElement.querySelector(
-      '[data-test="ai-assistant-prompt"]'
-    ) as HTMLTextAreaElement;
     prompt.value = 'Añade 500 g de garbanzos';
     prompt.dispatchEvent(new Event('input', { bubbles: true }));
     fixture.detectChanges();
@@ -1641,7 +1711,6 @@ describe('AiActionAssistantDialogComponent', () => {
 
   it('keeps the final speech result emitted after stopping recognition', () => {
     const recognitions = mountWithSpeech(FakeSpeechRecognition);
-    component.voiceConsent.set(true);
     component.startVoice();
     const recognition = recognitions[0];
     recognition.onresult?.({
@@ -1662,7 +1731,6 @@ describe('AiActionAssistantDialogComponent', () => {
 
   it('aborts pending finalization and ignores any later speech result when cancelled', () => {
     const recognitions = mountWithSpeech(FakeSpeechRecognition);
-    component.voiceConsent.set(true);
     component.startVoice();
     const recognition = recognitions[0];
 
@@ -1678,7 +1746,6 @@ describe('AiActionAssistantDialogComponent', () => {
 
   it('stops voice recognition on navigation while preserving its editable transcript', () => {
     const recognitions = mountWithSpeech(FakeSpeechRecognition);
-    component.voiceConsent.set(true);
     component.startVoice();
     const recognition = recognitions[0];
     recognition.onresult?.({
@@ -1697,7 +1764,6 @@ describe('AiActionAssistantDialogComponent', () => {
 
   it('ignores end events from a cancelled recognition after a new voice session starts', () => {
     const recognitions = mountWithSpeech(FakeSpeechRecognition);
-    component.voiceConsent.set(true);
     component.startVoice();
     const cancelledRecognition = recognitions[0];
     component.cancelVoice();
@@ -1711,21 +1777,15 @@ describe('AiActionAssistantDialogComponent', () => {
     expect(component.supportsPause()).toBeTrue();
   });
 
-  it('aborts active speech recognition as soon as voice consent is revoked', () => {
+  it('aborts active speech recognition on cancel and ignores later transcripts', () => {
     const recognitions = mountWithSpeech(FakeSpeechRecognition);
-    component.voiceConsent.set(true);
     component.startVoice();
     fixture.detectChanges();
     expect(component.voiceState()).toBe('listening');
 
-    const consent = fixture.nativeElement.querySelector(
-      '.assistant__consent input'
-    ) as HTMLInputElement;
-    consent.checked = false;
-    consent.dispatchEvent(new Event('change', { bubbles: true }));
+    component.cancelVoice();
     fixture.detectChanges();
 
-    expect(component.voiceConsent()).toBeFalse();
     expect(component.voiceState()).toBe('idle');
     expect(recognitions[0].aborted).toBeTrue();
 
@@ -2353,7 +2413,6 @@ describe('AiActionAssistantDialogComponent', () => {
 
   it('exposes optional pause/resume and aborts recognition on cancel', () => {
     const recognitions = mountWithSpeech(FakeSpeechRecognition);
-    component.voiceConsent.set(true);
     component.startVoice();
     component.pauseVoice();
     expect(component.voiceState()).toBe('paused');
@@ -2370,7 +2429,6 @@ describe('AiActionAssistantDialogComponent', () => {
 
   it('reports an error when recognition ends without a transcript', () => {
     const recognitions = mountWithSpeech(FakeSpeechRecognition);
-    component.voiceConsent.set(true);
     component.startVoice();
 
     recognitions[0].onend?.();
@@ -2391,7 +2449,6 @@ describe('AiActionAssistantDialogComponent', () => {
 
     for (const [error, expected] of cases) {
       const recognitions = mountWithSpeech(FakeSpeechRecognition);
-      component.voiceConsent.set(true);
       component.startVoice();
       recognitions[0].onerror?.({ error });
       fixture.detectChanges();
@@ -2404,7 +2461,6 @@ describe('AiActionAssistantDialogComponent', () => {
 
   it('offers browser and OS dictation alternatives when the speech service fails', () => {
     const recognitions = mountWithSpeech(FakeSpeechRecognition);
-    component.voiceConsent.set(true);
     component.startVoice();
     recognitions[0].onerror?.({ error: 'network' });
     fixture.detectChanges();
@@ -2418,7 +2474,6 @@ describe('AiActionAssistantDialogComponent', () => {
 
   it('reports denied microphone permission and falls back to text when unsupported', () => {
     const recognitions = mountWithSpeech(FakeSpeechRecognition);
-    component.voiceConsent.set(true);
     component.startVoice();
     recognitions[0].onerror?.({ error: 'not-allowed' });
     fixture.detectChanges();

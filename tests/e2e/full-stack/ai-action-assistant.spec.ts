@@ -1102,13 +1102,15 @@ test('asistente global: conserva el resultado final al parar dictado y descarta 
   await expect(dialog.locator('.assistant__voice-note')).toContainText(
     'procesar el audio fuera de tu dispositivo'
   );
-  await expect(voiceControls.getByRole('button', { name: 'Dictar petición' })).toBeDisabled();
+  const voiceWarning = dialog.locator('.assistant__voice-warning');
+  await expect(voiceWarning).toBeVisible();
+  await expect(voiceControls.getByRole('button', { name: 'Dictar petición' })).toBeEnabled();
 
-  await dialog.locator('.assistant__consent input').check();
   await voiceControls.getByRole('button', { name: 'Dictar petición' }).click();
   await expect(
     dialog.getByRole('status').filter({ hasText: 'Escuchando; puedes corregir la transcripción' })
   ).toBeVisible();
+  await expect(voiceWarning).toBeHidden();
   const recognitionStarted = await page.evaluate(() =>
     Boolean(
       (window as typeof window & { __assistantSpeechRecognition?: BrowserSpeechStubControl })
@@ -1160,6 +1162,7 @@ test('asistente global: conserva el resultado final al parar dictado y descarta 
     ).__assistantSpeechRecognition?.finish();
   });
   await expect(finalizing).toHaveCount(0);
+  await expect(voiceWarning).toBeVisible();
   await expect(
     dialog.getByRole('status').filter({ hasText: 'Escuchando; puedes corregir la transcripción' })
   ).toHaveCount(0);
@@ -1403,7 +1406,10 @@ test('asistente global: lote revisable, refino aislado y aprobación selectiva r
   const privacySummaryBounds = await privacySummary.boundingBox();
   expect(privacySummaryBounds?.height ?? 0).toBeGreaterThanOrEqual(44);
   await expect(compose.locator('.assistant__voice-note')).toBeHidden();
-  await expect(compose.locator('.assistant__consent')).toContainText('fuera del dispositivo');
+  await expect(compose.locator('.assistant__voice-warning')).toHaveText(
+    'El audio puede salir del dispositivo.'
+  );
+  await expect(compose.locator('input[type="checkbox"]')).toHaveCount(0);
   const prompt = compose.locator('[data-test="ai-assistant-prompt"]');
   const promptStyles = await prompt.evaluate((element) => {
     const styles = getComputedStyle(element);
@@ -4859,7 +4865,6 @@ test('asistente global: cerrar aborta el dictado y descarta callbacks tardíos',
   const dialog = page.locator('.modal[role="dialog"]');
   await expect(dialog).toBeVisible();
   const voiceControls = dialog.locator('.assistant__voice-controls');
-  await dialog.locator('.assistant__consent input').check();
   await voiceControls.getByRole('button', { name: 'Dictar petición' }).click();
   await expect(
     dialog.getByRole('status').filter({ hasText: 'Escuchando; puedes corregir la transcripción' })
@@ -4907,7 +4912,6 @@ test('asistente global: muestra error si el dictado termina sin transcripción',
 
   const dialog = page.locator('.modal[role="dialog"]');
   const voiceControls = dialog.locator('.assistant__voice-controls');
-  await dialog.locator('.assistant__consent input').check();
   await voiceControls.getByRole('button', { name: 'Dictar petición' }).click();
   await expect(
     dialog.getByRole('status').filter({ hasText: 'Escuchando; puedes corregir la transcripción' })
@@ -4953,7 +4957,6 @@ test('asistente global: guía si falla el servicio de dictado del navegador', as
 
   const dialog = page.locator('.modal[role="dialog"]');
   const voiceControls = dialog.locator('.assistant__voice-controls');
-  await dialog.locator('.assistant__consent input').check();
   await voiceControls.getByRole('button', { name: 'Dictar petición' }).click();
   await expect(
     dialog.getByRole('status').filter({ hasText: 'Escuchando; puedes corregir la transcripción' })
@@ -4998,7 +5001,6 @@ test('asistente global: traduce el fallback de dictado al inglés', async ({ pag
   await expect(privacy).toHaveJSProperty('open', false);
   await expect(privacy.locator('summary')).toContainText('Learn more');
   await expect(dialog.locator('.assistant__voice-note')).toBeHidden();
-  await dialog.locator('.assistant__consent input').check();
   const voiceControls = dialog.locator('.assistant__voice-controls');
   await voiceControls.getByRole('button', { name: 'Dictate request' }).click();
   await expect(
@@ -5054,7 +5056,6 @@ test('asistente global: navegar durante dictado libera voz y conserva el borrado
   const dialog = page.locator('.modal[role="dialog"]');
   const voiceControls = dialog.locator('.assistant__voice-controls');
   const prompt = dialog.locator('[data-test="ai-assistant-prompt"]');
-  await dialog.locator('.assistant__consent input').check();
   await voiceControls.getByRole('button', { name: 'Dictar petición' }).click();
   await expect(
     dialog.getByRole('status').filter({ hasText: 'Escuchando; puedes corregir la transcripción' })
