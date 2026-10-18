@@ -5615,6 +5615,40 @@ type HeapRetainerSearchLimits = {
   maxDepth?: number;
 };
 
+const defaultHeapRetainerSearchLimits = { maxVisitedNodes: 10_000, maxDepth: 12 } as const;
+
+function parseHeapRetainerSearchLimits(
+  env: Record<string, string | undefined> = process.env
+): Required<HeapRetainerSearchLimits> {
+  const parseLimit = (key: string, fallback: number, minimum: number, maximum: number) => {
+    const raw = env[key];
+    if (raw === undefined) return fallback;
+    if (!/^(0|[1-9][0-9]*)$/.test(raw)) {
+      throw new Error(`${key} must be an integer between ${minimum} and ${maximum}.`);
+    }
+    const value = Number(raw);
+    if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
+      throw new Error(`${key} must be an integer between ${minimum} and ${maximum}.`);
+    }
+    return value;
+  };
+
+  return {
+    maxVisitedNodes: parseLimit(
+      'HOGARIA_AI_ASSISTANT_HEAP_RETAINER_MAX_NODES',
+      defaultHeapRetainerSearchLimits.maxVisitedNodes,
+      1,
+      100_000
+    ),
+    maxDepth: parseLimit(
+      'HOGARIA_AI_ASSISTANT_HEAP_RETAINER_MAX_DEPTH',
+      defaultHeapRetainerSearchLimits.maxDepth,
+      0,
+      64
+    )
+  };
+}
+
 type HeapObjectCountSummary = {
   counts: Record<string, { count: number; selfSizeBytes: number }>;
   contextObjectIds: Set<number>;
@@ -6089,6 +6123,63 @@ test('asistente global: informa límite de nodos y profundidad de retainers', ()
   });
 });
 
+test('asistente global: amplía retainers con límites opt-in acotados y detecta rutas profundas', () => {
+  const nodeLimitKey = 'HOGARIA_AI_ASSISTANT_HEAP_RETAINER_MAX_NODES';
+  const depthLimitKey = 'HOGARIA_AI_ASSISTANT_HEAP_RETAINER_MAX_DEPTH';
+  expect(parseHeapRetainerSearchLimits({})).toEqual({ maxVisitedNodes: 10_000, maxDepth: 12 });
+  expect(
+    parseHeapRetainerSearchLimits({ [nodeLimitKey]: '100000', [depthLimitKey]: '64' })
+  ).toEqual({ maxVisitedNodes: 100_000, maxDepth: 64 });
+  expect(parseHeapRetainerSearchLimits({ [nodeLimitKey]: '1', [depthLimitKey]: '0' })).toEqual({
+    maxVisitedNodes: 1,
+    maxDepth: 0
+  });
+  expect(() => parseHeapRetainerSearchLimits({ [nodeLimitKey]: '0' })).toThrow(nodeLimitKey);
+  expect(() => parseHeapRetainerSearchLimits({ [nodeLimitKey]: '100001' })).toThrow(nodeLimitKey);
+  expect(() => parseHeapRetainerSearchLimits({ [nodeLimitKey]: '99999999999999999999' })).toThrow(
+    nodeLimitKey
+  );
+  expect(() => parseHeapRetainerSearchLimits({ [depthLimitKey]: '65' })).toThrow(depthLimitKey);
+  expect(() => parseHeapRetainerSearchLimits({ [depthLimitKey]: '1e2' })).toThrow(depthLimitKey);
+
+  const depth = 14;
+  const names = ['(GC roots)', ...Array.from({ length: depth }, (_, index) => `retainer ${index}`)];
+  const strings = [...names, 'retains'];
+  const nodeStride = 5;
+  const snapshot: ChromeHeapSnapshot = {
+    snapshot: {
+      meta: {
+        node_fields: ['type', 'name', 'id', 'self_size', 'edge_count'],
+        node_types: [['synthetic', 'object']],
+        edge_fields: ['type', 'name_or_index', 'to_node'],
+        edge_types: [['property']]
+      }
+    },
+    nodes: names.flatMap((name, index) => [
+      index === 0 ? 0 : 1,
+      strings.indexOf(name),
+      index + 1,
+      0,
+      index < depth ? 1 : 0
+    ]),
+    edges: Array.from({ length: depth }, (_, ownerIndex) => [
+      0,
+      strings.indexOf('retains'),
+      (ownerIndex + 1) * nodeStride
+    ]).flat(),
+    strings
+  };
+  expect(findHeapRetainerPath(snapshot, depth).truncationReason).toBe('depth-limit');
+  const expandedSearch = findHeapRetainerPath(
+    snapshot,
+    depth,
+    parseHeapRetainerSearchLimits({ [nodeLimitKey]: '100000', [depthLimitKey]: '64' })
+  );
+  expect(expandedSearch.searchTruncated).toBe(false);
+  expect(expandedSearch.maxDepthReached).toBe(depth);
+  expect(expandedSearch.path).toHaveLength(depth + 1);
+});
+
 test('asistente global: mide heap y listeners tras reaperturas repetidas', async ({
   page
 }, testInfo) => {
@@ -6103,6 +6194,7 @@ test('asistente global: mide heap y listeners tras reaperturas repetidas', async
   ).toBe(true);
   const allocationSamplingEnabled = process.env.HOGARIA_AI_ASSISTANT_HEAP_ALLOCATIONS === '1';
   const retainerTracingEnabled = process.env.HOGARIA_AI_ASSISTANT_HEAP_RETAINERS === '1';
+  const retainerSearchLimits = retainerTracingEnabled ? parseHeapRetainerSearchLimits() : undefined;
   const sharedConfirmDialogControl = process.env.HOGARIA_AI_ASSISTANT_HEAP_CONTROL_MODAL === '1';
   expect(
     !allocationSamplingEnabled || requestedReopenings === 40,
@@ -6273,7 +6365,7 @@ test('asistente global: mide heap y listeners tras reaperturas repetidas', async
 
       if (previousSnapshot) {
         const labels = contextSummary.newNodeIndexes.map((nodeIndex) => {
-          const search = findHeapRetainerPath(snapshot, nodeIndex);
+          const search = findHeapRetainerPath(snapshot, nodeIndex, retainerSearchLimits);
           const path = search.path?.map((step) => {
             const offset = step.nodeIndex * stride;
             const type = nodeTypes[snapshot.nodes[offset + typeIndex]];
@@ -6304,6 +6396,7 @@ test('asistente global: mide heap y listeners tras reaperturas repetidas', async
               (previousSnapshot.counts[scopeCountKey]?.count ?? 0),
             newContextCount: contextSummary.newContextCount,
             sampledNewContextCount: contextSummary.newNodeIndexes.length,
+            searchLimits: retainerSearchLimits,
             samplePaths: labels
           })
         );
