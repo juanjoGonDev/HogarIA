@@ -1808,6 +1808,7 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
       .assistant__refine,
       .assistant__confirm {
         display: grid;
+        grid-template-columns: minmax(0, 1fr);
         gap: var(--space-4);
         min-width: 0;
       }
@@ -2142,12 +2143,14 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
 
       .assistant__actions {
         display: grid;
+        grid-template-columns: minmax(0, 1fr);
         gap: var(--space-3);
         min-width: 0;
       }
 
       .assistant__action {
         display: grid;
+        grid-template-columns: minmax(0, 1fr);
         gap: var(--space-3);
         min-width: 0;
         padding: var(--space-4);
@@ -2212,6 +2215,7 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
       .assistant__meal-confirmation,
       .assistant__meal-shopping {
         display: grid;
+        grid-template-columns: minmax(0, 1fr);
         gap: var(--space-3);
         min-width: 0;
         padding: var(--space-3);

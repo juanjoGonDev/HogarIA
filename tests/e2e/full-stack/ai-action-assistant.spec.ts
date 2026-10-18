@@ -3022,6 +3022,11 @@ test('asistente global: propone, refina y confirma comidas con participantes exp
   expect(prematureShoppingPreviewRequests).toBe(0);
   const desktopViewport = page.viewportSize();
   expect(desktopViewport).toBeTruthy();
+  if (testInfo.project.name === 'chromium') {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await review.scrollIntoViewIfNeeded();
+    await capture(page, testInfo, 'meal-proposal-review-1440x900');
+  }
   for (const viewport of [
     { width: 320, height: 568 },
     { width: 568, height: 320 },
@@ -3031,15 +3036,34 @@ test('asistente global: propone, refina y confirma comidas con participantes exp
     await review.scrollIntoViewIfNeeded();
     const geometry = await page.evaluate(() => {
       const body = document.querySelector<HTMLElement>('.modal__body');
+      const overflowingGridTracks = Array.from(
+        body?.querySelectorAll<HTMLElement>(
+          '.assistant__review, .assistant__actions, .assistant__action, .assistant__meal-planner'
+        ) ?? []
+      )
+        .filter((element) => element.scrollWidth > element.clientWidth + 1)
+        .map((element) => ({
+          className: element.className.toString(),
+          clientWidth: element.clientWidth,
+          scrollWidth: element.scrollWidth
+        }));
       return {
         viewportWidth: window.visualViewport?.width ?? window.innerWidth,
         documentWidth: document.documentElement.scrollWidth,
         modalWidth: body?.clientWidth ?? 0,
-        modalScrollWidth: body?.scrollWidth ?? 0
+        modalScrollWidth: body?.scrollWidth ?? 0,
+        overflowingGridTracks
       };
     });
     expect(geometry.documentWidth).toBeLessThanOrEqual(geometry.viewportWidth + 1);
     expect(geometry.modalScrollWidth).toBeLessThanOrEqual(geometry.modalWidth + 1);
+    expect(
+      geometry.overflowingGridTracks,
+      `tracks de rejilla sin overflow en ${viewport.width}×${viewport.height}`
+    ).toEqual([]);
+    if (viewport.width === 320 && viewport.height === 568) {
+      await capture(page, testInfo, 'meal-proposal-review-320x568');
+    }
   }
   await page.setViewportSize(desktopViewport!);
 

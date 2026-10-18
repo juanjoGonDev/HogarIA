@@ -226,7 +226,7 @@ export const aiActionAssistantEs = {
     'Elige quién participará; no se selecciona a nadie por defecto.',
   'ai_assistant.meals.no_members':
     'No hay participantes activos con permiso para ver el calendario.',
-  'ai_assistant.meals.generate': 'Generar borrador de comidas',
+  'ai_assistant.meals.generate': 'Generar borrador',
   'ai_assistant.meals.refine_label': 'Cómo quieres refinar el plan',
   'ai_assistant.meals.refine_placeholder': 'Ej.: cambia las cenas por opciones vegetarianas',
   'ai_assistant.meals.refine': 'Refinar borrador',
@@ -506,7 +506,7 @@ export const aiActionAssistantEn: Record<keyof typeof aiActionAssistantEs, strin
   'ai_assistant.meals.heading': 'Participants and meal proposal',
   'ai_assistant.meals.participants': 'Choose participants; nobody is selected by default.',
   'ai_assistant.meals.no_members': 'No active participants have calendar-view permission.',
-  'ai_assistant.meals.generate': 'Generate meal draft',
+  'ai_assistant.meals.generate': 'Generate draft',
   'ai_assistant.meals.refine_label': 'How would you like to refine the plan',
   'ai_assistant.meals.refine_placeholder': 'E.g. replace dinners with vegetarian options',
   'ai_assistant.meals.refine': 'Refine draft',
