@@ -1,5 +1,5 @@
 import { test, expect, type Page } from './fixtures';
-import { registerUser } from './helpers/auth';
+import { registerAndGoto } from './helpers/auth';
 
 /**
  * El invariant de la tanda 20, escrito como test: **al cambiar de idioma no puede quedar texto del otro**.
@@ -117,7 +117,7 @@ async function elegirIdioma(page: Page, opcion: 'English' | 'Español'): Promise
 
 test.describe('el idioma llega a toda la app', () => {
   test.beforeEach(async ({ page }) => {
-    await registerUser(page, 'Bilingue');
+    await registerAndGoto(page, '/settings', 'Bilingue');
   });
 
   for (const pantalla of PANTALLAS) {

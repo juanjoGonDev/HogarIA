@@ -219,6 +219,8 @@ describe('HouseholdMealPlannerComponent', () => {
     fixture.componentRef.setInput('householdId', 'home-1');
     fixture.componentRef.setInput('canEdit', true);
     fixture.componentRef.setInput('members', members);
+    // Proposal fixtures use this week; pin it so tests do not expire after Monday.
+    component.setWeekFromInput('2026-10-12');
     fixture.detectChanges();
   });
 
