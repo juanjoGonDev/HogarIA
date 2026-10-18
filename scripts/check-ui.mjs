@@ -546,15 +546,22 @@ for (const file of sourceFiles) {
 // sin estado y la regla no lo ve (solo mira botones). Es mas facil de leer aqui que de descubrir en un
 // movil.
 const GLOBAL_STYLES = readFileSync('frontend/src/styles.scss', 'utf8');
+const CALENDAR_STYLES = readFileSync('frontend/src/styles/calendar-feature.scss', 'utf8');
 const SHARED_BUTTON_STYLES = readFileSync(
   'frontend/src/app/shared/components/ui/button/button.component.ts',
   'utf8'
 );
 for (const violation of findButtonGeometryViolations({
   globalStyles: GLOBAL_STYLES,
+  calendarStyles: CALENDAR_STYLES,
   buttonStyles: SHARED_BUTTON_STYLES
 })) {
-  fail('frontend/src/styles.scss', 1, violation.rule, violation.detail);
+  const file = {
+    calendar: 'frontend/src/styles/calendar-feature.scss',
+    button: 'frontend/src/app/shared/components/ui/button/button.component.ts',
+    global: 'frontend/src/styles.scss'
+  }[violation.source];
+  fail(file, 1, violation.rule, violation.detail);
 }
 for (const [what, re] of [
   ['`button { cursor: pointer }`', /button\s*\{[^}]*cursor:\s*pointer/s],

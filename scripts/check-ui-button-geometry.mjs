@@ -51,9 +51,10 @@ function hasAnyDimension(block) {
  * Guard the shared text-action geometry used by app-button and calendar actions.
  * Grid controls and icon-only buttons remain separate functional families.
  */
-export function findButtonGeometryViolations({ globalStyles, buttonStyles }) {
+export function findButtonGeometryViolations({ globalStyles, calendarStyles, buttonStyles }) {
   const violations = [];
-  const add = (detail) => violations.push({ rule: 'button-geometria', detail });
+  const add = (detail, source = 'global') =>
+    violations.push({ rule: 'button-geometria', detail, source });
   const global = normalize(globalStyles);
   const standardHeight = `--button-control-height: ${STANDARD_ACTION_HEIGHT};`;
   const standardWidth = `--calendar-action-width: ${STANDARD_ACTION_WIDTH};`;
@@ -78,24 +79,24 @@ export function findButtonGeometryViolations({ globalStyles, buttonStyles }) {
     ['white-space', 'nowrap']
   ];
   const requiredRules = [
-    [globalStyles, 'button:not([class])', 'botón base sin clase'],
-    [buttonStyles, '.btn--sm, .btn--md, .btn--lg', 'app-button de texto'],
-    [globalStyles, '.cal-btn', 'botón de acción del calendario']
+    [globalStyles, 'button:not([class])', 'botón base sin clase', 'global'],
+    [buttonStyles, '.btn--sm, .btn--md, .btn--lg', 'app-button de texto', 'button'],
+    [calendarStyles, '.cal-btn', 'botón de acción del calendario', 'calendar']
   ];
-  for (const [source, selector, label] of requiredRules) {
-    const block = extractRuleBodies(source, selector)[0];
+  for (const [styles, selector, label, source] of requiredRules) {
+    const block = extractRuleBodies(styles, selector)[0];
     if (!block) {
-      add(`falta la regla base ${selector} (${label})`);
+      add(`falta la regla base ${selector} (${label})`, source);
       continue;
     }
     for (const [property, value] of sharedGeometry) {
       if (!hasDeclaration(block, property, value)) {
-        add(`${selector} debe usar ${property}: ${value}`);
+        add(`${selector} debe usar ${property}: ${value}`, source);
       }
     }
   }
 
-  const calendarTop = extractRuleBodies(globalStyles, '.cal-top')[0] ?? '';
+  const calendarTop = extractRuleBodies(calendarStyles, '.cal-top')[0] ?? '';
   for (const [property, value] of [
     ['--cal-control-size', 'var(--button-control-height)'],
     ['--cal-control-pad-block', 'var(--button-control-padding-block)'],
@@ -103,34 +104,34 @@ export function findButtonGeometryViolations({ globalStyles, buttonStyles }) {
     ['--cal-control-font-size', 'var(--button-control-font-size)']
   ]) {
     if (!hasDeclaration(calendarTop, property, value)) {
-      add(`.cal-top debe heredar ${property}: ${value}`);
+      add(`.cal-top debe heredar ${property}: ${value}`, 'calendar');
     }
   }
 
-  const actionGroup = extractRuleBodies(globalStyles, '.calendar-event-actions')[0] ?? '';
+  const actionGroup = extractRuleBodies(calendarStyles, '.calendar-event-actions')[0] ?? '';
   for (const [property, value] of [
     ['display', 'grid'],
     ['grid-template-columns', 'repeat(auto-fit, var(--calendar-action-width))'],
     ['justify-content', 'end']
   ]) {
     if (!hasDeclaration(actionGroup, property, value)) {
-      add(`.calendar-event-actions debe usar ${property}: ${value}`);
+      add(`.calendar-event-actions debe usar ${property}: ${value}`, 'calendar');
     }
   }
 
   const actionButton =
-    extractRuleBodies(globalStyles, '.calendar-event-actions > .cal-btn')[0] ?? '';
+    extractRuleBodies(calendarStyles, '.calendar-event-actions > .cal-btn')[0] ?? '';
   for (const [property, value] of [
     ['width', 'var(--calendar-action-width)'],
     ['height', 'var(--button-control-height)'],
     ['white-space', 'nowrap']
   ]) {
     if (!hasDeclaration(actionButton, property, value)) {
-      add(`cada acción del evento debe usar ${property}: ${value}`);
+      add(`cada acción del evento debe usar ${property}: ${value}`, 'calendar');
     }
   }
 
-  const mobileActionGroup = extractRuleBodies(globalStyles, '.calendar-event-actions')[1] ?? '';
+  const mobileActionGroup = extractRuleBodies(calendarStyles, '.calendar-event-actions')[1] ?? '';
   if (
     !hasDeclaration(
       mobileActionGroup,
@@ -138,20 +139,22 @@ export function findButtonGeometryViolations({ globalStyles, buttonStyles }) {
       'repeat(2, var(--calendar-action-width))'
     )
   ) {
-    add('el pie del evento debe conservar columnas iguales de dos en móvil');
+    add('el pie del evento debe conservar columnas iguales de dos en móvil', 'calendar');
   }
 
-  for (const [source, selector, label] of [
-    [buttonStyles, '.btn--primary', 'app-button primario'],
-    [buttonStyles, '.btn--outline', 'app-button outline'],
-    [buttonStyles, '.btn--ghost', 'app-button ghost'],
-    [buttonStyles, '.btn--danger', 'app-button peligro'],
-    [buttonStyles, '.btn--secondary', 'app-button secundario'],
-    [globalStyles, '.cal-btn--primary', 'cal-btn primario'],
-    [globalStyles, '.cal-btn--danger', 'cal-btn peligro']
+  for (const [styles, selector, label, source] of [
+    [buttonStyles, '.btn--primary', 'app-button primario', 'button'],
+    [buttonStyles, '.btn--outline', 'app-button outline', 'button'],
+    [buttonStyles, '.btn--ghost', 'app-button ghost', 'button'],
+    [buttonStyles, '.btn--danger', 'app-button peligro', 'button'],
+    [buttonStyles, '.btn--secondary', 'app-button secundario', 'button'],
+    [calendarStyles, '.cal-btn--primary', 'cal-btn primario', 'calendar'],
+    [calendarStyles, '.cal-btn--danger', 'cal-btn peligro', 'calendar']
   ]) {
-    for (const block of extractRuleBodies(source, selector)) {
-      if (hasAnyDimension(block)) add(`${label} no puede sobrescribir geometría compartida`);
+    for (const block of extractRuleBodies(styles, selector)) {
+      if (hasAnyDimension(block)) {
+        add(`${label} no puede sobrescribir geometría compartida`, source);
+      }
     }
   }
 

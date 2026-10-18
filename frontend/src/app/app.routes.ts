@@ -6,7 +6,7 @@ import { InviteComponent } from './features/invite/invite.component';
 import { aiHouseholdSettingsGuard } from './core/guards/ai-household-settings.guard';
 import { householdRequiredGuard } from './core/guards/household-required.guard';
 import { translationBundlesResolver } from './core/i18n/translation-bundles.resolver';
-import { householdFeatureStylesResolver } from './features/household/household-feature-styles.resolver';
+import { routeFeatureStylesResolver } from './core/services/route-feature-styles.resolver';
 
 export const routes: Routes = [
   // Auth routes (no auth required)
@@ -123,6 +123,7 @@ export const routes: Routes = [
       {
         path: 'calendar',
         resolve: {
+          styles: routeFeatureStylesResolver('calendar'),
           translations: translationBundlesResolver(
             'calendar',
             'aiParticipants',
@@ -140,7 +141,7 @@ export const routes: Routes = [
       {
         path: 'household',
         resolve: {
-          styles: householdFeatureStylesResolver,
+          styles: routeFeatureStylesResolver('household'),
           translations: translationBundlesResolver(
             'household',
             'aiConfig',

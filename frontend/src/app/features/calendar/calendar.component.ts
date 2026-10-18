@@ -17,6 +17,7 @@ import { Subscription } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router } from '@angular/router';
 import { CalendarService } from '../../core/services/calendar.service';
+import { RouteFeatureStylesService } from '../../core/services/route-feature-styles.service';
 import { RecipeService } from '../../core/services/recipe.service';
 import { ToastService } from '../../core/services/toast.service';
 import { ConfirmService } from '../../core/services/confirm.service';
@@ -1409,6 +1410,7 @@ export class CalendarComponent implements OnInit {
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly routeFeatureStyles = inject(RouteFeatureStylesService);
   private readonly injector = inject(Injector);
   @ViewChild('mealDeletionAlert') private mealDeletionAlert?: ElementRef<HTMLElement>;
   readonly householdService = inject(HouseholdService);
@@ -1703,6 +1705,8 @@ export class CalendarComponent implements OnInit {
   readonly expectedMeals = computed(() => this.countedDays().length * MEAL_ORDER.length);
 
   constructor() {
+    this.destroyRef.onDestroy(() => this.routeFeatureStyles.releaseStyles('calendar'));
+
     // La vista y la fecha forman una sola unidad de navegación. Leer la URL de
     // forma reactiva permite que Atrás/Adelante restaure ambos valores, no solo
     // que la dirección cambie mientras la pantalla se queda en el estado nuevo.

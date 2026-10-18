@@ -37,6 +37,7 @@ import { IconComponent } from '../../shared/components/ui/icon/icon.component';
 import { TranslatePipe } from '../../core/pipes/translate.pipe';
 import { I18nService } from '../../core/services/i18n.service';
 import { AuthService } from '../../core/services/auth.service';
+import { RouteFeatureStylesService } from '../../core/services/route-feature-styles.service';
 import type { TranslationKey } from '../../core/i18n';
 import {
   householdTabQueryValue,
@@ -49,7 +50,6 @@ import { HouseholdTasksComponent } from './household-tasks.component';
 import { HouseholdMealPlannerComponent } from './household-meal-planner.component';
 import { HouseholdMealSettingsComponent } from './household-meal-settings.component';
 import { HouseholdPlanningAutomationComponent } from './household-planning-automation.component';
-import { HouseholdFeatureStylesService } from './household-feature-styles.service';
 
 type PermissionGroup = 'pantry' | 'recipes' | 'calendar' | 'members' | 'settings';
 type HouseholdPlanningTab = 'meals' | 'tasks' | 'settings';
@@ -1289,7 +1289,7 @@ function completeMemberPermissions(value: unknown, role: MemberRole): MemberPerm
 })
 export class HouseholdComponent implements OnInit, OnDestroy {
   private readonly i18n = inject(I18nService);
-  private readonly householdFeatureStyles = inject(HouseholdFeatureStylesService);
+  private readonly routeFeatureStyles = inject(RouteFeatureStylesService);
   private readonly clipboardService = inject(ClipboardService);
   private readonly authService = inject(AuthService);
 
@@ -1436,7 +1436,7 @@ export class HouseholdComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
-    this.householdFeatureStyles.releaseHouseholdStyles();
+    this.routeFeatureStyles.releaseStyles('household');
   }
 
   selectTab(tab: HouseholdTab): void {

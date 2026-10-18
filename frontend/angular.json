@@ -38,6 +38,11 @@
                 "input": "src/styles/household-feature.scss",
                 "bundleName": "household-feature",
                 "inject": false
+              },
+              {
+                "input": "src/styles/calendar-feature.scss",
+                "bundleName": "calendar-feature",
+                "inject": false
               }
             ],
             "scripts": []
@@ -116,7 +121,11 @@
             "tsConfig": "tsconfig.spec.json",
             "inlineStyleLanguage": "scss",
             "assets": ["src/favicon.ico", "src/assets"],
-            "styles": ["src/styles.scss", "src/styles/household-feature.scss"],
+            "styles": [
+              "src/styles.scss",
+              "src/styles/household-feature.scss",
+              "src/styles/calendar-feature.scss"
+            ],
             "scripts": []
           }
         },

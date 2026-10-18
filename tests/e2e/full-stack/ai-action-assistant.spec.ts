@@ -1309,7 +1309,7 @@ test('asistente global: lote revisable, refino aislado y aprobación selectiva r
   householdStyleRequests.length = 0;
   await page.goto('/dashboard');
   expect(householdStyleRequests, 'CSS de Hogar no se descarga en el dashboard').toEqual([]);
-  await expect(page.locator('link[data-household-feature-styles]')).toHaveCount(0);
+  await expect(page.locator('link[data-route-style="household"]')).toHaveCount(0);
   const launcher = page.locator('[data-test="ai-assistant-open"]');
   await expect(launcher).toBeVisible();
   await expect(page.locator('app-ai-action-assistant-launcher')).toHaveCount(1);
@@ -1356,7 +1356,7 @@ test('asistente global: lote revisable, refino aislado y aprobación selectiva r
   ]) {
     await page.goto(route);
     if (route === '/household') {
-      const householdStyle = page.locator('link[data-household-feature-styles]');
+      const householdStyle = page.locator('link[data-route-style="household"]');
       await expect(householdStyle, 'el CSS lazy está listo antes de renderizar Hogar').toHaveCount(
         1
       );
@@ -1367,7 +1367,7 @@ test('asistente global: lote revisable, refino aislado y aprobación selectiva r
     }
     if (route === '/ai-config') {
       await expect(
-        page.locator('link[data-household-feature-styles]'),
+        page.locator('link[data-route-style="household"]'),
         'el CSS de Hogar se libera al salir de la ruta'
       ).toHaveCount(0);
     }
