@@ -1,6 +1,6 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import { test } from './fixtures';
-import { createHousehold, registerAndGoto, registerWithHousehold } from './helpers/auth';
+import { createHousehold, registerUser, registerWithHousehold } from './helpers/auth';
 import { ponTamano } from './helpers/tabla';
 
 /**
@@ -202,40 +202,34 @@ test.describe('Pantry — catalogo de utensilios en tabla', () => {
   });
 });
 
-/**
- * Quien se registra y no crea un hogar se encontraba las dos pestanas vacias: el catalogo solo vivia dentro
- * de un hogar. Desde la tanda de backfill esta ahi desde el registro.
- */
+/** Las rutas de despensa están protegidas hasta que la cuenta cree o se una a un hogar. */
 test.describe('Pantry — utensilios sin hogar', () => {
-  test('el catalogo esta desde el registro y se puede marcar', async ({ page }) => {
-    await registerAndGoto(page, '/pantry?tab=utensils');
-    await expect(page.locator('.utensils')).toBeVisible();
+  test('redirige al setup obligatorio antes de acceder o marcar utensilios', async ({ page }) => {
+    await registerUser(page, 'Utensilios sin hogar');
+    await page.goto('/pantry?tab=utensils');
 
-    await ponTamano(tabla(page), 100);
-    expect(await filas(page).count()).toBeGreaterThanOrEqual(54);
-
-    await casillaDe(filas(page).first()).click();
-    await expect(page.locator('.tab', { hasText: 'Utensilios' })).toContainText('1');
+    await expect(page).toHaveURL(/\/household(?:$|[?#])/);
+    await expect(page.locator('.no-household')).toBeVisible();
+    await expect(page.locator('.utensils')).toHaveCount(0);
   });
 
-  test('crear un hogar se lleva el catalogo personal sin duplicarlo', async ({ page }) => {
-    await registerAndGoto(page, '/pantry?tab=utensils');
-    await expect(page.locator('.utensils')).toBeVisible();
-    await ponTamano(tabla(page), 100);
-
-    const total = await filas(page).count();
-
-    // Se marca por posicion y se comprueba la misma posicion despues del hogar: buscarla por nombre no vale,
-    // hay nombres que se solapan.
-    await casillaDe(filas(page).first()).click();
-    await expect(filas(page).first()).toHaveClass(/utensil-card--owned/);
-
+  test('el catalogo del hogar se marca una vez y persiste tras recargar', async ({ page }) => {
+    await registerUser(page, 'Utensilios hogar');
     await createHousehold(page);
     await page.goto('/pantry?tab=utensils');
     await expect(page.locator('.utensils')).toBeVisible();
     await ponTamano(tabla(page), 100);
 
-    // Mismo numero de filas (no el doble) y la marca sigue en su sitio.
+    const total = await filas(page).count();
+    expect(total).toBeGreaterThanOrEqual(54);
+
+    await casillaDe(filas(page).first()).click();
+    await expect(filas(page).first()).toHaveClass(/utensil-card--owned/);
+    await page.reload();
+    await expect(page.locator('.utensils')).toBeVisible();
+    await ponTamano(tabla(page), 100);
+
+    // Mismo numero de filas y marca persistida; nombres similares hacen fragil buscar por texto.
     await expect(filas(page)).toHaveCount(total);
     await expect(filas(page).first()).toHaveClass(/utensil-card--owned/);
     await expect(page.locator('.tab', { hasText: 'Utensilios' })).toContainText('1');

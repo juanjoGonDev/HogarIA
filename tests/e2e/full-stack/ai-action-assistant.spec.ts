@@ -667,7 +667,7 @@ async function startCancellableAiProvider(retryContent: string) {
   };
 }
 
-function assistantDatabaseSnapshot(): Record<string, string[]> {
+async function assistantDatabaseSnapshot(page: Page): Promise<Record<string, string[]>> {
   const runDirectory = process.env.E2E_RUN_DIR;
   const databasePath = process.env.DATABASE_PATH;
   if (!runDirectory || !databasePath) throw new Error('E2E requiere SQLite temporal aislada');
@@ -681,6 +681,30 @@ function assistantDatabaseSnapshot(): Record<string, string[]> {
     throw new Error('DATABASE_PATH debe permanecer dentro del directorio aislado del test');
   }
 
+  const identity = await page.evaluate(() => {
+    const user = JSON.parse(localStorage.getItem('hogar:v1:current_user') ?? 'null') as {
+      id?: string;
+    } | null;
+    return {
+      userId: user?.id ?? null,
+      token: localStorage.getItem('hogar:v1:auth_token')
+    };
+  });
+  if (!identity.userId || !identity.token) {
+    throw new Error('La instantánea requiere la sesión sintética activa del test');
+  }
+
+  const membershipsResponse = await page.request.get('/api/household/memberships', {
+    headers: { authorization: `Bearer ${identity.token}` }
+  });
+  if (!membershipsResponse.ok()) {
+    throw new Error(`No se pudo resolver el hogar del test (${membershipsResponse.status()})`);
+  }
+  const memberships = (await membershipsResponse.json()) as {
+    data?: { activeHouseholdId?: string | null };
+  };
+  const householdId = memberships.data?.activeHouseholdId ?? null;
+
   const database = new Database(databasePath, { readonly: true, fileMustExist: true });
   try {
     const tables = database
@@ -689,10 +713,48 @@ function assistantDatabaseSnapshot(): Record<string, string[]> {
     return Object.fromEntries(
       tables.map(({ name }) => {
         const quotedName = `"${name.replaceAll('"', '""')}"`;
-        const rows = database.prepare(`SELECT * FROM ${quotedName}`).all() as Record<
-          string,
-          unknown
-        >[];
+        const columns = database.prepare(`PRAGMA table_info(${quotedName})`).all() as Array<{
+          name: string;
+        }>;
+        const columnNames = new Set(columns.map((column) => column.name));
+        const predicates: string[] = [];
+        const values: string[] = [];
+
+        for (const column of ['user_id', 'owner_id', 'author_id', 'created_by', 'updated_by']) {
+          if (columnNames.has(column)) {
+            predicates.push(`${column} = ?`);
+            values.push(identity.userId as string);
+          }
+        }
+        if (columnNames.has('household_id') && householdId) {
+          predicates.push('household_id = ?');
+          values.push(householdId);
+        }
+        if (name === 'users' && columnNames.has('id')) {
+          predicates.push('id = ?');
+          values.push(identity.userId as string);
+        }
+        if (name === 'households' && householdId && columnNames.has('id')) {
+          predicates.push('id = ?');
+          values.push(householdId);
+        }
+
+        // E2E workers share one isolated database. Snapshot only data attributable to
+        // this test's user or active household; otherwise another worker's setup or
+        // writes make a read-only assistant proposal look like a mutation.
+        const hasOwnershipColumn =
+          ['user_id', 'owner_id', 'author_id', 'created_by', 'updated_by', 'household_id'].some(
+            (column) => columnNames.has(column)
+          ) ||
+          ((name === 'users' || name === 'households') && columnNames.has('id'));
+        const where = predicates.length
+          ? ` WHERE ${predicates.join(' OR ')}`
+          : hasOwnershipColumn
+            ? ' WHERE 0'
+            : '';
+        const rows = database
+          .prepare(`SELECT * FROM ${quotedName}${where}`)
+          .all(...values) as Record<string, unknown>[];
         return [name, rows.map((row) => JSON.stringify(row)).sort()];
       })
     );
@@ -837,9 +899,14 @@ async function capture(
 async function assertViewport(page: Page, width: number, height: number, dialogOpen: boolean) {
   await page.setViewportSize({ width, height });
   try {
-    await page.waitForFunction((expectedWidth) => window.innerWidth === expectedWidth, width, {
-      timeout: 5_000
-    });
+    await page.waitForFunction(
+      ({ expectedWidth, mobile }) => {
+        const layoutWidth = mobile ? document.documentElement.clientWidth : window.innerWidth;
+        return layoutWidth === expectedWidth && window.screen.width === expectedWidth;
+      },
+      { expectedWidth: width, mobile: width <= 1023 },
+      { timeout: 5_000 }
+    );
   } catch {
     const actualViewport = await page.evaluate(() => ({
       innerWidth: window.innerWidth,
@@ -871,7 +938,7 @@ async function assertViewport(page: Page, width: number, height: number, dialogO
     }, height);
   }
   const metrics = await page.evaluate((hasDialog) => {
-    const viewportWidth = window.visualViewport?.width ?? window.innerWidth;
+    const viewportWidth = document.documentElement.clientWidth;
     const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
     const fab = document
       .querySelector<HTMLElement>('[data-test="ai-assistant-open"]')
@@ -1844,7 +1911,7 @@ test('asistente global: refina un grupo de dominio o el lote completo sin escrib
   await registerUser(page, 'Asistente refinamiento por ámbitos');
   await createHousehold(page, 'Hogar sintético refinamiento por ámbitos');
   const token = await tokenOf(page);
-  const beforeAssistant = assistantDatabaseSnapshot();
+  const beforeAssistant = await assistantDatabaseSnapshot(page);
   await page.goto('/dashboard');
   await page.locator('[data-test="ai-assistant-open"]').click();
   await page
@@ -1852,7 +1919,7 @@ test('asistente global: refina un grupo de dominio o el lote completo sin escrib
     .fill('Prepara una propuesta de compra y despensa');
   await page.locator('[data-test="ai-assistant-submit"] button').click();
   await expect(page.locator('[data-test="ai-assistant-review"]')).toBeVisible();
-  expect(assistantDatabaseSnapshot()).toEqual(beforeAssistant);
+  expect(await assistantDatabaseSnapshot(page)).toEqual(beforeAssistant);
 
   const groupButton = page.getByRole('button', { name: 'Refinar grupo de Compra' });
   await expect(groupButton).toBeVisible();
@@ -1865,7 +1932,7 @@ test('asistente global: refina un grupo de dominio o el lote completo sin escrib
   await capture(page, testInfo, 'refine-domain-group');
   await page.getByRole('button', { name: 'Actualizar propuestas' }).click();
   await expect(page.locator('[data-test="ai-assistant-review"]')).toBeVisible();
-  expect(assistantDatabaseSnapshot()).toEqual(beforeAssistant);
+  expect(await assistantDatabaseSnapshot(page)).toEqual(beforeAssistant);
   expect(refinementScopes[0]).toEqual({ kind: 'group', domain: 'shopping' });
   await expect(page.locator(`[data-action-id="${ACTION_IDS[0]}"]`)).not.toContainText(
     'Grupo revisado:'
@@ -1883,7 +1950,7 @@ test('asistente global: refina un grupo de dominio o el lote completo sin escrib
   await capture(page, testInfo, 'refine-full-batch');
   await page.getByRole('button', { name: 'Actualizar propuestas' }).click();
   await expect(page.locator('[data-test="ai-assistant-review"]')).toBeVisible();
-  expect(assistantDatabaseSnapshot()).toEqual(beforeAssistant);
+  expect(await assistantDatabaseSnapshot(page)).toEqual(beforeAssistant);
   expect(refinementScopes[1]).toEqual({ kind: 'batch' });
   expect(domainWrites).toEqual([]);
 
@@ -1893,7 +1960,7 @@ test('asistente global: refina un grupo de dominio o el lote completo sin escrib
   await capture(page, testInfo, 'discard-draft-confirmation');
   await discardDialog.getByRole('button', { name: 'Descartar borrador' }).click();
   await expect(page.locator('[data-test="ai-assistant-open"]')).toBeVisible();
-  expect(assistantDatabaseSnapshot()).toEqual(beforeAssistant);
+  expect(await assistantDatabaseSnapshot(page)).toEqual(beforeAssistant);
   expect(domainWrites).toEqual([]);
   expect(await pantryByName(page, token, 'Action QA 01')).toEqual([]);
   expect(await shoppingListsByName(page, token, 'Lista QA confirmada')).toEqual([]);
@@ -1915,12 +1982,12 @@ test('asistente global: cancelar el cierre conserva el borrador ante botón, Esc
   await page.locator('[data-test="ai-assistant-open"]').click();
 
   const assistantDialog = page.getByRole('dialog', { name: 'Asistente' });
-  const databaseBeforeProposal = assistantDatabaseSnapshot();
+  const databaseBeforeProposal = await assistantDatabaseSnapshot(page);
   await page.locator('[data-test="ai-assistant-prompt"]').fill('Añade lentejas a la despensa.');
   await page.locator('[data-test="ai-assistant-submit"] button').click();
   await expect(page.locator('[data-test="ai-assistant-review"]')).toBeVisible();
   await expect(page.locator(`[data-action-id="${ACTION_IDS[0]}"]`)).toContainText('garbanzos');
-  expect(assistantDatabaseSnapshot()).toEqual(databaseBeforeProposal);
+  expect(await assistantDatabaseSnapshot(page)).toEqual(databaseBeforeProposal);
 
   const discardDialog = page.getByRole('dialog', { name: '¿Descartar este borrador?' });
   await page.getByRole('button', { name: 'Cerrar asistente' }).click();
@@ -1967,7 +2034,7 @@ test('asistente global: cancelar el cierre conserva el borrador ante botón, Esc
     .poll(() => page.locator('body').evaluate((body) => body.style.overflow))
     .toBe('hidden');
   await expect(page.locator('[data-test="ai-assistant-review"]')).toBeVisible();
-  expect(assistantDatabaseSnapshot()).toEqual(databaseBeforeProposal);
+  expect(await assistantDatabaseSnapshot(page)).toEqual(databaseBeforeProposal);
 
   await page.getByRole('button', { name: 'Cerrar asistente' }).click();
   await expect(discardDialog).toBeVisible();
@@ -1976,7 +2043,7 @@ test('asistente global: cancelar el cierre conserva el borrador ante botón, Esc
   await expect
     .poll(() => page.locator('body').evaluate((body) => body.style.overflow))
     .toBe(bodyOverflowBeforeAssistant);
-  expect(assistantDatabaseSnapshot()).toEqual(databaseBeforeProposal);
+  expect(await assistantDatabaseSnapshot(page)).toEqual(databaseBeforeProposal);
 });
 
 test('asistente global: ejecuta acciones de todos los dominios solo tras confirmar', async ({
@@ -2179,7 +2246,7 @@ test('asistente global: aprobación parcial conserva dependencia lista-artículo
       ? { width: 1440, height: 900 }
       : { width: 320, height: 568 };
   await page.setViewportSize(viewport);
-  const before = assistantDatabaseSnapshot();
+  const before = await assistantDatabaseSnapshot(page);
 
   const readTaskWeek = async () => {
     const response = await page.request.get('/api/household/tasks?weekStart=2026-10-19', {
@@ -2243,7 +2310,7 @@ test('asistente global: aprobación parcial conserva dependencia lista-artículo
     .poll(async () => (await shoppingListsByName(page, token, 'Lista de dominio QA')).length)
     .toBe(0);
   expect(actionRequests).toEqual([]);
-  expect(assistantDatabaseSnapshot()).toEqual(before);
+  expect(await assistantDatabaseSnapshot(page)).toEqual(before);
 
   await listAction.getByRole('checkbox').click();
   await expect(page.locator('[data-test="ai-assistant-continue"] button')).toBeEnabled();
@@ -2253,7 +2320,7 @@ test('asistente global: aprobación parcial conserva dependencia lista-artículo
   await expect(page.locator('[data-test="ai-assistant-continue"] button')).toBeEnabled();
   await taskAction.getByRole('checkbox').click();
   await expect(page.locator('[data-test="ai-assistant-continue"] button')).toBeEnabled();
-  expect(assistantDatabaseSnapshot()).toEqual(before);
+  expect(await assistantDatabaseSnapshot(page)).toEqual(before);
   await capture(page, testInfo, `shopping-dependency-review-${viewport.width}x${viewport.height}`);
 
   await page.locator('[data-test="ai-assistant-continue"] button').click();
@@ -2267,7 +2334,7 @@ test('asistente global: aprobación parcial conserva dependencia lista-artículo
   await expect(confirmation).not.toContainText('Evento de dominio QA');
   await expect(confirmation).not.toContainText('Receta de dominio QA');
   expect(actionRequests).toEqual([]);
-  expect(assistantDatabaseSnapshot()).toEqual(before);
+  expect(await assistantDatabaseSnapshot(page)).toEqual(before);
   expect(await shoppingListsByName(page, token, 'Lista de dominio QA')).toEqual([]);
   await capture(page, testInfo, `shopping-dependency-confirm-${viewport.width}x${viewport.height}`);
 
@@ -2295,7 +2362,7 @@ test('asistente global: aprobación parcial conserva dependencia lista-artículo
     }
   ]);
 
-  const afterFailure = assistantDatabaseSnapshot();
+  const afterFailure = await assistantDatabaseSnapshot(page);
   expect(afterFailure.shopping_lists).toEqual(before.shopping_lists);
   expect(afterFailure.shopping_list_items).toEqual(before.shopping_list_items);
   expect(afterFailure.ai_jobs ?? []).toEqual(before.ai_jobs ?? []);
@@ -2350,7 +2417,7 @@ test('asistente global: aprobación parcial conserva dependencia lista-artículo
   expect(await readTaskWeek()).toEqual(completedTasks);
   expect(await readEvents()).toEqual([]);
   expect(await readRecipe()).toEqual([]);
-  const afterRetry = assistantDatabaseSnapshot();
+  const afterRetry = await assistantDatabaseSnapshot(page);
   expect(afterRetry.shopping_lists).toHaveLength((before.shopping_lists ?? []).length + 1);
   expect(afterRetry.shopping_list_items).toHaveLength(
     (before.shopping_list_items ?? []).length + 1
@@ -2396,7 +2463,7 @@ test('asistente global: ejecuta primero los prerrequisitos aunque el proveedor i
   await createHousehold(page, 'Hogar orden de dependencias sintético');
   await page.goto('/dashboard');
   const token = await tokenOf(page);
-  const before = assistantDatabaseSnapshot();
+  const before = await assistantDatabaseSnapshot(page);
 
   await page.locator('[data-test="ai-assistant-open"]').click();
   await page
@@ -2411,7 +2478,7 @@ test('asistente global: ejecuta primero los prerrequisitos aunque el proveedor i
   await listAction.getByRole('checkbox').click();
   await itemAction.getByRole('checkbox').click();
   await expect(page.locator('[data-test="ai-assistant-continue"] button')).toBeEnabled();
-  expect(assistantDatabaseSnapshot()).toEqual(before);
+  expect(await assistantDatabaseSnapshot(page)).toEqual(before);
 
   await page.locator('[data-test="ai-assistant-continue"] button').click();
   const confirmation = page.locator('[data-test="ai-assistant-confirm"]');
@@ -2436,7 +2503,7 @@ test('asistente global: ejecuta primero los prerrequisitos aunque el proveedor i
   expect((await savedList.json()).data.items).toEqual(
     expect.arrayContaining([expect.objectContaining({ name: 'Manzanas QA', quantity: 2 })])
   );
-  const after = assistantDatabaseSnapshot();
+  const after = await assistantDatabaseSnapshot(page);
   expect(after.shopping_lists).toHaveLength((before.shopping_lists ?? []).length + 1);
   expect(after.shopping_list_items).toHaveLength((before.shopping_list_items ?? []).length + 1);
   expect(after.ai_jobs ?? []).toEqual(before.ai_jobs ?? []);
@@ -3310,7 +3377,7 @@ test('asistente global: rechazar no escribe y renombrar una lista solo persiste 
     version: seededList.version,
     snapshot: { name: seededList.name, store: seededList.store }
   });
-  const beforeAssistant = assistantDatabaseSnapshot();
+  const beforeAssistant = await assistantDatabaseSnapshot(page);
 
   const readList = async () => {
     const response = await page.request.get(`/api/shopping/lists/${list.id}`, {
@@ -3325,7 +3392,7 @@ test('asistente global: rechazar no escribe y renombrar una lista solo persiste 
   await page.locator('[data-test="ai-assistant-submit"] button').click();
   const review = page.locator('[data-test="ai-assistant-review"]');
   await expect(review).toBeVisible();
-  expect(assistantDatabaseSnapshot()).toEqual(beforeAssistant);
+  expect(await assistantDatabaseSnapshot(page)).toEqual(beforeAssistant);
   await expect(review.locator('[data-test="ai-assistant-shopping-target"]')).toContainText(
     'Compra privada QA'
   );
@@ -3337,7 +3404,7 @@ test('asistente global: rechazar no escribe y renombrar una lista solo persiste 
   await expect(page.getByRole('dialog', { name: '¿Descartar este borrador?' })).toBeVisible();
   await page.getByRole('button', { name: 'Descartar borrador' }).click();
   await expect(review).not.toBeVisible();
-  expect(assistantDatabaseSnapshot()).toEqual(beforeAssistant);
+  expect(await assistantDatabaseSnapshot(page)).toEqual(beforeAssistant);
   expect(await readList()).toMatchObject({ name: 'Compra privada QA', store: 'Lidl' });
   expect(assistantWrites).toEqual([]);
 
@@ -3345,7 +3412,7 @@ test('asistente global: rechazar no escribe y renombrar una lista solo persiste 
   await page.locator('[data-test="ai-assistant-prompt"]').fill('Renombra Compra privada QA.');
   await page.locator('[data-test="ai-assistant-submit"] button').click();
   await expect(review).toBeVisible();
-  expect(assistantDatabaseSnapshot()).toEqual(beforeAssistant);
+  expect(await assistantDatabaseSnapshot(page)).toEqual(beforeAssistant);
   const actionDetails = page.locator(
     '[data-test="ai-assistant-action-details-88888888-8888-4888-8888-888888888888"]'
   );
@@ -3370,7 +3437,7 @@ test('asistente global: rechazar no escribe y renombrar una lista solo persiste 
   await expect(editFields.nth(1)).toBeFocused();
   expect(await readList()).toMatchObject({ name: 'Compra privada QA', store: 'Lidl' });
   expect(assistantWrites).toEqual([]);
-  expect(assistantDatabaseSnapshot()).toEqual(beforeAssistant);
+  expect(await assistantDatabaseSnapshot(page)).toEqual(beforeAssistant);
   await capture(page, testInfo, 'shopping-update-review');
 
   await page.getByRole('button', { name: 'Seleccionar todas' }).click();
@@ -3381,7 +3448,7 @@ test('asistente global: rechazar no escribe y renombrar una lista solo persiste 
   await expect(confirmation).toContainText('Alcampo');
   expect(await readList()).toMatchObject({ name: 'Compra privada QA', store: 'Lidl' });
   expect(assistantWrites).toEqual([]);
-  expect(assistantDatabaseSnapshot()).toEqual(beforeAssistant);
+  expect(await assistantDatabaseSnapshot(page)).toEqual(beforeAssistant);
   await capture(page, testInfo, 'shopping-update-confirm');
 
   await page.locator('[data-test="ai-assistant-confirm-submit"] button').click();
@@ -3703,7 +3770,7 @@ test('asistente global: cancelar propuesta/refino aborta proveedor, no escribe y
     await expect(dialog).toBeVisible();
     await page.getByRole('button', { name: 'Cerrar asistente' }).click();
     await expect(dialog).not.toBeVisible();
-    const before = assistantDatabaseSnapshot();
+    const before = await assistantDatabaseSnapshot(page);
 
     const submitProposal = async () => {
       await page.locator('[data-test="ai-assistant-open"]').click();
@@ -3720,12 +3787,12 @@ test('asistente global: cancelar propuesta/refino aborta proveedor, no escribe y
     await page.getByRole('button', { name: 'Descartar borrador' }).click();
     await expect(page.locator('[data-test="ai-assistant-open"]')).toBeVisible();
     await expect.poll(() => provider.abortedRequests, { timeout: 10_000 }).toBe(1);
-    expect(assistantDatabaseSnapshot()).toEqual(before);
+    expect(await assistantDatabaseSnapshot(page)).toEqual(before);
 
     await submitProposal();
     await expect(page.locator('[data-test="ai-assistant-review"]')).toBeVisible();
     expect(provider.requests).toHaveLength(2);
-    expect(assistantDatabaseSnapshot()).toEqual(before);
+    expect(await assistantDatabaseSnapshot(page)).toEqual(before);
 
     const action = page.locator('[data-action-id]').first();
     await action.locator('[data-test="ai-assistant-refine"] button').click();
@@ -3739,23 +3806,23 @@ test('asistente global: cancelar propuesta/refino aborta proveedor, no escribe y
     await refineButton.dispatchEvent('click');
     await page.waitForTimeout(250);
     expect(provider.requests).toHaveLength(3);
-    expect(assistantDatabaseSnapshot()).toEqual(before);
+    expect(await assistantDatabaseSnapshot(page)).toEqual(before);
     await page.locator('.modal[role="dialog"] .modal__close').click();
     await expect(page.getByRole('dialog', { name: '¿Descartar este borrador?' })).toBeVisible();
     await page.getByRole('button', { name: 'Descartar borrador' }).click();
     await expect(page.locator('[data-test="ai-assistant-open"]')).toBeVisible();
     await expect.poll(() => provider.abortedRequests, { timeout: 10_000 }).toBe(2);
-    expect(assistantDatabaseSnapshot()).toEqual(before);
+    expect(await assistantDatabaseSnapshot(page)).toEqual(before);
 
     await submitProposal();
     await expect(page.locator('[data-test="ai-assistant-review"]')).toBeVisible();
     expect(provider.requests).toHaveLength(4);
-    expect(assistantDatabaseSnapshot()).toEqual(before);
+    expect(await assistantDatabaseSnapshot(page)).toEqual(before);
 
     await page.getByRole('button', { name: 'Cerrar asistente' }).click();
     await expect(page.getByRole('dialog', { name: '¿Descartar este borrador?' })).toBeVisible();
     await page.getByRole('button', { name: 'Descartar borrador' }).click();
-    expect(assistantDatabaseSnapshot()).toEqual(before);
+    expect(await assistantDatabaseSnapshot(page)).toEqual(before);
   } finally {
     await provider.close();
   }
@@ -4882,7 +4949,7 @@ test('asistente global: explica que falta configurar IA sin escribir datos', asy
 
   const dialog = page.locator('.modal[role="dialog"]');
   await expect(dialog).toBeVisible();
-  const databaseBeforeRequest = assistantDatabaseSnapshot();
+  const databaseBeforeRequest = await assistantDatabaseSnapshot(page);
   const proposalResponse = page.waitForResponse((response) => {
     const request = response.request();
     return (
@@ -4911,7 +4978,7 @@ test('asistente global: explica que falta configurar IA sin escribir datos', asy
   expect(errorBounds!.y + errorBounds!.height).toBeLessThanOrEqual(
     bodyBounds!.y + bodyBounds!.height
   );
-  expect(assistantDatabaseSnapshot()).toEqual(databaseBeforeRequest);
+  expect(await assistantDatabaseSnapshot(page)).toEqual(databaseBeforeRequest);
   await capture(page, testInfo, 'missing-ai-provider-error');
 });
 
@@ -4930,7 +4997,7 @@ test('asistente global: muestra en inglés el error de proveedor sin configurar'
     'placeholder',
     'Tell the AI what to do.\nE.g. add milk or create a task.'
   );
-  const databaseBeforeRequest = assistantDatabaseSnapshot();
+  const databaseBeforeRequest = await assistantDatabaseSnapshot(page);
   const proposalResponse = page.waitForResponse((response) => {
     const request = response.request();
     return (
@@ -4957,7 +5024,7 @@ test('asistente global: muestra en inglés el error de proveedor sin configurar'
   expect(errorBounds!.y + errorBounds!.height).toBeLessThanOrEqual(
     bodyBounds!.y + bodyBounds!.height
   );
-  expect(assistantDatabaseSnapshot()).toEqual(databaseBeforeRequest);
+  expect(await assistantDatabaseSnapshot(page)).toEqual(databaseBeforeRequest);
   await capture(page, testInfo, 'missing-ai-provider-error-en');
 });
 
@@ -4988,7 +5055,7 @@ test('asistente global: una ráfaga de envíos genera una sola petición efímer
     const token = await tokenOf(page);
     await configureDeterministicAi(page, token, provider.baseUrl);
 
-    const databaseBeforeProposal = assistantDatabaseSnapshot();
+    const databaseBeforeProposal = await assistantDatabaseSnapshot(page);
     await page.locator('[data-test="ai-assistant-open"]').click();
     await page.locator('[data-test="ai-assistant-prompt"]').fill('Añade lentejas a la despensa.');
     const submit = page.locator('[data-test="ai-assistant-submit"] button');
@@ -5013,7 +5080,7 @@ test('asistente global: una ráfaga de envíos genera una sola petición efímer
     expect(provider.requests).toHaveLength(1);
     await expect(page.locator('[data-test="ai-assistant-review"]')).toBeVisible();
     expect(proposalStatuses).toEqual([200]);
-    expect(assistantDatabaseSnapshot()).toEqual(databaseBeforeProposal);
+    expect(await assistantDatabaseSnapshot(page)).toEqual(databaseBeforeProposal);
   } finally {
     await provider.close();
   }
@@ -5084,7 +5151,7 @@ test('asistente global: muestra error si el dictado termina sin transcripción',
   await registerUser(page, 'Asistente sin transcripción E2E');
   await createHousehold(page, 'Hogar sin transcripción sintético');
   await page.goto('/dashboard');
-  const databaseBeforeVoice = assistantDatabaseSnapshot();
+  const databaseBeforeVoice = await assistantDatabaseSnapshot(page);
   await page.locator('[data-test="ai-assistant-open"]').click();
 
   const dialog = page.locator('.modal[role="dialog"]');
@@ -5115,7 +5182,7 @@ test('asistente global: muestra error si el dictado termina sin transcripción',
     bodyBounds!.y + bodyBounds!.height
   );
   expect(proposalRequests).toBe(0);
-  expect(assistantDatabaseSnapshot()).toEqual(databaseBeforeVoice);
+  expect(await assistantDatabaseSnapshot(page)).toEqual(databaseBeforeVoice);
   await capture(page, testInfo, 'voice-no-transcript-error');
 });
 
@@ -5129,7 +5196,7 @@ test('asistente global: guía si falla el servicio de dictado del navegador', as
   if (testInfo.project.name === 'mobile-chrome') {
     await page.setViewportSize({ width: 320, height: 568 });
   }
-  const databaseBeforeVoice = assistantDatabaseSnapshot();
+  const databaseBeforeVoice = await assistantDatabaseSnapshot(page);
   await page.locator('[data-test="ai-assistant-open"]').click();
 
   const dialog = page.locator('.modal[role="dialog"]');
@@ -5154,7 +5221,7 @@ test('asistente global: guía si falla el servicio de dictado del navegador', as
   await expect(voiceError).toContainText('reconocimiento online');
   await expect(voiceControls.getByRole('button', { name: 'Dictar petición' })).toBeVisible();
   await expect(voiceError).toBeInViewport();
-  expect(assistantDatabaseSnapshot()).toEqual(databaseBeforeVoice);
+  expect(await assistantDatabaseSnapshot(page)).toEqual(databaseBeforeVoice);
   await capture(page, testInfo, 'voice-service-fallback');
 });
 
@@ -5175,7 +5242,7 @@ test('asistente global: conserva texto sin avisos de voz si el navegador no ofre
     await page.setViewportSize({ width: 320, height: 568 });
   }
 
-  const databaseBefore = assistantDatabaseSnapshot();
+  const databaseBefore = await assistantDatabaseSnapshot(page);
   let proposalRequests = 0;
   page.on('request', (request) => {
     if (request.method() === 'POST' && request.url().includes('/api/ai/assistant/proposals')) {
@@ -5198,7 +5265,7 @@ test('asistente global: conserva texto sin avisos de voz si el navegador no ofre
   await prompt.fill('Añade lentejas a la despensa');
   await expect(prompt).toHaveValue('Añade lentejas a la despensa');
   expect(proposalRequests).toBe(0);
-  expect(assistantDatabaseSnapshot()).toEqual(databaseBefore);
+  expect(await assistantDatabaseSnapshot(page)).toEqual(databaseBefore);
   await capture(page, testInfo, 'voice-unsupported-browser');
 });
 
@@ -5209,7 +5276,7 @@ test('asistente global: traduce el fallback de dictado al inglés', async ({ pag
   await page.addInitScript(() => localStorage.setItem('hogar:v1:language', 'en'));
   await page.goto('/dashboard');
 
-  const databaseBeforeVoice = assistantDatabaseSnapshot();
+  const databaseBeforeVoice = await assistantDatabaseSnapshot(page);
   await page.locator('[data-test="ai-assistant-open"]').click();
 
   const dialog = page.getByRole('dialog', { name: 'Assistant' });
@@ -5242,7 +5309,7 @@ test('asistente global: traduce el fallback de dictado al inglés', async ({ pag
   await expect(voiceError).toContainText('Win+H');
   await expect(voiceError).toContainText('online recognition');
   await expect(voiceError).toBeInViewport();
-  expect(assistantDatabaseSnapshot()).toEqual(databaseBeforeVoice);
+  expect(await assistantDatabaseSnapshot(page)).toEqual(databaseBeforeVoice);
   await capture(page, testInfo, 'voice-service-fallback-en');
 });
 
@@ -5288,7 +5355,7 @@ test('asistente global: smoke opt-in con micrófono físico y frase sintética',
   const prompt = dialog.locator('[data-test="ai-assistant-prompt"]');
   const voiceStart = dialog.locator('[data-test="ai-assistant-voice-start"] button');
   const voiceStop = dialog.locator('[data-test="ai-assistant-voice-stop"] button');
-  const databaseBeforeVoice = assistantDatabaseSnapshot();
+  const databaseBeforeVoice = await assistantDatabaseSnapshot(page);
   await voiceStart.click();
   await expect(voiceStop).toBeVisible();
 
@@ -5300,7 +5367,7 @@ test('asistente global: smoke opt-in con micrófono físico y frase sintética',
       .toMatch(/lentejas[\s\S]*despensa/i);
     await voiceStop.click();
     await expect(voiceStart).toBeVisible();
-    expect(assistantDatabaseSnapshot()).toEqual(databaseBeforeVoice);
+    expect(await assistantDatabaseSnapshot(page)).toEqual(databaseBeforeVoice);
     expect(proposalRequests).toBe(0);
   } finally {
     if (await voiceStop.isVisible().catch(() => false)) {
@@ -6436,7 +6503,7 @@ test('asistente global: mide heap y listeners tras reaperturas repetidas', async
     await page.locator('app-modal button[type="submit"]').click();
     await expect(page.locator('.ingredient-item', { hasText: 'Tomate de control' })).toHaveCount(1);
     await expect(page.locator('.toast--success')).toHaveCount(0);
-    sharedModalDatabaseBefore = assistantDatabaseSnapshot();
+    sharedModalDatabaseBefore = await assistantDatabaseSnapshot(page);
   }
 
   const cdp = await page.context().newCDPSession(page);
@@ -6887,7 +6954,7 @@ test('asistente global: mide heap y listeners tras reaperturas repetidas', async
     expect(pantryCategoryRequests).toBe(1);
     if (sharedConfirmDialogControl) {
       expect(sharedModalDatabaseBefore).toBeDefined();
-      expect(assistantDatabaseSnapshot()).toEqual(sharedModalDatabaseBefore);
+      expect(await assistantDatabaseSnapshot(page)).toEqual(sharedModalDatabaseBefore);
       await expect(page.locator('.ingredient-item', { hasText: 'Tomate de control' })).toHaveCount(
         1
       );

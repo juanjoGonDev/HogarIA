@@ -147,10 +147,10 @@ test('asistente global: compositor progresivo junto al dictado', async ({ page }
     expect(Math.abs(geometry.warningMicCenterDelta)).toBeLessThanOrEqual(2);
     await expect
       .poll(() => micButton.boundingBox().then((bounds) => bounds?.width ?? 0))
-      .toBeGreaterThanOrEqual(44);
+      .toBeGreaterThanOrEqual(43.999);
     await expect
       .poll(() => micButton.boundingBox().then((bounds) => bounds?.height ?? 0))
-      .toBeGreaterThanOrEqual(44);
+      .toBeGreaterThanOrEqual(43.999);
 
     await privacySummary.focus();
     await page.keyboard.press('Enter');

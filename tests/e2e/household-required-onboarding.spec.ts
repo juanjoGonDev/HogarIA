@@ -4,12 +4,28 @@ import { join } from 'node:path';
 import { devices, type Browser, type BrowserContext, type Page } from '@playwright/test';
 
 import { test, expect } from './fixtures';
+import { registerAndGoto } from './helpers/auth';
 import { seededEmail } from './helpers/seed';
 
 const TEST_PASSWORD = 'Test1234';
 const INVALID_INVITE = 'INVALID1';
 
 test.use({ serviceWorkers: 'block', trace: 'off', screenshot: 'off', video: 'off' });
+
+test('registerAndGoto creates a household before opening a protected route', async ({ page }) => {
+  await registerAndGoto(page, '/dashboard', 'Fixture hogar protegido');
+
+  await expect(page).toHaveURL(/\/dashboard(?:$|[?#])/);
+  await expect(page.locator('.no-household')).toHaveCount(0);
+
+  const token = await page.evaluate(() => localStorage.getItem('hogar:v1:auth_token'));
+  expect(token).toBeTruthy();
+  const response = await page.request.get('/api/household/memberships', {
+    headers: { authorization: `Bearer ${token}` }
+  });
+  expect(response.status()).toBe(200);
+  expect((await response.json()).data.activeHouseholdId).toBeTruthy();
+});
 
 function localUrl(path: string, baseURL: string): string {
   return new URL(path, baseURL).toString();

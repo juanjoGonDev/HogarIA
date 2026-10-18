@@ -146,9 +146,10 @@ export async function registerWithHousehold(page: Page, path: string, name = 'E2
   await page.goto(path);
 }
 
-/** Registra un usuario y lo deja en `path` (sin hogar). */
+/** Registra un usuario y prepara un hogar al abrir rutas protegidas. */
 export async function registerAndGoto(page: Page, path: string, name = 'E2E'): Promise<string> {
   const email = await registerUser(page, name);
+  if (!/^\/household(?:$|[/?#])/.test(path)) await createHousehold(page);
   await page.goto(path);
   return email;
 }
