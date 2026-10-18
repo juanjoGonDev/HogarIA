@@ -1233,6 +1233,7 @@ test('asistente global: lote revisable, refino aislado y aprobación selectiva r
   const translationWarnings: string[] = [];
   const householdStyleRequests: string[] = [];
   const domainWrites: Array<{ url: string; actionId: string | undefined; body: unknown }> = [];
+  let membershipReads = 0;
   let proposalRequests = 0;
   let refinementRequests = 0;
   let refinementScope: unknown;
@@ -1244,6 +1245,10 @@ test('asistente global: lote revisable, refino aislado y aprobación selectiva r
     }
   });
   page.on('request', (request) => {
+    const requestUrl = new URL(request.url());
+    if (request.method() === 'GET' && requestUrl.pathname === '/api/household/memberships') {
+      membershipReads += 1;
+    }
     if (new URL(request.url()).pathname === '/household-feature.css') {
       householdStyleRequests.push(request.url());
     }
@@ -1307,7 +1312,10 @@ test('asistente global: lote revisable, refino aislado y aprobación selectiva r
   await registerUser(page, 'Asistente global E2E');
   await createHousehold(page, 'Hogar sintético asistente');
   householdStyleRequests.length = 0;
+  membershipReads = 0;
   await page.goto('/dashboard');
+  await page.waitForLoadState('networkidle');
+  expect(membershipReads, 'una sola lectura de membresías al entrar al dashboard').toBe(1);
   expect(householdStyleRequests, 'CSS de Hogar no se descarga en el dashboard').toEqual([]);
   await expect(page.locator('link[data-route-style="household"]')).toHaveCount(0);
   const launcher = page.locator('[data-test="ai-assistant-open"]');

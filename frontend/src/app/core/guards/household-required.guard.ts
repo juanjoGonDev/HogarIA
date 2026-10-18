@@ -12,7 +12,8 @@ export const householdRequiredGuard: CanActivateChildFn = (_route, state) => {
   // This screen is the recovery/onboarding route: members without a home must be able to create or join.
   if (path === '/household' || path.startsWith('/household/')) return of(true);
 
-  return householdService.loadMemberships().pipe(
+  const navigationId = router.getCurrentNavigation()?.id ?? null;
+  return householdService.loadMembershipsForNavigation(navigationId).pipe(
     map((memberships) => {
       const activeHouseholdId = householdService.activeHouseholdId();
       const hasActiveMembership =

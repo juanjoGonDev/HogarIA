@@ -8,17 +8,20 @@ describe('householdRequiredGuard', () => {
   let router: jasmine.SpyObj<Router>;
   let household: HouseholdService;
   let activeHouseholdId: string | null;
-  let loadMemberships: jasmine.Spy;
+  let loadMembershipsForNavigation: jasmine.Spy;
   let destination: UrlTree;
 
   beforeEach(() => {
     destination = {} as UrlTree;
-    router = jasmine.createSpyObj<Router>('Router', ['createUrlTree']);
+    router = jasmine.createSpyObj<Router>('Router', ['createUrlTree', 'getCurrentNavigation']);
     router.createUrlTree.and.returnValue(destination);
+    router.getCurrentNavigation.and.returnValue({ id: 7 } as never);
     activeHouseholdId = null;
-    loadMemberships = jasmine.createSpy('loadMemberships').and.returnValue(of([]));
+    loadMembershipsForNavigation = jasmine
+      .createSpy('loadMembershipsForNavigation')
+      .and.returnValue(of([]));
     household = {
-      loadMemberships,
+      loadMembershipsForNavigation,
       activeHouseholdId: () => activeHouseholdId
     } as unknown as HouseholdService;
 
@@ -38,15 +41,15 @@ describe('householdRequiredGuard', () => {
 
   it('allows the household route so a member can create or join a home', async () => {
     expect(await firstValueFrom(run('/household') as Observable<boolean | UrlTree>)).toBeTrue();
-    expect(loadMemberships).not.toHaveBeenCalled();
+    expect(loadMembershipsForNavigation).not.toHaveBeenCalled();
   });
 
   it('allows protected routes only after confirming the active household membership', async () => {
     activeHouseholdId = 'home-1';
-    loadMemberships.and.returnValue(of([{ id: 'home-1' }] as never));
+    loadMembershipsForNavigation.and.returnValue(of([{ id: 'home-1' }] as never));
 
     expect(await firstValueFrom(run('/dashboard') as Observable<boolean | UrlTree>)).toBeTrue();
-    expect(loadMemberships).toHaveBeenCalledTimes(1);
+    expect(loadMembershipsForNavigation).toHaveBeenCalledOnceWith(7);
     expect(router.createUrlTree).not.toHaveBeenCalled();
   });
 
@@ -54,12 +57,13 @@ describe('householdRequiredGuard', () => {
     const result = await firstValueFrom(run('/calendar') as Observable<boolean | UrlTree>);
 
     expect(result).toBe(destination);
+    expect(loadMembershipsForNavigation).toHaveBeenCalledOnceWith(7);
     expect(router.createUrlTree).toHaveBeenCalledWith(['/household']);
   });
 
   it('does not trust a stale active household id missing from the refreshed membership list', async () => {
     activeHouseholdId = 'removed-home';
-    loadMemberships.and.returnValue(of([{ id: 'another-home' }] as never));
+    loadMembershipsForNavigation.and.returnValue(of([{ id: 'another-home' }] as never));
 
     const result = await firstValueFrom(run('/dashboard') as Observable<boolean | UrlTree>);
 
@@ -67,7 +71,7 @@ describe('householdRequiredGuard', () => {
   });
 
   it('fails closed to setup when membership verification cannot complete', async () => {
-    loadMemberships.and.returnValue(throwError(() => new Error('offline')));
+    loadMembershipsForNavigation.and.returnValue(throwError(() => new Error('offline')));
 
     const result = await firstValueFrom(run('/dashboard') as Observable<boolean | UrlTree>);
 

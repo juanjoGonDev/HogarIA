@@ -585,8 +585,13 @@ export class MainLayoutComponent implements OnInit, OnDestroy {
     this.viewportQuery.addEventListener('change', this.onViewportChange);
     if (this.isMobileViewport()) this.ensureDrawerGestureController();
     this.householdService
-      .loadMemberships()
+      .ensureMemberships(this.isHouseholdRoute())
       .subscribe(() => this.householdService.ensureHousehold());
+  }
+
+  private isHouseholdRoute(): boolean {
+    const path = this.router.url.split(/[?#]/, 1)[0].replace(/\/+$/, '');
+    return path === '/household' || path.startsWith('/household/');
   }
 
   ngOnDestroy(): void {

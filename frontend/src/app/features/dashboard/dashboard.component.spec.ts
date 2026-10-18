@@ -145,7 +145,7 @@ describe('DashboardComponent', () => {
     membershipsFailed: ReturnType<typeof signal<boolean>>;
     activeHouseholdId: ReturnType<typeof signal<string | null>>;
     contextRevision: ReturnType<typeof signal<number>>;
-    loadMemberships: jasmine.Spy;
+    ensureMemberships: jasmine.Spy;
     loadHousehold: jasmine.Spy;
     ensureHousehold: jasmine.Spy;
   };
@@ -204,8 +204,8 @@ describe('DashboardComponent', () => {
       membershipsFailed: signal(false),
       activeHouseholdId: signal<string | null>(null),
       contextRevision: signal(0),
-      loadMemberships: jasmine
-        .createSpy('loadMemberships')
+      ensureMemberships: jasmine
+        .createSpy('ensureMemberships')
         .and.callFake(() => of(household.memberships())),
       loadHousehold: jasmine.createSpy('loadHousehold'),
       ensureHousehold: jasmine.createSpy('ensureHousehold')
@@ -276,7 +276,7 @@ describe('DashboardComponent', () => {
 
   it('ensures household data after membership loading discovers a new active context', () => {
     const home = membership('home-discovered', true);
-    household.loadMemberships.and.callFake(() => {
+    household.ensureMemberships.and.callFake(() => {
       household.activeHouseholdId.set(home.id);
       household.contextRevision.update((revision) => revision + 1);
       household.household.set(null);
@@ -294,7 +294,7 @@ describe('DashboardComponent', () => {
     household.memberships.set([home]);
     household.activeHouseholdId.set(home.id);
     const membershipsResponse = new Subject<HouseholdMembership[]>();
-    household.loadMemberships.and.returnValue(membershipsResponse.asObservable());
+    household.ensureMemberships.and.returnValue(membershipsResponse.asObservable());
 
     const component = createComponent();
     component.ngOnInit();
@@ -313,7 +313,7 @@ describe('DashboardComponent', () => {
     const unlimited = aiConfig('unlimited', 0);
     household.memberships.set([home]);
     household.activeHouseholdId.set(home.id);
-    household.loadMemberships.and.returnValue(of([home]));
+    household.ensureMemberships.and.returnValue(of([home]));
     ai.loadConfigsSnapshot.and.returnValue(of([enabled, unlimited]));
     queueStates.set(
       enabled.id,
@@ -352,7 +352,7 @@ describe('DashboardComponent', () => {
     const component = createComponent();
     component.ngOnInit();
 
-    expect(household.loadMemberships).toHaveBeenCalled();
+    expect(household.ensureMemberships).toHaveBeenCalled();
     expect(ai.loadConfigsSnapshot).toHaveBeenCalledOnceWith();
     expect(aiQueue.watch).toHaveBeenCalledOnceWith(config.id);
     expect(component.aiQueueRows()).toEqual([
@@ -383,7 +383,7 @@ describe('DashboardComponent', () => {
     const home = membership('home-unselected', true);
     household.memberships.set([home]);
     household.activeHouseholdId.set(null);
-    household.loadMemberships.and.returnValue(of([home]));
+    household.ensureMemberships.and.returnValue(of([home]));
 
     const unselected = createComponent();
     unselected.ngOnInit();
@@ -391,7 +391,7 @@ describe('DashboardComponent', () => {
 
     household.membershipsFailed.set(true);
     household.memberships.set([]);
-    household.loadMemberships.and.returnValue(of([]));
+    household.ensureMemberships.and.returnValue(of([]));
     const failed = createComponent();
     failed.ngOnInit();
 

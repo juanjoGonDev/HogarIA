@@ -261,7 +261,13 @@ describe('HouseholdService', () => {
       data: {
         activeHouseholdId: 'home-1',
         memberships: [
-          { id: 'home-1', name: 'Casa sintética', role: 'admin', permissions: PERMISSIONS, active: true }
+          {
+            id: 'home-1',
+            name: 'Casa sintética',
+            role: 'admin',
+            permissions: PERMISSIONS,
+            active: true
+          }
         ]
       }
     });
@@ -302,7 +308,13 @@ describe('HouseholdService', () => {
       data: {
         activeHouseholdId: 'home-1',
         memberships: [
-          { id: 'home-1', name: 'Casa sintética', role: 'member', permissions: PERMISSIONS, active: true }
+          {
+            id: 'home-1',
+            name: 'Casa sintética',
+            role: 'member',
+            permissions: PERMISSIONS,
+            active: true
+          }
         ]
       }
     });
@@ -332,7 +344,13 @@ describe('HouseholdService', () => {
       data: {
         activeHouseholdId: 'home-1',
         memberships: [
-          { id: 'home-1', name: 'Casa sintética', role: 'member', permissions: PERMISSIONS, active: true }
+          {
+            id: 'home-1',
+            name: 'Casa sintética',
+            role: 'member',
+            permissions: PERMISSIONS,
+            active: true
+          }
         ]
       }
     });
@@ -352,7 +370,13 @@ describe('HouseholdService', () => {
       data: {
         activeHouseholdId: 'home-1',
         memberships: [
-          { id: 'home-1', name: 'Casa sintética', role: 'member', permissions: PERMISSIONS, active: true }
+          {
+            id: 'home-1',
+            name: 'Casa sintética',
+            role: 'member',
+            permissions: PERMISSIONS,
+            active: true
+          }
         ]
       }
     });
@@ -387,7 +411,13 @@ describe('HouseholdService', () => {
       data: {
         activeHouseholdId: 'home-2',
         memberships: [
-          { id: 'home-1', name: 'Casa uno', role: 'admin', permissions: PERMISSIONS, active: false },
+          {
+            id: 'home-1',
+            name: 'Casa uno',
+            role: 'admin',
+            permissions: PERMISSIONS,
+            active: false
+          },
           { id: 'home-2', name: 'Casa dos', role: 'member', permissions: PERMISSIONS, active: true }
         ]
       }
@@ -548,6 +578,120 @@ describe('HouseholdService', () => {
     expect(result).toEqual(data.memberships);
     expect(service.memberships()).toEqual(data.memberships);
     expect(service.activeHouseholdId()).toBe('home-2');
+  });
+
+  it('reuses server-validated memberships for shell readers and refreshes on demand', () => {
+    const memberships = [
+      {
+        id: 'home-1',
+        name: 'Casa uno',
+        role: 'admin' as const,
+        permissions: PERMISSIONS,
+        active: true
+      }
+    ];
+    service.loadMemberships().subscribe();
+    http.expectOne(`${API_URL}/memberships`).flush({
+      success: true,
+      data: { activeHouseholdId: 'home-1', memberships }
+    });
+
+    let cachedResult: unknown;
+    service.ensureMemberships().subscribe((value) => (cachedResult = value));
+    expect(cachedResult).toEqual(memberships);
+    http.expectNone(`${API_URL}/memberships`);
+
+    let refreshedResult: unknown;
+    service.ensureMemberships(true).subscribe((value) => (refreshedResult = value));
+    http.expectOne(`${API_URL}/memberships`).flush({
+      success: true,
+      data: { activeHouseholdId: 'home-1', memberships }
+    });
+    expect(refreshedResult).toEqual(memberships);
+  });
+
+  it('shares an in-flight membership validation between the route guard and shell', () => {
+    let guardedResult: unknown;
+    let shellResult: unknown;
+
+    service.loadMemberships().subscribe((value) => (guardedResult = value));
+    service.ensureMemberships().subscribe((value) => (shellResult = value));
+
+    const requests = http.match(`${API_URL}/memberships`);
+    expect(requests.length).toBe(1);
+    requests[0].flush({
+      success: true,
+      data: { activeHouseholdId: null, memberships: [] }
+    });
+
+    expect(guardedResult).toEqual([]);
+    expect(shellResult).toEqual([]);
+  });
+
+  it('reuses one membership validation within a navigation but refreshes on the next one', () => {
+    service.loadMembershipsForNavigation(10).subscribe();
+    http.expectOne(`${API_URL}/memberships`).flush({
+      success: true,
+      data: {
+        activeHouseholdId: 'home-1',
+        memberships: [{ id: 'home-1', name: 'Casa uno', role: 'admin', permissions: PERMISSIONS }]
+      }
+    });
+
+    let repeatedResult: unknown;
+    service.loadMembershipsForNavigation(10).subscribe((value) => (repeatedResult = value));
+    expect((repeatedResult as { id: string }[]).map(({ id }) => id)).toEqual(['home-1']);
+    expect(service.activeHouseholdId()).toBe('home-1');
+    http.expectNone(`${API_URL}/memberships`);
+
+    service.loadMembershipsForNavigation(11).subscribe();
+    http.expectOne(`${API_URL}/memberships`).flush({
+      success: true,
+      data: { activeHouseholdId: null, memberships: [] }
+    });
+  });
+
+  it('does not share or apply a pending membership response across user changes', () => {
+    localStorage.setItem(STORAGE_KEYS.currentUser, JSON.stringify({ id: 'user-1' }));
+    service.loadMemberships().subscribe();
+
+    localStorage.setItem(STORAGE_KEYS.currentUser, JSON.stringify({ id: 'user-2' }));
+    service.ensureMemberships().subscribe();
+
+    const requests = http.match(`${API_URL}/memberships`);
+    expect(requests.length).toBe(2);
+    requests[1].flush({
+      success: true,
+      data: {
+        activeHouseholdId: 'home-2',
+        memberships: [{ id: 'home-2', name: 'Casa dos', role: 'member', permissions: PERMISSIONS }]
+      }
+    });
+    requests[0].flush({
+      success: true,
+      data: {
+        activeHouseholdId: 'home-1',
+        memberships: [{ id: 'home-1', name: 'Casa uno', role: 'admin', permissions: PERMISSIONS }]
+      }
+    });
+
+    expect(service.activeHouseholdId()).toBe('home-2');
+    expect(service.memberships().map(({ id }) => id)).toEqual(['home-2']);
+  });
+
+  it('retries ensureMemberships after a failed initial membership load', () => {
+    service.ensureMemberships().subscribe();
+    http.expectOne(`${API_URL}/memberships`).flush({}, { status: 503, statusText: 'Unavailable' });
+
+    let result: unknown;
+    service.ensureMemberships().subscribe((value) => (result = value));
+    http.expectOne(`${API_URL}/memberships`).flush({
+      success: true,
+      data: { activeHouseholdId: null, memberships: [] }
+    });
+
+    expect(result).toEqual([]);
+    expect(service.membershipsFailed()).toBeFalse();
   });
 
   it('clears an obsolete loading state and reloads after memberships resolve the active home', () => {

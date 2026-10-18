@@ -1,6 +1,6 @@
 import { Injectable, inject, signal } from '@angular/core';
 import { HttpClient, HttpContext } from '@angular/common/http';
-import { Observable, tap, catchError, map, of, switchMap, finalize } from 'rxjs';
+import { Observable, tap, catchError, map, of, switchMap, finalize, shareReplay } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import {
   Household,
@@ -24,6 +24,7 @@ export class HouseholdService {
   private activeHouseholdIdSignal = signal<string | null>(null);
   private contextRevisionSignal = signal(0);
   private membershipsLoadingSignal = signal(false);
+  private membershipsLoadedSignal = signal(false);
   private membershipsFailedSignal = signal(false);
   private switchingHouseholdSignal = signal(false);
   private isLoadingSignal = signal(false);
@@ -36,6 +37,7 @@ export class HouseholdService {
   readonly activeHouseholdId = this.activeHouseholdIdSignal.asReadonly();
   readonly contextRevision = this.contextRevisionSignal.asReadonly();
   readonly membershipsLoading = this.membershipsLoadingSignal.asReadonly();
+  readonly membershipsLoaded = this.membershipsLoadedSignal.asReadonly();
   readonly membershipsFailed = this.membershipsFailedSignal.asReadonly();
   readonly switchingHousehold = this.switchingHouseholdSignal.asReadonly();
   readonly isLoading = this.isLoadingSignal.asReadonly();
@@ -48,6 +50,17 @@ export class HouseholdService {
   }
 
   private membershipRequestId = 0;
+  private membershipLoadInFlight: {
+    requestId: number;
+    revision: number;
+    userId: string | null;
+    observable: Observable<HouseholdMembership[]>;
+  } | null = null;
+  private membershipValidationForNavigation: {
+    navigationId: number;
+    revision: number;
+    userId: string | null;
+  } | null = null;
   private householdRequestId = 0;
 
   /**
@@ -77,12 +90,19 @@ export class HouseholdService {
   }
 
   /** Lista las casas propias y adopta únicamente la selección validada por el servidor. */
-  loadMemberships(): Observable<HouseholdMembership[]> {
-    const requestId = ++this.membershipRequestId;
+  loadMemberships(forceRefresh = false): Observable<HouseholdMembership[]> {
     const revision = this.contextRevisionSignal();
+    const userId = this.currentUserId();
+    const pending = this.membershipLoadInFlight;
+    if (!forceRefresh && pending && pending.revision === revision && pending.userId === userId) {
+      return pending.observable;
+    }
+
+    const requestId = ++this.membershipRequestId;
     this.membershipsLoadingSignal.set(true);
 
-    return this.http.get<any>(`${this.apiUrl}/memberships`).pipe(
+    let request$: Observable<HouseholdMembership[]>;
+    request$ = this.http.get<any>(`${this.apiUrl}/memberships`).pipe(
       map((response) => {
         const data = response?.data;
         const memberships = Array.isArray(data?.memberships)
@@ -114,12 +134,14 @@ export class HouseholdService {
             this.askedSignal.set(false);
           }
           this.membershipsFailedSignal.set(false);
+          this.membershipsLoadedSignal.set(true);
         }
         return memberships;
       }),
       catchError(() => {
         if (requestId === this.membershipRequestId && revision === this.contextRevisionSignal()) {
           this.membershipsFailedSignal.set(true);
+          this.membershipsLoadedSignal.set(false);
           this.membershipsSignal.set([]);
           this.activeHouseholdIdSignal.set(null);
           this.householdRequestId += 1;
@@ -132,8 +154,47 @@ export class HouseholdService {
       }),
       finalize(() => {
         if (requestId === this.membershipRequestId) this.membershipsLoadingSignal.set(false);
+        if (this.membershipLoadInFlight?.requestId === requestId) {
+          this.membershipLoadInFlight = null;
+        }
+      }),
+      shareReplay({ bufferSize: 1, refCount: true })
+    );
+    this.membershipLoadInFlight = { requestId, revision, userId, observable: request$ };
+    return request$;
+  }
+
+  /** Validate at most once per protected navigation, even across nested lazy routes. */
+  loadMembershipsForNavigation(navigationId: number | null): Observable<HouseholdMembership[]> {
+    const revision = this.contextRevisionSignal();
+    const userId = this.currentUserId();
+    const validation = this.membershipValidationForNavigation;
+    if (
+      navigationId !== null &&
+      validation?.navigationId === navigationId &&
+      validation.revision === revision &&
+      validation.userId === userId
+    ) {
+      return of(this.membershipsSignal());
+    }
+
+    return this.loadMemberships().pipe(
+      tap(() => {
+        if (navigationId !== null && userId === this.currentUserId()) {
+          this.membershipValidationForNavigation = {
+            navigationId,
+            revision: this.contextRevisionSignal(),
+            userId
+          };
+        }
       })
     );
+  }
+
+  /** Reuse memberships validated for the current navigation unless an explicit refresh is needed. */
+  ensureMemberships(forceRefresh = false): Observable<HouseholdMembership[]> {
+    if (!forceRefresh && this.membershipsLoadedSignal()) return of(this.membershipsSignal());
+    return this.loadMemberships(forceRefresh);
   }
 
   /** Pide al servidor cambiar el contexto y solo después carga los datos de esa casa. */
@@ -174,9 +235,7 @@ export class HouseholdService {
   joinByCode(code: string, options: { silentToast?: boolean } = {}): Observable<any> {
     const requestOptions = options.silentToast ? { context: this.silentToastContext() } : {};
     return this.http.post<any>(`${this.apiUrl}/join/${code}`, {}, requestOptions).pipe(
-      switchMap((response) =>
-        this.refreshMembershipAndHousehold().pipe(map(() => response))
-      ),
+      switchMap((response) => this.refreshMembershipAndHousehold().pipe(map(() => response))),
       catchError((err) => {
         throw err;
       })
@@ -188,9 +247,7 @@ export class HouseholdService {
       .post<any>(this.apiUrl, { name, sharedPantry }, { context: this.silentToastContext() })
       .pipe(
         map((response) => (response?.data ? this.mapHousehold(response.data) : null)),
-        switchMap((household) =>
-          household ? this.activateCreatedHousehold(household) : of(null)
-        ),
+        switchMap((household) => (household ? this.activateCreatedHousehold(household) : of(null))),
         catchError(() => of(null))
       );
   }
@@ -199,9 +256,7 @@ export class HouseholdService {
     return this.http
       .post<any>(`${this.apiUrl}/join`, { inviteCode }, { context: this.silentToastContext() })
       .pipe(
-        switchMap((response) =>
-          this.refreshMembershipAndHousehold().pipe(map(() => response))
-        ),
+        switchMap((response) => this.refreshMembershipAndHousehold().pipe(map(() => response))),
         catchError(() => of(null))
       );
   }
@@ -393,7 +448,7 @@ export class HouseholdService {
     this.householdSignal.set(null);
     this.askedSignal.set(false);
 
-    return this.loadMemberships().pipe(
+    return this.loadMemberships(true).pipe(
       switchMap(() => {
         if (this.membershipsFailedSignal()) return of(false);
         return this.requestHousehold(this.contextRevisionSignal());
@@ -404,7 +459,7 @@ export class HouseholdService {
   private refreshMembershipAndHousehold(): Observable<boolean> {
     this.householdSignal.set(null);
     this.askedSignal.set(false);
-    return this.loadMemberships().pipe(
+    return this.loadMemberships(true).pipe(
       switchMap(() => {
         if (this.membershipsFailedSignal()) return of(false);
         return this.requestHousehold(this.contextRevisionSignal());
@@ -417,7 +472,7 @@ export class HouseholdService {
     this.setActiveHousehold(household.id);
     this.householdSignal.set(household);
     this.askedSignal.set(true);
-    return this.loadMemberships().pipe(
+    return this.loadMemberships(true).pipe(
       map(() => {
         if (
           this.membershipsFailedSignal() ||

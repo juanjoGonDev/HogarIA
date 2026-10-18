@@ -54,7 +54,7 @@ describe('MainLayoutComponent mobile drawer keyboard behavior', () => {
           provide: AuthService,
           useValue: { userName: signal('Test'), currentUser, logout: authLogout }
         },
-        { provide: Router, useValue: { navigate, events: routerEvents } },
+        { provide: Router, useValue: { navigate, events: routerEvents, url: '/dashboard' } },
         {
           provide: TasteProfileService,
           useValue: { ensureLoaded: jasmine.createSpy('ensureLoaded') }
@@ -66,7 +66,7 @@ describe('MainLayoutComponent mobile drawer keyboard behavior', () => {
             activeHouseholdId,
             membershipsFailed,
             household,
-            loadMemberships: jasmine.createSpy('loadMemberships').and.returnValue(of([])),
+            ensureMemberships: jasmine.createSpy('ensureMemberships').and.returnValue(of([])),
             ensureHousehold: jasmine.createSpy('ensureHousehold')
           }
         },

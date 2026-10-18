@@ -1213,7 +1213,7 @@ export class DashboardComponent implements OnDestroy, OnInit {
     this.aiQueueContextRevision.set(this.householdService.contextRevision());
 
     this.aiQueueMembershipSubscription = this.householdService
-      .loadMemberships()
+      .ensureMemberships()
       .subscribe((memberships) => {
         if (generation !== this.aiQueueGeneration) return;
         const contextRevision = this.householdService.contextRevision();
