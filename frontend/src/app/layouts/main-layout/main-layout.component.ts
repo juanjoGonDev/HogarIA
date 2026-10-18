@@ -121,7 +121,9 @@ interface NavItem {
           <app-receipt-queue *ngIf="hasActiveHousehold()" class="sidebar__receipt-queue" />
         </div>
 
-        <app-household-switcher />
+        @defer (when hasMultipleHouseholds()) {
+          <app-household-switcher />
+        }
 
         <nav class="sidebar__nav">
           <a
@@ -547,6 +549,7 @@ export class MainLayoutComponent implements OnInit, OnDestroy {
   private readonly householdService = inject(HouseholdService);
   private readonly modules = inject(ModulesService);
   private readonly zone = inject(NgZone);
+  readonly hasMultipleHouseholds = computed(() => this.householdService.memberships().length > 1);
   private sidebarTrigger: HTMLElement | null = null;
   private drawerGestureController:
     import('./mobile-drawer-gesture.controller').MobileDrawerGestureController | null = null;

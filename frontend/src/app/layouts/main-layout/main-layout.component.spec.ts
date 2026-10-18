@@ -103,6 +103,19 @@ describe('MainLayoutComponent mobile drawer keyboard behavior', () => {
     return fixture.nativeElement.querySelector('button') as HTMLButtonElement;
   }
 
+  describe('household switcher deferral', () => {
+    it('only opens the deferred block when more than one membership is available', () => {
+      createFixture();
+      expect(fixture.componentInstance.hasMultipleHouseholds()).toBeFalse();
+
+      memberships.set([{ id: 'home-1' }]);
+      expect(fixture.componentInstance.hasMultipleHouseholds()).toBeFalse();
+
+      memberships.set([{ id: 'home-1' }, { id: 'home-2' }]);
+      expect(fixture.componentInstance.hasMultipleHouseholds()).toBeTrue();
+    });
+  });
+
   it('does nothing when the mobile drawer is already closed', () => {
     createFixture();
 
