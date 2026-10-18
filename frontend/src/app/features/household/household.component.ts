@@ -1042,6 +1042,7 @@ function completeMemberPermissions(value: unknown, role: MemberRole): MemberPerm
       .invite-card__content {
         display: flex;
         flex-direction: column;
+        min-width: 0;
       }
 
       .invite-card__label {
@@ -1054,10 +1055,12 @@ function completeMemberPermissions(value: unknown, role: MemberRole): MemberPerm
         font-size: var(--text-xl);
         font-weight: var(--font-bold);
         letter-spacing: var(--tracking-wider);
+        overflow-wrap: anywhere;
       }
 
       .invite-card__actions {
         display: flex;
+        flex-wrap: wrap;
         gap: var(--space-2);
       }
 

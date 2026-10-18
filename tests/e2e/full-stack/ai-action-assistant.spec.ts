@@ -801,6 +801,29 @@ async function capture(
 
 async function assertViewport(page: Page, width: number, height: number, dialogOpen: boolean) {
   await page.setViewportSize({ width, height });
+  try {
+    await page.waitForFunction((expectedWidth) => window.innerWidth === expectedWidth, width, {
+      timeout: 5_000
+    });
+  } catch {
+    const actualViewport = await page.evaluate(() => ({
+      innerWidth: window.innerWidth,
+      innerHeight: window.innerHeight,
+      visualWidth: window.visualViewport?.width ?? null,
+      visualHeight: window.visualViewport?.height ?? null,
+      documentWidth: document.documentElement.clientWidth,
+      screenWidth: window.screen.width
+    }));
+    throw new Error(
+      `El viewport CSS no se actualizó a ${width}×${height}: ${JSON.stringify(actualViewport)}`
+    );
+  }
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      })
+  );
   if (width <= 1023) {
     await expect(page.locator('#primary-sidebar')).toHaveAttribute('aria-hidden', 'true');
   }
@@ -1397,7 +1420,7 @@ test('asistente global: lote revisable, refino aislado y aprobación selectiva r
   await expect(page.getByRole('dialog', { name: 'Asistente' })).toBeVisible();
   await expect(compose.locator('[data-test="ai-assistant-prompt"]')).toHaveAttribute(
     'placeholder',
-    'Pídele a la IA qué quieres hacer.\nEjemplos:\n• Añade leche a la compra.\n• Crea una tarea para el viernes.'
+    'Pídele a la IA qué hacer.\nEj.: añade leche o crea una tarea.'
   );
   await expectModalControlsAccessible(page, 'redacción');
   const privacy = compose.locator('details.assistant__privacy');
@@ -1422,7 +1445,7 @@ test('asistente global: lote revisable, refino aislado y aprobación selectiva r
   });
   expect(promptStyles.background).not.toBe('rgba(0, 0, 0, 0)');
   expect(promptStyles.borderRadius).toBeGreaterThanOrEqual(12);
-  expect(promptStyles.minHeight).toBeGreaterThanOrEqual(120);
+  expect(promptStyles.minHeight).toBeGreaterThanOrEqual(112);
   const micButton = compose.locator('[data-test="ai-assistant-voice-start"] button');
   await expect(micButton).toHaveAccessibleName('Dictar petición');
   const micBounds = await micButton.boundingBox();

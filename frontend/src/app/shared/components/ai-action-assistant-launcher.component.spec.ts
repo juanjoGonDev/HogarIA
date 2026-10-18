@@ -168,6 +168,85 @@ describe('AiActionAssistantLauncherComponent', () => {
     expect(fixture!.nativeElement.querySelector('[data-test="ai-assistant-open"]')).not.toBeNull();
   });
 
+  it('adds only the clearance needed above the rendered household notice', async () => {
+    const notice = document.createElement('app-household-planning-automation-notice');
+    const disconnectResizeObserver = spyOn(
+      ResizeObserver.prototype,
+      'disconnect'
+    ).and.callThrough();
+    const disconnectMutationObserver = spyOn(
+      MutationObserver.prototype,
+      'disconnect'
+    ).and.callThrough();
+    const button = fixture!.nativeElement.querySelector(
+      '[data-test="ai-assistant-open"]'
+    ) as HTMLElement;
+    let noticeBounds = new DOMRect(12, 400, 296, 96);
+    let buttonBounds = new DOMRect(256, 352, 52, 52);
+    spyOn(notice, 'getBoundingClientRect').and.callFake(() => noticeBounds);
+    spyOn(button, 'getBoundingClientRect').and.callFake(() => buttonBounds);
+    fixture!.nativeElement.parentElement!.append(notice);
+
+    try {
+      fixture!.componentRef.setInput('householdId', 'synthetic-household');
+      fixture!.detectChanges();
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+      const host = fixture!.nativeElement as HTMLElement;
+      expect(host.style.getPropertyValue('--assistant-household-extra-lift')).toBe('12px');
+
+      noticeBounds = new DOMRect(12, 390, 296, 106);
+      buttonBounds = new DOMRect(256, 340, 52, 52);
+      notice.textContent = 'El aviso ahora ocupa más espacio';
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      );
+      expect(host.style.getPropertyValue('--assistant-household-extra-lift')).toBe('22px');
+
+      noticeBounds = new DOMRect(12, 400, 0, 0);
+      window.dispatchEvent(new Event('resize'));
+      expect(host.style.getPropertyValue('--assistant-household-extra-lift')).toBe('0px');
+
+      noticeBounds = new DOMRect(12, 400, 296, 96);
+      buttonBounds = new DOMRect(256, 352, 52, 52);
+      window.dispatchEvent(new Event('resize'));
+      expect(host.style.getPropertyValue('--assistant-household-extra-lift')).toBe('12px');
+
+      notice.remove();
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      );
+      expect(host.style.getPropertyValue('--assistant-household-extra-lift')).toBe('0px');
+
+      fixture!.nativeElement.parentElement!.append(notice);
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      );
+      expect(host.style.getPropertyValue('--assistant-household-extra-lift')).toBe('12px');
+
+      fixture!.componentRef.setInput('householdId', null);
+      fixture!.detectChanges();
+
+      expect(host.style.getPropertyValue('--assistant-household-extra-lift')).toBe('0px');
+      expect(disconnectResizeObserver).toHaveBeenCalled();
+      expect(disconnectMutationObserver).toHaveBeenCalled();
+
+      fixture!.componentRef.setInput('householdId', 'synthetic-household');
+      fixture!.detectChanges();
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+      const resizeDisconnectsBeforeDestroy = disconnectResizeObserver.calls.count();
+      const mutationDisconnectsBeforeDestroy = disconnectMutationObserver.calls.count();
+      fixture!.destroy();
+      fixture = null;
+
+      expect(disconnectResizeObserver.calls.count()).toBe(resizeDisconnectsBeforeDestroy + 1);
+      expect(disconnectMutationObserver.calls.count()).toBe(mutationDisconnectsBeforeDestroy + 1);
+    } finally {
+      notice.remove();
+    }
+  });
+
   it('does not assume a visual viewport exists and removes its resize listener on destroy', () => {
     const addEventListener = viewport.addEventListener as jasmine.Spy;
     const removeEventListener = viewport.removeEventListener as jasmine.Spy;

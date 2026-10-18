@@ -1,9 +1,12 @@
 import { CommonModule } from '@angular/common';
 import {
+  AfterViewInit,
   Component,
   DestroyRef,
+  ElementRef,
   HostListener,
   Input,
+  OnChanges,
   OnDestroy,
   inject,
   signal
@@ -51,6 +54,7 @@ import { AiActionAssistantDialogComponent } from './ai-action-assistant-dialog.c
         right: max(var(--space-5), env(safe-area-inset-right, 0px));
         bottom: max(var(--space-5), env(safe-area-inset-bottom, 0px));
         display: block;
+        --assistant-household-extra-lift: 0px;
         --primary: var(--color-primary-700);
         --primary-dark: var(--color-primary-800);
       }
@@ -81,7 +85,9 @@ import { AiActionAssistantDialogComponent } from './ai-action-assistant-dialog.c
       }
 
       .assistant-launcher__button--household {
-        transform: translateY(calc(-1 * (var(--space-5) + 100px)));
+        transform: translateY(
+          calc(-1 * (var(--space-5) + 100px + var(--assistant-household-extra-lift, 0px)))
+        );
       }
 
       .assistant-launcher__button:focus-visible {
@@ -96,7 +102,7 @@ import { AiActionAssistantDialogComponent } from './ai-action-assistant-dialog.c
         }
 
         .assistant-launcher__button--household {
-          transform: translateY(calc(-1 * 132px));
+          transform: translateY(calc(-1 * (152px + var(--assistant-household-extra-lift, 0px))));
         }
       }
 
@@ -108,9 +114,10 @@ import { AiActionAssistantDialogComponent } from './ai-action-assistant-dialog.c
     `
   ]
 })
-export class AiActionAssistantLauncherComponent implements OnDestroy {
+export class AiActionAssistantLauncherComponent implements AfterViewInit, OnChanges, OnDestroy {
   @Input() householdId: string | null = null;
 
+  private readonly elementRef = inject(ElementRef<HTMLElement>);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
   private readonly visualViewport = typeof window === 'undefined' ? null : window.visualViewport;
@@ -120,6 +127,11 @@ export class AiActionAssistantLauncherComponent implements OnDestroy {
   readonly isOpen = signal(false);
   readonly keyboardOpen = signal(false);
   readonly routeHint = signal<AssistantRouteHint>(this.routeFromUrl(this.router.url));
+  private noticeResizeObserver: ResizeObserver | null = null;
+  private noticeMutationObserver: MutationObserver | null = null;
+  private layoutFrame: number | null = null;
+  private viewInitialized = false;
+  private householdExtraLift = 0;
 
   constructor() {
     this.router.events
@@ -132,8 +144,25 @@ export class AiActionAssistantLauncherComponent implements OnDestroy {
     this.updateKeyboardState();
   }
 
+  ngAfterViewInit(): void {
+    this.viewInitialized = true;
+    this.observeHouseholdNotice();
+  }
+
+  ngOnChanges(): void {
+    if (this.viewInitialized) this.observeHouseholdNotice();
+  }
+
   ngOnDestroy(): void {
     this.visualViewport?.removeEventListener('resize', this.onViewportResize);
+    this.noticeResizeObserver?.disconnect();
+    this.noticeMutationObserver?.disconnect();
+    if (this.layoutFrame !== null) {
+      this.elementRef.nativeElement.ownerDocument.defaultView?.cancelAnimationFrame(
+        this.layoutFrame
+      );
+      this.layoutFrame = null;
+    }
   }
 
   async open(): Promise<void> {
@@ -150,7 +179,144 @@ export class AiActionAssistantLauncherComponent implements OnDestroy {
     this.isOpen.set(false);
   }
 
-  private readonly onViewportResize = (): void => this.updateKeyboardState();
+  private readonly onViewportResize = (): void => {
+    this.updateKeyboardState();
+    this.updateHouseholdNoticeLayout();
+  };
+
+  @HostListener('window:resize')
+  onWindowResize(): void {
+    this.onViewportResize();
+  }
+
+  private observeHouseholdNotice(): void {
+    this.noticeResizeObserver?.disconnect();
+    this.noticeMutationObserver?.disconnect();
+    this.noticeResizeObserver = null;
+    this.noticeMutationObserver = null;
+
+    const host = this.elementRef.nativeElement as HTMLElement;
+    const document = host.ownerDocument as Document;
+    const view = document.defaultView;
+    if (!this.householdId || !view) {
+      this.setHouseholdExtraLift(0);
+      return;
+    }
+
+    const notice = document.querySelector(
+      'app-household-planning-automation-notice'
+    ) as HTMLElement | null;
+    if (!notice) {
+      const observationRoot = host.parentElement ?? document.body;
+      if (typeof MutationObserver !== 'undefined') {
+        this.noticeMutationObserver = new MutationObserver(() => {
+          if (document.querySelector('app-household-planning-automation-notice')) {
+            this.observeHouseholdNotice();
+          }
+        });
+        this.noticeMutationObserver.observe(observationRoot, { childList: true, subtree: true });
+      }
+      this.setHouseholdExtraLift(0);
+      return;
+    }
+
+    if (typeof ResizeObserver !== 'undefined') {
+      this.noticeResizeObserver = new ResizeObserver(this.scheduleHouseholdNoticeLayout);
+      this.noticeResizeObserver.observe(notice);
+    }
+    if (typeof MutationObserver !== 'undefined') {
+      this.noticeMutationObserver = new MutationObserver(() => {
+        if (document.querySelector('app-household-planning-automation-notice') !== notice) {
+          this.observeHouseholdNotice();
+          return;
+        }
+        this.scheduleHouseholdNoticeLayout();
+      });
+      this.noticeMutationObserver.observe(notice, {
+        childList: true,
+        characterData: true,
+        subtree: true
+      });
+      if (notice.parentElement) {
+        this.noticeMutationObserver.observe(notice.parentElement, { childList: true });
+      }
+    }
+    this.scheduleHouseholdNoticeLayout();
+  }
+
+  private readonly scheduleHouseholdNoticeLayout = (): void => {
+    const view = this.elementRef.nativeElement.ownerDocument.defaultView;
+    if (!view || this.layoutFrame !== null) return;
+    this.layoutFrame = view.requestAnimationFrame(() => {
+      this.layoutFrame = null;
+      this.updateHouseholdNoticeLayout();
+    });
+  };
+
+  private updateHouseholdNoticeLayout(): void {
+    const host = this.elementRef.nativeElement as HTMLElement;
+    const button = host.querySelector(
+      '.assistant-launcher__button--household'
+    ) as HTMLElement | null;
+    const notice = host.ownerDocument.querySelector(
+      'app-household-planning-automation-notice'
+    ) as HTMLElement | null;
+    if (!button || !notice) {
+      this.setHouseholdExtraLift(0);
+      return;
+    }
+
+    const buttonBounds = button.getBoundingClientRect();
+    const noticeBounds = notice.getBoundingClientRect();
+    if (buttonBounds.width <= 0 || buttonBounds.height <= 0 || noticeBounds.height <= 0) {
+      this.setHouseholdExtraLift(0);
+      return;
+    }
+
+    const horizontalOverlap =
+      buttonBounds.left < noticeBounds.right && buttonBounds.right > noticeBounds.left;
+    if (!horizontalOverlap) {
+      this.setHouseholdExtraLift(0);
+      return;
+    }
+
+    const baseTop = buttonBounds.top + this.householdExtraLift;
+    const baseBottom = buttonBounds.bottom + this.householdExtraLift;
+    const verticalOverlap = baseTop < noticeBounds.bottom && baseBottom > noticeBounds.top;
+    if (!verticalOverlap) {
+      this.setHouseholdExtraLift(0);
+      return;
+    }
+
+    const clearance = this.spacingTokenInPixels('--space-2', 8);
+    const extraLift = Math.max(0, Math.ceil(baseBottom - noticeBounds.top + clearance));
+    this.setHouseholdExtraLift(extraLift);
+  }
+
+  private spacingTokenInPixels(token: string, fallback: number): number {
+    const host = this.elementRef.nativeElement as HTMLElement;
+    const view = host.ownerDocument.defaultView;
+    if (!view) return fallback;
+
+    const value = view.getComputedStyle(host).getPropertyValue(token).trim();
+    const amount = Number.parseFloat(value);
+    if (!Number.isFinite(amount)) return fallback;
+    if (value.endsWith('rem')) {
+      return (
+        amount *
+        Number.parseFloat(view.getComputedStyle(host.ownerDocument.documentElement).fontSize)
+      );
+    }
+    if (value.endsWith('em'))
+      return amount * Number.parseFloat(view.getComputedStyle(host).fontSize);
+    return amount;
+  }
+
+  private setHouseholdExtraLift(value: number): void {
+    this.householdExtraLift = value;
+    const host = this.elementRef.nativeElement as HTMLElement;
+    host.style.setProperty('--assistant-household-extra-lift', `${value}px`);
+  }
 
   private updateKeyboardState(): void {
     if (typeof window === 'undefined' || !this.visualViewport) return;
