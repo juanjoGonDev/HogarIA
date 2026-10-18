@@ -677,8 +677,9 @@ $env:HOGARIA_AI_ASSISTANT_LOCAL_SMOKE='1'; node scripts/run-isolated-playwright.
 Fuente: run CI `39166387237`, commit `d3ef6d2` (2026-10-18). Alcance limitado a reproducir fallos remotos del PR; actualizar tests obsoletos solo con evidencia, corregir producto solo si se reproduce una regresión real. No relajar guards, tolerancias, interacciones reales ni pruebas de persistencia.
 
 - [ ] Shard 1: reproducir el E2E del scheduler/worker aislado; entender por qué una ejecución real queda sin `completed`; conservar reloj sintético, proveedor local y DB temporal.
-- [ ] Shard 2: reproducir overflow de Planning en 389/360 px; corregir la causa geométrica si se confirma, sin esconder overflow ni reducir cobertura.
-- [ ] Shard 2: atribuir pruebas de rutas protegidas/i18n/onboarding/layout/drawer/meal replacement; crear hogar sintético solo cuando la ruta exija membresía y mantener cobertura explícita del estado «sin hogar».
+- [ ] Shard 2: resolver overflow de Planning en Linux CI (389/360 px); el E2E focal pasa en Windows Chromium **1/1**, así que no se cambia CSS sin reproducir el fallo o inspeccionar su trace Linux. No esconder overflow ni reducir cobertura.
+- [ ] Shard 2: atribuir pruebas de rutas protegidas/i18n/onboarding/layout/drawer/meal replacement y selectores móviles de shell obsoletos (`.bottom-nav` no existe en el shell actual); crear hogar sintético solo cuando la ruta exija membresía y mantener cobertura explícita del estado «sin hogar».
+  - Red local reproducible: el E2E full `household-plan-tasks` en Mobile Chrome falla en `tests/e2e/household-plan-tasks.spec.ts:1236` al buscar `.bottom-nav`, antes de completar la cobertura móvil; no cambiar aún esas aserciones hasta mapearlas al header/drawer y al launcher fijo actual sin perder la prueba de no solapamiento.
 - [ ] Shard 2: clasificar y resolver los fallos restantes individualmente; no ajustar test ni producto por suposición.
 - [ ] Shard 3: reproducir los 14 fallos de tickets, libro/edición/favoritos/detalle de recetas e iconografía; separar precondición/ruta, assertion obsoleta y regresión visible, con DB temporal.
 - [ ] Tras cada unidad, ejecutar primero su E2E focal; después shards afectados en Chromium/CI Linux, typecheck, UI check y coverage; registrar comandos, conteos y capturas sintéticas requeridas.
