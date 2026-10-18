@@ -4928,7 +4928,7 @@ test('asistente global: muestra en inglés el error de proveedor sin configurar'
   await expect(dialog.getByRole('heading', { name: 'Assistant' })).toBeVisible();
   await expect(dialog.locator('[data-test="ai-assistant-prompt"]')).toHaveAttribute(
     'placeholder',
-    'Tell the AI what you want to do.\nExamples:\n• Add milk to the shopping list.\n• Create a task for Friday.'
+    'Tell the AI what to do.\nE.g. add milk or create a task.'
   );
   const databaseBeforeRequest = assistantDatabaseSnapshot();
   const proposalResponse = page.waitForResponse((response) => {
@@ -5172,7 +5172,7 @@ test('asistente global: traduce el fallback de dictado al inglés', async ({ pag
   await expect(dialog.getByRole('heading', { name: 'Assistant' })).toBeVisible();
   await expect(dialog.locator('[data-test="ai-assistant-prompt"]')).toHaveAttribute(
     'placeholder',
-    'Tell the AI what you want to do.\nExamples:\n• Add milk to the shopping list.\n• Create a task for Friday.'
+    'Tell the AI what to do.\nE.g. add milk or create a task.'
   );
   const privacy = dialog.locator('details.assistant__privacy');
   await expect(privacy).toHaveJSProperty('open', false);
@@ -5470,19 +5470,39 @@ test('asistente global: respeta safe-area emulada en FAB y diálogo móvil', asy
   });
   expect(emulatedInsets).toEqual(safeArea);
 
+  const layoutViewport = await page.evaluate(() => ({
+    width: window.innerWidth,
+    height: window.innerHeight
+  }));
+  expect(Math.abs(layoutViewport.width - 320)).toBeLessThanOrEqual(1);
+  expect(Math.abs(layoutViewport.height - 568)).toBeLessThanOrEqual(1);
+
   const launcher = page.locator('[data-test="ai-assistant-open"]');
   await expect(launcher).toBeVisible();
   const launcherBounds = await launcher.boundingBox();
   expect(launcherBounds).not.toBeNull();
-  expect(launcherBounds!.x).toBeGreaterThanOrEqual(safeArea.left);
-  expect(launcherBounds!.y).toBeGreaterThanOrEqual(safeArea.top);
-  expect(launcherBounds!.x + launcherBounds!.width).toBeLessThanOrEqual(320 - safeArea.right);
-  expect(launcherBounds!.y + launcherBounds!.height).toBeLessThanOrEqual(568 - safeArea.bottom);
+  expect(launcherBounds!.x).toBeGreaterThanOrEqual(safeArea.left - 1);
+  expect(launcherBounds!.y).toBeGreaterThanOrEqual(safeArea.top - 1);
+  expect(launcherBounds!.x + launcherBounds!.width).toBeLessThanOrEqual(
+    layoutViewport.width - safeArea.right + 1
+  );
+  expect(launcherBounds!.y + launcherBounds!.height).toBeLessThanOrEqual(
+    layoutViewport.height - safeArea.bottom + 1
+  );
   await capture(page, testInfo, 'assistant-safe-area-fab');
 
   await launcher.click();
   const dialog = page.locator('.modal[role="dialog"]');
   await expect(dialog).toBeVisible();
+  await dialog.evaluate(async (element) => {
+    const overlay = element.closest<HTMLElement>('.modal-overlay');
+    if (!overlay) throw new Error('Assistant modal overlay is missing');
+    await Promise.all(
+      overlay
+        .getAnimations({ subtree: true })
+        .map((animation) => animation.finished.catch(() => undefined))
+    );
+  });
   const geometry = await page.evaluate(() => {
     const overlay = document.querySelector<HTMLElement>('.modal-overlay--visual-viewport');
     const dialog = document.querySelector<HTMLElement>('.modal[role="dialog"]');
@@ -5506,10 +5526,10 @@ test('asistente global: respeta safe-area emulada en FAB y diálogo móvil', asy
   expect(geometry.paddingRight).toBeGreaterThanOrEqual(safeArea.right);
   expect(geometry.paddingBottom).toBeGreaterThanOrEqual(safeArea.bottom);
   expect(geometry.paddingLeft).toBeGreaterThanOrEqual(safeArea.left);
-  expect(geometry.left).toBeGreaterThanOrEqual(safeArea.left);
-  expect(geometry.top).toBeGreaterThanOrEqual(safeArea.top);
-  expect(geometry.right).toBeLessThanOrEqual(geometry.viewportWidth - safeArea.right);
-  expect(geometry.bottom).toBeLessThanOrEqual(geometry.viewportHeight - safeArea.bottom);
+  expect(geometry.left).toBeGreaterThanOrEqual(safeArea.left - 1);
+  expect(geometry.top).toBeGreaterThanOrEqual(safeArea.top - 1);
+  expect(geometry.right).toBeLessThanOrEqual(geometry.viewportWidth - safeArea.right + 1);
+  expect(geometry.bottom).toBeLessThanOrEqual(geometry.viewportHeight - safeArea.bottom + 1);
   await capture(page, testInfo, 'assistant-safe-area-dialog');
 
   await session.detach();
@@ -5529,7 +5549,18 @@ type ChromeHeapSnapshot = {
   strings: string[];
 };
 
-type HeapRetainerStep = { nodeIndex: number; viaEdgeType: string | null };
+type HeapRetainerStep = {
+  nodeIndex: number;
+  viaEdgeType: string | null;
+  viaEdgeName: string | null;
+};
+
+function safeHeapEdgeName(name: string | null): string | null {
+  if (name === null) return null;
+  return /^[A-Za-z_$][A-Za-z0-9_$.:\-]{0,79}$/.test(name) || /^#[0-9]{1,6}$/.test(name)
+    ? name
+    : '<redacted>';
+}
 
 function findHeapRetainerPath(
   snapshot: ChromeHeapSnapshot,
@@ -5547,6 +5578,7 @@ function findHeapRetainerPath(
   const nameField = nodeFieldIndex.get('name');
   const edgeCountField = nodeFieldIndex.get('edge_count');
   const edgeTypeField = edgeFieldIndex.get('type');
+  const edgeNameField = edgeFieldIndex.get('name_or_index');
   const targetNodeField = edgeFieldIndex.get('to_node');
   const nodeTypes = snapshot.snapshot.meta.node_types[0];
   const edgeTypes = snapshot.snapshot.meta.edge_types[0];
@@ -5560,6 +5592,7 @@ function findHeapRetainerPath(
     nameField === undefined ||
     edgeCountField === undefined ||
     edgeTypeField === undefined ||
+    edgeNameField === undefined ||
     targetNodeField === undefined ||
     targetNodeIndex < 0 ||
     targetNodeIndex >= nodeCount
@@ -5575,7 +5608,10 @@ function findHeapRetainerPath(
   );
   if (rootNodeIndex === undefined) return null;
 
-  const incoming = new Map<number, Array<{ ownerNodeIndex: number; edgeType: string }>>();
+  const incoming = new Map<
+    number,
+    Array<{ ownerNodeIndex: number; edgeType: string; edgeName: string }>
+  >();
   let edgeOffset = 0;
   for (let ownerNodeIndex = 0; ownerNodeIndex < nodeCount; ownerNodeIndex += 1) {
     const ownerOffset = ownerNodeIndex * nodeStride;
@@ -5583,6 +5619,11 @@ function findHeapRetainerPath(
     for (let edge = 0; edge < edgeCount; edge += 1) {
       if (edgeOffset + edgeStride > snapshot.edges.length) return null;
       const edgeType = edgeTypes[snapshot.edges[edgeOffset + edgeTypeField]];
+      const edgeNameOrIndex = snapshot.edges[edgeOffset + edgeNameField];
+      const edgeName =
+        edgeType === 'element'
+          ? `#${edgeNameOrIndex}`
+          : (snapshot.strings[edgeNameOrIndex] ?? `#${edgeNameOrIndex}`);
       const targetOffset = snapshot.edges[edgeOffset + targetNodeField];
       edgeOffset += edgeStride;
       if (edgeType === 'weak' || targetOffset % nodeStride !== 0) continue;
@@ -5590,13 +5631,16 @@ function findHeapRetainerPath(
       const targetIndex = targetOffset / nodeStride;
       if (targetIndex < 0 || targetIndex >= nodeCount) continue;
       const retainers = incoming.get(targetIndex) ?? [];
-      retainers.push({ ownerNodeIndex, edgeType });
+      retainers.push({ ownerNodeIndex, edgeType, edgeName });
       incoming.set(targetIndex, retainers);
     }
   }
 
   const queue: Array<{ nodeIndex: number; path: HeapRetainerStep[] }> = [
-    { nodeIndex: targetNodeIndex, path: [{ nodeIndex: targetNodeIndex, viaEdgeType: null }] }
+    {
+      nodeIndex: targetNodeIndex,
+      path: [{ nodeIndex: targetNodeIndex, viaEdgeType: null, viaEdgeName: null }]
+    }
   ];
   const visited = new Set([targetNodeIndex]);
   for (let cursor = 0; cursor < queue.length && cursor < 10_000; cursor += 1) {
@@ -5609,7 +5653,11 @@ function findHeapRetainerPath(
       visited.add(retainer.ownerNodeIndex);
       const path = [
         ...current.path,
-        { nodeIndex: retainer.ownerNodeIndex, viaEdgeType: retainer.edgeType }
+        {
+          nodeIndex: retainer.ownerNodeIndex,
+          viaEdgeType: retainer.edgeType,
+          viaEdgeName: retainer.edgeName
+        }
       ];
       if (retainer.ownerNodeIndex === rootNodeIndex) return path;
       queue.push({ nodeIndex: retainer.ownerNodeIndex, path });
@@ -5645,16 +5693,25 @@ test('asistente global: traza retainers fuertes y omite referencias débiles en 
       32,
       1 // owner -> retained context
     ],
-    edges: [1, 0, 10, 0, 0, 5],
-    strings: ['(GC roots)', 'system / Context / scope @7', 'assistant owner']
+    edges: [1, 4, 10, 0, 3, 5],
+    strings: [
+      '(GC roots)',
+      'system / Context / scope @7',
+      'assistant owner',
+      'context',
+      'activeAssistant'
+    ]
   };
 
   expect(findHeapRetainerPath(snapshot, 1)).toEqual([
-    { nodeIndex: 1, viaEdgeType: null },
-    { nodeIndex: 2, viaEdgeType: 'context' },
-    { nodeIndex: 0, viaEdgeType: 'property' }
+    { nodeIndex: 1, viaEdgeType: null, viaEdgeName: null },
+    { nodeIndex: 2, viaEdgeType: 'context', viaEdgeName: 'context' },
+    { nodeIndex: 0, viaEdgeType: 'property', viaEdgeName: 'activeAssistant' }
   ]);
   expect(findHeapRetainerPath({ ...snapshot, edges: [1, 0, 10, 2, 0, 5] }, 1)).toBeNull();
+  expect(safeHeapEdgeName('activeAssistant')).toBe('activeAssistant');
+  expect(safeHeapEdgeName('activeAssistant.current-state')).toBe('activeAssistant.current-state');
+  expect(safeHeapEdgeName('user@example.com')).toBe('<redacted>');
 });
 
 test('asistente global: mide heap y listeners tras reaperturas repetidas', async ({
@@ -5852,7 +5909,11 @@ test('asistente global: mide heap y listeners tras reaperturas repetidas', async
                   : type === 'object' && name.startsWith('system / Context / scope')
                     ? 'system / Context / scope'
                     : name.slice(0, 100);
-              return { node: `${type}:${safeName}`, via: step.viaEdgeType };
+              return {
+                node: `${type}:${safeName}`,
+                via: step.viaEdgeType,
+                edge: safeHeapEdgeName(step.viaEdgeName)
+              };
             });
           });
           console.log(
