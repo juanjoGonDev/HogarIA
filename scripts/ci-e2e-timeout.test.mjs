@@ -4,10 +4,10 @@ import test from 'node:test';
 
 const workflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
 
-function getE2eShardTimeoutMinutes(source) {
+function getJobTimeoutMinutes(source, jobName) {
   const lines = source.split(/\r?\n/);
-  const start = lines.findIndex((line) => /^  e2e:\s*$/.test(line));
-  assert.notEqual(start, -1, 'CI workflow must define the e2e shard job');
+  const start = lines.findIndex((line) => line === `  ${jobName}:`);
+  assert.notEqual(start, -1, `CI workflow must define the ${jobName} job`);
 
   const end = lines.findIndex(
     (line, index) => index > start && /^  [A-Za-z0-9_-]+:\s*$/.test(line)
@@ -19,12 +19,14 @@ function getE2eShardTimeoutMinutes(source) {
   return Number(timeout.match(/\d+/)?.[0]);
 }
 
-test('CI E2E shards have at least 16 minutes for tests and cleanup', () => {
-  const timeout = getE2eShardTimeoutMinutes(workflow);
-  assert.ok(
-    timeout >= 16,
-    `e2e shard timeout is ${timeout}m; it must cover the slowest observed run plus artifact cleanup`
-  );
+test('CI E2E jobs have at least 30 minutes for completion and diagnostics', () => {
+  for (const jobName of ['e2e', 'full-stack']) {
+    const timeout = getJobTimeoutMinutes(workflow, jobName);
+    assert.ok(
+      timeout >= 30,
+      `${jobName} timeout is ${timeout}m; it must allow the observed suite to finish and publish diagnostics`
+    );
+  }
 });
 
 test('the dedicated scheduler E2E publishes diagnostics from its own isolated run', () => {

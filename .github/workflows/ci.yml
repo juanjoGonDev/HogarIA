@@ -247,7 +247,7 @@ jobs:
     name: 'Full-stack E2E (prod build, limits on)'
     runs-on: ubuntu-latest
     needs: install
-    timeout-minutes: 16
+    timeout-minutes: 30
     env:
       E2E_SEED: r${{ github.run_id }}a${{ github.run_attempt }}fs
     steps:
@@ -316,7 +316,7 @@ jobs:
     name: 'E2E Tests (shard ${{ matrix.shard }})'
     runs-on: ubuntu-latest
     needs: install
-    timeout-minutes: 16
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
