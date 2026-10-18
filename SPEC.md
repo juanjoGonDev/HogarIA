@@ -442,3 +442,13 @@ $env:HOGARIA_AI_ASSISTANT_LOCAL_SMOKE='1'; node scripts/run-isolated-playwright.
 - `node .e2e-screenshots/assistant-compose-prototypes-20261018/capture.mjs` — **PASS**, cuatro diseños: `Campo unido` (consentimiento y micrófono en el borde interior inferior), `Permiso contextual` (consentimiento solo al pedir voz), `Herramientas en foco` (grupo en el borde superior interior) y `Entrada progresiva` (campo más compacto que crece al escribir). Verifica heading/label únicos y accesibles, permiso contextual, privacidad desplegable, proximidad consentimiento-micrófono, botones de 44 px y geometría sin overflow a **390×844** y **320×568**.
 - Capturas sintéticas comparables e inspeccionadas, fuera de Git: `.e2e-screenshots/assistant-compose-prototypes-20261018/desktop-comparison.png`, `mobile-comparison.png` y `desktop-1.png`–`desktop-4.png` / `mobile-1.png`–`mobile-4.png`. Fuentes HTML y runner en el mismo directorio ignorado.
 - Esta unidad no altera la implementación productiva ni captura audio. Queda pendiente la elección del usuario antes de aplicar una variante.
+
+### Implementación del prototipo seleccionado — Entrada progresiva
+
+**Decisión del usuario (2026-10-18):** aplicar el prototipo 4, «Entrada progresiva».
+
+- [ ] El textarea comienza compacto y crece con el texto hasta un máximo; al alcanzar el máximo, el contenido se desplaza dentro del campo. Con el campo vacío no debe reservar altura visual innecesaria.
+- [ ] Dictado, consentimiento explícito y acceso «Ver más» permanecen agrupados dentro del borde inferior del campo; no se añade una fila aislada debajo ni una columna lateral. A 320 px no hay solapamiento ni desbordamiento horizontal.
+- [ ] Mantener un único nombre accesible, la instrucción breve y ejemplos ya aprobados; el helper de revisión solo aparece cuando aporte información distinta. El dictado sigue bloqueado hasta aceptar el consentimiento y conserva sus estados/error accesibles.
+- [ ] Añadir regresiones unitarias y Playwright con app/API reales y DB temporal para crecimiento, límite, voz/consentimiento y geometría en escritorio, móvil y 320 px. Guardar e inspeccionar capturas sintéticas PC/móvil.
+- [ ] Revalidar la matriz de rutas/breakpoints afectada, teclado/foco, accesibilidad, i18n y gates requeridos; actualizar esta sección con comandos, resultados y limitaciones antes de cerrar.
