@@ -524,13 +524,21 @@ interface NavItem {
       /* Main Content */
       .main {
         padding-top: 56px;
-        padding-bottom: 0;
+        /* Keep the final actionable row clear of the fixed assistant launcher. */
+        padding-bottom: calc(
+          52px + max(var(--space-5), env(safe-area-inset-bottom, 0px)) + var(--space-2)
+        );
         min-height: 100vh;
+
+        @media (max-width: 767px) {
+          padding-bottom: calc(
+            52px + var(--space-3) + env(safe-area-inset-bottom, 0px) + var(--space-2)
+          );
+        }
 
         @media (min-width: 1024px) {
           margin-left: 280px;
           padding-top: 0;
-          padding-bottom: 0;
         }
       }
 

@@ -101,18 +101,29 @@ test('un fallo al guardar módulos revierte, desbloquea y permite reintentar', a
       const errorAlert = page.locator('.settings-hint--error');
       await errorAlert.scrollIntoViewIfNeeded();
       const errorBox = await errorAlert.boundingBox();
-      const navBox = await page.locator('.bottom-nav').boundingBox();
+      const header = page.locator('.header');
+      const assistantButton = page.locator('[data-test="ai-assistant-open"]');
+      const headerBox = await header.boundingBox();
+      const assistantBox = await assistantButton.boundingBox();
       expect(errorBox, 'El aviso debe tener una caja visible').not.toBeNull();
-      expect(navBox, 'La navegación móvil debe estar visible').not.toBeNull();
+      expect(headerBox, 'La cabecera móvil debe tener una caja visible').not.toBeNull();
+      expect(assistantBox, 'El acceso al asistente debe tener una caja visible').not.toBeNull();
 
-      const intersectsBottomNav =
-        errorBox!.x < navBox!.x + navBox!.width &&
-        errorBox!.x + errorBox!.width > navBox!.x &&
-        errorBox!.y < navBox!.y + navBox!.height &&
-        errorBox!.y + errorBox!.height > navBox!.y;
+      const intersects = (
+        first: { x: number; y: number; width: number; height: number },
+        second: { x: number; y: number; width: number; height: number }
+      ) =>
+        first.x < second.x + second.width &&
+        first.x + first.width > second.x &&
+        first.y < second.y + second.height &&
+        first.y + first.height > second.y;
       expect(
-        intersectsBottomNav,
-        `El aviso contextual no debe solaparse con la navegación a ${viewport.width}×${viewport.height}`
+        intersects(errorBox!, headerBox!),
+        `El aviso contextual no debe cubrir la cabecera a ${viewport.width}×${viewport.height}`
+      ).toBe(false);
+      expect(
+        intersects(errorBox!, assistantBox!),
+        `El aviso contextual no debe cubrir el acceso al asistente a ${viewport.width}×${viewport.height}`
       ).toBe(false);
     }
   }

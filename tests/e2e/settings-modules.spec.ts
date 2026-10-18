@@ -1,7 +1,7 @@
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test, expect } from './fixtures';
-import { registerAndGoto, registerUser } from './helpers/auth';
+import { registerAndGoto } from './helpers/auth';
 import { assertSwitchGeometry, assertSwitchHitArea } from './helpers/switch-geometry';
 
 test.use({ serviceWorkers: 'block' });
@@ -144,14 +144,64 @@ test.describe('Configuración — módulos', () => {
     await expect(page.locator('a[href="/shopping"]')).not.toHaveCount(0);
   });
 
-  test('la última sección visible no se apaga, y se puede restablecer', async ({ page }) => {
+  test('la última sección visible no se apaga, y se puede restablecer', async ({
+    page
+  }, testInfo) => {
     await registerAndGoto(page, '/settings', 'mods-last');
 
     // Hay que apagar las TRES secciones de mas: con cuatro vivas en este build (los
     // tickets llegaron en la ## 12aj), quitar dos deja tres visibles y ninguna al limite.
-    await page.locator('[data-module-switch="pantry"]').click();
-    await page.locator('[data-module-switch="shopping"]').click();
-    await page.locator('[data-module-switch="receipts"]').click();
+    for (const module of ['pantry', 'shopping', 'receipts']) {
+      const toggle = page.locator(`[data-module-switch="${module}"]`);
+      await toggle.evaluate((element) =>
+        element.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' })
+      );
+      const geometry = await toggle.evaluate((element) => {
+        const control = element.getBoundingClientRect();
+        const launcher = document.querySelector('[data-test="ai-assistant-open"]');
+        if (!launcher) return { overlapsLauncher: false, control: null, launcher: null };
+        const button = launcher.getBoundingClientRect();
+        return {
+          overlapsLauncher:
+            control.left < button.right &&
+            control.right > button.left &&
+            control.top < button.bottom &&
+            control.bottom > button.top,
+          control: {
+            left: control.left,
+            right: control.right,
+            top: control.top,
+            bottom: control.bottom
+          },
+          launcher: {
+            left: button.left,
+            right: button.right,
+            top: button.top,
+            bottom: button.bottom
+          }
+        };
+      });
+      expect(
+        geometry.overlapsLauncher,
+        `el FAB no debe cubrir ${module}: ${JSON.stringify(geometry)}`
+      ).toBe(false);
+      if (module === 'receipts') {
+        const screenshotDir = join(
+          process.cwd(),
+          '.e2e-screenshots',
+          'assistant-control-overlap-20261018',
+          testInfo.project.name
+        );
+        await mkdir(screenshotDir, { recursive: true });
+        await page.screenshot({
+          path: join(screenshotDir, 'settings-last-module-visible.png'),
+          fullPage: false,
+          animations: 'disabled'
+        });
+      }
+      await toggle.click();
+      await expect(toggle).toHaveAttribute('aria-checked', 'false');
+    }
 
     // Queda una sola: apagarla habria vuelto a encender todas (seleccion vacia)
     await expect(page.locator('[data-module-switch="meals"]')).toHaveAttribute(
@@ -232,7 +282,7 @@ test.describe('Configuración — módulos', () => {
   });
 
   test('no se pueden cambiar módulos hasta cargar el perfil inicial', async ({ page }) => {
-    await registerUser(page, 'mods-profile-load');
+    await registerAndGoto(page, '/settings', 'mods-profile-load');
 
     let signalProfileRequest!: () => void;
     let releaseProfile!: () => void;

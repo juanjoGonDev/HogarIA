@@ -54,6 +54,7 @@ import { AiActionAssistantDialogComponent } from './ai-action-assistant-dialog.c
         right: max(var(--space-5), env(safe-area-inset-right, 0px));
         bottom: max(var(--space-5), env(safe-area-inset-bottom, 0px));
         display: block;
+        pointer-events: none;
         --assistant-household-extra-lift: 0px;
         --primary: var(--color-primary-700);
         --primary-dark: var(--color-primary-800);
@@ -61,12 +62,14 @@ import { AiActionAssistantDialogComponent } from './ai-action-assistant-dialog.c
 
       :host(.assistant-launcher--open) {
         z-index: 1001;
+        pointer-events: auto;
       }
 
       .assistant-launcher__button {
         box-sizing: border-box;
         display: grid;
         place-items: center;
+        pointer-events: auto;
         width: 52px;
         height: 52px;
         border: 1px solid var(--border-strong);
@@ -85,9 +88,7 @@ import { AiActionAssistantDialogComponent } from './ai-action-assistant-dialog.c
       }
 
       .assistant-launcher__button--household {
-        transform: translateY(
-          calc(-1 * (var(--space-5) + 100px + var(--assistant-household-extra-lift, 0px)))
-        );
+        transform: translateY(calc(-1 * var(--assistant-household-extra-lift, 0px)));
       }
 
       .assistant-launcher__button:focus-visible {
@@ -99,10 +100,6 @@ import { AiActionAssistantDialogComponent } from './ai-action-assistant-dialog.c
         :host {
           right: max(var(--space-3), env(safe-area-inset-right, 0px));
           bottom: calc(env(safe-area-inset-bottom, 0px) + var(--space-3));
-        }
-
-        .assistant-launcher__button--household {
-          transform: translateY(calc(-1 * (152px + var(--assistant-household-extra-lift, 0px))));
         }
       }
 

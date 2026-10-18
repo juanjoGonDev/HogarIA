@@ -7,7 +7,10 @@ import { expect, test } from './fixtures';
 import { createHousehold, registerUser } from './helpers/auth';
 
 interface ProviderRequest {
-  messages?: Array<{ role?: string; content?: string }>;
+  messages?: Array<{
+    role?: string;
+    content?: string | Array<{ type?: string; file?: { filename?: string; file_data?: string } }>;
+  }>;
   response_format?: { type?: string; json_schema?: { name?: string; strict?: boolean } };
 }
 
@@ -190,33 +193,27 @@ function eventKey(meal: {
   ]);
 }
 
-function parsePromptArrayAfter(prompt: string, label: string): MealSlot[] {
-  const marker = label + '\n';
-  const markerStart = prompt.indexOf(marker);
-  if (markerStart < 0) throw new Error('Prompt fixture is missing the meal-slot section.');
-
-  const jsonStart = prompt.indexOf('[', markerStart + marker.length);
-  if (jsonStart < 0) throw new Error('Prompt fixture is missing the meal-slot JSON array.');
-
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  for (let index = jsonStart; index < prompt.length; index += 1) {
-    const character = prompt[index];
-    if (inString) {
-      if (escaped) escaped = false;
-      else if (character === '\\') escaped = true;
-      else if (character === '"') inString = false;
-      continue;
-    }
-    if (character === '"') inString = true;
-    else if (character === '[') depth += 1;
-    else if (character === ']') {
-      depth -= 1;
-      if (depth === 0) return JSON.parse(prompt.slice(jsonStart, index + 1)) as MealSlot[];
-    }
+function readRequiredTurns(payload: ProviderRequest): MealSlot[] {
+  const userContent = payload.messages?.find((message) => message.role === 'user')?.content;
+  if (!Array.isArray(userContent)) {
+    throw new Error('Provider fixture is missing multipart planning context.');
   }
-  throw new Error('Prompt fixture contains an incomplete meal-slot JSON array.');
+
+  const contextFile = userContent.find(
+    (part) => part.file?.filename === 'meal-planning-context.json'
+  )?.file?.file_data;
+  const contextPrefix = 'data:application/json;base64,';
+  if (!contextFile?.startsWith(contextPrefix)) {
+    throw new Error('Provider fixture is missing the planning context attachment.');
+  }
+
+  const context = JSON.parse(
+    Buffer.from(contextFile.slice(contextPrefix.length), 'base64').toString('utf8')
+  ) as { requiredTurns?: MealSlot[] };
+  if (!Array.isArray(context.requiredTurns)) {
+    throw new Error('Provider fixture context has no required turns.');
+  }
+  return context.requiredTurns;
 }
 
 async function captureSyntheticScreen(page: Page, project: string, state: string): Promise<string> {
@@ -263,11 +260,56 @@ test('recorre planificación del hogar y guarda automatización futura sin escri
       try {
         const payload = JSON.parse(body) as ProviderRequest;
         providerRequests.push(payload);
-        const prompt = payload.messages?.find((message) => message.role === 'user')?.content ?? '';
-        const slots = parsePromptArrayAfter(
-          prompt,
-          'Turnos que deben quedar resueltos exactamente una vez por participante:'
-        );
+        const slots = readRequiredTurns(payload);
+        const instruction = {
+          stepNumber: 1,
+          instruction: 'Cocina el ingrediente sintético hasta que esté tierno.',
+          duration: null,
+          temperature: null,
+          timerRequired: false,
+          timerDuration: null,
+          tips: null,
+          warning: null,
+          illustration: null
+        };
+        const recipe = {
+          name: 'Comida integrada E2E',
+          description: 'Receta sintética para el recorrido integrado.',
+          difficulty: 'easy',
+          cuisine: 'casera',
+          totalTime: 30,
+          prepTime: 10,
+          cookTime: 20,
+          restTime: null,
+          baseServings: 1,
+          calories: null,
+          ingredients: [
+            {
+              name: ingredientName,
+              quantity: 100,
+              unit: 'g',
+              preparation: null,
+              isOptional: false,
+              substitutes: [],
+              notes: null
+            }
+          ],
+          utensils: ['cacerola'],
+          guidance: {
+            appliances: [],
+            parallelTasks: [],
+            tipsAndVariations: [],
+            batchCookingWarning: null
+          },
+          instructionsByLevel: {
+            basic: [instruction],
+            intermediate: [instruction],
+            expert: [instruction]
+          },
+          nutrition: null,
+          storage: null,
+          tags: ['synthetic-e2e']
+        };
         const events = slots.flatMap((slot, index) => {
           const groups =
             index % 2 === 0
@@ -277,25 +319,7 @@ test('recorre planificación del hogar y guarda automatización futura sin escri
             date: slot.date,
             mealType: slot.mealType,
             time: slot.time,
-            recipe: {
-              name:
-                participantAliases.length > 1 ? 'Guiso E2E compartido' : 'Almuerzo E2E individual',
-              description: 'Receta sintética para el recorrido integrado.',
-              baseServings: 1,
-              prepTimeMinutes: 10,
-              cookTimeMinutes: 20,
-              ingredients: [
-                {
-                  name: ingredientName,
-                  quantity: 100,
-                  unit: 'g',
-                  preparation: null,
-                  isOptional: false,
-                  notes: null
-                }
-              ],
-              instructions: ['Cocina el ingrediente sintético hasta que esté tierno.']
-            },
+            recipeAlias: 'N1',
             participantAliases,
             servings: participantAliases.length,
             objectiveSummary: 'Comida equilibrada de prueba.',
@@ -306,7 +330,14 @@ test('recorre planificación del hogar y guarda automatización futura sin escri
         response.writeHead(200, { 'content-type': 'application/json' });
         response.end(
           JSON.stringify({
-            choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ events }) } }]
+            choices: [
+              {
+                finish_reason: 'stop',
+                message: {
+                  content: JSON.stringify({ newRecipes: [{ alias: 'N1', recipe }], events })
+                }
+              }
+            ]
           })
         );
       } catch {
@@ -538,14 +569,24 @@ test('recorre planificación del hogar y guarda automatización futura sin escri
     const proposalHttpResponse = await proposalResponse;
     const proposalBody = await responseData<{
       proposalId: string;
+      recipes: Array<{
+        alias: string;
+        source: 'catalog' | 'new';
+        recipeId: string | null;
+        recipe: { name: string };
+      }>;
       events: Array<{
         id: string;
         date: string;
         mealType: string;
         time: string | null;
-        recipe: { name: string } | null;
+        recipeAlias: string | null;
+        participantAliases: string[];
         participantIds: string[];
         servings: number;
+        objectiveSummary: string;
+        status: 'scheduled' | 'unresolved';
+        reason: string | null;
       }>;
     }>(proposalHttpResponse);
     expect(proposalBody.proposalId).toBeTruthy();
@@ -557,10 +598,11 @@ test('recorre planificación del hogar y guarda automatización futura sin escri
       type: 'json_schema',
       json_schema: { name: 'weekly_meal_proposal', strict: true }
     });
-    const prompt = providerRequests[0]?.messages
-      ?.map((message) => message.content ?? '')
-      .join('\n');
-    expect(prompt).toContain('Turnos que deben quedar resueltos exactamente una vez');
+    expect(readRequiredTurns(providerRequests[0] ?? {})).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ date: weekStart, mealType: expect.any(String) })
+      ])
+    );
 
     const review = page.locator('[data-test="meal-proposal-review"]');
     await expect(review).toBeVisible();
@@ -588,19 +630,25 @@ test('recorre planificación del hogar y guarda automatización futura sin escri
       proposalId: string;
       weekStart: string;
       householdMemberIds: string[];
+      recipes: typeof proposalBody.recipes;
       events: Array<{
         id: string;
         date: string;
         mealType: string;
         time: string | null;
-        recipe: { name: string } | null;
+        recipeAlias: string | null;
+        participantAliases: string[];
         participantIds: string[];
         servings: number;
+        objectiveSummary: string;
+        status: 'scheduled' | 'unresolved';
+        reason: string | null;
       }>;
     };
     expect(submitted.proposalId).toBe(proposalBody.proposalId);
     expect(submitted.weekStart).toBe(weekStart);
     expect(submitted.householdMemberIds).toEqual(proposalInput.householdMemberIds);
+    expect(submitted.recipes).toEqual(proposalBody.recipes);
     const confirmation = await confirmResponse;
     const confirmationData = await responseData<{
       idempotent: boolean;
@@ -632,7 +680,9 @@ test('recorre planificación del hogar y guarda automatización futura sin escri
           date: event.date,
           mealType: event.mealType,
           time: event.time,
-          recipeName: event.recipe?.name ?? '',
+          recipeName:
+            submitted.recipes.find((recipe) => recipe.alias === event.recipeAlias)?.recipe.name ??
+            '',
           servings: event.servings,
           participantIds: event.participantIds
         })
@@ -866,7 +916,28 @@ test('recorre planificación del hogar y guarda automatización futura sin escri
       lastRun: null
     });
 
-    await page.getByRole('button', { name: 'Reanudar planificación automática' }).click();
+    const resumeAutomation = page.getByRole('button', {
+      name: 'Reanudar planificación automática'
+    });
+    const resumeButtonHit = await resumeAutomation.evaluate((button) => {
+      const rect = button.getBoundingClientRect();
+      const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      const bounds = (element: Element | null) => {
+        if (!element) return null;
+        const { x, y, width, height } = element.getBoundingClientRect();
+        return { x, y, width, height };
+      };
+      return {
+        buttonHit: hit === button || button.contains(hit),
+        hitTarget:
+          hit?.tagName.toLowerCase() + (hit instanceof HTMLElement ? `.${hit.className}` : ''),
+        button: bounds(button),
+        assistantHost: bounds(document.querySelector('app-ai-action-assistant-launcher')),
+        assistantButton: bounds(document.querySelector('[data-test="ai-assistant-open"]'))
+      };
+    });
+    expect(resumeButtonHit.buttonHit, JSON.stringify(resumeButtonHit)).toBe(true);
+    await resumeAutomation.click();
     await expect
       .poll(async () => (await readAutomation(page, ownerPlanningHeaders)).enabled)
       .toBe(true);
