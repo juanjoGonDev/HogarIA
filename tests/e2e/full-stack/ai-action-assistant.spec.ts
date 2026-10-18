@@ -19,6 +19,41 @@ type BrowserSpeechStubControl = {
   finish(): void;
 };
 
+function localSpanishSpeechVoiceName(): string | null {
+  const script = [
+    'Add-Type -AssemblyName System.Speech',
+    '$synth = New-Object System.Speech.Synthesis.SpeechSynthesizer',
+    "try { $voice = $synth.GetInstalledVoices() | Where-Object { $_.Enabled -and $_.VoiceInfo.Culture.Name -eq 'es-ES' } | Select-Object -First 1; if ($voice) { $voice.VoiceInfo.Name } } finally { $synth.Dispose() }"
+  ].join('; ');
+
+  try {
+    return (
+      execFileSync(
+        'powershell.exe',
+        ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script],
+        { encoding: 'utf8', timeout: 5_000, windowsHide: true }
+      ).trim() || null
+    );
+  } catch {
+    return null;
+  }
+}
+
+function speakSyntheticSpanishPhrase(voiceName: string): void {
+  const escapedVoiceName = voiceName.replaceAll("'", "''");
+  const script = [
+    'Add-Type -AssemblyName System.Speech',
+    '$synth = New-Object System.Speech.Synthesis.SpeechSynthesizer',
+    `try { $synth.SelectVoice('${escapedVoiceName}'); $synth.Volume = 75; $synth.Rate = -1; $synth.Speak('Añade lentejas a la despensa.') } finally { $synth.Dispose() }`
+  ].join('; ');
+
+  execFileSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script], {
+    encoding: 'utf8',
+    timeout: 15_000,
+    windowsHide: true
+  });
+}
+
 // Intercept only the deterministic AI response; domain writes still reach the real backend.
 // Blocking the PWA worker lets Playwright observe and fulfill that API request reliably.
 test.use({ serviceWorkers: 'block' });
@@ -5165,6 +5200,69 @@ test('asistente global: traduce el fallback de dictado al inglés', async ({ pag
   await expect(voiceError).toBeInViewport();
   expect(assistantDatabaseSnapshot()).toEqual(databaseBeforeVoice);
   await capture(page, testInfo, 'voice-service-fallback-en');
+});
+
+test('asistente global: smoke opt-in con micrófono físico y frase sintética', async ({
+  page
+}, testInfo) => {
+  test.skip(
+    process.env.HOGARIA_AI_ASSISTANT_PHYSICAL_MIC_SMOKE !== '1',
+    'requiere autorización, preflight y Chrome con micrófono físico'
+  );
+  test.skip(testInfo.project.name !== 'chromium', 'el smoke usa solo Chrome de escritorio');
+  test.skip(!process.env.E2E_CHROME_BIN, 'requiere E2E_CHROME_BIN apuntando a Chrome estable');
+
+  let proposalRequests = 0;
+  await page.route('**/api/ai/assistant/proposals', async (route, request) => {
+    if (request.method() === 'POST') proposalRequests += 1;
+    await route.abort();
+  });
+  await registerUser(page, 'Asistente micrófono físico E2E');
+  await createHousehold(page, 'Hogar micrófono físico sintético');
+  await page.goto('/dashboard');
+  await page.context().grantPermissions(['microphone'], { origin: new URL(page.url()).origin });
+
+  const dialog = page.locator('.modal[role="dialog"]');
+  await page.locator('[data-test="ai-assistant-open"]').click();
+  await expect(dialog).toBeVisible();
+  const privacy = dialog.locator('details.assistant__privacy');
+  await privacy.locator('summary').click();
+  await expect(privacy.locator('.assistant__voice-note')).toContainText('fuera de tu dispositivo');
+  await expect(dialog.locator('input[type="checkbox"]')).toHaveCount(0);
+
+  const defaultMicrophone = await page.evaluate(async () => {
+    const inputs = (await navigator.mediaDevices.enumerateDevices()).filter(
+      (device) => device.kind === 'audioinput'
+    );
+    return inputs.find((device) => device.deviceId === 'default')?.label ?? '';
+  });
+  expect(defaultMicrophone).toMatch(/HD Pro Webcam C920/i);
+  expect(defaultMicrophone).not.toMatch(/ManyCam|WO Mic/i);
+  const localVoiceName = localSpanishSpeechVoiceName();
+  test.skip(!localVoiceName, 'requiere voz de sistema local es-ES; no se inicia el micrófono');
+
+  const prompt = dialog.locator('[data-test="ai-assistant-prompt"]');
+  const voiceStart = dialog.locator('[data-test="ai-assistant-voice-start"] button');
+  const voiceStop = dialog.locator('[data-test="ai-assistant-voice-stop"] button');
+  const databaseBeforeVoice = assistantDatabaseSnapshot();
+  await voiceStart.click();
+  await expect(voiceStop).toBeVisible();
+
+  try {
+    speakSyntheticSpanishPhrase(localVoiceName!);
+
+    await expect
+      .poll(() => prompt.inputValue(), { timeout: 30_000 })
+      .toMatch(/lentejas[\s\S]*despensa/i);
+    await voiceStop.click();
+    await expect(voiceStart).toBeVisible();
+    expect(assistantDatabaseSnapshot()).toEqual(databaseBeforeVoice);
+    expect(proposalRequests).toBe(0);
+  } finally {
+    if (await voiceStop.isVisible().catch(() => false)) {
+      await voiceStop.click().catch(() => undefined);
+    }
+  }
 });
 
 test('asistente global: navegar durante dictado libera voz y conserva el borrador', async ({
