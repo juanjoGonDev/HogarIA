@@ -671,3 +671,15 @@ $env:HOGARIA_AI_ASSISTANT_LOCAL_SMOKE='1'; node scripts/run-isolated-playwright.
   - Verde: `pnpm exec prettier --check SPEC.md tests/e2e/safe-area-layout.spec.ts tests/e2e/ui-shared-button-geometry.spec.ts`; `pnpm run typecheck:e2e`; cada test focal pasa **1/1** en Chromium y **1/1** en Mobile Chrome, con `node scripts/run-isolated-playwright.mjs --config=playwright.config.ts --project=<project> --workers=1 --retries=0 --reporter=line --grep '<título focal>' <spec>`. Cada ejecución usó DB temporal y confirmó cleanup.
   - Capturas sintéticas PC/móvil revisadas; ignoradas por Git en `.e2e-screenshots/pr47-shard4-20261018/{chromium,mobile-chrome}/`.
 - [ ] No relajar tolerancias de geometría, guards ni coverage. Reejecutar CI remota y mantener abierta la spec integral mientras fallen otros shards o heap.
+
+### CI shards 1–3: atribuir fallos previos a corregir
+
+Fuente: run CI `39166387237`, commit `d3ef6d2` (2026-10-18). Alcance limitado a reproducir fallos remotos del PR; actualizar tests obsoletos solo con evidencia, corregir producto solo si se reproduce una regresión real. No relajar guards, tolerancias, interacciones reales ni pruebas de persistencia.
+
+- [ ] Shard 1: reproducir el E2E del scheduler/worker aislado; entender por qué una ejecución real queda sin `completed`; conservar reloj sintético, proveedor local y DB temporal.
+- [ ] Shard 2: reproducir overflow de Planning en 389/360 px; corregir la causa geométrica si se confirma, sin esconder overflow ni reducir cobertura.
+- [ ] Shard 2: atribuir pruebas de rutas protegidas/i18n/onboarding/layout/drawer/meal replacement; crear hogar sintético solo cuando la ruta exija membresía y mantener cobertura explícita del estado «sin hogar».
+- [ ] Shard 2: clasificar y resolver los fallos restantes individualmente; no ajustar test ni producto por suposición.
+- [ ] Shard 3: reproducir los 14 fallos de tickets, libro/edición/favoritos/detalle de recetas e iconografía; separar precondición/ruta, assertion obsoleta y regresión visible, con DB temporal.
+- [ ] Tras cada unidad, ejecutar primero su E2E focal; después shards afectados en Chromium/CI Linux, typecheck, UI check y coverage; registrar comandos, conteos y capturas sintéticas requeridas.
+- [ ] Completar la matriz CI del HEAD y mantener separado el gate de heap/performance; PR sigue Draft y no afirmar 100 % hasta completar evidencia.
