@@ -1,3 +1,5 @@
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { expect, test } from '../fixtures';
 import { createHousehold, logout, registerUser } from '../helpers/auth';
 import { seededEmail } from '../helpers/seed';
@@ -8,12 +10,22 @@ test('registration from an invite link preserves the code and joins that househo
   page
 }) => {
   const pageErrors: string[] = [];
+  const failedScripts: string[] = [];
+  const scriptRequests: string[] = [];
   let registrationRequests = 0;
   let joinRequests = 0;
   const inviteeName = 'QA invitee from registration';
   const inviteeEmail = seededEmail();
 
   page.on('pageerror', (error) => pageErrors.push(error.message));
+  page.on('requestfailed', (request) => {
+    if (request.resourceType() === 'script') failedScripts.push(request.url());
+  });
+  page.on('request', (request) => {
+    if (request.resourceType() === 'script') {
+      scriptRequests.push(new URL(request.url()).pathname);
+    }
+  });
   page.on('request', (request) => {
     const pathname = new URL(request.url()).pathname;
     if (request.method() === 'POST' && pathname === '/api/auth/register') {
@@ -31,8 +43,25 @@ test('registration from an invite link preserves the code and joins that househo
   expect(code).toBeTruthy();
 
   await logout(page);
+  const scriptsBeforeInvite = new Set(scriptRequests);
   await page.goto(`/invite/${encodeURIComponent(code!)}`);
   await expect(page.locator('.invite-card__title')).toContainText('QA registration invite home');
+  expect(failedScripts).toEqual([]);
+  expect(
+    scriptRequests.some(
+      (url) => url.startsWith('/chunk-') && url.endsWith('.js') && !scriptsBeforeInvite.has(url)
+    ),
+    'visitar una invitación pública carga un chunk lazy nuevo'
+  ).toBe(true);
+  const screenshotRoot = process.env.E2E_SCREENSHOT_DIR;
+  if (screenshotRoot) {
+    const screenshotDirectory = join(screenshotRoot, test.info().project.name);
+    mkdirSync(screenshotDirectory, { recursive: true });
+    await page.screenshot({
+      path: join(screenshotDirectory, 'invite-route-after-lazy-load.png'),
+      animations: 'disabled'
+    });
+  }
 
   const registerLink = page.locator('a[href^="/auth/register"]');
   const registerTarget = new URL((await registerLink.getAttribute('href'))!, page.url());

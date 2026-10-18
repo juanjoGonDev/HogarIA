@@ -2,7 +2,6 @@ import { Routes } from '@angular/router';
 import { authGuard } from './core/guards/auth.guard';
 import { MainLayoutComponent } from './layouts/main-layout/main-layout.component';
 import { AuthLayoutComponent } from './layouts/auth-layout/auth-layout.component';
-import { InviteComponent } from './features/invite/invite.component';
 import { aiHouseholdSettingsGuard } from './core/guards/ai-household-settings.guard';
 import { householdRequiredGuard } from './core/guards/household-required.guard';
 import { translationBundlesResolver } from './core/i18n/translation-bundles.resolver';
@@ -20,7 +19,8 @@ export const routes: Routes = [
   // Public invite page (works before & after login)
   {
     path: 'invite/:code',
-    component: InviteComponent,
+    loadComponent: () =>
+      import('./features/invite/invite.component').then((m) => m.InviteComponent),
     resolve: { translations: translationBundlesResolver('invite', 'auth', 'household') }
   },
 
