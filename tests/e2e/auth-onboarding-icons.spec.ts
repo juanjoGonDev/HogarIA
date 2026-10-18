@@ -104,6 +104,8 @@ test('onboarding y preferencias conservan emojis de comida y usan SVG para objet
     : [{ width: 1440, height: 900 }];
 
   await registerToOnboarding(page, 'qa-onboarding-icons');
+  await createHousehold(page, 'Hogar sintético onboarding iconos');
+  await page.goto('/onboarding');
   await waitForRouterViewTransition(page);
   await waitForStableView(page);
   const onboardingLogo = page.locator('.onboarding__logo app-icon[name="home"]');

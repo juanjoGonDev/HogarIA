@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures';
-import { registerUser } from './helpers/auth';
+import { registerAndGoto } from './helpers/auth';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -7,8 +7,7 @@ test.describe('Settings — theme & i18n', () => {
   test.use({ serviceWorkers: 'block' });
 
   test.beforeEach(async ({ page }) => {
-    await registerUser(page, 'Tester');
-    await page.goto('/settings');
+    await registerAndGoto(page, '/settings', 'Tester');
     await expect(page.locator('.settings-group__title').first()).toBeVisible();
   });
 

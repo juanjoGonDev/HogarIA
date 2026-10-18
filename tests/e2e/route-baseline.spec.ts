@@ -3,7 +3,7 @@ import { join } from 'node:path';
 
 import type { Request } from '@playwright/test';
 import { expect, test } from './fixtures';
-import { registerToOnboarding, skipOnboarding } from './helpers/auth';
+import { createHousehold, registerToOnboarding, skipOnboarding } from './helpers/auth';
 import {
   AUTHENTICATED_ROUTES,
   ONBOARDING_ROUTE,
@@ -268,6 +268,8 @@ test('baseline público y autenticado: rutas, errores de navegador y overflow', 
   await expect(page).toHaveURL(/\/auth\/login(?:\?|$)/);
 
   await registerToOnboarding(page, 'QA baseline');
+  await createHousehold(page, 'Hogar sintético baseline');
+  await page.goto(ONBOARDING_ROUTE.path);
   for (const viewport of VIEWPORTS) await visit(ONBOARDING_ROUTE, viewport);
   await skipOnboarding(page);
 

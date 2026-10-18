@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures';
-import { registerUser, logout } from './helpers/auth';
+import { createHousehold, registerUser, logout } from './helpers/auth';
 
 test.describe('Authentication', () => {
   test.beforeEach(async ({ page }) => {
@@ -93,6 +93,7 @@ test.describe('Authentication', () => {
     page
   }, testInfo) => {
     const email = await registerUser(page, 'Login feedback');
+    await createHousehold(page, 'Hogar sintético de feedback de acceso');
     await logout(page);
     await page.fill('input#email', email);
     await page.fill('input#password', 'WrongPassword1');
@@ -154,6 +155,7 @@ test.describe('Authentication', () => {
 
   test('should login with the credentials used at registration', async ({ page }) => {
     const email = await registerUser(page, 'Login Tester');
+    await createHousehold(page, 'Hogar sintético de login');
     await logout(page);
 
     await page.fill('input#email', email);

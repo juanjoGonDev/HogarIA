@@ -133,7 +133,7 @@ test.describe('límite de bytes UTF-8 para contraseñas nuevas', () => {
     await page.getByRole('button', { name: /Crear Cuenta|Create account/i }).click();
     const response = await responsePromise;
     expect(response.status()).toBe(201);
-    await expect(page).toHaveURL(/\/(dashboard|onboarding)$/);
+    await expect(page).toHaveURL(/\/household$/);
     expect(pageErrors).toEqual([]);
   });
 

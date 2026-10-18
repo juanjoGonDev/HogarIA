@@ -31,6 +31,7 @@ export const routes: Routes = [
     canActivate: [authGuard, householdRequiredGuard],
     resolve: {
       translations: translationBundlesResolver(
+        'auth',
         'onboarding',
         'preferences',
         'taste',
@@ -88,6 +89,7 @@ export const routes: Routes = [
             'recipes',
             'dashboard',
             'aiConfig',
+            'auth',
             'household',
             'pantry',
             'calendar',
@@ -184,6 +186,7 @@ export const routes: Routes = [
         path: 'preferences',
         resolve: {
           translations: translationBundlesResolver(
+            'auth',
             'preferences',
             'profile',
             'taste',

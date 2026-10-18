@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { test, expect } from './fixtures';
-import { registerAndGoto, registerUser } from './helpers/auth';
+import { registerAndGoto } from './helpers/auth';
 
 /**
  * Preferencias del comensal: perfil, alergias, gustos y objetivo. Seccion propia
@@ -10,7 +10,7 @@ import { registerAndGoto, registerUser } from './helpers/auth';
  */
 test.describe('Preferencias', () => {
   test('vive fuera de la configuración de la app', async ({ page }) => {
-    await registerUser(page, 'Pref Tester');
+    await registerAndGoto(page, '/settings', 'Pref Tester');
 
     // Configuracion: solo lo de la app (tema e idioma), sin ni un control del
     // comensal ni una tarjeta que lo recuerde

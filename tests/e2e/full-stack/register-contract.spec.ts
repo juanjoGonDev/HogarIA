@@ -182,7 +182,7 @@ test.describe('contrato del formulario de registro', () => {
       );
       await submit.click();
       expect((await retryResponse).status()).toBe(201);
-      await expect(page).toHaveURL(/\/onboarding$/);
+      await expect(page).toHaveURL(/\/household$/);
       expect(requestCount).toBe(2);
       expect(pageErrors).toEqual([]);
     } finally {
@@ -253,7 +253,7 @@ test.describe('contrato del formulario de registro', () => {
       await fillValidRegistration(page, validName, uniqueEmail(), 'Abc123');
       const response = await submitRegistration(page);
       expect(response.status()).toBe(201);
-      await expect(page).toHaveURL(/\/(onboarding|dashboard)$/);
+      await expect(page).toHaveURL(/\/household$/);
     }
   });
 
@@ -262,7 +262,7 @@ test.describe('contrato del formulario de registro', () => {
     await page.goto('/auth/register');
     await fillValidRegistration(page, 'Ana', duplicateEmail);
     expect((await submitRegistration(page)).status()).toBe(201);
-    await expect(page).toHaveURL(/\/(onboarding|dashboard)$/);
+    await expect(page).toHaveURL(/\/household$/);
 
     await page.evaluate(() => localStorage.clear());
     await page.goto('/auth/register');
@@ -291,7 +291,7 @@ test.describe('contrato del formulario de registro', () => {
     // Prueba el segundo envío desde el teclado mientras la petición real sigue pendiente.
     await page.locator('#password').press('Enter');
     expect((await responsePromise).status()).toBe(201);
-    await expect(page).toHaveURL(/\/(onboarding|dashboard)$/);
+    await expect(page).toHaveURL(/\/household$/);
     expect(registerRequests).toBe(1);
   });
 });

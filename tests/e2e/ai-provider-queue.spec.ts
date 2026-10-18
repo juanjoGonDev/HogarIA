@@ -202,7 +202,7 @@ test.describe('gestor de cola de IA por proveedor', () => {
           await page.locator('.sidebar__close').click();
         }
         await expect(sidebar).not.toHaveClass(/sidebar--open/);
-        await expect(page.locator('.sidebar-overlay')).toHaveCount(0);
+        await expect(page.locator('.sidebar-overlay')).toBeHidden();
         await expect
           .poll(() =>
             sidebar.evaluate((element) => Math.round(element.getBoundingClientRect().right))
@@ -252,7 +252,7 @@ test.describe('gestor de cola de IA por proveedor', () => {
           await page.locator('.sidebar__close').click();
         }
         await expect(sidebar).not.toHaveClass(/sidebar--open/);
-        await expect(page.locator('.sidebar-overlay')).toHaveCount(0);
+        await expect(page.locator('.sidebar-overlay')).toBeHidden();
         await expect
           .poll(() =>
             sidebar.evaluate((element) => Math.round(element.getBoundingClientRect().right))

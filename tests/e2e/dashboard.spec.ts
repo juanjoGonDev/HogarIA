@@ -1,15 +1,14 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { test, expect } from './fixtures';
-import { registerUser, registerWithHousehold } from './helpers/auth';
+import { registerWithHousehold } from './helpers/auth';
 import { waitForStableView } from './helpers/recipe-fixtures';
 
 const SCREENSHOT_DIR = process.env.E2E_SCREENSHOT_DIR;
 
 test.describe('Dashboard (new user) — empty states', () => {
   test('shows greeting, empty states and quick stats', async ({ page }) => {
-    await registerUser(page, 'Dash');
-    await page.goto('/dashboard');
+    await registerWithHousehold(page, '/dashboard', 'Dash');
 
     // Greeting should contain user name
     await expect(page.locator('h1.dashboard__title')).toContainText('Dash');
@@ -76,8 +75,7 @@ test.describe('Dashboard (new user) — empty states', () => {
   });
 
   test('quick actions navigate to correct sections', async ({ page }) => {
-    await registerUser(page, 'QA');
-    await page.goto('/dashboard');
+    await registerWithHousehold(page, '/dashboard', 'QA');
 
     await page.locator('a.action-card[href="/pantry"]').click();
     await expect(page).toHaveURL(/.*pantry/);
@@ -90,8 +88,7 @@ test.describe('Dashboard (new user) — empty states', () => {
   test('empty-meals and recipe-list links reach their destinations and summaries render', async ({
     page
   }) => {
-    await registerUser(page, 'Dashboard CTA');
-    await page.goto('/dashboard');
+    await registerWithHousehold(page, '/dashboard', 'Dashboard CTA');
 
     const stats = page.locator('.dashboard__stats .stat-card');
     await expect(stats).toHaveCount(4);

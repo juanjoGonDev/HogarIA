@@ -30,7 +30,10 @@ test.describe('Recipes', () => {
   test('should show empty state when no recipes', async ({ page }) => {
     await page.goto('/recipes?search=__qa_no_matching_recipe__');
     await expect(page.locator('.empty-state__title')).toContainText('No hay recetas');
-    await expect(page.getByRole('button', { name: /Generar con IA/ })).toBeVisible();
+    const clearFilters = page.getByRole('button', { name: 'Limpiar filtros' });
+    await expect(clearFilters).toBeVisible();
+    await clearFilters.click();
+    await expect(page).toHaveURL((url) => url.searchParams.get('search') === null);
   });
 
   test('should open AI generation modal', async ({ page }) => {

@@ -1,5 +1,5 @@
 import { expect, test } from '../fixtures';
-import { registerUser } from '../helpers/auth';
+import { createHousehold, registerUser } from '../helpers/auth';
 import { watchRequests } from '../helpers/request-watch';
 import { shoppingNewListAction } from '../helpers/shopping-ui';
 
@@ -28,6 +28,7 @@ async function expectNoRepeatAfterIdle(
 test.describe('presupuesto de peticiones en el stack de produccion', () => {
   test('la agenda y la cesta no repiten la misma peticion', async ({ page }) => {
     await registerUser(page, 'full-budget');
+    await createHousehold(page, 'Hogar de presupuesto E2E');
     const watch = watchRequests(page);
 
     const firstRange = page.waitForResponse((response) =>
@@ -64,6 +65,10 @@ test.describe('presupuesto de peticiones en el stack de produccion', () => {
     }
 
     await page.goto('/shopping');
+    await expect(shoppingNewListAction(page)).toBeVisible();
+    // The page load and first SSE-ready event are initial reads, not a repeat loop
+    // caused by the list-creation action measured below.
+    watch.reset();
     await shoppingNewListAction(page).click();
     await page.locator('[data-test="list-name"]').fill('Cesta con presupuesto');
     await page.locator('[data-test="create-submit"]').click();
@@ -120,6 +125,7 @@ test.describe('presupuesto de peticiones en el stack de produccion', () => {
       });
     });
     await registerUser(page, 'full-sse');
+    await createHousehold(page, 'Hogar de streams E2E');
     const watch = watchRequests(page, {
       windowMs: 2000,
       maxPerUrl: 1,

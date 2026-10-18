@@ -1,8 +1,10 @@
 import { test, expect } from './fixtures';
-import { skipOnboarding } from './helpers/auth';
+import { createHousehold, skipOnboarding } from './helpers/auth';
 
 test.describe('Authentication flow', () => {
-  test('register redirects to dashboard and keeps user logged in across navigation', async ({ page }) => {
+  test('register redirects to dashboard and keeps user logged in across navigation', async ({
+    page
+  }) => {
     const email = `authflow-${Date.now()}@example.com`;
     await page.goto('/auth/register');
     await page.fill('input#name', 'Auth Tester');
@@ -10,6 +12,8 @@ test.describe('Authentication flow', () => {
     await page.fill('input#password', 'Test1234');
     await page.click('button[type="submit"]');
     await skipOnboarding(page);
+    await createHousehold(page, 'Hogar sintético de auth flow');
+    await page.goto('/dashboard');
     // Should land on dashboard (no more 429 / logout loop)
     await page.waitForURL(/.*dashboard/, { timeout: 20000 });
     await expect(page.locator('h1.dashboard__title')).toContainText(/Hola|Hi/);
@@ -43,7 +47,7 @@ test.describe('Authentication flow', () => {
     await page.fill('input#password', 'Test1234');
     await page.click('button[type="submit"]');
     await skipOnboarding(page);
-    await page.waitForURL(/.*dashboard/);
+    await expect(page).toHaveURL(/\/household$/);
 
     // Log out
     await page.evaluate(() => localStorage.clear());

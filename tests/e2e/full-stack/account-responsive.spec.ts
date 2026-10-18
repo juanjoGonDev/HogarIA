@@ -2,7 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Page } from '@playwright/test';
 import { expect, test } from '../fixtures';
-import { registerUser } from '../helpers/auth';
+import { registerAndGoto } from '../helpers/auth';
 
 async function measureAccountLayout(page: Page) {
   return page.evaluate(() => {
@@ -109,8 +109,7 @@ test('Cuenta no desborda en móvil estrecho', async ({ page }, testInfo) => {
       ? { width: 1440, height: 900 }
       : { width: 320, height: 568 }
   );
-  await registerUser(page, 'QA Account Responsive');
-  await page.goto('/account');
+  await registerAndGoto(page, '/account', 'QA Account Responsive');
   await expect(page.locator('app-account')).toBeVisible();
 
   if (testInfo.project.name === 'chromium') {

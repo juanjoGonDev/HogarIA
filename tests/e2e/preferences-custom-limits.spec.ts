@@ -1,10 +1,11 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Locator } from './fixtures';
-import { registerAndGoto, registerToOnboarding } from './helpers/auth';
+import { createHousehold, registerAndGoto, registerToOnboarding } from './helpers/auth';
 
 const SCREENSHOTS =
-  process.env.E2E_SCREENSHOT_DIR ?? join(process.cwd(), '.e2e-screenshots', 'preferences-custom-limits');
+  process.env.E2E_SCREENSHOT_DIR ??
+  join(process.cwd(), '.e2e-screenshots', 'preferences-custom-limits');
 
 async function activate(locator: Locator, isMobile: boolean): Promise<void> {
   if (isMobile) await locator.tap();
@@ -47,13 +48,17 @@ test.describe('límites de opciones personalizadas en Preferencias', () => {
       await expect
         .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
         .toBeLessThanOrEqual(viewport.width);
-      if (viewport.width === 1440) await capture(page, 'preferences-allergies-desktop-1440x900.png');
+      if (viewport.width === 1440)
+        await capture(page, 'preferences-allergies-desktop-1440x900.png');
       if (viewport.width === 390)
         await capture(page, 'preferences-allergies-mobile-390x844.png', false);
-      if (viewport.width === 320) await capture(page, 'preferences-allergies-mobile-320x740.png', false);
+      if (viewport.width === 320)
+        await capture(page, 'preferences-allergies-mobile-320x740.png', false);
     }
 
-    await page.setViewportSize(isMobile ? { width: 390, height: 844 } : { width: 1440, height: 900 });
+    await page.setViewportSize(
+      isMobile ? { width: 390, height: 844 } : { width: 1440, height: 900 }
+    );
     const control = page.locator('app-chip-select');
     const input = control.locator('.chip-select__input');
     const add = control.getByRole('button', { name: 'Añadir' });
@@ -130,6 +135,8 @@ test.describe('límites de opciones personalizadas en Preferencias', () => {
   }, testInfo) => {
     const isMobile = testInfo.project.name === 'mobile-chrome';
     await registerToOnboarding(page, 'preferences-custom-onboarding');
+    await createHousehold(page, 'Hogar sintético de preferencias');
+    await page.goto('/onboarding');
     await expect(page).toHaveURL(/\/onboarding$/);
     await activate(page.getByRole('button', { name: 'Siguiente' }), isMobile);
 
@@ -138,7 +145,9 @@ test.describe('límites de opciones personalizadas en Preferencias', () => {
     const allergyInput = allergyControl.locator('.chip-select__input');
     await allergyInput.fill(invalidValue);
     await activate(allergyControl.getByRole('button', { name: 'Añadir' }), isMobile);
-    await expect(allergyControl.locator('.chip-select__chip', { hasText: invalidValue })).toHaveCount(0);
+    await expect(
+      allergyControl.locator('.chip-select__chip', { hasText: invalidValue })
+    ).toHaveCount(0);
     await expect(allergyControl.locator('[role="alert"]')).toContainText('60');
     await expect(allergyInput).toHaveAttribute('aria-invalid', 'true');
 
