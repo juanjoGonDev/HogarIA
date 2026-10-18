@@ -428,3 +428,11 @@ $env:HOGARIA_AI_ASSISTANT_LOCAL_SMOKE='1'; node scripts/run-isolated-playwright.
 - Revalidación de traducciones: `node scripts/run-isolated-playwright.mjs --config=playwright.full-stack.config.ts --project=chromium --project=mobile-chrome --workers=1 --reporter=dot --grep 'muestra en inglés el error de proveedor sin configurar|guía si falla el servicio de dictado del navegador|traduce el fallback de dictado al inglés' tests/e2e/full-stack/ai-action-assistant.spec.ts` — **6/6**. i18n focal **14/14**.
 - `pnpm run typecheck:e2e`, `pnpm run check:ui` (**263 archivos/21 reglas**), `pnpm run build`, Prettier de los archivos afectados y `git diff --check` pasan. Build conserva warnings de budget global (**980,32 kB** frente a aviso de **500 kB**) y CSS del diálogo (**12,82 kB** frente a aviso de **10 kB**); no se relajaron.
 - Capturas sintéticas inspeccionadas, ignoradas por Git: `D:\projects\MiCocinAI\.e2e-screenshots\assistant-compose-minimal-20261018\chromium\assistant-compose-minimal.png` y `D:\projects\MiCocinAI\.e2e-screenshots\assistant-compose-minimal-20261018\mobile-chrome\assistant-compose-minimal.png`. Voz/proveedor real no se probó en esta unidad; permanecen las limitaciones globales de preflight/documentación superior.
+
+### Exploración de cuatro prototipos del compositor — alcance aprobado (2026-10-18)
+
+- [ ] Crear cuatro alternativas realmente distintas para el paso de redacción, manteniendo paleta, tipografía y controles de HogarIA. Variar distribución y relación entre texto y dictado, no solo colores.
+- [ ] En las cuatro, agrupar visualmente el consentimiento explícito con el control de micrófono; no dejar el micrófono como una fila aislada debajo ni como una columna lateral que desplace el campo.
+- [ ] Mantener el campo como foco principal, con una sola instrucción breve y hasta dos ejemplos en el placeholder. No duplicar título, pregunta, etiqueta o ayuda.
+- [ ] Mantener privacidad ampliada detrás de «Ver más» y los detalles accesibles; asegurar controles de dictado con nombre accesible y objetivo táctil mínimo de 44 px.
+- [ ] Generar fuentes de vista previa y capturas comparables de escritorio y móvil para las cuatro opciones. Son prototipos de selección: no reemplazar el flujo de producción hasta que el usuario elija una opción.
