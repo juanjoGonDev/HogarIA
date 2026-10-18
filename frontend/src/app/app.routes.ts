@@ -1,6 +1,5 @@
 import { Routes } from '@angular/router';
 import { authGuard } from './core/guards/auth.guard';
-import { MainLayoutComponent } from './layouts/main-layout/main-layout.component';
 import { AuthLayoutComponent } from './layouts/auth-layout/auth-layout.component';
 import { aiHouseholdSettingsGuard } from './core/guards/ai-household-settings.guard';
 import { householdRequiredGuard } from './core/guards/household-required.guard';
@@ -48,7 +47,8 @@ export const routes: Routes = [
   // Protected routes with main layout
   {
     path: '',
-    component: MainLayoutComponent,
+    loadComponent: () =>
+      import('./layouts/main-layout/main-layout.component').then((m) => m.MainLayoutComponent),
     canActivate: [authGuard],
     canActivateChild: [householdRequiredGuard],
     children: [
