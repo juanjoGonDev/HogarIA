@@ -28,18 +28,17 @@
             "outputPath": "dist",
             "index": "src/index.html",
             "browser": "src/main.ts",
-            "polyfills": [
-              "zone.js"
-            ],
+            "polyfills": ["zone.js"],
             "tsConfig": "tsconfig.app.json",
             "inlineStyleLanguage": "scss",
-            "assets": [
-              "src/favicon.ico",
-              "src/assets",
-              "src/manifest.json"
-            ],
+            "assets": ["src/favicon.ico", "src/assets", "src/manifest.json"],
             "styles": [
-              "src/styles.scss"
+              "src/styles.scss",
+              {
+                "input": "src/styles/household-feature.scss",
+                "bundleName": "household-feature",
+                "inject": false
+              }
             ],
             "scripts": []
           },
@@ -106,38 +105,25 @@
           },
           "defaultConfiguration": "development",
           "options": {
-            "allowedHosts": [
-              ".e2b.app"
-            ]
+            "allowedHosts": [".e2b.app"]
           }
         },
         "test": {
           "builder": "@angular-devkit/build-angular:karma",
           "options": {
             "karmaConfig": "karma.conf.js",
-            "polyfills": [
-              "zone.js",
-              "zone.js/testing"
-            ],
+            "polyfills": ["zone.js", "zone.js/testing"],
             "tsConfig": "tsconfig.spec.json",
             "inlineStyleLanguage": "scss",
-            "assets": [
-              "src/favicon.ico",
-              "src/assets"
-            ],
-            "styles": [
-              "src/styles.scss"
-            ],
+            "assets": ["src/favicon.ico", "src/assets"],
+            "styles": ["src/styles.scss", "src/styles/household-feature.scss"],
             "scripts": []
           }
         },
         "lint": {
           "builder": "@angular-eslint/builder:lint",
           "options": {
-            "lintFilePatterns": [
-              "src/**/*.ts",
-              "src/**/*.html"
-            ]
+            "lintFilePatterns": ["src/**/*.ts", "src/**/*.html"]
           }
         }
       }

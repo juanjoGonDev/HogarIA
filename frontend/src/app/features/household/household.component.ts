@@ -4,7 +4,16 @@ import type {
   MemberPermissions,
   MemberRole
 } from '../../shared/models/household.model';
-import { Component, DestroyRef, effect, inject, OnInit, signal, untracked } from '@angular/core';
+import {
+  Component,
+  DestroyRef,
+  effect,
+  inject,
+  OnDestroy,
+  OnInit,
+  signal,
+  untracked
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
@@ -40,6 +49,7 @@ import { HouseholdTasksComponent } from './household-tasks.component';
 import { HouseholdMealPlannerComponent } from './household-meal-planner.component';
 import { HouseholdMealSettingsComponent } from './household-meal-settings.component';
 import { HouseholdPlanningAutomationComponent } from './household-planning-automation.component';
+import { HouseholdFeatureStylesService } from './household-feature-styles.service';
 
 type PermissionGroup = 'pantry' | 'recipes' | 'calendar' | 'members' | 'settings';
 type HouseholdPlanningTab = 'meals' | 'tasks' | 'settings';
@@ -1277,8 +1287,9 @@ function completeMemberPermissions(value: unknown, role: MemberRole): MemberPerm
     `
   ]
 })
-export class HouseholdComponent implements OnInit {
+export class HouseholdComponent implements OnInit, OnDestroy {
   private readonly i18n = inject(I18nService);
+  private readonly householdFeatureStyles = inject(HouseholdFeatureStylesService);
   private readonly clipboardService = inject(ClipboardService);
   private readonly authService = inject(AuthService);
 
@@ -1422,6 +1433,10 @@ export class HouseholdComponent implements OnInit {
         });
       }
     });
+  }
+
+  ngOnDestroy(): void {
+    this.householdFeatureStyles.releaseHouseholdStyles();
   }
 
   selectTab(tab: HouseholdTab): void {

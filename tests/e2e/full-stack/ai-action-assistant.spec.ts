@@ -1231,6 +1231,7 @@ test('asistente global: lote revisable, refino aislado y aprobación selectiva r
   const pageErrors: string[] = [];
   const consoleErrors: string[] = [];
   const translationWarnings: string[] = [];
+  const householdStyleRequests: string[] = [];
   const domainWrites: Array<{ url: string; actionId: string | undefined; body: unknown }> = [];
   let proposalRequests = 0;
   let refinementRequests = 0;
@@ -1243,6 +1244,9 @@ test('asistente global: lote revisable, refino aislado y aprobación selectiva r
     }
   });
   page.on('request', (request) => {
+    if (new URL(request.url()).pathname === '/household-feature.css') {
+      householdStyleRequests.push(request.url());
+    }
     const actionId = request.headers()['x-assistant-action-id'];
     if (
       actionId &&
@@ -1302,7 +1306,10 @@ test('asistente global: lote revisable, refino aislado y aprobación selectiva r
 
   await registerUser(page, 'Asistente global E2E');
   await createHousehold(page, 'Hogar sintético asistente');
+  householdStyleRequests.length = 0;
   await page.goto('/dashboard');
+  expect(householdStyleRequests, 'CSS de Hogar no se descarga en el dashboard').toEqual([]);
+  await expect(page.locator('link[data-household-feature-styles]')).toHaveCount(0);
   const launcher = page.locator('[data-test="ai-assistant-open"]');
   await expect(launcher).toBeVisible();
   await expect(page.locator('app-ai-action-assistant-launcher')).toHaveCount(1);
@@ -1348,6 +1355,22 @@ test('asistente global: lote revisable, refino aislado y aprobación selectiva r
     '/settings'
   ]) {
     await page.goto(route);
+    if (route === '/household') {
+      const householdStyle = page.locator('link[data-household-feature-styles]');
+      await expect(householdStyle, 'el CSS lazy está listo antes de renderizar Hogar').toHaveCount(
+        1
+      );
+      await expect
+        .poll(() => householdStyle.evaluate((link) => Boolean((link as HTMLLinkElement).sheet)))
+        .toBe(true);
+      expect(householdStyleRequests).toHaveLength(1);
+    }
+    if (route === '/ai-config') {
+      await expect(
+        page.locator('link[data-household-feature-styles]'),
+        'el CSS de Hogar se libera al salir de la ruta'
+      ).toHaveCount(0);
+    }
     const pathname = new URL(page.url()).pathname;
     expect(
       pathname === route || pathname.startsWith(`${route}/`),
@@ -1366,6 +1389,31 @@ test('asistente global: lote revisable, refino aislado y aprobación selectiva r
     ]) {
       await assertViewport(page, size.width, size.height, false);
     }
+  }
+  const householdViewports =
+    testInfo.project.name === 'chromium'
+      ? [
+          { width: 1440, height: 900, suffix: 'desktop' },
+          { width: 768, height: 1024, suffix: 'tablet' }
+        ]
+      : [{ width: 393, height: 851, suffix: 'mobile' }];
+  for (const viewport of householdViewports) {
+    await page.setViewportSize(viewport);
+    await page.goto('/household?tab=plan');
+    const planEditor = page.locator('app-household-plan-editor .plan-editor');
+    await expect(planEditor, 'el editor conserva sus estilos diferidos').toBeVisible();
+    await expect
+      .poll(() => planEditor.evaluate((element) => getComputedStyle(element).display))
+      .toBe('grid');
+    await capture(page, testInfo, `household-plan-styles-${viewport.suffix}`);
+
+    await page.locator('[data-test="household-tab-tasks"]').click();
+    const tasksEditor = page.locator('app-household-tasks .tasks-editor');
+    await expect(tasksEditor, 'la vista de tareas conserva sus estilos diferidos').toBeVisible();
+    await expect
+      .poll(() => tasksEditor.evaluate((element) => getComputedStyle(element).display))
+      .toBe('grid');
+    await capture(page, testInfo, `household-task-styles-${viewport.suffix}`);
   }
   expect(translationWarnings, 'los bundles de las rutas evitan claves i18n ausentes').toEqual([]);
   await page.goto('/dashboard');

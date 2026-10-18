@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import test from 'node:test';
 
@@ -44,4 +45,31 @@ test('supports styleUrl, multiple stylesheets, and inline styles', () => {
   assert.match(styles, /\.inline-control:focus-visible/);
   assert.match(styles, /first\.css/);
   assert.match(styles, /second\.css/);
+});
+
+test('builds household feature CSS as a lazy stylesheet instead of initial global CSS', () => {
+  const angularConfig = JSON.parse(
+    readFileSync(new URL('../frontend/angular.json', import.meta.url), 'utf8')
+  );
+  const globalStyles = readFileSync(
+    new URL('../frontend/src/styles.scss', import.meta.url),
+    'utf8'
+  );
+  const featureStyles = readFileSync(
+    new URL('../frontend/src/styles/household-feature.scss', import.meta.url),
+    'utf8'
+  );
+  const styles = angularConfig.projects.hogaria.architect.build.options.styles;
+  const featureBundle = styles.find(
+    (entry) => typeof entry === 'object' && entry.bundleName === 'household-feature'
+  );
+
+  assert.doesNotMatch(globalStyles, /@use\s+['"]\.\/styles\/household-(?:plan-editor|tasks)['"]/);
+  assert.match(featureStyles, /@use\s+['"]\.\/household-plan-editor['"]/);
+  assert.match(featureStyles, /@use\s+['"]\.\/household-tasks['"]/);
+  assert.deepEqual(featureBundle, {
+    input: 'src/styles/household-feature.scss',
+    bundleName: 'household-feature',
+    inject: false
+  });
 });
