@@ -447,8 +447,16 @@ $env:HOGARIA_AI_ASSISTANT_LOCAL_SMOKE='1'; node scripts/run-isolated-playwright.
 
 **Decisión del usuario (2026-10-18):** aplicar el prototipo 4, «Entrada progresiva».
 
-- [ ] El textarea comienza compacto y crece con el texto hasta un máximo; al alcanzar el máximo, el contenido se desplaza dentro del campo. Con el campo vacío no debe reservar altura visual innecesaria.
-- [ ] Dictado, consentimiento explícito y acceso «Ver más» permanecen agrupados dentro del borde inferior del campo; no se añade una fila aislada debajo ni una columna lateral. A 320 px no hay solapamiento ni desbordamiento horizontal.
-- [ ] Mantener un único nombre accesible, la instrucción breve y ejemplos ya aprobados; el helper de revisión solo aparece cuando aporte información distinta. El dictado sigue bloqueado hasta aceptar el consentimiento y conserva sus estados/error accesibles.
-- [ ] Añadir regresiones unitarias y Playwright con app/API reales y DB temporal para crecimiento, límite, voz/consentimiento y geometría en escritorio, móvil y 320 px. Guardar e inspeccionar capturas sintéticas PC/móvil.
-- [ ] Revalidar la matriz de rutas/breakpoints afectada, teclado/foco, accesibilidad, i18n y gates requeridos; actualizar esta sección con comandos, resultados y limitaciones antes de cerrar.
+- [x] El textarea comienza compacto y crece con el texto hasta un máximo; al alcanzar el máximo, el contenido se desplaza dentro del campo. Con el campo vacío no reserva altura visual innecesaria.
+- [x] Controles de voz y acceso «Ver más» agrupados en el borde inferior del campo; sin fila aislada ni columna lateral. A 320 px no hay solapamiento ni desbordamiento horizontal.
+- [ ] Mantener un único nombre accesible, la instrucción breve y ejemplos aprobados; retirar ayudas redundantes. Mostrar junto al micro un aviso breve de posible procesamiento fuera del dispositivo y ampliar privacidad con «Ver más». Sin checkbox: una pulsación del micro inicia dictado directamente; no se captura audio antes de esa acción. Errores y estado siguen accesibles.
+- [ ] Añadir/ajustar regresiones unitarias y Playwright con app/API reales y DB temporal para crecimiento, límite, aviso/disclosure y dictado en escritorio, móvil y 320 px. Guardar e inspeccionar capturas sintéticas PC/móvil.
+- [ ] Revalidar los breakpoints afectados, orientación, teclado/foco, accesibilidad, i18n y gates requeridos.
+
+**Evidencia (2026-10-18):**
+
+- TDD base: la nueva aserción falló al encontrar la ayuda redundante; suite focal posterior **54/54**. Coverage global tras `pnpm run test:client`: **90,70/80,95/92,30/93,19 %** statements/branches/functions/lines; diálogo **79,98/71,27/87,25/83,70 %** (>70 %).
+- Verificación base antes del ajuste solicitado hoy: `pnpm run build`, `pnpm run typecheck:e2e`, `pnpm run check:ui` (263 archivos / 21 reglas) y `git diff --check` pasaron. E2E full-stack pasó **2/2**, SQLite temporal y cleanup; cubrió 1440×900, 851×393, 641/640 px, 393×851 y 320×568, crecimiento/límite, disclosure por teclado, geometría y cero POST de propuestas.
+- Capturas base inspeccionadas: `.e2e-screenshots/assistant-compose-progressive-20261018/chromium/assistant-compose-1440px.png` y `.e2e-screenshots/assistant-compose-progressive-20261018/mobile-chrome/assistant-compose-393px.png`. Deben regenerarse tras quitar el checkbox.
+- **Esta evidencia cubre el diseño anterior con checkbox y no verifica el nuevo inicio directo del dictado.** Repetir suite focal y E2E antes de marcar las casillas restantes.
+- Limitación: no se capturó audio ni se llamó a un proveedor de IA; esta unidad valida interfaz. La build conserva avisos de presupuesto (bundle inicial 980,32 kB y CSS del diálogo 13,51 kB frente a 10 kB); ningún umbral se relajó.
