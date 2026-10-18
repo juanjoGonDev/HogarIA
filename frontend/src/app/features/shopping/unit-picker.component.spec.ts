@@ -11,6 +11,7 @@ describe('UnitPickerComponent — unidades recientes', () => {
   beforeEach(async () => {
     localStorage.clear();
     await TestBed.configureTestingModule({ imports: [UnitPickerComponent] }).compileComponents();
+    await TestBed.inject(I18nService).loadTranslations('shoppingListDetail');
     storage = TestBed.inject(StorageService);
     createPicker();
   });

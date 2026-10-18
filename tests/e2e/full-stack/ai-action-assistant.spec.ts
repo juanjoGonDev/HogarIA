@@ -1230,6 +1230,7 @@ test('asistente global: lote revisable, refino aislado y aprobación selectiva r
 }, testInfo) => {
   const pageErrors: string[] = [];
   const consoleErrors: string[] = [];
+  const translationWarnings: string[] = [];
   const domainWrites: Array<{ url: string; actionId: string | undefined; body: unknown }> = [];
   let proposalRequests = 0;
   let refinementRequests = 0;
@@ -1237,6 +1238,9 @@ test('asistente global: lote revisable, refino aislado y aprobación selectiva r
   page.on('pageerror', (error) => pageErrors.push(`${error.name}: ${error.message}`));
   page.on('console', (message) => {
     if (message.type() === 'error') consoleErrors.push(message.text());
+    if (message.type() === 'warning' && message.text().startsWith('[i18n]')) {
+      translationWarnings.push(message.text());
+    }
   });
   page.on('request', (request) => {
     const actionId = request.headers()['x-assistant-action-id'];
@@ -1363,6 +1367,7 @@ test('asistente global: lote revisable, refino aislado y aprobación selectiva r
       await assertViewport(page, size.width, size.height, false);
     }
   }
+  expect(translationWarnings, 'los bundles de las rutas evitan claves i18n ausentes').toEqual([]);
   await page.goto('/dashboard');
   await expect(launcher).toBeVisible();
 

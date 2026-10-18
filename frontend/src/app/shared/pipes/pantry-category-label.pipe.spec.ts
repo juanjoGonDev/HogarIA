@@ -1,6 +1,7 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { DICTS, type TranslationKey } from '../../core/i18n';
+import type { TranslationKey } from '../../core/i18n';
+import { pantryEn, pantryEs } from '../../core/i18n/dict/pantry';
 import { I18nService } from '../../core/services/i18n.service';
 import { PantryCategoryLabelPipe } from './pantry-category-label.pipe';
 
@@ -9,6 +10,7 @@ describe('PantryCategoryLabelPipe', () => {
   let lang: 'es' | 'en';
   let changeTick: jasmine.Spy;
   let translate: jasmine.Spy;
+  const dictionaries = { es: pantryEs, en: pantryEn };
 
   beforeEach(() => {
     lang = 'es';
@@ -16,7 +18,7 @@ describe('PantryCategoryLabelPipe', () => {
     changeTick = jasmine.createSpy('changeTick').and.callFake(() => tick());
     translate = jasmine
       .createSpy('t')
-      .and.callFake((key: TranslationKey) => (DICTS[lang] as Record<string, string>)[key]);
+      .and.callFake((key: TranslationKey) => (dictionaries[lang] as Record<string, string>)[key]);
 
     TestBed.configureTestingModule({
       providers: [

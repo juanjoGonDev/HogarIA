@@ -38,6 +38,7 @@ describe('AiParticipantsComponent', () => {
     }).compileComponents();
     const fixture = TestBed.createComponent(AiParticipantsComponent);
     const i18n = TestBed.inject(I18nService);
+    await i18n.loadTranslations('aiParticipants');
     i18n.setLang('es');
     fixture.detectChanges();
 

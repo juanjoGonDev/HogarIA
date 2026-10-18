@@ -1,7 +1,12 @@
 import { Injectable, signal, effect } from '@angular/core';
 import { STORAGE_KEYS } from './storage.service';
 import { relativeTimeParts, setDateLocale, type TimeInput } from '../time';
-import { DICTS, type TranslationKey, type TranslationParams } from '../i18n';
+import {
+  DICTS,
+  type TranslationBundleName,
+  type TranslationKey,
+  type TranslationParams
+} from '../i18n';
 import { environment } from '../../../environments/environment';
 
 /**
@@ -21,24 +26,22 @@ import { environment } from '../../../environments/environment';
 export type Language = 'es' | 'en' | 'auto';
 export type ResolvedLanguage = 'es' | 'en';
 
-type HouseholdDictionary = {
+type LocaleDictionaryPair = {
   es: Readonly<Record<string, string>>;
   en: Readonly<Record<string, string>>;
 };
-
-type RecipeDictionary = HouseholdDictionary;
 
 @Injectable({ providedIn: 'root' })
 export class I18nService {
   private readonly LANG_KEY = STORAGE_KEYS.language;
   private langSignal = signal<Language>(this.getStoredLang());
   private resolvedSignal = signal<ResolvedLanguage>(this.resolve(this.getStoredLang()));
-  private householdDictionary: HouseholdDictionary | null = null;
-  private householdDictionaryLoad: Promise<void> | null = null;
-  private recipeDictionary: RecipeDictionary | null = null;
-  private recipeDictionaryLoad: Promise<void> | null = null;
-  private assistantDictionary: HouseholdDictionary | null = null;
-  private assistantDictionaryLoad: Promise<void> | null = null;
+  private readonly loadedDictionaries = new Set<TranslationBundleName>();
+  private readonly dictionaryLoads = new Map<TranslationBundleName, Promise<void>>();
+  private readonly dynamicTranslations: Record<ResolvedLanguage, Record<string, string>> = {
+    es: {},
+    en: {}
+  };
 
   readonly lang = this.langSignal.asReadonly();
   readonly resolved = this.resolvedSignal.asReadonly();
@@ -80,58 +83,151 @@ export class I18nService {
     localStorage.setItem(this.LANG_KEY, lang);
   }
 
-  /**
-   * El diccionario grande de Hogar solo se descarga al entrar en esa sección. Lo espera su route resolver
-   * antes de renderizar, y el cache incluye ambos idiomas para que un cambio de idioma no repita la carga.
-   */
+  /** Load route dictionaries before rendering; cache both languages and coalesce concurrent requests. */
+  loadTranslations(...bundles: TranslationBundleName[]): Promise<void> {
+    return Promise.all([...new Set(bundles)].map((bundle) => this.loadDictionary(bundle))).then(
+      () => undefined
+    );
+  }
+
   loadHouseholdTranslations(): Promise<void> {
-    if (this.householdDictionary) return Promise.resolve();
-    if (!this.householdDictionaryLoad) {
-      this.householdDictionaryLoad = import('../i18n/dict/household')
-        .then(({ householdEs, householdEn }) => {
-          this.householdDictionary = { es: householdEs, en: householdEn };
-          this.changeTick.update((value) => value + 1);
-        })
-        .catch((error: unknown) => {
-          this.householdDictionaryLoad = null;
-          throw error;
-        });
-    }
-    return this.householdDictionaryLoad;
+    return this.loadTranslations('household');
   }
 
-  /** La biblioteca de recetas carga ambos idiomas al entrar en su ruta, no en el bundle inicial. */
   loadRecipeTranslations(): Promise<void> {
-    if (this.recipeDictionary) return Promise.resolve();
-    if (!this.recipeDictionaryLoad) {
-      this.recipeDictionaryLoad = import('../i18n/dict/recipes')
-        .then(({ recipesEs, recipesEn }) => {
-          this.recipeDictionary = { es: recipesEs, en: recipesEn };
-          this.changeTick.update((value) => value + 1);
-        })
-        .catch((error: unknown) => {
-          this.recipeDictionaryLoad = null;
-          throw error;
-        });
-    }
-    return this.recipeDictionaryLoad;
+    return this.loadTranslations('recipes');
   }
 
-  /** The global assistant's full bilingual copy loads only after the user opens the assistant. */
+  /** Assistant copy plus cross-domain labels load only after the user opens the assistant. */
   loadAssistantTranslations(): Promise<void> {
-    if (this.assistantDictionary) return Promise.resolve();
-    if (!this.assistantDictionaryLoad) {
-      this.assistantDictionaryLoad = import('../i18n/dict/ai_action_assistant')
-        .then(({ aiActionAssistantEs, aiActionAssistantEn }) => {
-          this.assistantDictionary = { es: aiActionAssistantEs, en: aiActionAssistantEn };
-          this.changeTick.update((value) => value + 1);
-        })
-        .catch((error: unknown) => {
-          this.assistantDictionaryLoad = null;
-          throw error;
-        });
+    return this.loadTranslations(
+      'aiActionAssistant',
+      'calendar',
+      'household',
+      'pantry',
+      'recipes',
+      'shoppingLists',
+      'shoppingListDetail',
+      'taste'
+    );
+  }
+
+  private loadDictionary(bundle: TranslationBundleName): Promise<void> {
+    if (this.loadedDictionaries.has(bundle)) return Promise.resolve();
+    const inFlight = this.dictionaryLoads.get(bundle);
+    if (inFlight) return inFlight;
+
+    const load = this.importDictionary(bundle)
+      .then(({ es, en }) => {
+        this.loadedDictionaries.add(bundle);
+        Object.assign(this.dynamicTranslations.es, es);
+        Object.assign(this.dynamicTranslations.en, en);
+        this.changeTick.update((value) => value + 1);
+      })
+      .catch((error: unknown) => {
+        this.dictionaryLoads.delete(bundle);
+        throw error;
+      });
+    this.dictionaryLoads.set(bundle, load);
+    return load;
+  }
+
+  private importDictionary(bundle: TranslationBundleName): Promise<LocaleDictionaryPair> {
+    switch (bundle) {
+      case 'homeProfilePicker':
+        return import('../i18n/dict/home_profile_picker').then((d) => ({
+          es: d.homeProfilePickerEs,
+          en: d.homeProfilePickerEn
+        }));
+      case 'shoppingLists':
+        return import('../i18n/dict/shopping_lists').then((d) => ({
+          es: d.shoppingListsEs,
+          en: d.shoppingListsEn
+        }));
+      case 'shoppingListDetail':
+        return import('../i18n/dict/shopping_list_detail').then((d) => ({
+          es: d.shoppingListDetailEs,
+          en: d.shoppingListDetailEn
+        }));
+      case 'onboarding':
+        return import('../i18n/dict/onboarding').then((d) => ({
+          es: d.onboardingEs,
+          en: d.onboardingEn
+        }));
+      case 'invite':
+        return import('../i18n/dict/invite').then((d) => ({ es: d.inviteEs, en: d.inviteEn }));
+      case 'aiConfig':
+        return import('../i18n/dict/ai_config').then((d) => ({
+          es: d.aiConfigEs,
+          en: d.aiConfigEn
+        }));
+      case 'avatarEditor':
+        return import('../i18n/dict/avatar_editor').then((d) => ({
+          es: d.avatarEditorEs,
+          en: d.avatarEditorEn
+        }));
+      case 'account':
+        return import('../i18n/dict/account').then((d) => ({ es: d.accountEs, en: d.accountEn }));
+      case 'auth':
+        return import('../i18n/dict/auth').then((d) => ({ es: d.authEs, en: d.authEn }));
+      case 'caducidades':
+        return import('../i18n/dict/caducidades').then((d) => ({
+          es: d.caducidadesEs,
+          en: d.caducidadesEn
+        }));
+      case 'shoppingSuggested':
+        return import('../i18n/dict/shopping_suggested').then((d) => ({
+          es: d.shoppingSuggestedEs,
+          en: d.shoppingSuggestedEn
+        }));
+      case 'calendar':
+        return import('../i18n/dict/calendar').then((d) => ({
+          es: d.calendarEs,
+          en: d.calendarEn
+        }));
+      case 'dashboard':
+        return import('../i18n/dict/dashboard').then((d) => ({
+          es: d.dashboardEs,
+          en: d.dashboardEn
+        }));
+      case 'logs':
+        return import('../i18n/dict/logs').then((d) => ({ es: d.logsEs, en: d.logsEn }));
+      case 'pantry':
+        return import('../i18n/dict/pantry').then((d) => ({ es: d.pantryEs, en: d.pantryEn }));
+      case 'preferences':
+        return import('../i18n/dict/preferences').then((d) => ({
+          es: d.preferencesEs,
+          en: d.preferencesEn
+        }));
+      case 'profile':
+        return import('../i18n/dict/profile').then((d) => ({ es: d.profileEs, en: d.profileEn }));
+      case 'settings':
+        return import('../i18n/dict/settings').then((d) => ({
+          es: d.settingsEs,
+          en: d.settingsEn
+        }));
+      case 'taste':
+        return import('../i18n/dict/taste').then((d) => ({ es: d.tasteEs, en: d.tasteEn }));
+      case 'aiParticipants':
+        return import('../i18n/dict/ai_participants').then((d) => ({
+          es: d.aiParticipantsEs,
+          en: d.aiParticipantsEn
+        }));
+      case 'household':
+        return import('../i18n/dict/household').then((d) => ({
+          es: d.householdEs,
+          en: d.householdEn
+        }));
+      case 'recipes':
+        return import('../i18n/dict/recipes').then((d) => ({ es: d.recipesEs, en: d.recipesEn }));
+      case 'aiActionAssistant':
+        return import('../i18n/dict/ai_action_assistant').then((d) => ({
+          es: d.aiActionAssistantEs,
+          en: d.aiActionAssistantEn
+        }));
+      default:
+        return Promise.reject(new Error(`Unknown translation bundle: ${bundle satisfies never}`));
     }
-    return this.assistantDictionaryLoad;
   }
 
   /**
@@ -190,18 +286,11 @@ export class I18nService {
     const language = this.resolvedSignal();
     const activeDictionary = DICTS[language] as Record<string, string>;
     const spanishDictionary = DICTS.es as Record<string, string>;
-    const householdDictionary = this.householdDictionary;
-    const recipeDictionary = this.recipeDictionary;
-    const assistantDictionary = this.assistantDictionary;
     const encontrada =
       activeDictionary[key] ??
-      assistantDictionary?.[language][key] ??
-      householdDictionary?.[language][key] ??
-      recipeDictionary?.[language][key] ??
+      this.dynamicTranslations[language][key] ??
       spanishDictionary[key] ??
-      assistantDictionary?.es[key] ??
-      householdDictionary?.es[key] ??
-      recipeDictionary?.es[key];
+      this.dynamicTranslations.es[key];
     let str: string = encontrada ?? key;
     if (encontrada === undefined && !environment.production) {
       // Un hueco de texto de Angular acepta cualquier `string`, asi que una clave que no existe NO falla: se

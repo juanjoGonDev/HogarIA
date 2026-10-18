@@ -145,6 +145,123 @@ describe('I18nService', () => {
     }
   });
 
+  it('keeps feature translations out of the startup dictionaries and loads route bundles on demand', async () => {
+    const i18n = injectService();
+    const spanish = DICTS.es as Record<string, string>;
+    const importSpy = spyOn(i18n as any, 'importDictionary').and.callThrough();
+
+    expect(spanish['pantry.catalogo_titulo']).toBeUndefined();
+    expect(spanish['calendar.consumption.title']).toBeUndefined();
+    expect(spanish['ai_config.activo']).toBeUndefined();
+    expect(i18n.t('ui.ahora')).toBe('ahora');
+
+    await Promise.all([
+      i18n.loadTranslations('pantry', 'calendar'),
+      i18n.loadTranslations('pantry')
+    ]);
+
+    expect(importSpy).toHaveBeenCalledTimes(2);
+    expect(i18n.t('pantry.catalogo_titulo')).toBe('Catálogo del supermercado');
+    expect(i18n.t('calendar.consumption.title')).toBe('Registrar consumo');
+
+    i18n.setLang('en');
+    TestBed.flushEffects();
+    expect(i18n.t('pantry.catalogo_titulo')).toBe('Supermarket catalog');
+    expect(i18n.t('calendar.consumption.title')).toBe('Record consumption');
+
+    const changeTickAfterLoad = i18n.changeTick();
+    await i18n.loadTranslations('pantry', 'calendar');
+    expect(i18n.changeTick()).toBe(changeTickAfterLoad);
+    expect(importSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries a failed route dictionary import without retaining a rejected promise', async () => {
+    const i18n = injectService();
+    const failure = new Error('temporary translation chunk failure');
+    const importSpy = spyOn(i18n as any, 'importDictionary').and.returnValues(
+      Promise.reject(failure),
+      Promise.resolve({
+        es: { 'ai_config.activo': 'Activo' },
+        en: { 'ai_config.activo': 'Active' }
+      })
+    );
+
+    await expectAsync(i18n.loadTranslations('aiConfig')).toBeRejectedWith(failure);
+    await i18n.loadTranslations('aiConfig');
+
+    expect(importSpy).toHaveBeenCalledTimes(2);
+    expect(i18n.t('ai_config.activo')).toBe('Activo');
+  });
+
+  it('loads every deferred domain dictionary and resolves representative keys in both languages', async () => {
+    const i18n = injectService();
+    const importSpy = spyOn(i18n as any, 'importDictionary').and.callThrough();
+    const warning = spyOn(console, 'warn');
+    const bundles = [
+      'homeProfilePicker',
+      'shoppingLists',
+      'shoppingListDetail',
+      'onboarding',
+      'invite',
+      'aiConfig',
+      'avatarEditor',
+      'account',
+      'auth',
+      'caducidades',
+      'shoppingSuggested',
+      'calendar',
+      'dashboard',
+      'logs',
+      'pantry',
+      'preferences',
+      'profile',
+      'settings',
+      'taste',
+      'aiParticipants',
+      'household',
+      'recipes',
+      'aiActionAssistant'
+    ] as const;
+
+    await i18n.loadTranslations(...bundles);
+
+    expect(importSpy).toHaveBeenCalledTimes(bundles.length);
+    const sampleKeys: TranslationKey[] = [
+      'home_profile_picker.que_quieres_llevar',
+      'shopping_lists.abrir_lista',
+      'shopping_list_detail.unidades_recientes',
+      'onboarding.no_se_pudo_guardar_progreso',
+      'invite.miembros',
+      'ai_config.activo',
+      'avatar_editor.acercar',
+      'account.no_se_pudo_cambiar',
+      'auth.la_contrasena_debe_tener',
+      'caducidades.titulo',
+      'shopping_suggested.titulo',
+      'calendar.consumption.title',
+      'dashboard.aiQueueCounts',
+      'logs.lineas_copiadas_varios',
+      'pantry.catalogo_titulo',
+      'preferences.a_que_hora_comes',
+      'profile.no_se_pudo_guardar',
+      'settings.themeDetected',
+      'taste.goal.balanced',
+      'ai_participants.title',
+      'household.has_salido_del_hogar',
+      'recipes.disfruta_preparando_tu_receta',
+      'ai_assistant.title'
+    ];
+    for (const key of sampleKeys) expect(i18n.t(key)).not.toBe(key);
+    expect(warning).not.toHaveBeenCalled();
+
+    i18n.setLang('en');
+    TestBed.flushEffects();
+    expect(i18n.t('shopping_lists.abrir_lista')).toBe('Open {name}');
+    expect(i18n.t('calendar.consumption.title')).toBe('Record consumption');
+    expect(i18n.t('pantry.catalogo_titulo')).toBe('Supermarket catalog');
+    expect(warning).not.toHaveBeenCalled();
+  });
+
   it('loads household translations once for both languages before the route renders', async () => {
     const i18n = injectService();
     const changeTickBeforeLoad = i18n.changeTick();
@@ -186,6 +303,7 @@ describe('I18nService', () => {
   it('loads assistant translations lazily once for both languages', async () => {
     const i18n = injectService();
     const dictionaries = DICTS.es as Record<string, string>;
+    const importSpy = spyOn(i18n as any, 'importDictionary').and.callThrough();
     const warning = spyOn(console, 'warn');
     const changeTickBeforeLoad = i18n.changeTick();
 
@@ -196,8 +314,10 @@ describe('I18nService', () => {
 
     await Promise.all([i18n.loadAssistantTranslations(), i18n.loadAssistantTranslations()]);
 
-    expect(i18n.changeTick()).toBe(changeTickBeforeLoad + 1);
+    expect(i18n.changeTick()).toBeGreaterThan(changeTickBeforeLoad);
     expect(i18n.t('ai_assistant.title')).toBe('Asistente');
+    expect(i18n.t('calendar.consumption.title')).toBe('Registrar consumo');
+    expect(i18n.t('pantry.catalogo_titulo')).toBe('Catálogo del supermercado');
 
     i18n.setLang('en');
     TestBed.flushEffects();
@@ -206,6 +326,7 @@ describe('I18nService', () => {
     const changeTickAfterLoad = i18n.changeTick();
     await i18n.loadAssistantTranslations();
     expect(i18n.changeTick()).toBe(changeTickAfterLoad);
+    expect(importSpy).toHaveBeenCalledTimes(8);
     expect(warning).not.toHaveBeenCalled();
   });
 
@@ -226,15 +347,17 @@ describe('I18nService', () => {
     expect(warning).not.toHaveBeenCalled();
   });
 
-  it('replaces every placeholder and turns nullish parameter values into empty text', () => {
+  it('replaces every placeholder and turns nullish parameter values into empty text', async () => {
     const i18n = injectService();
+    await i18n.loadTranslations('caducidades', 'calendar');
     expect(i18n.t('caducidades.de_n_en_n', { n: 2 })).toBe('de 2 en 2');
     expect(i18n.t('calendar.nothing_planned', { period: null })).toBe('Nada planificado en .');
     expect(i18n.t('calendar.replan_selection_count', { count: 3 })).toBe('Platos seleccionados: 3');
   });
 
-  it('selects singular and plural translation keys', () => {
+  it('selects singular and plural translation keys', async () => {
     const i18n = injectService();
+    await i18n.loadTranslations('aiConfig');
     expect(
       i18n.plural(1, 'ai_config.n_configuraciones_uno', 'ai_config.n_configuraciones_varios', {
         count: 1

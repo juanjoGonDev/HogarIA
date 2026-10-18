@@ -12,96 +12,82 @@
 // impide escribir una clave que no existe; lo que el tipo no puede ver es el `en`, y ahi mira el check-ui
 // (regla `clave-sin-traduccion`).
 // =============================================================================
-import { homeProfilePickerEs, homeProfilePickerEn } from './dict/home_profile_picker';
-import { shoppingListsEs, shoppingListsEn } from './dict/shopping_lists';
-import { shoppingListDetailEs, shoppingListDetailEn } from './dict/shopping_list_detail';
-import { onboardingEs, onboardingEn } from './dict/onboarding';
-import { inviteEs, inviteEn } from './dict/invite';
 import { householdSharedEs, householdSharedEn } from './dict/household_shared';
-import { aiConfigEs, aiConfigEn } from './dict/ai_config';
-import { avatarEditorEs, avatarEditorEn } from './dict/avatar_editor';
-import { accountEs, accountEn } from './dict/account';
 import { uiEs, uiEn } from './dict/ui';
-import { authEs, authEn } from './dict/auth';
-import { caducidadesEs, caducidadesEn } from './dict/caducidades';
-import { shoppingSuggestedEs, shoppingSuggestedEn } from './dict/shopping_suggested';
-import { calendarEs, calendarEn } from './dict/calendar';
-import { dashboardEs, dashboardEn } from './dict/dashboard';
-import { logsEs, logsEn } from './dict/logs';
 import { navEs, navEn } from './dict/nav';
-import { pantryEs, pantryEn } from './dict/pantry';
 import { receiptsEs, receiptsEn } from './dict/receipts';
-import { preferencesEs, preferencesEn } from './dict/preferences';
-import { profileEs, profileEn } from './dict/profile';
-import { settingsEs, settingsEn } from './dict/settings';
-import { tasteEs, tasteEn } from './dict/taste';
-import { aiParticipantsEs, aiParticipantsEn } from './dict/ai_participants';
 import {
   aiActionAssistantShellEs,
   aiActionAssistantShellEn
 } from './dict/ai_action_assistant_shell';
 
 const es = {
-  ...homeProfilePickerEs,
-  ...shoppingListsEs,
-  ...shoppingListDetailEs,
-  ...onboardingEs,
-  ...inviteEs,
   ...householdSharedEs,
-  ...aiConfigEs,
-  ...avatarEditorEs,
-  ...accountEs,
-  ...authEs,
-  ...caducidadesEs,
-  ...shoppingSuggestedEs,
-  ...calendarEs,
-  ...dashboardEs,
-  ...logsEs,
-  ...navEs,
-  ...pantryEs,
-  ...preferencesEs,
   ...receiptsEs,
-  ...profileEs,
-  ...settingsEs,
-  ...tasteEs,
-  ...aiParticipantsEs,
   ...aiActionAssistantShellEs,
+  ...navEs,
   ...uiEs
 };
 
 const en: Record<keyof typeof es, string> = {
-  ...homeProfilePickerEn,
-  ...shoppingListsEn,
-  ...shoppingListDetailEn,
-  ...onboardingEn,
-  ...inviteEn,
   ...householdSharedEn,
-  ...aiConfigEn,
-  ...avatarEditorEn,
-  ...accountEn,
-  ...authEn,
-  ...caducidadesEn,
-  ...shoppingSuggestedEn,
-  ...calendarEn,
-  ...dashboardEn,
-  ...logsEn,
-  ...navEn,
-  ...pantryEn,
-  ...preferencesEn,
   ...receiptsEn,
-  ...profileEn,
-  ...settingsEn,
-  ...tasteEn,
-  ...aiParticipantsEn,
   ...aiActionAssistantShellEn,
+  ...navEn,
   ...uiEn
 };
 
 export const DICTS = { es, en };
 
-/** Claves estáticas y del diccionario hogar, cargado bajo demanda al entrar en su ruta. */
+/** Diccionarios de dominio cargados antes de activar su ruta o al abrir el asistente. */
+export type TranslationBundleName =
+  | 'homeProfilePicker'
+  | 'shoppingLists'
+  | 'shoppingListDetail'
+  | 'onboarding'
+  | 'invite'
+  | 'aiConfig'
+  | 'avatarEditor'
+  | 'account'
+  | 'auth'
+  | 'caducidades'
+  | 'shoppingSuggested'
+  | 'calendar'
+  | 'dashboard'
+  | 'logs'
+  | 'pantry'
+  | 'preferences'
+  | 'profile'
+  | 'settings'
+  | 'taste'
+  | 'aiParticipants'
+  | 'household'
+  | 'recipes'
+  | 'aiActionAssistant';
+
+/** Claves estáticas y de los diccionarios de dominio cargados bajo demanda. */
 export type TranslationKey =
   | keyof typeof es
+  | keyof typeof import('./dict/home_profile_picker').homeProfilePickerEs
+  | keyof typeof import('./dict/shopping_lists').shoppingListsEs
+  | keyof typeof import('./dict/shopping_list_detail').shoppingListDetailEs
+  | keyof typeof import('./dict/onboarding').onboardingEs
+  | keyof typeof import('./dict/invite').inviteEs
+  | keyof typeof import('./dict/ai_config').aiConfigEs
+  | keyof typeof import('./dict/avatar_editor').avatarEditorEs
+  | keyof typeof import('./dict/account').accountEs
+  | keyof typeof import('./dict/auth').authEs
+  | keyof typeof import('./dict/caducidades').caducidadesEs
+  | keyof typeof import('./dict/shopping_suggested').shoppingSuggestedEs
+  | keyof typeof import('./dict/calendar').calendarEs
+  | keyof typeof import('./dict/dashboard').dashboardEs
+  | keyof typeof import('./dict/logs').logsEs
+  | keyof typeof import('./dict/pantry').pantryEs
+  | keyof typeof import('./dict/preferences').preferencesEs
+  | keyof typeof import('./dict/profile').profileEs
+  | keyof typeof import('./dict/settings').settingsEs
+  | keyof typeof import('./dict/taste').tasteEs
+  | keyof typeof import('./dict/ai_participants').aiParticipantsEs
   | keyof typeof import('./dict/household').householdEs
   | keyof typeof import('./dict/recipes').recipesEs
   | keyof typeof import('./dict/ai_action_assistant').aiActionAssistantEs;

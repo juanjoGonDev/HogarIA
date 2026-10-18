@@ -1,4 +1,5 @@
-import { DICTS } from '../../core/i18n';
+import { profileEs, profileEn } from '../../core/i18n/dict/profile';
+import { authEs, authEn } from '../../core/i18n/dict/auth';
 import {
   COOKING_LEVEL_LABEL_KEYS,
   COOKING_LEVEL_OPTIONS,
@@ -20,8 +21,9 @@ import {
  * parte defensiva, que es la que evita pantallas en blanco con datos viejos.
  */
 describe('home-profile model', () => {
-  const es = DICTS.es as Record<string, string>;
-  const en = DICTS.en as Record<string, string>;
+  const es = { ...profileEs, ...authEs } as Record<string, string>;
+  const en = { ...profileEn, ...authEn } as Record<string, string>;
+  const dictionaries = { es, en };
 
   it('declara los cuatro niveles con su etiqueta y su explicacion', () => {
     expect(COOKING_LEVEL_OPTIONS.map((option) => option.value)).toEqual([
@@ -146,10 +148,7 @@ describe('home-profile model', () => {
   it('los cuatro niveles tienen palabra en los dos idiomas', () => {
     for (const level of COOKING_LEVEL_OPTIONS.map((option) => option.value)) {
       for (const idioma of ['es', 'en'] as const) {
-        const palabra = cookingLevelWord(
-          level,
-          (clave) => DICTS[idioma][clave as keyof (typeof DICTS)['es']]
-        );
+        const palabra = cookingLevelWord(level, (clave) => dictionaries[idioma][clave]);
         expect(palabra.length).toBeGreaterThan(2);
         expect(palabra).not.toContain('.'); // «profile.cooking.none» no es una respuesta, es un diagnostico
       }

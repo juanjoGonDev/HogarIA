@@ -9,7 +9,7 @@ import {
   HomeProfile
 } from '../../shared/models/home-profile';
 import { TasteProfileService } from './taste-profile.service';
-import { DICTS } from '../i18n';
+import { profileEn, profileEs } from '../i18n/dict/profile';
 import { MODULE_REGISTRY, ModulesService, moduleOwningPath } from './modules.service';
 
 /**
@@ -294,7 +294,7 @@ describe('ModulesService', () => {
     // Y la clave no puede estar de adorno: si no resuelve en los dos idiomas, la pantalla sale a medias.
     for (const definition of MODULE_REGISTRY) {
       for (const idioma of ['es', 'en'] as const) {
-        const dictionary = DICTS[idioma] as Record<string, string>;
+        const dictionary = (idioma === 'es' ? profileEs : profileEn) as Record<string, string>;
         expect(dictionary[definition.labelKey])
           .withContext(`${definition.id} en ${idioma}`)
           .toBeTruthy();

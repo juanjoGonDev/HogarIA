@@ -1,4 +1,5 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { I18nService } from '../../../../core/services/i18n.service';
 import { ChipSelectComponent } from './chip-select.component';
 import { COMMON_ALLERGENS } from '../../../models/taste-profile';
 
@@ -8,6 +9,7 @@ describe('ChipSelectComponent', () => {
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({ imports: [ChipSelectComponent] }).compileComponents();
+    await TestBed.inject(I18nService).loadTranslations('taste');
     fixture = TestBed.createComponent(ChipSelectComponent);
     component = fixture.componentInstance;
     fixture.detectChanges();
@@ -29,7 +31,8 @@ describe('ChipSelectComponent', () => {
     component.value = ['Alergia personal'];
     fixture.detectChanges();
 
-    const chips: NodeListOf<HTMLButtonElement> = fixture.nativeElement.querySelectorAll('.chip-select__chip');
+    const chips: NodeListOf<HTMLButtonElement> =
+      fixture.nativeElement.querySelectorAll('.chip-select__chip');
     const custom = Array.from(chips).find((chip) => chip.textContent?.includes('Alergia personal'));
     const icon = custom?.querySelector('app-icon svg');
 

@@ -1,4 +1,24 @@
 import { DICTS } from './index';
+import { homeProfilePickerEs, homeProfilePickerEn } from './dict/home_profile_picker';
+import { shoppingListsEs, shoppingListsEn } from './dict/shopping_lists';
+import { shoppingListDetailEs, shoppingListDetailEn } from './dict/shopping_list_detail';
+import { onboardingEs, onboardingEn } from './dict/onboarding';
+import { inviteEs, inviteEn } from './dict/invite';
+import { aiConfigEs, aiConfigEn } from './dict/ai_config';
+import { avatarEditorEs, avatarEditorEn } from './dict/avatar_editor';
+import { accountEs, accountEn } from './dict/account';
+import { authEs, authEn } from './dict/auth';
+import { caducidadesEs, caducidadesEn } from './dict/caducidades';
+import { shoppingSuggestedEs, shoppingSuggestedEn } from './dict/shopping_suggested';
+import { calendarEs, calendarEn } from './dict/calendar';
+import { dashboardEs, dashboardEn } from './dict/dashboard';
+import { logsEs, logsEn } from './dict/logs';
+import { pantryEs, pantryEn } from './dict/pantry';
+import { preferencesEs, preferencesEn } from './dict/preferences';
+import { profileEs, profileEn } from './dict/profile';
+import { settingsEs, settingsEn } from './dict/settings';
+import { tasteEs, tasteEn } from './dict/taste';
+import { aiParticipantsEs, aiParticipantsEn } from './dict/ai_participants';
 import { householdEs, householdEn } from './dict/household';
 import { recipesEs, recipesEn } from './dict/recipes';
 import { aiActionAssistantEs, aiActionAssistantEn } from './dict/ai_action_assistant';
@@ -18,12 +38,52 @@ import { aiActionAssistantEs, aiActionAssistantEn } from './dict/ai_action_assis
 describe('diccionario simetrico', () => {
   const es = {
     ...DICTS.es,
+    ...homeProfilePickerEs,
+    ...shoppingListsEs,
+    ...shoppingListDetailEs,
+    ...onboardingEs,
+    ...inviteEs,
+    ...aiConfigEs,
+    ...avatarEditorEs,
+    ...accountEs,
+    ...authEs,
+    ...caducidadesEs,
+    ...shoppingSuggestedEs,
+    ...calendarEs,
+    ...dashboardEs,
+    ...logsEs,
+    ...pantryEs,
+    ...preferencesEs,
+    ...profileEs,
+    ...settingsEs,
+    ...tasteEs,
+    ...aiParticipantsEs,
     ...householdEs,
     ...recipesEs,
     ...aiActionAssistantEs
   } as Record<string, string>;
   const en = {
     ...DICTS.en,
+    ...homeProfilePickerEn,
+    ...shoppingListsEn,
+    ...shoppingListDetailEn,
+    ...onboardingEn,
+    ...inviteEn,
+    ...aiConfigEn,
+    ...avatarEditorEn,
+    ...accountEn,
+    ...authEn,
+    ...caducidadesEn,
+    ...shoppingSuggestedEn,
+    ...calendarEn,
+    ...dashboardEn,
+    ...logsEn,
+    ...pantryEn,
+    ...preferencesEn,
+    ...profileEn,
+    ...settingsEn,
+    ...tasteEn,
+    ...aiParticipantsEn,
     ...householdEn,
     ...recipesEn,
     ...aiActionAssistantEn
