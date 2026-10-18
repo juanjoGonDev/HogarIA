@@ -146,6 +146,7 @@ export const routes: Routes = [
           styles: routeFeatureStylesResolver('household'),
           translations: translationBundlesResolver(
             'household',
+            'auth',
             'aiConfig',
             'calendar',
             'dashboard',
