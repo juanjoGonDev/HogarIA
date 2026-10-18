@@ -585,3 +585,10 @@ $env:HOGARIA_AI_ASSISTANT_LOCAL_SMOKE='1'; node scripts/run-isolated-playwright.
 - Build de producción reporta inicial **473,83 kB raw / 133,67 kB transferidos estimados**, dentro del warning de **500 kB**; el chunk diferido del asistente es **159,42 kB / 28,36 kB** transferidos. Persiste el warning de estilo individual del diálogo (**13,42 kB frente a 10 kB**); no se relajaron budgets.
 - No se vuelve a llamar a la WebAPI en esta revalidación: el smoke real anterior ya cubrió los 13 tipos permitidos. La suite UI usa stubs para repetibilidad y las pruebas E2E no escribieron datos salvo aprobaciones sintéticas explícitas.
 - El gate padre sigue abierto: el residuo de heap tras idle es casi igual en asistente y control, pero aún no tiene propietario confirmado; no se declara ausencia de fugas ni 100 % de cobertura de código. El bundle inicial sí queda bajo su umbral actual.
+
+### CI remota — 2026-10-18
+
+- Workflow dispatch [39137848714](https://github.com/juanjoGonDev/MiCocinAI/actions/runs/39137848714), iniciado sobre `354520e` (sin cambios de código después; `b1bd276` solo sincroniza spec), terminó `cancelled`. Instalación, tests de servidor, Type Check y Production Build pasaron.
+- Los cuatro shards E2E y Full-stack E2E se cancelaron al alcanzar el límite de **16 min** mientras Playwright seguía ejecutándose: el log de full-stack había iniciado **170 tests** y alcanzado el test 151; los shards también seguían emitiendo resultados. El corte no es un resultado verde ni permite concluir que el cambio falle o pase.
+- Los logs parciales muestran varios casos fallidos/reintentados antes del corte; no se obtuvo informe final ni artefactos Playwright para atribuirlos. No se debe aumentar solo el límite y declarar éxito: elevarlo para que la suite termine y conservar diagnósticos, luego resolver cada fallo reproducible.
+- Decisión: ajustar con prueba el timeout de ambos trabajos a **30 min**, reejecutar CI remota y revisar los informes completos. Mantener sin marcar la verificación remota de `AI-ACTION-ASSISTANT-RECIPE-UPDATE-SPEC.md` hasta que esa ejecución concluya. El gate de rendimiento y heap sigue abierto.
