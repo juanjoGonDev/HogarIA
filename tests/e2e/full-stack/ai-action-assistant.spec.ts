@@ -5299,6 +5299,148 @@ test('asistente global: respeta safe-area emulada en FAB y diálogo móvil', asy
   await session.detach();
 });
 
+type ChromeHeapSnapshot = {
+  snapshot: {
+    meta: {
+      node_fields: string[];
+      node_types: string[][];
+      edge_fields: string[];
+      edge_types: string[][];
+    };
+  };
+  nodes: number[];
+  edges: number[];
+  strings: string[];
+};
+
+type HeapRetainerStep = { nodeIndex: number; viaEdgeType: string | null };
+
+function findHeapRetainerPath(
+  snapshot: ChromeHeapSnapshot,
+  targetNodeIndex: number
+): HeapRetainerStep[] | null {
+  const nodeFieldIndex = new Map(
+    snapshot.snapshot.meta.node_fields.map((name, index) => [name, index])
+  );
+  const edgeFieldIndex = new Map(
+    snapshot.snapshot.meta.edge_fields.map((name, index) => [name, index])
+  );
+  const nodeStride = snapshot.snapshot.meta.node_fields.length;
+  const edgeStride = snapshot.snapshot.meta.edge_fields.length;
+  const typeField = nodeFieldIndex.get('type');
+  const nameField = nodeFieldIndex.get('name');
+  const edgeCountField = nodeFieldIndex.get('edge_count');
+  const edgeTypeField = edgeFieldIndex.get('type');
+  const targetNodeField = edgeFieldIndex.get('to_node');
+  const nodeTypes = snapshot.snapshot.meta.node_types[0];
+  const edgeTypes = snapshot.snapshot.meta.edge_types[0];
+  const nodeCount = snapshot.nodes.length / nodeStride;
+
+  if (
+    !Number.isInteger(nodeCount) ||
+    nodeStride === 0 ||
+    edgeStride === 0 ||
+    typeField === undefined ||
+    nameField === undefined ||
+    edgeCountField === undefined ||
+    edgeTypeField === undefined ||
+    targetNodeField === undefined ||
+    targetNodeIndex < 0 ||
+    targetNodeIndex >= nodeCount
+  ) {
+    return null;
+  }
+
+  const nodeType = (index: number) => nodeTypes[snapshot.nodes[index * nodeStride + typeField]];
+  const nodeName = (index: number) =>
+    snapshot.strings[snapshot.nodes[index * nodeStride + nameField]];
+  const rootNodeIndex = Array.from({ length: nodeCount }, (_, index) => index).find(
+    (index) => nodeType(index) === 'synthetic' && nodeName(index) === '(GC roots)'
+  );
+  if (rootNodeIndex === undefined) return null;
+
+  const incoming = new Map<number, Array<{ ownerNodeIndex: number; edgeType: string }>>();
+  let edgeOffset = 0;
+  for (let ownerNodeIndex = 0; ownerNodeIndex < nodeCount; ownerNodeIndex += 1) {
+    const ownerOffset = ownerNodeIndex * nodeStride;
+    const edgeCount = snapshot.nodes[ownerOffset + edgeCountField];
+    for (let edge = 0; edge < edgeCount; edge += 1) {
+      if (edgeOffset + edgeStride > snapshot.edges.length) return null;
+      const edgeType = edgeTypes[snapshot.edges[edgeOffset + edgeTypeField]];
+      const targetOffset = snapshot.edges[edgeOffset + targetNodeField];
+      edgeOffset += edgeStride;
+      if (edgeType === 'weak' || targetOffset % nodeStride !== 0) continue;
+
+      const targetIndex = targetOffset / nodeStride;
+      if (targetIndex < 0 || targetIndex >= nodeCount) continue;
+      const retainers = incoming.get(targetIndex) ?? [];
+      retainers.push({ ownerNodeIndex, edgeType });
+      incoming.set(targetIndex, retainers);
+    }
+  }
+
+  const queue: Array<{ nodeIndex: number; path: HeapRetainerStep[] }> = [
+    { nodeIndex: targetNodeIndex, path: [{ nodeIndex: targetNodeIndex, viaEdgeType: null }] }
+  ];
+  const visited = new Set([targetNodeIndex]);
+  for (let cursor = 0; cursor < queue.length && cursor < 10_000; cursor += 1) {
+    const current = queue[cursor]!;
+    if (current.nodeIndex === rootNodeIndex) return current.path;
+    if (current.path.length >= 12) continue;
+
+    for (const retainer of incoming.get(current.nodeIndex) ?? []) {
+      if (visited.has(retainer.ownerNodeIndex)) continue;
+      visited.add(retainer.ownerNodeIndex);
+      const path = [
+        ...current.path,
+        { nodeIndex: retainer.ownerNodeIndex, viaEdgeType: retainer.edgeType }
+      ];
+      if (retainer.ownerNodeIndex === rootNodeIndex) return path;
+      queue.push({ nodeIndex: retainer.ownerNodeIndex, path });
+    }
+  }
+  return null;
+}
+
+test('asistente global: traza retainers fuertes y omite referencias débiles en heap', () => {
+  const snapshot: ChromeHeapSnapshot = {
+    snapshot: {
+      meta: {
+        node_fields: ['type', 'name', 'id', 'self_size', 'edge_count'],
+        node_types: [['synthetic', 'object', 'closure']],
+        edge_fields: ['type', 'name_or_index', 'to_node'],
+        edge_types: [['context', 'property', 'weak']]
+      }
+    },
+    nodes: [
+      0,
+      0,
+      1,
+      0,
+      1, // GC roots -> owner
+      1,
+      1,
+      2,
+      44,
+      0, // retained context
+      2,
+      2,
+      3,
+      32,
+      1 // owner -> retained context
+    ],
+    edges: [1, 0, 10, 0, 0, 5],
+    strings: ['(GC roots)', 'system / Context / scope @7', 'assistant owner']
+  };
+
+  expect(findHeapRetainerPath(snapshot, 1)).toEqual([
+    { nodeIndex: 1, viaEdgeType: null },
+    { nodeIndex: 2, viaEdgeType: 'context' },
+    { nodeIndex: 0, viaEdgeType: 'property' }
+  ]);
+  expect(findHeapRetainerPath({ ...snapshot, edges: [1, 0, 10, 2, 0, 5] }, 1)).toBeNull();
+});
+
 test('asistente global: mide heap y listeners tras reaperturas repetidas', async ({
   page
 }, testInfo) => {
@@ -5406,7 +5548,9 @@ test('asistente global: mide heap y listeners tras reaperturas repetidas', async
     };
   };
 
-  const captureHeapObjectCounts = async () => {
+  const captureHeapObjectCounts = async (
+    previousSnapshot?: Record<string, { count: number; selfSizeBytes: number }>
+  ) => {
     const snapshotCdp = await page.context().newCDPSession(page);
     const chunks: string[] = [];
     const onSnapshotChunk = ({ chunk }: { chunk: string }) => chunks.push(chunk);
@@ -5416,11 +5560,7 @@ test('asistente global: mide heap y listeners tras reaperturas repetidas', async
       await snapshotCdp.send('HeapProfiler.enable');
       await snapshotCdp.send('HeapProfiler.collectGarbage');
       await snapshotCdp.send('HeapProfiler.takeHeapSnapshot', { reportProgress: false });
-      const snapshot = JSON.parse(chunks.join('')) as {
-        snapshot: { meta: { node_fields: string[]; node_types: string[][] } };
-        nodes: number[];
-        strings: string[];
-      };
+      const snapshot = JSON.parse(chunks.join('')) as ChromeHeapSnapshot;
       const nodeFields = new Map(snapshot.snapshot.meta.node_fields.map((name, i) => [name, i]));
       const typeIndex = nodeFields.get('type');
       const nameIndex = nodeFields.get('name');
@@ -5450,6 +5590,59 @@ test('asistente global: mide heap y listeners tras reaperturas repetidas', async
         current.count += 1;
         current.selfSizeBytes += snapshot.nodes[offset + sizeIndex];
         counts[key] = current;
+      }
+
+      if (previousSnapshot) {
+        const growingContexts = Object.entries(counts)
+          .filter(([key]) => key.startsWith('object:system / Context / scope'))
+          .map(([key, current]) => ({
+            key,
+            countDelta: current.count - (previousSnapshot[key]?.count ?? 0)
+          }))
+          .filter(({ countDelta }) => countDelta > 0)
+          .sort((left, right) => right.countDelta - left.countDelta);
+        const target = growingContexts[0];
+
+        if (target) {
+          const targetName = target.key.slice('object:'.length);
+          const targetNodeIndexes: number[] = [];
+          const typeIndex = nodeFields.get('type')!;
+          const nameIndex = nodeFields.get('name')!;
+          for (let offset = 0; offset < snapshot.nodes.length; offset += stride) {
+            const type = nodeTypes[snapshot.nodes[offset + typeIndex]];
+            const name = snapshot.strings[snapshot.nodes[offset + nameIndex]];
+            if (type === 'object' && name === targetName) {
+              targetNodeIndexes.push(offset / stride);
+              if (targetNodeIndexes.length >= 3) break;
+            }
+          }
+
+          const labels = targetNodeIndexes.map((nodeIndex) => {
+            const path = findHeapRetainerPath(snapshot, nodeIndex);
+            if (!path) return null;
+            return path.map((step) => {
+              const offset = step.nodeIndex * stride;
+              const type = nodeTypes[snapshot.nodes[offset + typeIndex]];
+              const name = snapshot.strings[snapshot.nodes[offset + nameIndex]];
+              const safeName =
+                type === 'string'
+                  ? '<redacted>'
+                  : type === 'object' && name.startsWith('system / Context / scope')
+                    ? 'system / Context / scope'
+                    : name.slice(0, 100);
+              return { node: `${type}:${safeName}`, via: step.viaEdgeType };
+            });
+          });
+          console.log(
+            '[assistant-retainers]',
+            JSON.stringify({ scopeCountDelta: target.countDelta, samplePaths: labels })
+          );
+        } else {
+          console.log(
+            '[assistant-retainers]',
+            JSON.stringify({ scopeCountDelta: 0, samplePaths: [] })
+          );
+        }
       }
       return counts;
     } finally {
@@ -5577,7 +5770,12 @@ test('asistente global: mide heap y listeners tras reaperturas repetidas', async
 
       const durationSeconds = Number(((Date.now() - groupStartedAt) / 1000).toFixed(2));
       const processAfter = await sampleBrowserProcesses();
-      const heapAfterGroup = await captureHeapObjectCounts();
+      const traceRetainers =
+        process.env.HOGARIA_AI_ASSISTANT_HEAP_RETAINERS === '1' &&
+        groupIndex + 1 === reopeningGroupCount;
+      const heapAfterGroup = await captureHeapObjectCounts(
+        traceRetainers ? heapSnapshots[heapSnapshots.length - 1] : undefined
+      );
       heapSnapshots.push(heapAfterGroup);
       const closedHeapStartMiB =
         groupIndex === 0
