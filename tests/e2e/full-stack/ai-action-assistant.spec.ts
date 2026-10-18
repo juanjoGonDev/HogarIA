@@ -738,6 +738,17 @@ async function assistantDatabaseSnapshot(page: Page): Promise<Record<string, str
           predicates.push('id = ?');
           values.push(householdId);
         }
+        if (name === 'meals' && columnNames.has('calendar_id')) {
+          const ownerFilters = ['user_id = ?'];
+          values.push(identity.userId as string);
+          if (householdId) {
+            ownerFilters.push('household_id = ?');
+            values.push(householdId);
+          }
+          predicates.push(
+            `calendar_id IN (SELECT id FROM weekly_calendars WHERE ${ownerFilters.join(' OR ')})`
+          );
+        }
 
         // E2E workers share one isolated database. Snapshot only data attributable to
         // this test's user or active household; otherwise another worker's setup or
@@ -746,6 +757,7 @@ async function assistantDatabaseSnapshot(page: Page): Promise<Record<string, str
           ['user_id', 'owner_id', 'author_id', 'created_by', 'updated_by', 'household_id'].some(
             (column) => columnNames.has(column)
           ) ||
+          (name === 'meals' && columnNames.has('calendar_id')) ||
           ((name === 'users' || name === 'households') && columnNames.has('id'));
         const where = predicates.length
           ? ` WHERE ${predicates.join(' OR ')}`
@@ -5544,6 +5556,69 @@ test('asistente global: adapta el diálogo cuando aparece el teclado virtual', a
   expect(geometry.prompt?.bottom ?? Infinity).toBeLessThanOrEqual(geometry.footer?.top ?? -1);
   expect(geometry.bodyClientHeight).toBeGreaterThan(0);
   expect(geometry.promptFocused).toBe(true);
+});
+
+test('asistente global: las acciones del dashboard caben en móvil mínimo', async ({
+  page
+}, testInfo) => {
+  await registerUser(page, 'Asistente grid móvil E2E');
+  await createHousehold(page, 'Hogar grid móvil sintético');
+  await page.goto('/dashboard');
+  await expect(page.locator('.dashboard__actions .action-card')).toHaveCount(3);
+
+  const measureActionGrid = () =>
+    page.locator('.dashboard__actions').evaluate((grid) => {
+      const rectangle = (element: Element) => {
+        const bounds = element.getBoundingClientRect();
+        return { left: bounds.left, right: bounds.right, width: bounds.width };
+      };
+      const cards = Array.from(grid.querySelectorAll<HTMLElement>('.action-card'));
+      const cardRects = cards.map((card) => rectangle(card));
+      const columns = new Set(cardRects.map(({ left }) => Math.round(left * 100) / 100)).size;
+      return {
+        viewportWidth: document.documentElement.clientWidth,
+        documentWidth: document.documentElement.scrollWidth,
+        columns,
+        grid: rectangle(grid),
+        cards: cards.map((card, index) => ({
+          ...cardRects[index],
+          label: rectangle(card.querySelector('.action-card__label')!)
+        }))
+      };
+    });
+
+  if (testInfo.project.name === 'chromium') {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await expect.poll(async () => (await measureActionGrid()).viewportWidth).toBe(1440);
+    const desktopGeometry = await measureActionGrid();
+    expect(desktopGeometry.columns).toBe(3);
+    expect(desktopGeometry.documentWidth).toBeLessThanOrEqual(1441);
+    expect(
+      Math.max(...desktopGeometry.cards.map((card) => card.width)) -
+        Math.min(...desktopGeometry.cards.map((card) => card.width))
+    ).toBeLessThanOrEqual(1);
+    await capture(page, testInfo, 'dashboard-action-grid-1440x900');
+  }
+
+  await page.setViewportSize({ width: 320, height: 568 });
+  await expect.poll(async () => (await measureActionGrid()).viewportWidth).toBe(320);
+  const mobileGeometry = await measureActionGrid();
+  expect(mobileGeometry.columns, 'dos columnas de acciones a 320 px').toBe(2);
+  expect(mobileGeometry.documentWidth, JSON.stringify(mobileGeometry)).toBeLessThanOrEqual(321);
+  expect(
+    mobileGeometry.cards.every(
+      (card) =>
+        card.left >= 0 &&
+        card.right <= mobileGeometry.viewportWidth + 1 &&
+        card.label.right <= card.right
+    ),
+    JSON.stringify(mobileGeometry)
+  ).toBe(true);
+  expect(
+    Math.max(...mobileGeometry.cards.map((card) => card.width)) -
+      Math.min(...mobileGeometry.cards.map((card) => card.width))
+  ).toBeLessThanOrEqual(1);
+  await capture(page, testInfo, 'dashboard-action-grid-320x568');
 });
 
 test('asistente global: respeta safe-area emulada en FAB y diálogo móvil', async ({

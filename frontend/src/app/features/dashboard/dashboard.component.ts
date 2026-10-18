@@ -531,7 +531,7 @@ interface DashboardAiQueueRow {
 
       .dashboard__actions {
         display: grid;
-        grid-template-columns: repeat(3, 1fr);
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 8.5rem), 1fr));
         gap: var(--space-3);
         margin-bottom: var(--space-8);
       }
@@ -541,6 +541,7 @@ interface DashboardAiQueueRow {
         flex-direction: column;
         align-items: center;
         gap: var(--space-2);
+        min-width: 0;
         padding: var(--space-4);
         border-radius: var(--radius-xl);
         text-decoration: none;
@@ -566,8 +567,11 @@ interface DashboardAiQueueRow {
         display: inline-flex;
       }
       .action-card__label {
+        max-width: 100%;
         font-size: var(--text-sm);
         font-weight: var(--font-medium);
+        overflow-wrap: anywhere;
+        text-align: center;
       }
 
       .dashboard__section {
