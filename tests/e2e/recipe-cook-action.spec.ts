@@ -70,8 +70,9 @@ test('Cocinar ahora espera confirmación, evita duplicados y permite reintentar'
 
     await page.goto(`/recipes?recipe=${recipe.id}`);
     const detail = page.locator('[data-test="recipe-detail-page"]');
-    const cookButton = page.getByRole('button', { name: /Cocinar ahora/ });
     await expect(detail).toBeVisible();
+    await page.locator('[data-test="recipe-detail-tab-ingredients"]').click();
+    const cookButton = page.locator('[data-test="recipe-cooking-mark-done"] button');
     const initialBounds = await cookButton.boundingBox();
     expect(initialBounds).not.toBeNull();
     expect(initialBounds!.width).toBeGreaterThanOrEqual(44);

@@ -57,9 +57,10 @@ test('la receta sigue legible si falla la búsqueda y permite reintentar una esc
 
   try {
     await page.goto(`/recipes?collection=all&page=1&recipe=${recipe.id}`);
-    const detail = page.locator('[data-test="recipe-full-detail"]');
-    const step = detail.locator('.step-card[data-step-number="1"]');
-    await expect(step).toContainText('Corta las verduras en trozos regulares.');
+    await page.getByRole('button', { name: 'Empezar a cocinar', exact: true }).click();
+    const detail = page.locator('[data-test="recipe-cooking-view"]');
+    const step = detail.locator('[data-test="recipe-cooking-step"][data-step-number="1"]');
+    await expect(step).toContainText('Pica las verduras con cuidado.');
     const retry = step.getByRole('button', { name: 'Buscar de nuevo' });
     await expect(retry).toBeVisible();
     await retry.focus();
@@ -67,7 +68,9 @@ test('la receta sigue legible si falla la búsqueda y permite reintentar una esc
     await retry.press('Enter');
 
     const photo = step.locator('[data-test="recipe-step-photo"]');
-    await expect(photo.getByRole('img', { name: 'Verduras troceadas sobre una tabla' })).toBeVisible();
+    await expect(
+      photo.getByRole('img', { name: 'Verduras troceadas sobre una tabla' })
+    ).toBeVisible();
     await expect(photo).toContainText('Autora sintética E2E');
     await expect(photo.getByRole('link', { name: 'CC BY 4.0' })).toHaveAttribute(
       'href',
@@ -76,7 +79,9 @@ test('la receta sigue legible si falla la búsqueda y permite reintentar una esc
     expect(photoQueries).toHaveLength(2);
     expect(
       photoQueries.every(
-        (url) => [...url.searchParams.keys()].join(',') === 'scene' && url.searchParams.get('scene') === 'cut'
+        (url) =>
+          [...url.searchParams.keys()].join(',') === 'scene' &&
+          url.searchParams.get('scene') === 'cut'
       )
     ).toBeTruthy();
   } finally {

@@ -82,9 +82,9 @@ async function selectEditorTab(page: import('@playwright/test').Page, name: stri
 
 async function selectInstructionLevel(
   page: import('@playwright/test').Page,
-  name: string
+  level: 'basic' | 'intermediate' | 'expert'
 ): Promise<void> {
-  await page.getByRole('tab', { name, exact: true }).click();
+  await page.locator(`#editor-level-tab-${level}`).click();
 }
 
 async function stubAutomaticStepPhotos(page: import('@playwright/test').Page): Promise<void> {
@@ -144,11 +144,11 @@ test('la vista dedicada edita todos los campos, conserva el estado personal y no
     await expect(page.locator('#step-instruction-basic-0')).toHaveValue(
       detailedFixture.instructionsByLevel.basic[0].instruction
     );
-    await selectInstructionLevel(page, 'Intermedio');
+    await selectInstructionLevel(page, 'intermediate');
     await expect(page.locator('#step-instruction-intermediate-0')).toHaveValue(
       detailedFixture.instructionsByLevel.intermediate[0].instruction
     );
-    await selectInstructionLevel(page, 'Experto');
+    await selectInstructionLevel(page, 'expert');
     await expect(page.locator('#step-instruction-expert-0')).toHaveValue(
       detailedFixture.instructionsByLevel.expert[0].instruction
     );
@@ -172,9 +172,9 @@ test('la vista dedicada edita todos los campos, conserva el estado personal y no
     await selectEditorTab(page, 'Multimedia');
     await page.locator('#editor-image').fill(manualCoverUrl);
     await selectEditorTab(page, 'Preparación');
-    await selectInstructionLevel(page, 'Básico');
+    await selectInstructionLevel(page, 'basic');
     await page.locator('#step-image-basic-0').fill(manualStepUrl);
-    await selectInstructionLevel(page, 'Intermedio');
+    await selectInstructionLevel(page, 'intermediate');
     await page
       .locator('#step-instruction-intermediate-0')
       .fill('Enjuaga los garbanzos y corta las espinacas.');
@@ -899,7 +899,7 @@ test('revisa una mejora canónica, busca medios genéricos y persiste solo al gu
     expect(videoScenes.every((scene) => allowedScenes.includes(scene))).toBeTruthy();
     expect(patchRequests).toHaveLength(0);
     await selectEditorTab(page, 'Preparación');
-    await selectInstructionLevel(page, 'Básico');
+    await selectInstructionLevel(page, 'basic');
     await expect(page.locator('#step-instruction-basic-0')).toHaveValue(
       'Corta la calabaza en dados uniformes.'
     );
@@ -1147,11 +1147,11 @@ test('crea una receta manual solo al guardar y mantiene privada la receta nueva'
     await page.locator('#ingredient-quantity-0').fill('400');
     await selectEditorTab(page, 'Preparación');
     await page.locator('#step-instruction-basic-0').fill('Pela y trocea la calabaza.');
-    await selectInstructionLevel(page, 'Intermedio');
+    await selectInstructionLevel(page, 'intermediate');
     await page
       .locator('#step-instruction-intermediate-0')
       .fill('Corta la calabaza en dados uniformes.');
-    await selectInstructionLevel(page, 'Experto');
+    await selectInstructionLevel(page, 'expert');
     await page
       .locator('#step-instruction-expert-0')
       .fill('Corta en dados regulares para una cocción homogénea.');
@@ -1263,7 +1263,7 @@ test('el calor es opcional y quitarlo deja el paso guardado sin temperatura', as
   try {
     await openEditor(page, recipe.id);
     await selectEditorTab(page, 'Preparación');
-    await selectInstructionLevel(page, 'Básico');
+    await selectInstructionLevel(page, 'basic');
     await expect(page.locator('#step-temperature-basic-0')).toHaveCount(0);
     const addTemperature = page.getByRole('button', { name: /Añadir temperatura/ });
     await addTemperature.focus();
@@ -1426,7 +1426,7 @@ test('the direct editor route preserves shared content geometry at phone and lan
       await page.goto(`/recipes/${recipe.id}/edit`);
       await expect(page.locator('[data-test="recipe-editor-form"]')).toBeVisible();
       await selectEditorTab(page, 'Preparación');
-      await page.getByRole('tab', { name: 'Básico', exact: true }).click();
+      await selectInstructionLevel(page, 'basic');
       const widths = await page.evaluate(() => ({
         body: document.documentElement.clientWidth,
         scroll: document.documentElement.scrollWidth,

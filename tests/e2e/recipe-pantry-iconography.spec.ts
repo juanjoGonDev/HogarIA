@@ -77,7 +77,7 @@ test('Recipe and Pantry decorative icons are SVG while food and recipe content s
     expect(DECORATIVE_EMOJI.test(await page.locator('.recipes__quick-filters').innerText())).toBe(
       false
     );
-    await expect(page.locator('.recipes__grid .recipe-card').first()).toBeVisible();
+    await expect(page.locator('.recipes__grid .recipe-card:visible').first()).toBeVisible();
     await expect(page.getByRole('button', { name: 'Generar IA' })).toBeVisible();
 
     const ingredientResponse = await page.request.post('/api/pantry/ingredients', {
@@ -96,7 +96,7 @@ test('Recipe and Pantry decorative icons are SVG while food and recipe content s
       tips: 'Consejo QA: remueve suavemente.',
       warning: 'Advertencia QA: vigila el aceite caliente.'
     });
-    await page.reload();
+    await page.goto(`/recipes?search=${encodeURIComponent(recipe.name)}`);
     const card = page.locator('.recipe-card').filter({ hasText: recipe.name });
     await expect(card).toBeVisible();
     await expect(card.locator('.recipe-card__placeholder app-icon')).toHaveCount(1);
