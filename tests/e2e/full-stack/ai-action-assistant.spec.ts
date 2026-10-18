@@ -5730,6 +5730,94 @@ function summarizeHeapContextNodes(
   return { contextObjectIds, newContextCount, newNodeIndexes };
 }
 
+function findHeapClosureContextIdentity(
+  snapshot: ChromeHeapSnapshot,
+  closureName: string
+): { closureObjectId: number; contextObjectId: number } {
+  const nodeFields = new Map(
+    snapshot.snapshot.meta.node_fields.map((name, index) => [name, index])
+  );
+  const edgeFields = new Map(
+    snapshot.snapshot.meta.edge_fields.map((name, index) => [name, index])
+  );
+  const nodeTypes = snapshot.snapshot.meta.node_types[0];
+  const edgeTypes = snapshot.snapshot.meta.edge_types[0];
+  const nodeStride = snapshot.snapshot.meta.node_fields.length;
+  const edgeStride = snapshot.snapshot.meta.edge_fields.length;
+  const typeField = nodeFields.get('type');
+  const nameField = nodeFields.get('name');
+  const idField = nodeFields.get('id');
+  const edgeCountField = nodeFields.get('edge_count');
+  const edgeTypeField = edgeFields.get('type');
+  const edgeNameField = edgeFields.get('name_or_index');
+  const targetNodeField = edgeFields.get('to_node');
+
+  if (
+    !nodeTypes ||
+    !edgeTypes ||
+    nodeStride === 0 ||
+    edgeStride === 0 ||
+    snapshot.nodes.length % nodeStride !== 0 ||
+    typeField === undefined ||
+    nameField === undefined ||
+    idField === undefined ||
+    edgeCountField === undefined ||
+    edgeTypeField === undefined ||
+    edgeNameField === undefined ||
+    targetNodeField === undefined
+  ) {
+    throw new Error('Chromium heap snapshot lacks closure/context identity fields.');
+  }
+
+  const nodeCount = snapshot.nodes.length / nodeStride;
+  const closureIndexes = Array.from({ length: nodeCount }, (_, index) => index).filter(
+    (index) =>
+      nodeTypes[snapshot.nodes[index * nodeStride + typeField]] === 'closure' &&
+      snapshot.strings[snapshot.nodes[index * nodeStride + nameField]] === closureName
+  );
+  if (closureIndexes.length !== 1) {
+    throw new Error(`Expected one closure named ${closureName} in heap snapshot.`);
+  }
+  const closureIndex = closureIndexes[0]!;
+  const closureOffset = closureIndex * nodeStride;
+  const closureObjectId = snapshot.nodes[closureOffset + idField];
+  let edgeOffset = 0;
+  for (let ownerIndex = 0; ownerIndex < closureIndex; ownerIndex += 1) {
+    const edgeCount = snapshot.nodes[ownerIndex * nodeStride + edgeCountField];
+    if (!Number.isSafeInteger(edgeCount) || edgeCount < 0) {
+      throw new Error('Chromium heap snapshot has invalid edge counts.');
+    }
+    edgeOffset += edgeCount * edgeStride;
+  }
+
+  const closureEdgeCount = snapshot.nodes[closureOffset + edgeCountField];
+  for (let edgeIndex = 0; edgeIndex < closureEdgeCount; edgeIndex += 1) {
+    const currentEdgeOffset = edgeOffset + edgeIndex * edgeStride;
+    const edgeType = edgeTypes[snapshot.edges[currentEdgeOffset + edgeTypeField]];
+    const edgeNameOrIndex = snapshot.edges[currentEdgeOffset + edgeNameField];
+    const edgeName =
+      edgeType === 'element' ? `#${edgeNameOrIndex}` : snapshot.strings[edgeNameOrIndex];
+    if (edgeType !== 'internal' || edgeName !== 'context') continue;
+
+    const targetOffset = snapshot.edges[currentEdgeOffset + targetNodeField];
+    if (
+      !Number.isSafeInteger(targetOffset) ||
+      targetOffset < 0 ||
+      targetOffset % nodeStride !== 0 ||
+      targetOffset >= snapshot.nodes.length
+    ) {
+      throw new Error('Chromium heap snapshot has an invalid closure context edge.');
+    }
+    const contextObjectId = snapshot.nodes[targetOffset + idField];
+    if (!Number.isSafeInteger(closureObjectId) || !Number.isSafeInteger(contextObjectId)) {
+      throw new Error('Chromium heap snapshot has invalid object identity values.');
+    }
+    return { closureObjectId, contextObjectId };
+  }
+
+  throw new Error(`Closure ${closureName} has no internal context edge in heap snapshot.`);
+}
+
 function findHeapRetainerPath(
   snapshot: ChromeHeapSnapshot,
   targetNodeIndex: number,
@@ -6178,6 +6266,74 @@ test('asistente global: amplía retainers con límites opt-in acotados y detecta
   expect(expandedSearch.searchTruncated).toBe(false);
   expect(expandedSearch.maxDepthReached).toBe(depth);
   expect(expandedSearch.path).toHaveLength(depth + 1);
+});
+
+test('asistente global: verifica IDs estables de Context entre heap snapshots CDP', async ({
+  page
+}, testInfo) => {
+  test.skip(testInfo.project.name !== 'chromium', 'comprueba identidad de nodos de Chromium CDP');
+  await page.goto('data:text/html,<html><body>synthetic heap identity</body></html>');
+  await page.evaluate(() => {
+    const target = window as Window & {
+      __assistantRetainedContextProbe?: () => unknown;
+    };
+    target.__assistantRetainedContextProbe = (() => {
+      const retainedValue = { marker: 'synthetic' };
+      return function assistantRetainedContextProbe() {
+        return retainedValue;
+      };
+    })();
+  });
+
+  const snapshotCdp = await page.context().newCDPSession(page);
+  try {
+    await snapshotCdp.send('HeapProfiler.enable');
+    const captureSnapshot = async (): Promise<ChromeHeapSnapshot> => {
+      const chunks: string[] = [];
+      const onSnapshotChunk = ({ chunk }: { chunk: string }) => chunks.push(chunk);
+      snapshotCdp.on('HeapProfiler.addHeapSnapshotChunk', onSnapshotChunk);
+      try {
+        await snapshotCdp.send('HeapProfiler.collectGarbage');
+        await snapshotCdp.send('HeapProfiler.takeHeapSnapshot', { reportProgress: false });
+        return JSON.parse(chunks.join('')) as ChromeHeapSnapshot;
+      } finally {
+        snapshotCdp.off('HeapProfiler.addHeapSnapshotChunk', onSnapshotChunk);
+      }
+    };
+
+    const firstSnapshot = await captureSnapshot();
+    await page.evaluate(() => {
+      const target = window as Window & {
+        __assistantCreatedContextProbe?: () => unknown;
+      };
+      target.__assistantCreatedContextProbe = (() => {
+        const freshValue = { marker: 'synthetic' };
+        return function assistantCreatedContextProbe() {
+          return freshValue;
+        };
+      })();
+    });
+    const secondSnapshot = await captureSnapshot();
+    const firstIdentity = findHeapClosureContextIdentity(
+      firstSnapshot,
+      'assistantRetainedContextProbe'
+    );
+    const retainedIdentity = findHeapClosureContextIdentity(
+      secondSnapshot,
+      'assistantRetainedContextProbe'
+    );
+    const createdIdentity = findHeapClosureContextIdentity(
+      secondSnapshot,
+      'assistantCreatedContextProbe'
+    );
+
+    expect(retainedIdentity).toEqual(firstIdentity);
+    expect(createdIdentity.closureObjectId).not.toBe(retainedIdentity.closureObjectId);
+    expect(createdIdentity.contextObjectId).not.toBe(retainedIdentity.contextObjectId);
+  } finally {
+    await snapshotCdp.send('HeapProfiler.disable').catch(() => undefined);
+    await snapshotCdp.detach();
+  }
 });
 
 test('asistente global: mide heap y listeners tras reaperturas repetidas', async ({
