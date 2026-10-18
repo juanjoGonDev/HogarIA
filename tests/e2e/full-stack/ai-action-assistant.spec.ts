@@ -5815,6 +5815,7 @@ test('asistente global: mide heap y listeners tras reaperturas repetidas', async
     'el target debe ser múltiplo de 20 entre 40 y 200'
   ).toBe(true);
   const allocationSamplingEnabled = process.env.HOGARIA_AI_ASSISTANT_HEAP_ALLOCATIONS === '1';
+  const sharedConfirmDialogControl = process.env.HOGARIA_AI_ASSISTANT_HEAP_CONTROL_MODAL === '1';
   expect(
     !allocationSamplingEnabled || requestedReopenings === 40,
     'el perfil de asignaciones solo acompaña al perfil default de 40 ciclos'
@@ -5822,6 +5823,7 @@ test('asistente global: mide heap y listeners tras reaperturas repetidas', async
   test.setTimeout(90_000 + Math.max(0, requestedReopenings - 40) * 2_000);
 
   const proposalRequests: string[] = [];
+  const destructiveRequests: string[] = [];
   const scriptRequests: string[] = [];
   let receiptQueueRequests = 0;
   let pantryCategoryRequests = 0;
@@ -5834,13 +5836,33 @@ test('asistente global: mide heap y listeners tras reaperturas repetidas', async
     if (request.method() === 'GET' && pathname === '/api/pantry/categories') {
       pantryCategoryRequests += 1;
     }
+    if (request.method() === 'DELETE') destructiveRequests.push(pathname);
     if (request.method() !== 'POST') return;
     if (pathname.startsWith('/api/ai/assistant/')) proposalRequests.push(pathname);
   });
 
   await registerUser(page, 'Asistente rendimiento E2E');
   await createHousehold(page, 'Hogar rendimiento sintético');
-  await page.goto('/dashboard');
+  await page.goto(sharedConfirmDialogControl ? '/pantry' : '/dashboard');
+  let sharedModalDatabaseBefore: Record<string, string[]> | undefined;
+  if (sharedConfirmDialogControl) {
+    await expect(page.locator('h1.pantry__title')).toBeVisible();
+    await page.getByRole('button', { name: '+ Agregar' }).click();
+    await page.fill('input#ingredientName', 'Tomate de control');
+    await page.fill('input#quantity', '500');
+    for (const [testDelPicker, opcion] of [
+      ['pantry-picker-categoria', 'Verduras'],
+      ['pantry-picker-ubicacion', 'Nevera']
+    ] as const) {
+      const caja = page.locator(`[data-test="${testDelPicker}"]`);
+      await caja.locator('.picker__trigger').click();
+      await caja.locator('.picker__option').filter({ hasText: opcion }).first().click();
+    }
+    await page.locator('app-modal button[type="submit"]').click();
+    await expect(page.locator('.ingredient-item', { hasText: 'Tomate de control' })).toHaveCount(1);
+    await expect(page.locator('.toast--success')).toHaveCount(0);
+    sharedModalDatabaseBefore = assistantDatabaseSnapshot();
+  }
 
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('Performance.enable');
@@ -6070,21 +6092,37 @@ test('asistente global: mide heap y listeners tras reaperturas repetidas', async
       await page.waitForTimeout(100);
     }
 
-    throw new Error('DOM nodes/listeners did not stabilize after closing the assistant.');
+    throw new Error('DOM nodes/listeners did not stabilize after closing the modal.');
   };
 
-  const launcher = page.locator('[data-test="ai-assistant-open"]');
+  const launcher = sharedConfirmDialogControl
+    ? page
+        .locator('.ingredient-item', { hasText: 'Tomate de control' })
+        .locator('.action-btn--danger')
+    : page.locator('[data-test="ai-assistant-open"]');
   await expect(launcher).toBeVisible();
   await page.waitForTimeout(100);
   const closedBeforeWarmup = await sample('closed-before-warmup');
-  const dialog = page.locator('.modal[role="dialog"]');
+  const dialog = sharedConfirmDialogControl
+    ? page.locator('.modal-overlay')
+    : page.locator('.modal[role="dialog"]');
 
   const openAndClose = async (phase: string, measureOpenProcess = false) => {
     await launcher.click();
     await expect(dialog).toBeVisible();
+    if (sharedConfirmDialogControl) {
+      await expect(dialog.locator('.modal__title')).toHaveText('Eliminar ingrediente');
+    }
     const open = await sample(`${phase}-open`);
     const openProcess = measureOpenProcess ? await sampleBrowserProcesses() : null;
-    await page.keyboard.press('Escape');
+    if (sharedConfirmDialogControl) {
+      await dialog.getByRole('button', { name: 'Cancelar' }).click();
+      await expect(page.locator('.ingredient-item', { hasText: 'Tomate de control' })).toHaveCount(
+        1
+      );
+    } else {
+      await page.keyboard.press('Escape');
+    }
     await expect(dialog).toBeHidden();
     await page.waitForTimeout(250);
     const closed = await sampleAfterStableCounters(`${phase}-closed`);
@@ -6143,7 +6181,6 @@ test('asistente global: mide heap y listeners tras reaperturas repetidas', async
     const heapBeforeAssistant = await captureHeapObjectCounts();
     const processAfterIdleControl = await sampleBrowserProcesses();
 
-    const assistantStartedAt = Date.now();
     const reopeningsPerGroup = 20;
     const reopeningGroupCount = requestedReopenings / reopeningsPerGroup;
     const repeatedCycles: Array<Awaited<ReturnType<typeof openAndClose>>> = [];
@@ -6227,14 +6264,17 @@ test('asistente global: mide heap y listeners tras reaperturas repetidas', async
     }
     const firstTwentyDurationSeconds = reopeningGroups[0]!.durationSeconds;
     const secondTwentyDurationSeconds = reopeningGroups[1]!.durationSeconds;
-    const assistantDurationSeconds = Number(
+    const targetDurationSeconds = Number(
       reopeningGroups.reduce((total, group) => total + group.durationSeconds, 0).toFixed(2)
     );
-    const idleToAssistantDurationRatio = Number(
-      (controlDurationSeconds / assistantDurationSeconds).toFixed(2)
+    const idleToTargetDurationRatio = Number(
+      (controlDurationSeconds / targetDurationSeconds).toFixed(2)
     );
-    expect(idleToAssistantDurationRatio).toBeGreaterThanOrEqual(0.75);
-    expect(idleToAssistantDurationRatio).toBeLessThanOrEqual(1.35);
+    // This control includes a full shared-confirm-dialog flow; keep the idle-ratio gate assistant-specific.
+    if (!sharedConfirmDialogControl) {
+      expect(idleToTargetDurationRatio).toBeGreaterThanOrEqual(0.75);
+      expect(idleToTargetDurationRatio).toBeLessThanOrEqual(1.35);
+    }
     const processAfterFirstTwenty = reopeningGroups[0]!.processAfter;
     const processBeforeSecondTwenty = reopeningGroups[1]!.processBefore;
     const processAfterSecondTwenty = reopeningGroups[1]!.processAfter;
@@ -6264,7 +6304,15 @@ test('asistente global: mide heap y listeners tras reaperturas repetidas', async
     expect(new Set(stableListeners).size).toBe(1);
     expect(scriptRequests).toHaveLength(warmedScriptRequestCount);
     expect(proposalRequests).toEqual([]);
+    expect(destructiveRequests).toEqual([]);
     expect(pantryCategoryRequests).toBe(1);
+    if (sharedConfirmDialogControl) {
+      expect(sharedModalDatabaseBefore).toBeDefined();
+      expect(assistantDatabaseSnapshot()).toEqual(sharedModalDatabaseBefore);
+      await expect(page.locator('.ingredient-item', { hasText: 'Tomate de control' })).toHaveCount(
+        1
+      );
+    }
 
     const closedSamples = [warmup.closed, ...repeatedCycles.map(({ closed }) => closed)];
     const openSamples = [warmup.open, ...repeatedCycles.map(({ open }) => open)];
@@ -6307,6 +6355,7 @@ test('asistente global: mide heap y listeners tras reaperturas repetidas', async
       '[assistant-performance]',
       JSON.stringify({
         browser: testInfo.project.name,
+        profileTarget: sharedConfirmDialogControl ? 'shared-confirm-dialog' : 'ai-assistant',
         chromiumProcesses: {
           beforeWarmup: processBeforeWarmup,
           afterWarmupOpen: warmup.openProcess,
@@ -6362,8 +6411,8 @@ test('asistente global: mide heap y listeners tras reaperturas repetidas', async
         reopeningGroupDurationsSeconds: reopeningGroups.map(
           ({ durationSeconds }) => durationSeconds
         ),
-        assistantDurationSeconds,
-        idleToAssistantDurationRatio,
+        targetDurationSeconds,
+        idleToTargetDurationRatio,
         firstTwentyDurationSeconds,
         secondTwentyDurationSeconds,
         closedHeapRangeMiB: [Math.min(...closedHeapValues), Math.max(...closedHeapValues)],
@@ -6394,6 +6443,7 @@ test('asistente global: mide heap y listeners tras reaperturas repetidas', async
           (finalClosed.scriptDurationSeconds - closedBeforeWarmup.scriptDurationSeconds).toFixed(3)
         ),
         proposalRequests: proposalRequests.length,
+        destructiveRequests: destructiveRequests.length,
         newScriptsAfterWarmup: scriptRequests.length - warmedScriptRequestCount,
         receiptQueueRequests,
         pantryCategoryRequests
