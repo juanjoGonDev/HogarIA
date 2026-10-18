@@ -197,11 +197,11 @@ describe('I18nService', () => {
     await Promise.all([i18n.loadAssistantTranslations(), i18n.loadAssistantTranslations()]);
 
     expect(i18n.changeTick()).toBe(changeTickBeforeLoad + 1);
-    expect(i18n.t('ai_assistant.title')).toBe('Asistente de acciones');
+    expect(i18n.t('ai_assistant.title')).toBe('Asistente');
 
     i18n.setLang('en');
     TestBed.flushEffects();
-    expect(i18n.t('ai_assistant.title')).toBe('Action assistant');
+    expect(i18n.t('ai_assistant.title')).toBe('Assistant');
 
     const changeTickAfterLoad = i18n.changeTick();
     await i18n.loadAssistantTranslations();

@@ -1004,6 +1004,70 @@ function contrastRatio(foreground: string, background: string): number {
   return (lighter + 0.05) / (darker + 0.05);
 }
 
+async function expectModalControlsAccessible(page: Page, stage: string): Promise<void> {
+  await page.waitForFunction(() => {
+    const dialog = document.querySelector<HTMLElement>('.modal[role="dialog"]');
+    return Boolean(
+      dialog && dialog.getAnimations().every((animation) => animation.playState === 'finished')
+    );
+  });
+  const problems = await page.locator('.modal[role="dialog"]').evaluate((dialog) => {
+    const selector =
+      'button, a[href], input:not([type="hidden"]), select, textarea, summary, [role="button"], [role="checkbox"], [role="switch"]';
+    return Array.from(dialog.querySelectorAll<HTMLElement>(selector))
+      .filter((control) => {
+        const style = getComputedStyle(control);
+        const bounds = control.getBoundingClientRect();
+        return (
+          style.display !== 'none' &&
+          style.visibility === 'visible' &&
+          Number(style.opacity) > 0 &&
+          bounds.width > 0 &&
+          bounds.height > 0
+        );
+      })
+      .map((control) => {
+        const labelledBy = control
+          .getAttribute('aria-labelledby')
+          ?.split(/\s+/)
+          .map((id) => document.getElementById(id)?.textContent ?? '')
+          .join(' ');
+        const nativeLabels =
+          control instanceof HTMLInputElement ||
+          control instanceof HTMLSelectElement ||
+          control instanceof HTMLTextAreaElement
+            ? Array.from(control.labels ?? [])
+                .map((label) => label.textContent ?? '')
+                .join(' ')
+            : '';
+        const name =
+          control.getAttribute('aria-label') ||
+          labelledBy ||
+          nativeLabels ||
+          control.getAttribute('title') ||
+          control.innerText ||
+          control.textContent ||
+          '';
+        const touchTarget =
+          control instanceof HTMLInputElement &&
+          ['checkbox', 'radio'].includes(control.type) &&
+          control.labels?.[0]
+            ? control.labels[0]
+            : control;
+        const bounds = touchTarget.getBoundingClientRect();
+        return {
+          control: control.tagName.toLowerCase(),
+          name: name.replace(/\s+/g, ' ').trim(),
+          width: bounds.width,
+          height: bounds.height
+        };
+      })
+      .filter((control) => !control.name || control.width < 44 || control.height < 44);
+  });
+
+  expect(problems, `controles accesibles en etapa ${stage}`).toEqual([]);
+}
+
 test('asistente global: conserva el resultado final al parar dictado y descarta el cancelado', async ({
   page
 }, testInfo) => {
@@ -1323,8 +1387,46 @@ test('asistente global: lote revisable, refino aislado y aprobación selectiva r
     contrastRatio(launcherColors.foreground, launcherColors.background)
   ).toBeGreaterThanOrEqual(3);
   await page.emulateMedia({ reducedMotion: 'no-preference' });
-  await expect(page.locator('[data-test="ai-assistant-compose"]')).toBeVisible();
-  await expect(page.locator('.assistant__voice-note')).toContainText('Privacidad de voz');
+  const compose = page.locator('[data-test="ai-assistant-compose"]');
+  await expect(compose).toBeVisible();
+  await expect(compose.getByRole('heading')).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'Asistente' })).toBeVisible();
+  await expect(compose.locator('[data-test="ai-assistant-prompt"]')).toHaveAttribute(
+    'placeholder',
+    'Pídele a la IA qué quieres hacer.\nEjemplos:\n• Añade leche a la compra.\n• Crea una tarea para el viernes.'
+  );
+  await expectModalControlsAccessible(page, 'redacción');
+  const privacy = compose.locator('details.assistant__privacy');
+  await expect(privacy).toHaveJSProperty('open', false);
+  const privacySummary = privacy.locator('summary');
+  await expect(privacySummary).toContainText('Ver más');
+  const privacySummaryBounds = await privacySummary.boundingBox();
+  expect(privacySummaryBounds?.height ?? 0).toBeGreaterThanOrEqual(44);
+  await expect(compose.locator('.assistant__voice-note')).toBeHidden();
+  await expect(compose.locator('.assistant__consent')).toContainText('fuera del dispositivo');
+  const prompt = compose.locator('[data-test="ai-assistant-prompt"]');
+  const promptStyles = await prompt.evaluate((element) => {
+    const styles = getComputedStyle(element);
+    return {
+      background: styles.backgroundColor,
+      borderRadius: Number.parseFloat(styles.borderTopLeftRadius),
+      minHeight: element.getBoundingClientRect().height
+    };
+  });
+  expect(promptStyles.background).not.toBe('rgba(0, 0, 0, 0)');
+  expect(promptStyles.borderRadius).toBeGreaterThanOrEqual(12);
+  expect(promptStyles.minHeight).toBeGreaterThanOrEqual(120);
+  const micButton = compose.locator('[data-test="ai-assistant-voice-start"] button');
+  await expect(micButton).toHaveAccessibleName('Dictar petición');
+  const micBounds = await micButton.boundingBox();
+  expect(micBounds?.width ?? 0).toBeGreaterThanOrEqual(44);
+  expect(micBounds?.height ?? 0).toBeGreaterThanOrEqual(44);
+  await capture(page, testInfo, 'assistant-compose-minimal');
+  await privacySummary.focus();
+  await page.keyboard.press('Enter');
+  await expect(compose.locator('.assistant__voice-note')).toBeVisible();
+  await page.keyboard.press('Enter');
+  await expect(compose.locator('.assistant__voice-note')).toBeHidden();
   expect(await page.evaluate(() => document.body.style.overflow)).toBe('hidden');
   expect(
     await page.evaluate(() => {
@@ -1629,7 +1731,7 @@ test('asistente global: cancelar el cierre conserva el borrador ante botón, Esc
     .evaluate((body) => body.style.overflow);
   await page.locator('[data-test="ai-assistant-open"]').click();
 
-  const assistantDialog = page.getByRole('dialog', { name: 'Asistente de acciones' });
+  const assistantDialog = page.getByRole('dialog', { name: 'Asistente' });
   const databaseBeforeProposal = assistantDatabaseSnapshot();
   await page.locator('[data-test="ai-assistant-prompt"]').fill('Añade lentejas a la despensa.');
   await page.locator('[data-test="ai-assistant-submit"] button').click();
@@ -4639,10 +4741,12 @@ test('asistente global: muestra en inglés el error de proveedor sin configurar'
   await page.goto('/dashboard');
   await page.locator('[data-test="ai-assistant-open"]').click();
 
-  const dialog = page.getByRole('dialog', { name: 'Action assistant' });
-  await expect(
-    dialog.getByRole('heading', { name: 'What would you like to organise?' })
-  ).toBeVisible();
+  const dialog = page.getByRole('dialog', { name: 'Assistant' });
+  await expect(dialog.getByRole('heading', { name: 'Assistant' })).toBeVisible();
+  await expect(dialog.locator('[data-test="ai-assistant-prompt"]')).toHaveAttribute(
+    'placeholder',
+    'Tell the AI what you want to do.\nExamples:\n• Add milk to the shopping list.\n• Create a task for Friday.'
+  );
   const databaseBeforeRequest = assistantDatabaseSnapshot();
   const proposalResponse = page.waitForResponse((response) => {
     const request = response.request();
@@ -4884,11 +4988,16 @@ test('asistente global: traduce el fallback de dictado al inglés', async ({ pag
   const databaseBeforeVoice = assistantDatabaseSnapshot();
   await page.locator('[data-test="ai-assistant-open"]').click();
 
-  const dialog = page.getByRole('dialog', { name: 'Action assistant' });
-  await expect(
-    dialog.getByRole('heading', { name: 'What would you like to organise?' })
-  ).toBeVisible();
-  await expect(dialog.locator('.assistant__voice-note')).toContainText('Voice privacy');
+  const dialog = page.getByRole('dialog', { name: 'Assistant' });
+  await expect(dialog.getByRole('heading', { name: 'Assistant' })).toBeVisible();
+  await expect(dialog.locator('[data-test="ai-assistant-prompt"]')).toHaveAttribute(
+    'placeholder',
+    'Tell the AI what you want to do.\nExamples:\n• Add milk to the shopping list.\n• Create a task for Friday.'
+  );
+  const privacy = dialog.locator('details.assistant__privacy');
+  await expect(privacy).toHaveJSProperty('open', false);
+  await expect(privacy.locator('summary')).toContainText('Learn more');
+  await expect(dialog.locator('.assistant__voice-note')).toBeHidden();
   await dialog.locator('.assistant__consent input').check();
   const voiceControls = dialog.locator('.assistant__voice-controls');
   await voiceControls.getByRole('button', { name: 'Dictate request' }).click();

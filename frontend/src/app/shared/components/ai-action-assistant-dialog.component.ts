@@ -299,19 +299,6 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
       @switch (stage()) {
         @case ('compose') {
           <section class="assistant__compose" data-test="ai-assistant-compose">
-            <header class="assistant__intro">
-              <h2 #stageHeading tabindex="-1">{{ 'ai_assistant.compose_title' | t }}</h2>
-              <p>{{ 'ai_assistant.compose_hint' | t }}</p>
-            </header>
-
-            <div class="assistant__voice-note" role="note">
-              <app-icon name="help_outline" [size]="18" [label]="null" />
-              <div>
-                <strong>{{ 'ai_assistant.privacy_title' | t }}</strong>
-                <p>{{ 'ai_assistant.privacy_copy' | t }}</p>
-              </div>
-            </div>
-
             <label class="assistant__consent">
               <input
                 type="checkbox"
@@ -321,11 +308,25 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
               <span>{{ 'ai_assistant.voice_consent' | t }}</span>
             </label>
 
+            <details class="assistant__privacy">
+              <summary>{{ 'ai_assistant.privacy_title' | t }}</summary>
+              <div class="assistant__voice-note" role="note">
+                <app-icon name="help_outline" [size]="18" [label]="null" />
+                <div>
+                  <p>{{ 'ai_assistant.privacy_copy' | t }}</p>
+                </div>
+              </div>
+            </details>
+
             <div class="assistant__input-group">
-              <label for="ai-assistant-prompt">{{ 'ai_assistant.prompt_label' | t }}</label>
+              <label class="visually-hidden" for="ai-assistant-prompt">
+                {{ 'ai_assistant.prompt_label' | t }}
+              </label>
               <textarea
                 id="ai-assistant-prompt"
-                rows="5"
+                #composePrompt
+                class="assistant__prompt"
+                rows="4"
                 maxlength="2000"
                 [value]="prompt()"
                 [placeholder]="'ai_assistant.prompt_placeholder' | t"
@@ -362,44 +363,63 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
               <app-button
                 *ngIf="voiceState() !== 'listening' && voiceState() !== 'paused'"
                 variant="outline"
+                size="icon"
                 [touchTarget]="true"
                 [disabled]="loading() || !voiceConsent()"
+                [attr.title]="'ai_assistant.voice_start' | t"
                 data-test="ai-assistant-voice-start"
                 (onClick)="startVoice()"
               >
-                {{ 'ai_assistant.voice_start' | t }}
+                <app-icon name="mic" [size]="20" [label]="null" />
+                <span class="visually-hidden">{{ 'ai_assistant.voice_start' | t }}</span>
               </app-button>
               <app-button
                 *ngIf="voiceState() === 'listening'"
-                variant="secondary"
+                variant="danger"
+                size="icon"
                 [touchTarget]="true"
                 [disabled]="loading() || voiceStopPending()"
+                [attr.title]="'ai_assistant.voice_stop' | t"
+                data-test="ai-assistant-voice-stop"
                 (onClick)="stopVoice()"
               >
-                {{ 'ai_assistant.voice_stop' | t }}
+                <app-icon name="stop" [size]="18" [label]="null" />
+                <span class="visually-hidden">{{ 'ai_assistant.voice_stop' | t }}</span>
               </app-button>
               <app-button
                 *ngIf="voiceState() === 'listening' && supportsPause()"
                 variant="ghost"
+                size="icon"
                 [touchTarget]="true"
                 [disabled]="loading() || voiceStopPending()"
+                [attr.title]="'ai_assistant.voice_pause' | t"
                 (onClick)="pauseVoice()"
-                >{{ 'ai_assistant.voice_pause' | t }}</app-button
               >
+                <app-icon name="pause" [size]="18" [label]="null" />
+                <span class="visually-hidden">{{ 'ai_assistant.voice_pause' | t }}</span>
+              </app-button>
               <app-button
                 *ngIf="voiceState() === 'paused'"
                 variant="secondary"
+                size="icon"
                 [touchTarget]="true"
+                [attr.title]="'ai_assistant.voice_resume' | t"
                 (onClick)="resumeVoice()"
-                >{{ 'ai_assistant.voice_resume' | t }}</app-button
               >
+                <app-icon name="play_arrow" [size]="20" [label]="null" />
+                <span class="visually-hidden">{{ 'ai_assistant.voice_resume' | t }}</span>
+              </app-button>
               <app-button
                 *ngIf="voiceState() === 'listening' || voiceState() === 'paused'"
                 variant="ghost"
+                size="icon"
                 [touchTarget]="true"
+                [attr.title]="'ai_assistant.cancel' | t"
                 (onClick)="cancelVoice()"
-                >{{ 'ai_assistant.cancel' | t }}</app-button
               >
+                <app-icon name="close" [size]="18" [label]="null" />
+                <span class="visually-hidden">{{ 'ai_assistant.cancel' | t }}</span>
+              </app-button>
             </div>
             <ng-template #voiceFallback>
               <p class="assistant__hint" role="note">{{ 'ai_assistant.voice_unsupported' | t }}</p>
@@ -1785,7 +1805,6 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
         min-width: 0;
       }
 
-      .assistant__intro h2,
       .assistant__stage-heading h2,
       .assistant__refine h2,
       .assistant__confirm h2 {
@@ -1796,7 +1815,6 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
         line-height: var(--leading-tight);
       }
 
-      .assistant__intro p,
       .assistant__refine > p,
       .assistant__confirm > p {
         margin: var(--space-2) 0 0;
@@ -1833,6 +1851,31 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
         color: var(--text-secondary);
         font-size: var(--text-xs);
         line-height: var(--leading-normal);
+      }
+
+      .assistant__privacy > summary {
+        width: fit-content;
+        min-height: 44px;
+        padding: 0 var(--space-2);
+        border-radius: var(--radius-sm);
+        color: var(--text-secondary);
+        font-size: var(--text-xs);
+        line-height: var(--button-control-height);
+        cursor: pointer;
+      }
+
+      .assistant__privacy > summary:hover {
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+      }
+
+      .assistant__privacy > summary:focus-visible {
+        outline: 2px solid var(--primary);
+        outline-offset: 2px;
+      }
+
+      .assistant__privacy .assistant__voice-note {
+        margin-top: var(--space-2);
       }
 
       .assistant__consent {
@@ -1892,6 +1935,29 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
         min-height: 76px;
         resize: vertical;
         line-height: var(--leading-normal);
+      }
+
+      .assistant__input-group .assistant__prompt {
+        min-height: 132px;
+        border-radius: var(--radius-lg);
+        border-color: color-mix(in srgb, var(--primary) 24%, var(--border-default));
+        background: color-mix(in srgb, var(--primary) 3%, var(--bg-primary));
+        transition: var(--transition-fast);
+      }
+
+      .assistant__input-group .assistant__prompt::placeholder {
+        color: var(--text-secondary);
+        opacity: 1;
+      }
+
+      .assistant__input-group .assistant__prompt:hover:not(:disabled) {
+        border-color: color-mix(in srgb, var(--primary) 46%, var(--border-default));
+      }
+
+      .assistant__input-group .assistant__prompt:focus-visible {
+        border-color: var(--primary);
+        background: var(--bg-primary);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 16%, transparent);
       }
 
       .assistant__input-group textarea:focus-visible,
@@ -2433,6 +2499,7 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
 export class AiActionAssistantDialogComponent implements OnDestroy {
   private readonly router = inject(Router);
   @ViewChild('stageHeading') private stageHeading?: ElementRef<HTMLElement>;
+  @ViewChild('composePrompt') private composePrompt?: ElementRef<HTMLTextAreaElement>;
   @ViewChild('assistantErrorAlert') private assistantErrorAlert?: ElementRef<HTMLElement>;
   @ViewChild('voiceErrorAlert') private voiceErrorAlert?: ElementRef<HTMLElement>;
 
@@ -5336,9 +5403,18 @@ export class AiActionAssistantDialogComponent implements OnDestroy {
 
   private setStage(stage: AssistantStage): void {
     this.stage.set(stage);
-    afterNextRender(() => this.stageHeading?.nativeElement.focus(), {
-      injector: this.injector
-    });
+    afterNextRender(
+      () => {
+        const focusTarget =
+          stage === 'compose'
+            ? this.composePrompt?.nativeElement
+            : this.stageHeading?.nativeElement;
+        focusTarget?.focus();
+      },
+      {
+        injector: this.injector
+      }
+    );
   }
 
   async requestClose(): Promise<void> {

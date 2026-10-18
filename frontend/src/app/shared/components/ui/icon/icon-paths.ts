@@ -456,6 +456,13 @@ export const ICON_SHAPES = {
       'M20 9V4c0-1.1-.9-2-2-2H6c-1.1 0-2 .9-2 2v5h16zM8 5h2v3H8V5zm-4 6v9c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-9H4zm6 6H8v-5h2v5z'
     ]
   },
+  mic: {
+    viewBox: '0 0 24 24',
+    d: [
+      'M12 14c1.66 0 3-1.34 3-3V5a3 3 0 0 0-6 0v6c0 1.66 1.34 3 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z'
+    ]
+  },
+  stop: { viewBox: '0 0 24 24', d: ['M6 6h12v12H6z'] },
   play_arrow: { viewBox: '0 0 24 24', d: ['M8 5v14l11-7z'] },
   pause: { viewBox: '0 0 24 24', d: ['M6 19h4V5H6v14zm8-14v14h4V5h-4z'] },
   menu_book: {

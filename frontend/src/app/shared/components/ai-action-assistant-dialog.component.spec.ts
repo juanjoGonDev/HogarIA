@@ -143,6 +143,47 @@ describe('AiActionAssistantDialogComponent', () => {
     restoreWindowProperty('webkitSpeechRecognition', webkitSpeechRecognitionDescriptor);
   });
 
+  it('keeps compose copy concise and voice privacy progressively disclosed', () => {
+    mountWithSpeech(FakeSpeechRecognition);
+    const compose = fixture.nativeElement.querySelector(
+      '[data-test="ai-assistant-compose"]'
+    ) as HTMLElement;
+
+    expect(fixture.nativeElement.querySelector('.modal__title')?.textContent?.trim()).toBe(
+      'Asistente'
+    );
+    expect(compose.querySelector('h2')).toBeNull();
+    expect(
+      compose.querySelectorAll('.assistant__input-group > label:not(.visually-hidden)').length
+    ).toBe(0);
+
+    const prompt = compose.querySelector(
+      '[data-test="ai-assistant-prompt"]'
+    ) as HTMLTextAreaElement;
+    expect(prompt.getAttribute('placeholder')).toBe(
+      'Pídele a la IA qué quieres hacer.\nEjemplos:\n• Añade leche a la compra.\n• Crea una tarea para el viernes.'
+    );
+    expect(prompt.getAttribute('aria-describedby')).toBe('ai-assistant-prompt-help');
+    expect(compose.querySelector('#ai-assistant-prompt-help')?.textContent?.trim()).toBe(
+      'Revisarás cada propuesta antes de confirmar.'
+    );
+
+    const disclosure = compose.querySelector('details.assistant__privacy') as HTMLDetailsElement;
+    expect(disclosure).not.toBeNull();
+    expect(disclosure.open).toBeFalse();
+    expect(disclosure.querySelector('summary')?.textContent).toContain('Ver más');
+    expect(disclosure.textContent).toContain('puede procesar el audio fuera de tu dispositivo');
+
+    const consent = compose.querySelector('.assistant__consent') as HTMLLabelElement;
+    expect(consent.textContent).toContain('fuera del dispositivo');
+    const micButton = compose.querySelector('[data-test="ai-assistant-voice-start"] button');
+    expect(micButton?.querySelector('app-icon[name="mic"]')).not.toBeNull();
+    expect(micButton?.querySelector('.visually-hidden')?.textContent?.trim()).toBe(
+      'Dictar petición'
+    );
+    expect((micButton as HTMLButtonElement | null)?.disabled).toBeTrue();
+  });
+
   it('keeps interpretation and review read-only until the final explicit confirmation', async () => {
     const plan = pantryPlan();
     assistant.propose.and.returnValue(of(plan));
@@ -1738,7 +1779,7 @@ describe('AiActionAssistantDialogComponent', () => {
     expect(recipePickers[1].querySelector('button')?.getAttribute('aria-label')).toBe('Unit: unit');
   });
 
-  it('moves focus to the heading after each assistant stage change', async () => {
+  it('moves focus to the primary content after each assistant stage change', async () => {
     const plan = pantryPlan();
     assistant.propose.and.returnValue(of(plan));
     component.prompt.set('Añade lentejas');
@@ -1783,7 +1824,7 @@ describe('AiActionAssistantDialogComponent', () => {
     fixture.detectChanges();
     await fixture.whenStable();
     expect(document.activeElement).toBe(
-      fixture.nativeElement.querySelector('[data-test="ai-assistant-compose"] h2')
+      fixture.nativeElement.querySelector('[data-test="ai-assistant-prompt"]')
     );
   });
 

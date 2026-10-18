@@ -1,19 +1,18 @@
 export const aiActionAssistantEs = {
-  'ai_assistant.title': 'Asistente de acciones',
+  'ai_assistant.title': 'Asistente',
   'ai_assistant.close': 'Cerrar asistente',
-  'ai_assistant.compose_title': '¿Qué necesitas organizar?',
-  'ai_assistant.compose_hint':
-    'Describe lo que quieres hacer. Revisarás cada propuesta antes de confirmar.',
+  'ai_assistant.compose_hint': 'Revisarás cada propuesta antes de confirmar.',
   'ai_assistant.prompt_label': 'Tu petición',
   'ai_assistant.prompt_required': 'Escribe una petición antes de continuar.',
-  'ai_assistant.prompt_placeholder': 'Ej.: añade lentejas a la despensa y crea una lista de compra',
+  'ai_assistant.prompt_placeholder':
+    'Pídele a la IA qué quieres hacer.\nEjemplos:\n• Añade leche a la compra.\n• Crea una tarea para el viernes.',
   'ai_assistant.send': 'Preparar propuestas',
   'ai_assistant.cancel': 'Cancelar',
-  'ai_assistant.privacy_title': 'Privacidad de voz',
+  'ai_assistant.privacy_title': 'Privacidad del dictado · Ver más',
   'ai_assistant.privacy_copy':
     'El reconocimiento de voz de este navegador puede procesar el audio fuera de tu dispositivo. La transcripción se puede revisar antes de enviarla al proveedor de IA configurado.',
   'ai_assistant.voice_consent':
-    'Entiendo que el reconocimiento del navegador puede procesar el audio fuera del dispositivo.',
+    'Permitir dictado; el navegador puede procesar audio fuera del dispositivo.',
   'ai_assistant.voice_start': 'Dictar petición',
   'ai_assistant.voice_stop': 'Terminar dictado',
   'ai_assistant.voice_pause': 'Pausar dictado',
@@ -287,21 +286,19 @@ export const aiActionAssistantEs = {
 };
 
 export const aiActionAssistantEn: Record<keyof typeof aiActionAssistantEs, string> = {
-  'ai_assistant.title': 'Action assistant',
+  'ai_assistant.title': 'Assistant',
   'ai_assistant.close': 'Close assistant',
-  'ai_assistant.compose_title': 'What would you like to organise?',
-  'ai_assistant.compose_hint':
-    'Describe what you want to do. Review every proposal before confirming.',
+  'ai_assistant.compose_hint': 'You’ll review every proposal before confirming.',
   'ai_assistant.prompt_label': 'Your request',
   'ai_assistant.prompt_required': 'Enter a request before continuing.',
-  'ai_assistant.prompt_placeholder': 'E.g. add lentils to the pantry and create a shopping list',
+  'ai_assistant.prompt_placeholder':
+    'Tell the AI what you want to do.\nExamples:\n• Add milk to the shopping list.\n• Create a task for Friday.',
   'ai_assistant.send': 'Prepare proposals',
   'ai_assistant.cancel': 'Cancel',
-  'ai_assistant.privacy_title': 'Voice privacy',
+  'ai_assistant.privacy_title': 'Dictation privacy · Learn more',
   'ai_assistant.privacy_copy':
     'This browser’s speech recognition may process audio outside your device. You can review the transcript before sending it to your configured AI provider.',
-  'ai_assistant.voice_consent':
-    'I understand that browser speech recognition may process audio outside this device.',
+  'ai_assistant.voice_consent': 'Allow dictation; your browser may process audio off-device.',
   'ai_assistant.voice_start': 'Dictate request',
   'ai_assistant.voice_stop': 'Stop dictation',
   'ai_assistant.voice_pause': 'Pause dictation',
