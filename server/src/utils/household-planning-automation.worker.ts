@@ -443,6 +443,7 @@ async function preparePublication(input: {
         spaceId: task.spaceId,
         scheduledDate: task.scheduledDate,
         assignedMemberId: task.assignedMemberId,
+        priority: 'medium',
         completed: false
       }));
       const afterProposal = input.renewBeforeProvider();
