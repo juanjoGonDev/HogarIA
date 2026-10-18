@@ -5555,8 +5555,17 @@ type HeapRetainerStep = {
   viaEdgeName: string | null;
 };
 
+type HeapRetainerSearchResult = {
+  rootNodeFound: boolean;
+  searchTruncated: boolean;
+  path: HeapRetainerStep[] | null;
+};
+
 function safeHeapEdgeName(name: string | null): string | null {
   if (name === null) return null;
+  if (name.startsWith('Symbol(') && name.endsWith(')') && name.length <= 80) {
+    return '<symbol-property>';
+  }
   return /^[A-Za-z_$][A-Za-z0-9_$.:\-]{0,79}$/.test(name) || /^#[0-9]{1,6}$/.test(name)
     ? name
     : '<redacted>';
@@ -5565,7 +5574,7 @@ function safeHeapEdgeName(name: string | null): string | null {
 function findHeapRetainerPath(
   snapshot: ChromeHeapSnapshot,
   targetNodeIndex: number
-): HeapRetainerStep[] | null {
+): HeapRetainerSearchResult {
   const nodeFieldIndex = new Map(
     snapshot.snapshot.meta.node_fields.map((name, index) => [name, index])
   );
@@ -5597,7 +5606,7 @@ function findHeapRetainerPath(
     targetNodeIndex < 0 ||
     targetNodeIndex >= nodeCount
   ) {
-    return null;
+    return { rootNodeFound: false, searchTruncated: false, path: null };
   }
 
   const nodeType = (index: number) => nodeTypes[snapshot.nodes[index * nodeStride + typeField]];
@@ -5606,7 +5615,9 @@ function findHeapRetainerPath(
   const rootNodeIndex = Array.from({ length: nodeCount }, (_, index) => index).find(
     (index) => nodeType(index) === 'synthetic' && nodeName(index) === '(GC roots)'
   );
-  if (rootNodeIndex === undefined) return null;
+  if (rootNodeIndex === undefined) {
+    return { rootNodeFound: false, searchTruncated: false, path: null };
+  }
 
   const incoming = new Map<
     number,
@@ -5617,7 +5628,9 @@ function findHeapRetainerPath(
     const ownerOffset = ownerNodeIndex * nodeStride;
     const edgeCount = snapshot.nodes[ownerOffset + edgeCountField];
     for (let edge = 0; edge < edgeCount; edge += 1) {
-      if (edgeOffset + edgeStride > snapshot.edges.length) return null;
+      if (edgeOffset + edgeStride > snapshot.edges.length) {
+        return { rootNodeFound: true, searchTruncated: true, path: null };
+      }
       const edgeType = edgeTypes[snapshot.edges[edgeOffset + edgeTypeField]];
       const edgeNameOrIndex = snapshot.edges[edgeOffset + edgeNameField];
       const edgeName =
@@ -5643,10 +5656,20 @@ function findHeapRetainerPath(
     }
   ];
   const visited = new Set([targetNodeIndex]);
-  for (let cursor = 0; cursor < queue.length && cursor < 10_000; cursor += 1) {
+  let searchTruncated = false;
+  for (let cursor = 0; cursor < queue.length; cursor += 1) {
+    if (cursor >= 10_000) {
+      searchTruncated = true;
+      break;
+    }
     const current = queue[cursor]!;
-    if (current.nodeIndex === rootNodeIndex) return current.path;
-    if (current.path.length >= 12) continue;
+    if (current.nodeIndex === rootNodeIndex) {
+      return { rootNodeFound: true, searchTruncated, path: current.path };
+    }
+    if (current.path.length >= 12) {
+      searchTruncated = true;
+      continue;
+    }
 
     for (const retainer of incoming.get(current.nodeIndex) ?? []) {
       if (visited.has(retainer.ownerNodeIndex)) continue;
@@ -5659,11 +5682,13 @@ function findHeapRetainerPath(
           viaEdgeName: retainer.edgeName
         }
       ];
-      if (retainer.ownerNodeIndex === rootNodeIndex) return path;
+      if (retainer.ownerNodeIndex === rootNodeIndex) {
+        return { rootNodeFound: true, searchTruncated, path };
+      }
       queue.push({ nodeIndex: retainer.ownerNodeIndex, path });
     }
   }
-  return null;
+  return { rootNodeFound: true, searchTruncated, path: null };
 }
 
 test('asistente global: traza retainers fuertes y omite referencias débiles en heap', () => {
@@ -5703,15 +5728,34 @@ test('asistente global: traza retainers fuertes y omite referencias débiles en 
     ]
   };
 
-  expect(findHeapRetainerPath(snapshot, 1)).toEqual([
-    { nodeIndex: 1, viaEdgeType: null, viaEdgeName: null },
-    { nodeIndex: 2, viaEdgeType: 'context', viaEdgeName: 'context' },
-    { nodeIndex: 0, viaEdgeType: 'property', viaEdgeName: 'activeAssistant' }
-  ]);
-  expect(findHeapRetainerPath({ ...snapshot, edges: [1, 0, 10, 2, 0, 5] }, 1)).toBeNull();
+  expect(findHeapRetainerPath(snapshot, 1)).toEqual({
+    rootNodeFound: true,
+    searchTruncated: false,
+    path: [
+      { nodeIndex: 1, viaEdgeType: null, viaEdgeName: null },
+      { nodeIndex: 2, viaEdgeType: 'context', viaEdgeName: 'context' },
+      { nodeIndex: 0, viaEdgeType: 'property', viaEdgeName: 'activeAssistant' }
+    ]
+  });
+  expect(findHeapRetainerPath({ ...snapshot, edges: [1, 0, 10, 2, 0, 5] }, 1)).toEqual({
+    rootNodeFound: true,
+    searchTruncated: false,
+    path: null
+  });
+  expect(
+    findHeapRetainerPath(
+      { ...snapshot, strings: ['not the root', ...snapshot.strings.slice(1)] },
+      1
+    )
+  ).toEqual({
+    rootNodeFound: false,
+    searchTruncated: false,
+    path: null
+  });
   expect(safeHeapEdgeName('activeAssistant')).toBe('activeAssistant');
   expect(safeHeapEdgeName('activeAssistant.current-state')).toBe('activeAssistant.current-state');
   expect(safeHeapEdgeName('user@example.com')).toBe('<redacted>');
+  expect(safeHeapEdgeName('Symbol(assistant)')).toBe('<symbol-property>');
 });
 
 test('asistente global: mide heap y listeners tras reaperturas repetidas', async ({
@@ -5897,9 +5941,8 @@ test('asistente global: mide heap y listeners tras reaperturas repetidas', async
           }
 
           const labels = targetNodeIndexes.map((nodeIndex) => {
-            const path = findHeapRetainerPath(snapshot, nodeIndex);
-            if (!path) return null;
-            return path.map((step) => {
+            const search = findHeapRetainerPath(snapshot, nodeIndex);
+            const path = search.path?.map((step) => {
               const offset = step.nodeIndex * stride;
               const type = nodeTypes[snapshot.nodes[offset + typeIndex]];
               const name = snapshot.strings[snapshot.nodes[offset + nameIndex]];
@@ -5915,6 +5958,11 @@ test('asistente global: mide heap y listeners tras reaperturas repetidas', async
                 edge: safeHeapEdgeName(step.viaEdgeName)
               };
             });
+            return {
+              rootNodeFound: search.rootNodeFound,
+              searchTruncated: search.searchTruncated,
+              path: path ?? null
+            };
           });
           console.log(
             '[assistant-retainers]',
