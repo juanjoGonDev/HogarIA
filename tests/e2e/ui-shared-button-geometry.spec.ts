@@ -2,7 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { expect, test } from './fixtures';
-import { registerUser } from './helpers/auth';
+import { registerWithHousehold } from './helpers/auth';
 import type { Page } from './fixtures';
 
 const VIEWPORTS = [
@@ -128,7 +128,7 @@ test('los botones compartidos mantienen la misma geometría sin importar su tama
     }
   }
 
-  await registerUser(page, 'UI geometry buttons');
+  await registerWithHousehold(page, '/dashboard', 'UI geometry buttons');
 
   for (const [index, viewport] of VIEWPORTS.entries()) {
     await page.setViewportSize(viewport);

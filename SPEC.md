@@ -664,7 +664,10 @@ $env:HOGARIA_AI_ASSISTANT_LOCAL_SMOKE='1'; node scripts/run-isolated-playwright.
 ### Shard 4: alinear las regresiones E2E con el shell actual
 
 - Alcance: corregir solo las pruebas que usan selectores/precondiciones ya obsoletos; sin cambiar navegación ni estilos del producto.
-- [ ] Safe-area: comprobar header móvil, contenido y drawer actual en retrato/paisaje, incluida navegación real dentro de `.sidebar__nav`; conservar medidas de safe-area en los cuatro bordes y desktop.
-- [ ] Geometría de botones: crear hogar sintético tras `registerUser()` antes de abrir rutas protegidas; conservar verificación comparativa de `sm/md/lg` en rutas que renderizan realmente esos controles.
-- [ ] TDD: reproducir localmente los dos fallos reportados por CI, actualizar aserciones/precondiciones, validar Chromium y Mobile Chrome con DB temporal y revisar capturas sintéticas PC/móvil si el test las genera.
+- [x] Safe-area: comprobar header móvil, contenido y drawer actual en retrato/paisaje, incluida navegación real dentro de `.sidebar__nav`; conservar medidas de safe-area en los cuatro bordes y desktop.
+- [x] Geometría de botones: crear hogar sintético tras `registerUser()` antes de abrir rutas protegidas; conservar verificación comparativa de `sm/md/lg` en rutas que renderizan realmente esos controles.
+- [x] TDD: reproducir localmente los dos fallos reportados por CI, actualizar aserciones/precondiciones, validar Chromium y Mobile Chrome con DB temporal y revisar capturas sintéticas PC/móvil si el test las genera.
+  - Red: safe-area falló al buscar `.bottom-nav`, ya retirado; geometría falló porque `registerUser()` acababa redirigido a «No tienes un hogar» antes de abrir rutas protegidas. Fix limitado a los selectores del shell vigente y a crear hogar sintético mediante `registerWithHousehold`; sin cambios de producto, guard ni tolerancias.
+  - Verde: `pnpm exec prettier --check SPEC.md tests/e2e/safe-area-layout.spec.ts tests/e2e/ui-shared-button-geometry.spec.ts`; `pnpm run typecheck:e2e`; cada test focal pasa **1/1** en Chromium y **1/1** en Mobile Chrome, con `node scripts/run-isolated-playwright.mjs --config=playwright.config.ts --project=<project> --workers=1 --retries=0 --reporter=line --grep '<título focal>' <spec>`. Cada ejecución usó DB temporal y confirmó cleanup.
+  - Capturas sintéticas PC/móvil revisadas; ignoradas por Git en `.e2e-screenshots/pr47-shard4-20261018/{chromium,mobile-chrome}/`.
 - [ ] No relajar tolerancias de geometría, guards ni coverage. Reejecutar CI remota y mantener abierta la spec integral mientras fallen otros shards o heap.

@@ -40,7 +40,9 @@ test('keeps the shell controls clear of injected safe areas on portrait and land
   ]) {
     await page.setViewportSize(scenario.viewport);
     await applyInsets(page, scenario.insets);
-    await expect(page.locator('.bottom-nav')).toBeVisible();
+    await expect(page.locator('.header')).toBeVisible();
+    await expect(page.locator('.header__menu')).toBeVisible();
+    await expect(page.locator('.header__profile')).toBeVisible();
 
     const geometry = await page.evaluate(() => {
       const element = (selector: string): HTMLElement => {
@@ -67,22 +69,8 @@ test('keeps the shell controls clear of injected safe areas on portrait and land
       const rootStyle = getComputedStyle(document.documentElement);
       const value = (edge: string) =>
         Number.parseFloat(rootStyle.getPropertyValue(`--hogaria-safe-area-${edge}`));
-      const nav = element('.bottom-nav');
       const main = element('main.main');
       const container = element('main app-page-container');
-      const links = Array.from(nav.querySelectorAll<HTMLElement>('.bottom-nav__item')).map(
-        (link) => {
-          const bounds = link.getBoundingClientRect();
-          return {
-            top: bounds.top,
-            right: bounds.right,
-            bottom: bounds.bottom,
-            left: bounds.left,
-            width: bounds.width,
-            height: bounds.height
-          };
-        }
-      );
 
       return {
         width: window.innerWidth,
@@ -110,14 +98,6 @@ test('keeps the shell controls clear of injected safe areas on portrait and land
           right: Number.parseFloat(getComputedStyle(container).paddingRight),
           left: Number.parseFloat(getComputedStyle(container).paddingLeft)
         },
-        nav: {
-          ...rect('.bottom-nav'),
-          position: getComputedStyle(nav).position,
-          paddingBottom: Number.parseFloat(getComputedStyle(nav).paddingBottom),
-          paddingLeft: Number.parseFloat(getComputedStyle(nav).paddingLeft),
-          paddingRight: Number.parseFloat(getComputedStyle(nav).paddingRight),
-          links
-        },
         documentWidth: document.documentElement.scrollWidth
       };
     });
@@ -136,24 +116,7 @@ test('keeps the shell controls clear of injected safe areas on portrait and land
     expect(geometry.headerPadding.right).toBeGreaterThanOrEqual(scenario.insets.right);
     expect(geometry.pagePadding.left).toBeGreaterThanOrEqual(scenario.insets.left);
     expect(geometry.pagePadding.right).toBeGreaterThanOrEqual(scenario.insets.right);
-    expect(geometry.nav.position).toBe('fixed');
-    expect(Math.abs(geometry.nav.bottom - scenario.viewport.height)).toBeLessThanOrEqual(1);
-    expect(geometry.nav.height).toBeGreaterThanOrEqual(64 + scenario.insets.bottom - 1);
-    expect(geometry.nav.paddingBottom).toBeGreaterThanOrEqual(scenario.insets.bottom);
-    expect(geometry.nav.paddingLeft).toBeGreaterThanOrEqual(scenario.insets.left);
-    expect(geometry.nav.paddingRight).toBeGreaterThanOrEqual(scenario.insets.right);
     expect(geometry.documentWidth).toBeLessThanOrEqual(scenario.viewport.width);
-    expect(geometry.nav.links.length).toBeGreaterThan(0);
-    for (const link of geometry.nav.links) {
-      expect(link.width).toBeGreaterThanOrEqual(44);
-      expect(link.height).toBeGreaterThanOrEqual(44);
-      expect(link.top).toBeGreaterThanOrEqual(geometry.nav.top - 1);
-      expect(link.bottom).toBeLessThanOrEqual(
-        scenario.viewport.height - scenario.insets.bottom + 1
-      );
-      expect(link.left).toBeGreaterThanOrEqual(scenario.insets.left);
-      expect(link.right).toBeLessThanOrEqual(scenario.viewport.width - scenario.insets.right);
-    }
 
     await page.locator('.header__menu').click();
     const sidebar = page.locator('.sidebar');
@@ -229,17 +192,19 @@ test('keeps the shell controls clear of injected safe areas on portrait and land
 
   await page.setViewportSize({ width: 393, height: 851 });
   await applyInsets(page, { top: 24, right: 12, bottom: 34, left: 18 });
-  const mobileNav = page.locator('.bottom-nav');
-  await mobileNav.getByRole('link', { name: 'Recetas' }).click();
+  const sidebarNav = page.locator('.sidebar__nav');
+  await page.locator('.header__menu').click();
+  await sidebarNav.getByRole('link', { name: 'Recetas' }).click();
   await expect(page).toHaveURL(/\/recipes/);
-  await mobileNav.getByRole('link', { name: 'Inicio' }).click();
+  await page.locator('.header__menu').click();
+  await sidebarNav.getByRole('link', { name: 'Inicio' }).click();
   await expect(page).toHaveURL(/\/dashboard/);
 
   await page.setViewportSize({ width: 1440, height: 900 });
   await applyInsets(page, { top: 24, right: 18, bottom: 34, left: 24 });
   await expect(page.locator('.header')).toBeHidden();
-  await expect(page.locator('.bottom-nav')).toBeHidden();
   await expect(page.locator('.sidebar')).toBeVisible();
+  await expect(page.locator('.sidebar__nav')).toBeVisible();
   const desktopSafePadding = await page.evaluate(() => {
     const main = document.querySelector<HTMLElement>('main.main');
     const container = document.querySelector<HTMLElement>('main app-page-container');
