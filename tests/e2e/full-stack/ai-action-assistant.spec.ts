@@ -5617,6 +5617,28 @@ type HeapRetainerSearchLimits = {
 
 const defaultHeapRetainerSearchLimits = { maxVisitedNodes: 10_000, maxDepth: 12 } as const;
 
+const maxPostCycleIdleCycles = 100;
+
+function parseHeapPostCycleIdleCycles(
+  env: Record<string, string | undefined> = process.env
+): number {
+  const key = 'HOGARIA_AI_ASSISTANT_HEAP_POST_IDLE_CYCLES';
+  const raw = env[key];
+  const invalidValueError = () =>
+    new Error(`${key} must be 0 or a multiple of 20 between 20 and ${maxPostCycleIdleCycles}.`);
+  if (raw === undefined) return 0;
+  if (!/^(0|[1-9][0-9]*)$/.test(raw)) throw invalidValueError();
+
+  const value = Number(raw);
+  if (
+    !Number.isSafeInteger(value) ||
+    (value !== 0 && (value < 20 || value > maxPostCycleIdleCycles || value % 20 !== 0))
+  ) {
+    throw invalidValueError();
+  }
+  return value;
+}
+
 function parseHeapRetainerSearchLimits(
   env: Record<string, string | undefined> = process.env
 ): Required<HeapRetainerSearchLimits> {
@@ -6211,6 +6233,16 @@ test('asistente global: informa límite de nodos y profundidad de retainers', ()
   });
 });
 
+test('asistente global: limita ciclos idle posteriores opt-in', () => {
+  const key = 'HOGARIA_AI_ASSISTANT_HEAP_POST_IDLE_CYCLES';
+  expect(parseHeapPostCycleIdleCycles({})).toBe(0);
+  expect(parseHeapPostCycleIdleCycles({ [key]: '20' })).toBe(20);
+  expect(parseHeapPostCycleIdleCycles({ [key]: '100' })).toBe(100);
+  for (const invalid of ['10', '120', '-20', '21', '1e2', '']) {
+    expect(() => parseHeapPostCycleIdleCycles({ [key]: invalid })).toThrow(key);
+  }
+});
+
 test('asistente global: amplía retainers con límites opt-in acotados y detecta rutas profundas', () => {
   const nodeLimitKey = 'HOGARIA_AI_ASSISTANT_HEAP_RETAINER_MAX_NODES';
   const depthLimitKey = 'HOGARIA_AI_ASSISTANT_HEAP_RETAINER_MAX_DEPTH';
@@ -6348,15 +6380,22 @@ test('asistente global: mide heap y listeners tras reaperturas repetidas', async
       requestedReopenings % 20 === 0,
     'el target debe ser múltiplo de 20 entre 40 y 200'
   ).toBe(true);
+  const postCycleIdleCycles = parseHeapPostCycleIdleCycles();
   const allocationSamplingEnabled = process.env.HOGARIA_AI_ASSISTANT_HEAP_ALLOCATIONS === '1';
   const retainerTracingEnabled = process.env.HOGARIA_AI_ASSISTANT_HEAP_RETAINERS === '1';
   const retainerSearchLimits = retainerTracingEnabled ? parseHeapRetainerSearchLimits() : undefined;
   const sharedConfirmDialogControl = process.env.HOGARIA_AI_ASSISTANT_HEAP_CONTROL_MODAL === '1';
   expect(
+    postCycleIdleCycles === 0 || (requestedReopenings === 200 && retainerTracingEnabled),
+    'la quiescencia post-ciclo requiere el perfil de 200 ciclos con retainers opt-in'
+  ).toBe(true);
+  expect(
     !allocationSamplingEnabled || requestedReopenings === 40,
     'el perfil de asignaciones solo acompaña al perfil default de 40 ciclos'
   ).toBe(true);
-  test.setTimeout(90_000 + Math.max(0, requestedReopenings - 40) * 2_000);
+  test.setTimeout(
+    90_000 + Math.max(0, requestedReopenings - 40) * 2_000 + (postCycleIdleCycles > 0 ? 150_000 : 0)
+  );
 
   const proposalRequests: string[] = [];
   const destructiveRequests: string[] = [];
@@ -6773,6 +6812,30 @@ test('asistente global: mide heap y listeners tras reaperturas repetidas', async
     }
 
     expect(repeatedCycles).toHaveLength(requestedReopenings);
+    const postCycleIdleSamples: Array<Awaited<ReturnType<typeof sample>>> = [];
+    let postCycleIdleDurationSeconds = 0;
+    let postCycleIdleFinal: Awaited<ReturnType<typeof sample>> | null = null;
+    let processBeforePostCycleIdle: Awaited<ReturnType<typeof sampleBrowserProcesses>> | null =
+      null;
+    let processAfterPostCycleIdle: Awaited<ReturnType<typeof sampleBrowserProcesses>> | null = null;
+    if (postCycleIdleCycles > 0) {
+      processBeforePostCycleIdle = await sampleBrowserProcesses();
+      const postCycleIdleStartedAt = Date.now();
+      for (let cycle = 1; cycle <= postCycleIdleCycles; cycle += 1) {
+        await page.waitForTimeout(600);
+        postCycleIdleSamples.push(await sample(`post-cycle-idle-${cycle}`));
+      }
+      postCycleIdleDurationSeconds = Number(
+        ((Date.now() - postCycleIdleStartedAt) / 1000).toFixed(2)
+      );
+      expect(postCycleIdleSamples).toHaveLength(postCycleIdleCycles);
+      postCycleIdleFinal = await sampleAfterStableCounters('post-cycle-idle-final');
+      processAfterPostCycleIdle = await sampleBrowserProcesses();
+      if (retainerTracingEnabled) {
+        await captureHeapObjectCounts(heapSnapshots[heapSnapshots.length - 1], true);
+      }
+    }
+
     if (allocationSamplingEnabled) {
       expect(allocationProfiles).toHaveLength(requestedReopenings / reopeningsPerGroup);
       expect(allocationProfiles.every((profile) => profile.sampleCount > 0)).toBe(true);
@@ -6800,12 +6863,13 @@ test('asistente global: mide heap y listeners tras reaperturas repetidas', async
     const processDuringFirstTwenty = reopeningGroups[0]!.processDuringOpen;
     const processDuringSecondTwenty = reopeningGroups[1]!.processDuringOpen;
 
-    const stableNodes = [warmup.closed, ...repeatedCycles.map(({ closed }) => closed)].map(
-      ({ nodes }) => nodes
-    );
-    const stableListeners = [warmup.closed, ...repeatedCycles.map(({ closed }) => closed)].map(
-      ({ jsEventListeners }) => jsEventListeners
-    );
+    const allClosedSamples = [
+      warmup.closed,
+      ...repeatedCycles.map(({ closed }) => closed),
+      ...(postCycleIdleFinal ? [postCycleIdleFinal] : [])
+    ];
+    const stableNodes = allClosedSamples.map(({ nodes }) => nodes);
+    const stableListeners = allClosedSamples.map(({ jsEventListeners }) => jsEventListeners);
     console.log(
       '[assistant-performance-counters]',
       JSON.stringify({
@@ -6951,6 +7015,32 @@ test('asistente global: mide heap y listeners tras reaperturas repetidas', async
           nodes: finalClosed.nodes,
           jsEventListeners: finalClosed.jsEventListeners
         },
+        postCycleIdle: postCycleIdleFinal
+          ? {
+              cycles: postCycleIdleSamples.length,
+              durationSeconds: postCycleIdleDurationSeconds,
+              heapFinalMiB: postCycleIdleFinal.jsHeapUsedMiB,
+              heapDeltaFromImmediateCloseMiB: Number(
+                (postCycleIdleFinal.jsHeapUsedMiB - finalClosed.jsHeapUsedMiB).toFixed(2)
+              ),
+              heapDeltaFromIdleControlMiB: Number(
+                (postCycleIdleFinal.jsHeapUsedMiB - finalIdle.jsHeapUsedMiB).toFixed(2)
+              ),
+              nodes: postCycleIdleFinal.nodes,
+              jsEventListeners: postCycleIdleFinal.jsEventListeners,
+              chromiumBefore: processBeforePostCycleIdle,
+              chromiumAfter: processAfterPostCycleIdle,
+              cpuTimeDeltaSeconds:
+                processBeforePostCycleIdle && processAfterPostCycleIdle
+                  ? Number(
+                      (
+                        processAfterPostCycleIdle.cpuTimeSeconds -
+                        processBeforePostCycleIdle.cpuTimeSeconds
+                      ).toFixed(3)
+                    )
+                  : null
+            }
+          : null,
         taskDurationDeltaSeconds: Number(
           (finalClosed.taskDurationSeconds - closedBeforeWarmup.taskDurationSeconds).toFixed(3)
         ),
