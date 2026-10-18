@@ -31,11 +31,12 @@ describe('ModalComponent', () => {
     const previousDescriptor = Object.getOwnPropertyDescriptor(window, 'visualViewport');
     const viewport = new EventTarget() as VisualViewport;
     let height = 560;
+    let top = 12;
     Object.defineProperties(viewport, {
       width: { configurable: true, get: () => 393 },
       height: { configurable: true, get: () => height },
       offsetLeft: { configurable: true, get: () => 0 },
-      offsetTop: { configurable: true, get: () => 12 }
+      offsetTop: { configurable: true, get: () => top }
     });
     const removeEventListener = spyOn(viewport, 'removeEventListener').and.callThrough();
     const removeWindowEventListener = spyOn(window, 'removeEventListener').and.callThrough();
@@ -56,9 +57,17 @@ describe('ModalComponent', () => {
         `${Math.min(560, window.innerHeight)}px`
       );
 
+      const setProperty = spyOn(overlay.style, 'setProperty').and.callThrough();
+      fixture.detectChanges();
+      fixture.detectChanges();
+      expect(setProperty).not.toHaveBeenCalled();
+
+      top = 20;
       height = 300;
       viewport.dispatchEvent(new Event('resize'));
+      expect(overlay.style.getPropertyValue('--modal-visual-viewport-top')).toBe('20px');
       expect(overlay.style.getPropertyValue('--modal-visual-viewport-height')).toBe('300px');
+      expect(setProperty.calls.count()).toBe(2);
 
       fixture.componentRef.setInput('isOpen', false);
       fixture.detectChanges();

@@ -247,6 +247,8 @@ export class ModalComponent implements OnChanges, AfterViewChecked, OnDestroy {
   private _focusOnOpen = false;
   private _trackedVisualViewport: VisualViewport | null = null;
   private _trackedOverlay: HTMLElement | null = null;
+  private _lastVisualViewportTop: number | null = null;
+  private _lastVisualViewportHeight: number | null = null;
   private readonly _handleVisualViewportChange = (): void => {
     this._applyVisualViewportGeometry();
   };
@@ -442,11 +444,17 @@ export class ModalComponent implements OnChanges, AfterViewChecked, OnDestroy {
     const visualViewport = this._trackedVisualViewport;
     if (!overlay || !visualViewport) return;
 
-    overlay.style.setProperty('--modal-visual-viewport-top', `${visualViewport.offsetTop}px`);
-    overlay.style.setProperty(
-      '--modal-visual-viewport-height',
-      `${Math.min(visualViewport.height, window.innerHeight)}px`
-    );
+    const top = visualViewport.offsetTop;
+    if (top !== this._lastVisualViewportTop) {
+      overlay.style.setProperty('--modal-visual-viewport-top', `${top}px`);
+      this._lastVisualViewportTop = top;
+    }
+
+    const height = Math.min(visualViewport.height, window.innerHeight);
+    if (height !== this._lastVisualViewportHeight) {
+      overlay.style.setProperty('--modal-visual-viewport-height', `${height}px`);
+      this._lastVisualViewportHeight = height;
+    }
     this._ensureFocusedElementIsVisible();
   }
 
@@ -458,6 +466,8 @@ export class ModalComponent implements OnChanges, AfterViewChecked, OnDestroy {
     this._trackedOverlay?.style.removeProperty('--modal-visual-viewport-height');
     this._trackedVisualViewport = null;
     this._trackedOverlay = null;
+    this._lastVisualViewportTop = null;
+    this._lastVisualViewportHeight = null;
   }
 
   private _ensureFocusedElementIsVisible(): void {
