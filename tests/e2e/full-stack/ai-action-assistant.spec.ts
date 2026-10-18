@@ -5571,6 +5571,11 @@ test('asistente global: mide heap y listeners tras reaperturas repetidas', async
       requestedReopenings % 20 === 0,
     'el target debe ser múltiplo de 20 entre 40 y 200'
   ).toBe(true);
+  const allocationSamplingEnabled = process.env.HOGARIA_AI_ASSISTANT_HEAP_ALLOCATIONS === '1';
+  expect(
+    !allocationSamplingEnabled || requestedReopenings === 40,
+    'el perfil de asignaciones solo acompaña al perfil default de 40 ciclos'
+  ).toBe(true);
   test.setTimeout(90_000 + Math.max(0, requestedReopenings - 40) * 2_000);
 
   const proposalRequests: string[] = [];
@@ -5596,6 +5601,7 @@ test('asistente global: mide heap y listeners tras reaperturas repetidas', async
 
   const cdp = await page.context().newCDPSession(page);
   await cdp.send('Performance.enable');
+  let allocationSamplingActive = false;
   const browser = page.context().browser();
   if (!browser) throw new Error('Missing Chromium browser for process-level metrics.');
   const browserCdp = await browser.newBrowserCDPSession();
@@ -5834,7 +5840,43 @@ test('asistente global: mide heap y listeners tras reaperturas repetidas', async
     return { open, closed, openProcess };
   };
 
+  const allocationProfiles: Array<{
+    group: number;
+    sampleCount: number;
+    topSites: Array<{ liveSampledBytes: number; stack: string }>;
+  }> = [];
+  const stopAndSummarizeAllocationSampling = async (group: number) => {
+    const { profile } = await cdp.send('HeapProfiler.stopSampling');
+    allocationSamplingActive = false;
+    const siteBytes = new Map<string, number>();
+    const formatFrame = (frame: (typeof profile.head)['callFrame']) => {
+      const rawPath = frame.url.split(/[?#]/, 1)[0] ?? '';
+      const script = rawPath.split('/').pop() || '<native>';
+      const name = frame.functionName
+        ? frame.functionName.replace(/[^A-Za-z0-9_$<>.]/g, '?').slice(0, 80)
+        : '<anonymous>';
+      return `${name}@${script}:${frame.lineNumber + 1}`;
+    };
+    const visit = (node: typeof profile.head, ancestors: string[]) => {
+      const stack = [...ancestors, formatFrame(node.callFrame)].slice(-6);
+      if (node.selfSize > 0) {
+        const key = stack.join(' ← ');
+        siteBytes.set(key, (siteBytes.get(key) ?? 0) + node.selfSize);
+      }
+      node.children.forEach((child) => visit(child, stack));
+    };
+    visit(profile.head, []);
+    const topSites = [...siteBytes.entries()]
+      .map(([stack, liveSampledBytes]) => ({ stack, liveSampledBytes }))
+      .sort((left, right) => right.liveSampledBytes - left.liveSampledBytes)
+      .slice(0, 8);
+    const result = { group, sampleCount: profile.samples.length, topSites };
+    allocationProfiles.push(result);
+    console.log('[assistant-allocation-profile]', JSON.stringify(result));
+  };
+
   try {
+    if (allocationSamplingEnabled) await cdp.send('HeapProfiler.enable');
     const processBeforeWarmup = await sampleBrowserProcesses();
     const warmup = await openAndClose('warmup', true);
     const processAfterWarmup = await sampleBrowserProcesses();
@@ -5877,6 +5919,11 @@ test('asistente global: mide heap y listeners tras reaperturas repetidas', async
       const groupStartedAt = Date.now();
       let processDuringOpen: Awaited<ReturnType<typeof sampleBrowserProcesses>> | undefined;
 
+      if (allocationSamplingEnabled) {
+        await cdp.send('HeapProfiler.startSampling', { samplingInterval: 8192, stackDepth: 24 });
+        allocationSamplingActive = true;
+      }
+
       for (let cycle = firstReopening; cycle <= lastReopening; cycle += 1) {
         const cycleResult = await openAndClose(
           `cycle-${cycle}`,
@@ -5885,6 +5932,8 @@ test('asistente global: mide heap y listeners tras reaperturas repetidas', async
         repeatedCycles.push(cycleResult);
         if (cycleResult.openProcess) processDuringOpen = cycleResult.openProcess;
       }
+
+      if (allocationSamplingEnabled) await stopAndSummarizeAllocationSampling(groupIndex + 1);
 
       const durationSeconds = Number(((Date.now() - groupStartedAt) / 1000).toFixed(2));
       const processAfter = await sampleBrowserProcesses();
@@ -5921,6 +5970,10 @@ test('asistente global: mide heap y listeners tras reaperturas repetidas', async
     }
 
     expect(repeatedCycles).toHaveLength(requestedReopenings);
+    if (allocationSamplingEnabled) {
+      expect(allocationProfiles).toHaveLength(requestedReopenings / reopeningsPerGroup);
+      expect(allocationProfiles.every((profile) => profile.sampleCount > 0)).toBe(true);
+    }
     const firstTwentyDurationSeconds = reopeningGroups[0]!.durationSeconds;
     const secondTwentyDurationSeconds = reopeningGroups[1]!.durationSeconds;
     const assistantDurationSeconds = Number(
@@ -6096,6 +6149,8 @@ test('asistente global: mide heap y listeners tras reaperturas repetidas', async
       })
     );
   } finally {
+    if (allocationSamplingActive)
+      await cdp.send('HeapProfiler.stopSampling').catch(() => undefined);
     await Promise.all([cdp.detach(), browserCdp.detach()]);
   }
 });
