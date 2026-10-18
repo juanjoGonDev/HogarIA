@@ -5158,6 +5158,50 @@ test('asistente global: guía si falla el servicio de dictado del navegador', as
   await capture(page, testInfo, 'voice-service-fallback');
 });
 
+test('asistente global: conserva texto sin avisos de voz si el navegador no ofrece dictado', async ({
+  page
+}, testInfo) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window, 'SpeechRecognition', { configurable: true, value: undefined });
+    Object.defineProperty(window, 'webkitSpeechRecognition', {
+      configurable: true,
+      value: undefined
+    });
+  });
+  await registerUser(page, 'Asistente navegador sin dictado E2E');
+  await createHousehold(page, 'Hogar sin dictado sintético');
+  await page.goto('/dashboard');
+  if (testInfo.project.name === 'mobile-chrome') {
+    await page.setViewportSize({ width: 320, height: 568 });
+  }
+
+  const databaseBefore = assistantDatabaseSnapshot();
+  let proposalRequests = 0;
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().includes('/api/ai/assistant/proposals')) {
+      proposalRequests += 1;
+    }
+  });
+  await page.locator('[data-test="ai-assistant-open"]').click();
+
+  const dialog = page.locator('.modal[role="dialog"]');
+  await expect(dialog).toBeVisible();
+  const fallback = dialog.locator('.assistant__prompt-shell .assistant__hint[role="note"]');
+  await expect(fallback).toContainText('El reconocimiento de voz no está disponible');
+  await expect(dialog.getByRole('button', { name: 'Dictar petición' })).toHaveCount(0);
+  await expect(dialog.locator('.assistant__voice-warning')).toHaveCount(0);
+  await expect(dialog.locator('details.assistant__privacy')).toHaveCount(0);
+
+  const prompt = dialog.locator('[data-test="ai-assistant-prompt"]');
+  await expect(prompt).toBeVisible();
+  await expect(prompt).toBeEnabled();
+  await prompt.fill('Añade lentejas a la despensa');
+  await expect(prompt).toHaveValue('Añade lentejas a la despensa');
+  expect(proposalRequests).toBe(0);
+  expect(assistantDatabaseSnapshot()).toEqual(databaseBefore);
+  await capture(page, testInfo, 'voice-unsupported-browser');
+});
+
 test('asistente global: traduce el fallback de dictado al inglés', async ({ page }, testInfo) => {
   await installSpeechRecognitionStub(page);
   await registerUser(page, 'Assistant English voice fallback E2E');

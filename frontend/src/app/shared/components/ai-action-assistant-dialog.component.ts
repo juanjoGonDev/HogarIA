@@ -320,88 +320,87 @@ const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
                   (input)="updatePrompt($event)"
                 ></textarea>
                 <div class="assistant__field-tools">
-                  <span
-                    *ngIf="voiceState() !== 'listening' && voiceState() !== 'paused'"
-                    id="ai-assistant-voice-warning"
-                    class="assistant__voice-warning"
-                    role="note"
-                  >
-                    {{ 'ai_assistant.voice_warning' | t }}
-                  </span>
-                  <details class="assistant__privacy">
-                    <summary>{{ 'ai_assistant.privacy_title' | t }}</summary>
-                    <div class="assistant__voice-note" role="note">
-                      <app-icon name="help_outline" [size]="18" [label]="null" />
-                      <p>{{ 'ai_assistant.privacy_copy' | t }}</p>
-                    </div>
-                  </details>
-
-                  <div
-                    class="assistant__voice-controls"
-                    *ngIf="voiceSupported(); else voiceFallback"
-                  >
-                    <app-button
+                  <ng-container *ngIf="voiceSupported(); else voiceFallback">
+                    <span
                       *ngIf="voiceState() !== 'listening' && voiceState() !== 'paused'"
-                      describedBy="ai-assistant-voice-warning"
-                      variant="outline"
-                      size="icon"
-                      [touchTarget]="true"
-                      [disabled]="loading()"
-                      [attr.title]="'ai_assistant.voice_start' | t"
-                      data-test="ai-assistant-voice-start"
-                      (onClick)="startVoice()"
+                      id="ai-assistant-voice-warning"
+                      class="assistant__voice-warning"
+                      role="note"
                     >
-                      <app-icon name="mic" [size]="20" [label]="null" />
-                      <span class="visually-hidden">{{ 'ai_assistant.voice_start' | t }}</span>
-                    </app-button>
-                    <app-button
-                      *ngIf="voiceState() === 'listening'"
-                      variant="danger"
-                      size="icon"
-                      [touchTarget]="true"
-                      [disabled]="loading() || voiceStopPending()"
-                      [attr.title]="'ai_assistant.voice_stop' | t"
-                      data-test="ai-assistant-voice-stop"
-                      (onClick)="stopVoice()"
-                    >
-                      <app-icon name="stop" [size]="18" [label]="null" />
-                      <span class="visually-hidden">{{ 'ai_assistant.voice_stop' | t }}</span>
-                    </app-button>
-                    <app-button
-                      *ngIf="voiceState() === 'listening' && supportsPause()"
-                      variant="ghost"
-                      size="icon"
-                      [touchTarget]="true"
-                      [disabled]="loading() || voiceStopPending()"
-                      [attr.title]="'ai_assistant.voice_pause' | t"
-                      (onClick)="pauseVoice()"
-                    >
-                      <app-icon name="pause" [size]="18" [label]="null" />
-                      <span class="visually-hidden">{{ 'ai_assistant.voice_pause' | t }}</span>
-                    </app-button>
-                    <app-button
-                      *ngIf="voiceState() === 'paused'"
-                      variant="secondary"
-                      size="icon"
-                      [touchTarget]="true"
-                      [attr.title]="'ai_assistant.voice_resume' | t"
-                      (onClick)="resumeVoice()"
-                    >
-                      <app-icon name="play_arrow" [size]="20" [label]="null" />
-                      <span class="visually-hidden">{{ 'ai_assistant.voice_resume' | t }}</span>
-                    </app-button>
-                    <app-button
-                      *ngIf="voiceState() === 'listening' || voiceState() === 'paused'"
-                      variant="ghost"
-                      size="icon"
-                      [touchTarget]="true"
-                      [attr.title]="'ai_assistant.cancel' | t"
-                      (onClick)="cancelVoice()"
-                    >
-                      <app-icon name="close" [size]="18" [label]="null" />
-                      <span class="visually-hidden">{{ 'ai_assistant.cancel' | t }}</span>
-                    </app-button>
-                  </div>
+                      {{ 'ai_assistant.voice_warning' | t }}
+                    </span>
+                    <details class="assistant__privacy">
+                      <summary>{{ 'ai_assistant.privacy_title' | t }}</summary>
+                      <div class="assistant__voice-note" role="note">
+                        <app-icon name="help_outline" [size]="18" [label]="null" />
+                        <p>{{ 'ai_assistant.privacy_copy' | t }}</p>
+                      </div>
+                    </details>
+
+                    <div class="assistant__voice-controls">
+                      <app-button
+                        *ngIf="voiceState() !== 'listening' && voiceState() !== 'paused'"
+                        describedBy="ai-assistant-voice-warning"
+                        variant="outline"
+                        size="icon"
+                        [touchTarget]="true"
+                        [disabled]="loading()"
+                        [attr.title]="'ai_assistant.voice_start' | t"
+                        data-test="ai-assistant-voice-start"
+                        (onClick)="startVoice()"
+                      >
+                        <app-icon name="mic" [size]="20" [label]="null" />
+                        <span class="visually-hidden">{{ 'ai_assistant.voice_start' | t }}</span>
+                      </app-button>
+                      <app-button
+                        *ngIf="voiceState() === 'listening'"
+                        variant="danger"
+                        size="icon"
+                        [touchTarget]="true"
+                        [disabled]="loading() || voiceStopPending()"
+                        [attr.title]="'ai_assistant.voice_stop' | t"
+                        data-test="ai-assistant-voice-stop"
+                        (onClick)="stopVoice()"
+                      >
+                        <app-icon name="stop" [size]="18" [label]="null" />
+                        <span class="visually-hidden">{{ 'ai_assistant.voice_stop' | t }}</span>
+                      </app-button>
+                      <app-button
+                        *ngIf="voiceState() === 'listening' && supportsPause()"
+                        variant="ghost"
+                        size="icon"
+                        [touchTarget]="true"
+                        [disabled]="loading() || voiceStopPending()"
+                        [attr.title]="'ai_assistant.voice_pause' | t"
+                        (onClick)="pauseVoice()"
+                      >
+                        <app-icon name="pause" [size]="18" [label]="null" />
+                        <span class="visually-hidden">{{ 'ai_assistant.voice_pause' | t }}</span>
+                      </app-button>
+                      <app-button
+                        *ngIf="voiceState() === 'paused'"
+                        variant="secondary"
+                        size="icon"
+                        [touchTarget]="true"
+                        [attr.title]="'ai_assistant.voice_resume' | t"
+                        (onClick)="resumeVoice()"
+                      >
+                        <app-icon name="play_arrow" [size]="20" [label]="null" />
+                        <span class="visually-hidden">{{ 'ai_assistant.voice_resume' | t }}</span>
+                      </app-button>
+                      <app-button
+                        *ngIf="voiceState() === 'listening' || voiceState() === 'paused'"
+                        variant="ghost"
+                        size="icon"
+                        [touchTarget]="true"
+                        [attr.title]="'ai_assistant.cancel' | t"
+                        (onClick)="cancelVoice()"
+                      >
+                        <app-icon name="close" [size]="18" [label]="null" />
+                        <span class="visually-hidden">{{ 'ai_assistant.cancel' | t }}</span>
+                      </app-button>
+                    </div>
+                  </ng-container>
                 </div>
               </div>
               <div *ngIf="prompt().length" class="assistant__input-meta">
