@@ -142,7 +142,7 @@ function pantryAddCandidate(): string {
         kind: 'pantry.add_ingredient',
         title: 'Añadir lentejas',
         summary: 'Añade lentejas a la despensa.',
-        payload: {
+        payloadJson: JSON.stringify({
           name: 'Lentejas QA',
           category: 'other',
           quantity: 500,
@@ -150,7 +150,7 @@ function pantryAddCandidate(): string {
           expirationDate: null,
           location: 'pantry',
           notes: null
-        },
+        }),
         dependsOn: [],
         warnings: []
       }
@@ -377,7 +377,7 @@ function shoppingItemUpdateCandidate(listName: string, targetName: string) {
         kind: 'shopping.update_item',
         title: 'Actualizar artículo de compra',
         summary: 'Ajusta los datos del artículo indicado.',
-        payload: {
+        payloadJson: JSON.stringify({
           listName,
           targetName,
           matchUnit: false,
@@ -392,7 +392,7 @@ function shoppingItemUpdateCandidate(listName: string, targetName: string) {
             category: null,
             setCategory: false
           }
-        },
+        }),
         dependsOn: [],
         warnings: []
       }
@@ -447,12 +447,12 @@ function calendarUpdateCandidate(targetTitle: string, targetStartTime: string | 
         kind: 'calendar.update_event',
         title: 'Editar evento existente',
         summary: 'Actualiza la fecha y las notas del evento.',
-        payload: {
+        payloadJson: JSON.stringify({
           targetTitle,
           targetDate: '2026-10-20',
           targetStartTime,
           changes: { date: '2026-10-21', notes: 'Notas propuestas QA' }
-        },
+        }),
         dependsOn: [],
         warnings: []
       }
@@ -473,14 +473,14 @@ function recipeUpdateCandidate(
         kind: 'recipes.update_content',
         title: 'Reducir cebolla',
         summary: 'Reduce cebolla y aclara el primer paso.',
-        payload: {
+        payloadJson: JSON.stringify({
           targetName,
           changes: {
             servings: null,
             ingredients: [{ operation: 'update', targetName: 'Cebolla', changes: { quantity } }],
             instructions: [{ level: 'legacy', stepNumber: 1, instruction }]
           }
-        },
+        }),
         dependsOn: [],
         warnings: []
       }
@@ -499,14 +499,14 @@ function recipeUpdateRefinementCandidate(
       kind: 'recipes.update_content',
       title: 'Reducir cebolla',
       summary: 'Reduce cebolla y aclara el primer paso.',
-      payload: {
+      payloadJson: JSON.stringify({
         targetName,
         changes: {
           servings: null,
           ingredients: [{ operation: 'update', targetName: 'Cebolla', changes: { quantity } }],
           instructions: [{ level: 'legacy', stepNumber: 1, instruction }]
         }
-      },
+      }),
       dependsOn: [],
       warnings: []
     },
