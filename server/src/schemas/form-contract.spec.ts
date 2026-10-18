@@ -126,6 +126,7 @@ import {
   assistantActionRefinementProviderCandidateSchema
 } from './ai-assistant.schema.js';
 import { assistantUpdateIngredientSchema } from './ai-assistant-pantry-update.schema.js';
+import { assistantUpdateCalendarEventSchema } from './ai-assistant-calendar-update.schema.js';
 import {
   assistantRecipeContentSnapshotSchema,
   assistantRecipeContentUpdateRequestSchema
@@ -869,6 +870,35 @@ const ROWS: Row[] = [
           expirationDate: null,
           location: 'fridge',
           notes: null,
+          updatedAt: null
+        }
+      }
+    }
+  },
+  {
+    name: 'assistantUpdateCalendarEventSchema',
+    schema: assistantUpdateCalendarEventSchema,
+    required: {
+      changes: { title: 'Revisión actualizada' },
+      assistantAction: {
+        operation: 'update_event',
+        targetId: 'event-1',
+        householdId: null,
+        before: {
+          householdId: null,
+          title: 'Revisión del coche',
+          kind: 'appointment',
+          date: '2026-10-20',
+          startTime: '09:00',
+          endTime: '10:00',
+          allDay: false,
+          color: null,
+          notes: null,
+          location: null,
+          recurrence: 'none',
+          recurrenceRule: null,
+          exceptions: '[]',
+          source: 'user',
           updatedAt: null
         }
       }
