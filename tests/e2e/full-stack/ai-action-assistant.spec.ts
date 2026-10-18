@@ -1348,6 +1348,10 @@ test('asistente global: lote revisable, refino aislado y aprobación selectiva r
   await page.reload();
   await expect(page.locator('[data-test="planning-automation-notice"]')).toBeVisible();
 
+  const composerGeometryByViewport = new Map<
+    string,
+    Record<string, { x: number; y: number; width: number; height: number }>
+  >();
   for (const route of [
     '/dashboard',
     '/pantry',
@@ -1396,6 +1400,59 @@ test('asistente global: lote revisable, refino aislado y aprobación selectiva r
       { width: 320, height: 568 }
     ]) {
       await assertViewport(page, size.width, size.height, false);
+      await routeLauncher.click();
+      await expect(page.locator('.modal[role="dialog"]')).toBeVisible();
+      await page.locator('.modal[role="dialog"]').evaluate(async (dialog) => {
+        const overlay = dialog.closest<HTMLElement>('.modal-overlay');
+        if (!overlay) throw new Error('Assistant modal overlay is missing.');
+        await Promise.all(
+          overlay
+            .getAnimations({ subtree: true })
+            .map((animation) => animation.finished.catch(() => undefined))
+        );
+      });
+      await assertViewport(page, size.width, size.height, true);
+      const composerGeometry = await page.evaluate(() => {
+        const selectors = {
+          dialog: '.modal[role="dialog"]',
+          header: '.modal__header',
+          headerClose: '.modal__close',
+          body: '.modal__body',
+          footer: '.modal__footer',
+          footerClose: '.assistant__footer app-button:first-of-type button',
+          prompt: '#ai-assistant-prompt',
+          warning: '#ai-assistant-voice-warning',
+          privacy: 'details.assistant__privacy > summary',
+          mic: '[data-test="ai-assistant-voice-start"] button',
+          submit: '[data-test="ai-assistant-submit"] button'
+        } as const;
+        const rects: Record<string, { x: number; y: number; width: number; height: number }> = {};
+        for (const [name, selector] of Object.entries(selectors)) {
+          const element = document.querySelector<HTMLElement>(selector);
+          if (!element) throw new Error(`Assistant geometry element is missing: ${name}`);
+          const { x, y, width, height } = element.getBoundingClientRect();
+          rects[name] = { x, y, width, height };
+        }
+        return rects;
+      });
+      const viewportKey = `${size.width}x${size.height}`;
+      const routeBaseline = composerGeometryByViewport.get(viewportKey);
+      if (!routeBaseline) {
+        composerGeometryByViewport.set(viewportKey, composerGeometry);
+      } else {
+        for (const [name, actual] of Object.entries(composerGeometry)) {
+          const expected = routeBaseline[name]!;
+          for (const dimension of ['x', 'y', 'width', 'height'] as const) {
+            expect(
+              Math.abs(actual[dimension] - expected[dimension]),
+              `${route}: ${name}.${dimension} debe coincidir entre rutas en ${viewportKey}; ` +
+                `esperado=${expected[dimension]}, actual=${actual[dimension]}`
+            ).toBeLessThanOrEqual(1);
+          }
+        }
+      }
+      await page.keyboard.press('Escape');
+      await expect(page.locator('.modal[role="dialog"]')).toBeHidden();
     }
   }
   const householdViewports =
