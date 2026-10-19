@@ -1,5 +1,5 @@
 # =============================================================================
-# Docker Compose - MiCocinAI Development Environment
+# Docker Compose - HogarIA Development Environment
 # =============================================================================
 # Usage: docker compose -f docker-compose.dev.yml up --build
 
@@ -12,7 +12,7 @@ services:
       context: .
       dockerfile: Dockerfile.dev
       target: frontend
-    container_name: micocinai-frontend
+    container_name: hogaria-frontend
     restart: unless-stopped
     ports:
       - "4200:4200"
@@ -42,7 +42,7 @@ services:
       context: .
       dockerfile: Dockerfile.dev
       target: server
-    container_name: micocinai-server
+    container_name: hogaria-server
     restart: unless-stopped
     ports:
       - "3000:3000"
@@ -52,7 +52,7 @@ services:
       - dev-data:/app/data
     environment:
       - NODE_ENV=development
-      - DATABASE_PATH=/app/data/recipeapp-dev.db
+      - DATABASE_PATH=/app/data/hogaria-dev.sqlite
       - JWT_SECRET=dev-jwt-secret-change-in-production
       - PORT=3000
     healthcheck:
@@ -76,7 +76,7 @@ services:
       context: .
       dockerfile: Dockerfile.dev
       target: server
-    container_name: micocinai-drizzle-studio
+    container_name: hogaria-drizzle-studio
     restart: unless-stopped
     ports:
       - "4983:4983"
@@ -86,7 +86,7 @@ services:
       - dev-data:/app/data
     environment:
       - NODE_ENV=development
-      - DATABASE_PATH=/app/data/recipeapp-dev.db
+      - DATABASE_PATH=/app/data/hogaria-dev.sqlite
     command: ["pnpm", "--filter", "server", "exec", "drizzle-kit", "studio"]
     depends_on:
       server:

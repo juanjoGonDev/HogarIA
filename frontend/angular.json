@@ -3,7 +3,7 @@
   "version": 1,
   "newProjectRoot": "projects",
   "projects": {
-    "recipeapp": {
+    "hogaria": {
       "projectType": "application",
       "schematics": {
         "@schematics/angular:component": {
@@ -31,13 +31,19 @@
             "polyfills": ["zone.js"],
             "tsConfig": "tsconfig.app.json",
             "inlineStyleLanguage": "scss",
-            "assets": [
-              "src/favicon.ico",
-              "src/assets",
-              "src/manifest.json"
-            ],
+            "assets": ["src/favicon.ico", "src/assets", "src/manifest.json"],
             "styles": [
-              "src/styles.scss"
+              "src/styles.scss",
+              {
+                "input": "src/styles/household-feature.scss",
+                "bundleName": "household-feature",
+                "inject": false
+              },
+              {
+                "input": "src/styles/calendar-feature.scss",
+                "bundleName": "calendar-feature",
+                "inject": false
+              }
             ],
             "scripts": []
           },
@@ -67,9 +73,19 @@
                   "with": "src/environments/environment.prod.ts"
                 }
               ],
+              "serviceWorker": "ngsw-config.json",
               "outputHashing": "all",
               "sourceMap": false,
-              "optimization": true,
+              "optimization": {
+                "scripts": true,
+                "fonts": {
+                  "inline": false
+                },
+                "styles": {
+                  "minify": true,
+                  "inlineCritical": true
+                }
+              },
               "namedChunks": false,
               "extractLicenses": true,
               "aot": true
@@ -86,26 +102,29 @@
           "builder": "@angular-devkit/build-angular:dev-server",
           "configurations": {
             "production": {
-              "buildTarget": "recipeapp:build:production"
+              "buildTarget": "hogaria:build:production"
             },
             "development": {
-              "buildTarget": "recipeapp:build:development"
+              "buildTarget": "hogaria:build:development"
             }
           },
-          "defaultConfiguration": "development"
+          "defaultConfiguration": "development",
+          "options": {
+            "allowedHosts": [".e2b.app"]
+          }
         },
         "test": {
           "builder": "@angular-devkit/build-angular:karma",
           "options": {
+            "karmaConfig": "karma.conf.js",
             "polyfills": ["zone.js", "zone.js/testing"],
             "tsConfig": "tsconfig.spec.json",
             "inlineStyleLanguage": "scss",
-            "assets": [
-              "src/favicon.ico",
-              "src/assets"
-            ],
+            "assets": ["src/favicon.ico", "src/assets"],
             "styles": [
-              "src/styles.scss"
+              "src/styles.scss",
+              "src/styles/household-feature.scss",
+              "src/styles/calendar-feature.scss"
             ],
             "scripts": []
           }

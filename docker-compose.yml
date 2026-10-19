@@ -5,19 +5,19 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: recipeapp
+    container_name: hogaria
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - '3000:3000'
     volumes:
       - ./data:/app/data
     environment:
       - NODE_ENV=production
-      - DATABASE_PATH=/app/data/recipeapp.db
+      - DATABASE_PATH=/app/data/hogaria.sqlite
       - JWT_SECRET=${JWT_SECRET:-change-this-to-a-secure-secret-key}
       - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      test: ['CMD', 'curl', '-f', 'http://localhost:3000/health']
       interval: 15s
       timeout: 5s
       retries: 3
@@ -33,12 +33,13 @@ services:
 
   nginx:
     image: nginx:alpine
-    container_name: recipeapp-nginx
+    container_name: hogaria-nginx
     restart: unless-stopped
     ports:
-      - "80:80"
+      - '80:80'
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/proxy-api-common.conf:/etc/nginx/proxy-api-common.conf:ro
       - ./frontend/dist:/usr/share/nginx/html:ro
     depends_on:
       app:

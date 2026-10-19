@@ -1,4 +1,8 @@
-# 📋 RecipeApp - Development Progress
+# 📋 HogarIA - Development Progress
+
+> Los apartados siguientes son el registro histórico de *RecipeApp/MiCocinAI*; se dejan tal cual
+> porque son la trazabilidad de lo que ya está desplegado. Lo que cambia a partir de la ronda HogarIA,
+> abajo.
 
 ## Fase 1: Configuración del Proyecto ✅
 
@@ -347,4 +351,29 @@
 
 ---
 
-*Last updated: 2026-09-13*
+## Ronda HogarIA · 2026-09-19 · PR #34 (SDD, sin mergear)
+
+Todo lo de arriba sigue siendo válido como historia; esto es lo que hay ahora:
+
+- **Configuración vs Preferencias**: los módulos de la app son *switches vivos* en `/settings`
+  (la nav se repinta por señal, sin recargar ni navegar); `/preferences` es el perfil del comensal
+  y su icono pasa a 👤. El tour pregunta nivel + módulos y cada respuesta se edita luego en su sección.
+- **Reporter e2e propio** (`tools/reporters/hogaria-e2e-reporter.js`): semilla del run, una línea por
+  `it` con su `describe › it`, duración y datos usados, los fallos concentrados **antes** del summary y
+  `test-results/hogaria-run.json` para máquinas.
+- **Cobertura obligatoria**: 70 % por fichero en el servidor, rampa documentada en `server/vitest.config.ts`,
+  CI ejecuta `test:coverage` y sube el informe HTML.
+- **Renombrado**: paquetes `@hogaria/web`/`@hogaria/server`, proyecto de Angular `hogaria`,
+  `data/hogaria.sqlite` **adoptando** la `recipeapp.db` heredada (con sus `-wal`/`-shm`), marca visible,
+  contenedores y tooling.
+- **Marca gráfica**: casa con cerebro de robot (tinta `#1C1917` + naranja `#F97316`) en `design/`, y el set
+  de iconos/PWA derivado de verdad; el `favicon.ico` declarado y ausente ahora existe.
+- **Tests nuevos**: 16 unitarios del registry de módulos, 7 de adopción de la BD, 6 e2e de módulos en
+  caliente, 6 e2e de assets de la PWA, y las pruebas que subieron `memory-monitor`/`seed-data` por encima
+  del umbral (46 tests de servidor en verde con el umbral aplicado; 339 casos e2e listados en 18 ficheros).
+
+---
+
+---
+
+*Last updated: 2026-09-19 (ronda HogarIA)*

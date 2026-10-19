@@ -1,25 +1,9 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
+import { Component, EventEmitter, Input, Output } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { TranslatePipe } from '../../../../core/pipes/translate.pipe';
 
-@Component({
-  selector: 'app-tag',
-  standalone: true,
-  imports: [CommonModule],
-  template: `
-    <span [class]="getClasses()" (click)="onClick.emit()">
-      <ng-content></ng-content>
-      <button
-        *ngIf="removable"
-        type="button"
-        class="tag__remove"
-        (click)="onRemove.emit($event); $event.stopPropagation()"
-        aria-label="Remove tag"
-      >
-        ×
-      </button>
-    </span>
-  `,
-  styles: [`
+export const TAG_STYLES: string[] = [
+  `
     .tag {
       display: inline-flex;
       align-items: center;
@@ -31,12 +15,33 @@ import { CommonModule } from '@angular/common';
       background: var(--bg-tertiary);
       border: 1px solid var(--border-default);
       border-radius: var(--radius-md);
-      cursor: pointer;
+      cursor: default;
       transition: var(--transition-fast);
       user-select: none;
+    }
 
-      &:hover {
+    .tag--interactive {
+      appearance: none;
+      cursor: pointer;
+      font-family: inherit;
+      line-height: inherit;
+      text-align: inherit;
+      margin: 0;
+
+      &:hover:not(:disabled) {
         background: var(--border-default);
+      }
+
+      &:focus-visible {
+        outline: 2px solid var(--primary);
+        outline-offset: 2px;
+      }
+    }
+
+    @media (max-width: 760px) {
+      .tag--touch-target {
+        min-height: 44px;
+        padding-inline: var(--space-2);
       }
     }
 
@@ -51,41 +56,69 @@ import { CommonModule } from '@angular/common';
       cursor: not-allowed;
       pointer-events: none;
     }
+  `
+];
 
-    .tag__remove {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      width: 16px;
-      height: 16px;
-      border-radius: var(--radius-full);
-      background: var(--border-default);
-      color: var(--text-tertiary);
-      font-size: 12px;
-      line-height: 1;
-      cursor: pointer;
-      transition: var(--transition-fast);
-      border: none;
-      padding: 0;
+@Component({
+  selector: 'app-tag',
+  standalone: true,
+  imports: [TranslatePipe, CommonModule],
+  template: `
+    <span [class]="getClasses()" [class.tag--removable]="removable">
+      <ng-content></ng-content>
+      <button
+        *ngIf="removable"
+        type="button"
+        class="tag__remove"
+        [disabled]="disabled"
+        (click)="onRemove.emit($event); $event.stopPropagation()"
+        [attr.aria-label]="'ui.remove_tag' | t"
+      >
+        ×
+      </button>
+    </span>
+  `,
+  styles: [
+    ...TAG_STYLES,
+    `
+      .tag__remove {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 16px;
+        height: 16px;
+        border-radius: var(--radius-full);
+        background: var(--border-default);
+        color: var(--text-tertiary);
+        font-size: 12px;
+        line-height: 1;
+        cursor: pointer;
+        transition: var(--transition-fast);
+        border: none;
+        padding: 0;
+        appearance: none;
+      }
 
-      &:hover {
+      .tag__remove:focus-visible {
+        outline: 2px solid var(--primary);
+        outline-offset: 2px;
+      }
+
+      .tag__remove:hover:not(:disabled) {
         background: var(--error-subtle);
         color: var(--error);
       }
-    }
-  `]
+    `
+  ]
 })
 export class TagComponent {
-  @Input() selected = false;
   @Input() removable = false;
   @Input() disabled = false;
 
-  @Output() onClick = new EventEmitter<void>();
   @Output() onRemove = new EventEmitter<Event>();
 
   getClasses(): string {
     const classes = ['tag'];
-    if (this.selected) classes.push('tag--selected');
     if (this.disabled) classes.push('tag--disabled');
     return classes.join(' ');
   }

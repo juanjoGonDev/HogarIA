@@ -1,31 +1,38 @@
 {
-  "name": "recipeapp",
+  "name": "hogaria",
   "version": "1.0.0",
-  "description": "Smart recipe app with AI integration for Raspberry Pi",
+  "description": "HogarIA: household, shopping, kitchen and AI on a single Raspberry Pi",
   "private": true,
   "packageManager": "pnpm@10.15.0",
   "scripts": {
-    "dev": "concurrently --names CLIENT,SERVER --prefix-colors cyan,yellow \"pnpm --filter frontend run start\" \"pnpm --filter server run dev\"",
-    "dev:client": "pnpm --filter frontend run start",
-    "dev:server": "pnpm --filter server run dev",
+    "dev": "concurrently --names CLIENT,SERVER --prefix-colors cyan,yellow \"pnpm --filter @hogaria/web run start\" \"pnpm --filter @hogaria/server run dev\"",
+    "dev:client": "pnpm --filter @hogaria/web run start",
+    "dev:server": "pnpm --filter @hogaria/server run dev",
     "build": "pnpm run build:server && pnpm run build:client",
-    "build:client": "pnpm --filter frontend run build:prod",
-    "build:server": "pnpm --filter server run build",
-    "start": "pnpm --filter server run start",
-    "test": "pnpm run test:client && pnpm run test:server",
-    "test:client": "pnpm --filter frontend run test",
-    "test:server": "pnpm --filter server run test",
-    "test:e2e": "npx playwright test",
+    "build:client": "pnpm --filter @hogaria/web run build:prod",
+    "build:server": "pnpm --filter @hogaria/server run build",
+    "start": "pnpm --filter @hogaria/server run start",
+    "test": "pnpm run test:config && pnpm run test:client && pnpm run test:server",
+    "test:config": "node --test --experimental-test-isolation=none scripts/karma-coverage-gate.test.mjs scripts/check-ui-button-geometry.test.mjs scripts/ci-e2e-timeout.test.mjs scripts/node-test-config.test.mjs scripts/ai-live-existing-webapi.test.mjs scripts/ai-live-smoke-safety.test.mjs scripts/ai-live-smoke-runner-control.test.mjs scripts/run-household-meal-real-smoke.test.mjs scripts/check-push-format.test.mjs scripts/check-ui-component-styles.test.mjs scripts/format-staged-files.test.mjs scripts/container-smoke.test.mjs scripts/ci-delivery-workflows.test.mjs scripts/check-image-platforms.test.mjs",
+    "test:client": "pnpm --filter @hogaria/web run test",
+    "test:server": "pnpm --filter @hogaria/server run test",
+    "test:e2e": "node scripts/run-isolated-playwright.mjs",
+    "test:e2e:nginx": "node scripts/run-isolated-playwright.mjs --nginx-ingress",
+    "smoke:ai:real": "node scripts/run-ai-real-smoke.mjs",
+    "smoke:ai:household-meal": "node scripts/run-household-meal-real-smoke.mjs",
+    "test:e2e:full-stack": "pnpm run build && node scripts/run-isolated-playwright.mjs --config=playwright.full-stack.config.ts",
     "test:coverage": "pnpm run test:client:coverage && pnpm run test:server:coverage",
-    "test:client:coverage": "pnpm --filter frontend run test:coverage",
-    "test:server:coverage": "pnpm --filter server run test:coverage",
+    "test:client:coverage": "pnpm --filter @hogaria/web run test:coverage",
+    "test:server:coverage": "pnpm --filter @hogaria/server run test:coverage",
     "lint": "pnpm run lint:client && pnpm run lint:server",
-    "lint:client": "pnpm --filter frontend run lint",
-    "lint:server": "pnpm --filter server run lint",
+    "lint:client": "pnpm run check:ui && pnpm --filter @hogaria/web run lint",
+    "lint:server": "pnpm --filter @hogaria/server run lint",
     "lint:fix": "pnpm run lint:client:fix && pnpm run lint:server:fix",
-    "lint:client:fix": "pnpm --filter frontend run lint:fix",
-    "lint:server:fix": "pnpm --filter server run lint:fix",
+    "lint:client:fix": "pnpm --filter @hogaria/web run lint:fix",
+    "lint:server:fix": "pnpm --filter @hogaria/server run lint:fix",
     "format": "prettier --write \"**/*.{ts,json,md}\"",
+    "check:ui": "node scripts/check-ui.mjs",
+    "typecheck:e2e": "tsc -p tsconfig.e2e.json",
     "knip": "knip",
     "knip:fix": "knip --fix",
     "clean": "rm -rf node_modules frontend/node_modules server/node_modules frontend/dist server/dist",
@@ -36,21 +43,24 @@
     "docker:dev:clean": "docker compose -f docker-compose.dev.yml down -v --rmi local"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/better-sqlite3": "7.6.12",
+    "@types/node": "22.5.1",
+    "better-sqlite3": "13.0.3",
     "concurrently": "10.0.5",
-    "prettier": "3.9.6",
-    "husky": "9.1.7",
     "knip": "6.35.1",
-    "lint-staged": "17.5.1"
+    "lefthook": "2.1.8",
+    "prettier": "3.9.6",
+    "typescript": "5.7.3"
   },
-  "lint-staged": {
-    "*.{ts,json,md}": "prettier --write",
-    "*.ts": "eslint --fix"
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "bcryptjs",
+      "lefthook"
+    ]
   },
   "engines": {
-    "node": ">=18.0.0"
-  },
-  "onlyBuiltDependencies": [
-    "better-sqlite3",
-    "bcryptjs"
-  ]
+    "node": ">=22.0.0"
+  }
 }

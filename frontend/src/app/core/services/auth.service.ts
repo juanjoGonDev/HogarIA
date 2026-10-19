@@ -1,9 +1,11 @@
 import { Injectable, signal, computed } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpContext } from '@angular/common/http';
 import { Router } from '@angular/router';
-import { Observable, tap, catchError, of } from 'rxjs';
+import { Observable, tap, map, catchError, of } from 'rxjs';
 
 import { environment } from '../../../environments/environment';
+import { LEGACY_AUTH_KEYS, STORAGE_KEYS } from './storage.service';
+import { SILENT_TOAST } from '../interceptors/error.interceptor';
 import {
   User,
   AuthCredentials,
@@ -17,9 +19,9 @@ import {
 })
 export class AuthService {
   private readonly apiUrl = `${environment.apiUrl}/auth`;
-  private readonly TOKEN_KEY = 'auth_token';
-  private readonly REFRESH_TOKEN_KEY = 'refresh_token';
-  private readonly USER_KEY = 'current_user';
+  private readonly TOKEN_KEY = STORAGE_KEYS.authToken;
+  private readonly REFRESH_TOKEN_KEY = STORAGE_KEYS.refreshToken;
+  private readonly USER_KEY = STORAGE_KEYS.currentUser;
 
   // Signals for reactive state
   private currentUserSignal = signal<User | null>(null);
@@ -55,31 +57,42 @@ export class AuthService {
   login(credentials: AuthCredentials): Observable<AuthResponse> {
     this.isLoadingSignal.set(true);
 
-    return this.http.post<any>(`${this.apiUrl}/login`, credentials).pipe(
-      tap(response => {
-        this.handleAuthResponse(this.unwrap(response));
-        this.isLoadingSignal.set(false);
-      }),
-      catchError(error => {
-        this.isLoadingSignal.set(false);
-        throw error;
+    return this.http
+      .post<any>(`${this.apiUrl}/login`, credentials, {
+        // LoginComponent owns recoverable errors; a global toast would duplicate its feedback.
+        context: new HttpContext().set(SILENT_TOAST, true)
       })
-    );
+      .pipe(
+        map((response) => this.unwrap(response)),
+        tap((response) => {
+          this.handleAuthResponse(response);
+          this.isLoadingSignal.set(false);
+        }),
+        catchError((error) => {
+          this.isLoadingSignal.set(false);
+          throw error;
+        })
+      );
   }
 
   register(data: RegisterData): Observable<AuthResponse> {
     this.isLoadingSignal.set(true);
 
-    return this.http.post<any>(`${this.apiUrl}/register`, data).pipe(
-      tap(response => {
-        this.handleAuthResponse(this.unwrap(response));
-        this.isLoadingSignal.set(false);
-      }),
-      catchError(error => {
-        this.isLoadingSignal.set(false);
-        throw error;
+    return this.http
+      .post<any>(`${this.apiUrl}/register`, data, {
+        context: new HttpContext().set(SILENT_TOAST, true)
       })
-    );
+      .pipe(
+        map((response) => this.unwrap(response)),
+        tap((response) => {
+          this.handleAuthResponse(response);
+          this.isLoadingSignal.set(false);
+        }),
+        catchError((error) => {
+          this.isLoadingSignal.set(false);
+          throw error;
+        })
+      );
   }
 
   /**
@@ -109,7 +122,8 @@ export class AuthService {
     }
 
     return this.http.post<any>(`${this.apiUrl}/refresh`, { refreshToken }).pipe(
-      tap(response => this.handleAuthResponse(this.unwrap(response))),
+      map((response) => this.unwrap(response)),
+      tap((response) => this.handleAuthResponse(response)),
       catchError(() => {
         this.logout();
         return of();
@@ -138,6 +152,7 @@ export class AuthService {
     localStorage.removeItem(this.TOKEN_KEY);
     localStorage.removeItem(this.REFRESH_TOKEN_KEY);
     localStorage.removeItem(this.USER_KEY);
+    for (const key of LEGACY_AUTH_KEYS) localStorage.removeItem(key);
   }
 
   private getStoredUser(): User | null {
@@ -166,7 +181,7 @@ export class AuthService {
     const jsonPayload = decodeURIComponent(
       atob(base64)
         .split('')
-        .map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
         .join('')
     );
     return JSON.parse(jsonPayload) as TokenPayload;
@@ -174,23 +189,64 @@ export class AuthService {
 
   updateProfile(userData: Partial<User>): Observable<User> {
     return this.http.patch(`${this.apiUrl}/profile`, userData).pipe(
-      tap((response: any) => {
-        const user: User = response?.data ? response.data : response;
+      map((response: any) => (response?.data ? response.data : response) as User),
+      tap((user) => {
         this.currentUserSignal.set(user);
         localStorage.setItem(this.USER_KEY, JSON.stringify(user));
       })
     );
   }
 
+  /**
+   * La foto de la cuenta. El servidor guarda un fichero y devuelve SU RUTA —no los bytes—, y el
+   * usuario en cache se actualiza con ella: si no, al volver de la foto seguiria viendo la inicial
+   * hasta recargar.
+   */
+  uploadAvatar(image: string): Observable<string | null> {
+    return this.http
+      .post<{ data: { avatar: string | null } }>(`${this.apiUrl}/avatar`, { image })
+      .pipe(map((response) => this.applyAvatar(response.data?.avatar ?? null)));
+  }
+
+  removeAvatar(): Observable<null> {
+    return this.http.delete(`${this.apiUrl}/avatar`).pipe(
+      map(() => {
+        this.applyAvatar(null);
+        return null;
+      })
+    );
+  }
+
+  private applyAvatar(avatar: string | null): string | null {
+    const current = this.currentUserSignal();
+    if (!current) return avatar;
+    const next: User = { ...current, avatar: avatar ?? undefined };
+    this.currentUserSignal.set(next);
+    localStorage.setItem(this.USER_KEY, JSON.stringify(next));
+    return avatar;
+  }
+
   changePassword(oldPassword: string, newPassword: string): Observable<void> {
-    return this.http.post<void>(`${this.apiUrl}/change-password`, {
-      oldPassword,
-      newPassword
-    });
+    return this.http.post<void>(
+      `${this.apiUrl}/change-password`,
+      {
+        oldPassword,
+        newPassword
+      },
+      {
+        // AccountComponent translates the reason beside the fields; a global toast would duplicate
+        // the inline message and expose the server's English detail.
+        context: new HttpContext().set(SILENT_TOAST, true)
+      }
+    );
   }
 
   forgotPassword(email: string): Observable<void> {
-    return this.http.post<void>(`${this.apiUrl}/forgot-password`, { email });
+    return this.http.post<void>(
+      `${this.apiUrl}/forgot-password`,
+      { email },
+      { context: new HttpContext().set(SILENT_TOAST, true) }
+    );
   }
 
   resetPassword(token: string, newPassword: string): Observable<void> {

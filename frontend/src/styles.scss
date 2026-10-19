@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════════
-   RecipeApp - Global Styles
+   HogarIA - Global Styles
    Sistema de Diseño Minimalista con Paleta Cálida
    ═══════════════════════════════════════════════════════════════════ */
 
@@ -12,16 +12,16 @@
 
 :root {
   /* ─── Primary Colors (Orange - Appetite Stimulating) ─── */
-  --color-primary-50: #FFF7ED;
-  --color-primary-100: #FFEDD5;
-  --color-primary-200: #FED7AA;
-  --color-primary-300: #FDBA74;
-  --color-primary-400: #FB923C;
-  --color-primary-500: #F97316;
-  --color-primary-600: #EA580C;
-  --color-primary-700: #C2410C;
-  --color-primary-800: #9A3412;
-  --color-primary-900: #7C2D12;
+  --color-primary-50: #fff7ed;
+  --color-primary-100: #ffedd5;
+  --color-primary-200: #fed7aa;
+  --color-primary-300: #fdba74;
+  --color-primary-400: #fb923c;
+  --color-primary-500: #f97316;
+  --color-primary-600: #ea580c;
+  --color-primary-700: #c2410c;
+  --color-primary-800: #9a3412;
+  --color-primary-900: #7c2d12;
 
   /* Primary aliases */
   --primary: var(--color-primary-500);
@@ -30,16 +30,16 @@
   --primary-subtle: var(--color-primary-50);
 
   /* ─── Secondary Colors (Green - Freshness) ─── */
-  --color-secondary-50: #F0FDF4;
-  --color-secondary-100: #DCFCE7;
-  --color-secondary-200: #BBF7D0;
-  --color-secondary-300: #86EFAC;
-  --color-secondary-400: #4ADE80;
-  --color-secondary-500: #22C55E;
-  --color-secondary-600: #16A34A;
-  --color-secondary-700: #15803D;
+  --color-secondary-50: #f0fdf4;
+  --color-secondary-100: #dcfce7;
+  --color-secondary-200: #bbf7d0;
+  --color-secondary-300: #86efac;
+  --color-secondary-400: #4ade80;
+  --color-secondary-500: #22c55e;
+  --color-secondary-600: #16a34a;
+  --color-secondary-700: #15803d;
   --color-secondary-800: #166534;
-  --color-secondary-900: #14532D;
+  --color-secondary-900: #14532d;
 
   /* Secondary aliases */
   --secondary: var(--color-secondary-500);
@@ -48,18 +48,18 @@
   --secondary-subtle: var(--color-secondary-50);
 
   /* ─── Neutral Colors (Warm Grays) ─── */
-  --color-neutral-0: #FFFFFF;
-  --color-neutral-50: #FAFAF9;
-  --color-neutral-100: #F5F5F4;
-  --color-neutral-200: #E7E5E4;
-  --color-neutral-300: #D6D3D1;
-  --color-neutral-400: #A8A29E;
-  --color-neutral-500: #78716C;
-  --color-neutral-600: #57534E;
-  --color-neutral-700: #44403C;
+  --color-neutral-0: #ffffff;
+  --color-neutral-50: #fafaf9;
+  --color-neutral-100: #f5f5f4;
+  --color-neutral-200: #e7e5e4;
+  --color-neutral-300: #d6d3d1;
+  --color-neutral-400: #a8a29e;
+  --color-neutral-500: #78716c;
+  --color-neutral-600: #57534e;
+  --color-neutral-700: #44403c;
   --color-neutral-800: #292524;
-  --color-neutral-900: #1C1917;
-  --color-neutral-950: #0C0A09;
+  --color-neutral-900: #1c1917;
+  --color-neutral-950: #0c0a09;
 
   /* Neutral aliases */
   --white: var(--color-neutral-0);
@@ -75,35 +75,35 @@
   --border-strong: var(--color-neutral-300);
 
   /* ─── Semantic Colors ─── */
-  --color-success-50: #F0FDF4;
-  --color-success-100: #DCFCE7;
-  --color-success-500: #22C55E;
-  --color-success-600: #16A34A;
-  --color-success-700: #15803D;
+  --color-success-50: #f0fdf4;
+  --color-success-100: #dcfce7;
+  --color-success-500: #22c55e;
+  --color-success-600: #16a34a;
+  --color-success-700: #15803d;
   --success: var(--color-success-500);
   --success-subtle: var(--color-success-50);
 
-  --color-warning-50: #FFFBEB;
-  --color-warning-100: #FEF3C7;
-  --color-warning-500: #F59E0B;
-  --color-warning-600: #D97706;
-  --color-warning-700: #B45309;
+  --color-warning-50: #fffbeb;
+  --color-warning-100: #fef3c7;
+  --color-warning-500: #f59e0b;
+  --color-warning-600: #d97706;
+  --color-warning-700: #b45309;
   --warning: var(--color-warning-500);
   --warning-subtle: var(--color-warning-50);
 
-  --color-error-50: #FEF2F2;
-  --color-error-100: #FEE2E2;
-  --color-error-500: #EF4444;
-  --color-error-600: #DC2626;
-  --color-error-700: #B91C1C;
+  --color-error-50: #fef2f2;
+  --color-error-100: #fee2e2;
+  --color-error-500: #ef4444;
+  --color-error-600: #dc2626;
+  --color-error-700: #b91c1c;
   --error: var(--color-error-500);
   --error-subtle: var(--color-error-50);
 
-  --color-info-50: #EFF6FF;
-  --color-info-100: #DBEAFE;
-  --color-info-500: #3B82F6;
-  --color-info-600: #2563EB;
-  --color-info-700: #1D4ED8;
+  --color-info-50: #eff6ff;
+  --color-info-100: #dbeafe;
+  --color-info-500: #3b82f6;
+  --color-info-600: #2563eb;
+  --color-info-700: #1d4ed8;
   --info: var(--color-info-500);
   --info-subtle: var(--color-info-50);
 
@@ -155,6 +155,13 @@
   --space-16: 4rem;
   --space-20: 5rem;
 
+  /* Geometría compartida para botones de acción de texto. */
+  --button-control-height: 44px;
+  --button-control-padding-block: var(--space-2);
+  --button-control-padding-inline: var(--space-4);
+  --button-control-font-size: var(--text-sm);
+  --calendar-action-width: 96px;
+
   /* ─── Border Radius ─── */
   --radius-none: 0;
   --radius-sm: 0.25rem;
@@ -196,16 +203,38 @@
 
   /* ─── Layout ─── */
   --container-max: 1280px;
+  --container-padding: var(--space-4);
   --sidebar-width: 280px;
   --header-height: 64px;
   --bottom-nav-height: 64px;
+}
+
+@media (min-width: 768px) {
+  :root {
+    --container-padding: var(--space-6);
+  }
+}
+
+@media (min-width: 1024px) {
+  :root {
+    --container-padding: var(--space-8);
+  }
+}
+
+/* Con la barra de navegacion inferior, el borde de abajo de la ventana esta ocupado: quien se trae a la
+   vista (scrollIntoView, anclas, foco) se alinea por encima de la nav y de cualquier barra flotante, como
+   el lote de las tablas (## 12ad, F). */
+@media (max-width: 1023px) {
+  html {
+    scroll-padding-bottom: calc(var(--bottom-nav-height) + 148px);
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════
    CSS Variables - Dark Theme
    ═══════════════════════════════════════════════════════════════════ */
 
-[data-theme="dark"] {
+[data-theme='dark'] {
   --bg-primary: var(--color-neutral-950);
   --bg-secondary: var(--color-neutral-900);
   --bg-tertiary: var(--color-neutral-800);
@@ -250,6 +279,15 @@ body {
   overflow-x: hidden;
 }
 
+.page-heading {
+  margin: 0 0 var(--space-1);
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  font-weight: var(--font-bold);
+  line-height: var(--leading-normal);
+}
+
 a {
   color: var(--primary);
   text-decoration: none;
@@ -266,11 +304,56 @@ img {
   display: block;
 }
 
+/*
+ * El reset de los botones, y las tres cosas que le faltaban.
+ *
+ * `border: none; background: none` es lo que deja que `app-button` se pinte solo. El efecto secundario
+ * era menos visible: cualquier `<button>` con una clase cuyo CSS no dijera nada de fondo no se parecia a
+ * nada —texto suelto, con puntero—, y la sensacion de «esto se puede pulsar» se iba con ella. Por eso el
+ * boton *sin clase propia* recibe aqui un skin minimo (el de los controles del design system, en
+ * miniatura), y por eso `check-ui` exige un estado `:hover` a todo boton que si traiga clase: que algo
+ * responda no puede depender de que alguien se acuerde de escribirlo.
+ */
 button {
   font-family: inherit;
   cursor: pointer;
   border: none;
   background: none;
+}
+
+button:not([class]) {
+  box-sizing: border-box;
+  width: auto;
+  height: var(--button-control-height);
+  padding: var(--button-control-padding-block) var(--button-control-padding-inline);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: var(--button-control-font-size);
+  font-weight: var(--font-medium);
+  line-height: var(--leading-none);
+  white-space: nowrap;
+  transition: var(--transition-fast);
+
+  &:hover {
+    border-color: var(--primary);
+    background: var(--primary-subtle);
+    color: var(--primary-dark);
+  }
+}
+
+/* Un boton apagado no es un boton: el cursor lo dice, y `not-allowed` explica por que (`default`, no).
+   El oscurecido lo sigue poniendo cada componente —opacidad global y propia se multiplicarian. */
+button:disabled,
+[aria-disabled='true'] {
+  cursor: not-allowed;
+}
+
+/* Las tarjetas-check de la app (utensilios, «todo el dia», filtros) son un `label` con su input dentro:
+   sin esto el puntero dice «no toques» justo encima de lo unico que se puede tocar. */
+label:has(input) {
+  cursor: pointer;
 }
 
 input,
@@ -290,8 +373,12 @@ ol {
    ═══════════════════════════════════════════════════════════════════ */
 
 @keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 @keyframes fadeInUp {
@@ -350,23 +437,40 @@ ol {
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
 }
 
 @keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
 }
 
 @keyframes ring {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
 }
 
 /* Animation utility classes */
@@ -491,51 +595,116 @@ ol {
 .container {
   width: 100%;
   max-width: var(--container-max);
-  margin: 0 auto;
-  padding: 0 var(--space-4);
+  margin-inline: auto;
+  padding-inline: var(--container-padding);
+}
 
-  @media (min-width: 768px) {
-    padding: 0 var(--space-6);
-  }
+/* Accessible text for control names and section headings that should not add visual clutter. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 
-  @media (min-width: 1024px) {
-    padding: 0 var(--space-8);
-  }
+app-page-container.page-container {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  padding-inline: var(--container-padding);
+}
+
+app-page-container.page-container--bounded {
+  max-width: var(--container-max);
+  margin-inline: auto;
+}
+
+/* El frame compartido es la única fuente de ancho/gutters de cada vista. Las raíces privadas y de
+   onboarding llenan su caja útil; las tarjetas/forms pueden limitarse dentro sin estrechar la página. */
+app-page-container.page-container.page-container--full-content > :not(router-outlet),
+app-page-container.page-container.page-container--full-content > router-outlet + *,
+app-page-container.page-container.page-container--full-content > router-outlet + * > :first-child {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  margin-inline: 0;
 }
 
 .grid {
   display: grid;
   gap: var(--space-4);
 
-  &--2 { grid-template-columns: 1fr; }
-  &--3 { grid-template-columns: 1fr; }
-  &--4 { grid-template-columns: 1fr; }
+  &--2 {
+    grid-template-columns: 1fr;
+  }
+  &--3 {
+    grid-template-columns: 1fr;
+  }
+  &--4 {
+    grid-template-columns: 1fr;
+  }
 
   @media (min-width: 768px) {
-    &--2 { grid-template-columns: repeat(2, 1fr); }
-    &--3 { grid-template-columns: repeat(2, 1fr); }
-    &--4 { grid-template-columns: repeat(2, 1fr); }
+    &--2 {
+      grid-template-columns: repeat(2, 1fr);
+    }
+    &--3 {
+      grid-template-columns: repeat(2, 1fr);
+    }
+    &--4 {
+      grid-template-columns: repeat(2, 1fr);
+    }
   }
 
   @media (min-width: 1024px) {
-    &--3 { grid-template-columns: repeat(3, 1fr); }
-    &--4 { grid-template-columns: repeat(4, 1fr); }
+    &--3 {
+      grid-template-columns: repeat(3, 1fr);
+    }
+    &--4 {
+      grid-template-columns: repeat(4, 1fr);
+    }
   }
 }
 
 .flex {
   display: flex;
 
-  &--col { flex-direction: column; }
-  &--wrap { flex-wrap: wrap; }
-  &--center { align-items: center; justify-content: center; }
-  &--between { justify-content: space-between; }
-  &--end { justify-content: flex-end; }
-  &--gap-1 { gap: var(--space-1); }
-  &--gap-2 { gap: var(--space-2); }
-  &--gap-3 { gap: var(--space-3); }
-  &--gap-4 { gap: var(--space-4); }
-  &--gap-6 { gap: var(--space-6); }
+  &--col {
+    flex-direction: column;
+  }
+  &--wrap {
+    flex-wrap: wrap;
+  }
+  &--center {
+    align-items: center;
+    justify-content: center;
+  }
+  &--between {
+    justify-content: space-between;
+  }
+  &--end {
+    justify-content: flex-end;
+  }
+  &--gap-1 {
+    gap: var(--space-1);
+  }
+  &--gap-2 {
+    gap: var(--space-2);
+  }
+  &--gap-3 {
+    gap: var(--space-3);
+  }
+  &--gap-4 {
+    gap: var(--space-4);
+  }
+  &--gap-6 {
+    gap: var(--space-6);
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -586,3 +755,309 @@ ol {
 /* Tablet: 481px - 768px */
 /* Desktop: 769px - 1024px */
 /* Wide: > 1024px */
+
+/* Safe-area tokens keep edge-to-edge shells usable around a notch/home indicator. */
+:root {
+  --hogaria-safe-area-top: env(safe-area-inset-top, 0px);
+  --hogaria-safe-area-right: env(safe-area-inset-right, 0px);
+  --hogaria-safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --hogaria-safe-area-left: env(safe-area-inset-left, 0px);
+}
+
+app-main-layout .layout > .sidebar .sidebar__header,
+app-main-layout .layout > .sidebar .sidebar__nav,
+app-main-layout .layout > .sidebar .sidebar__footer {
+  padding-left: max(var(--space-4), var(--hogaria-safe-area-left));
+  padding-right: max(var(--space-4), var(--hogaria-safe-area-right));
+}
+
+app-main-layout .layout > .sidebar .sidebar__header {
+  padding-top: calc(var(--space-4) + var(--hogaria-safe-area-top));
+}
+
+app-main-layout .layout > .sidebar .sidebar__footer {
+  padding-bottom: max(var(--space-4), var(--hogaria-safe-area-bottom));
+}
+
+app-main-layout .layout > .main app-page-container.page-container {
+  padding-left: max(var(--container-padding), var(--hogaria-safe-area-left));
+  padding-right: max(var(--container-padding), var(--hogaria-safe-area-right));
+}
+
+@media (max-width: 1023px) {
+  app-main-layout .layout > .header {
+    height: calc(56px + var(--hogaria-safe-area-top));
+    padding-top: var(--hogaria-safe-area-top);
+    padding-left: max(var(--space-4), var(--hogaria-safe-area-left));
+    padding-right: max(var(--space-4), var(--hogaria-safe-area-right));
+  }
+
+  app-main-layout .layout > .main {
+    padding-top: calc(56px + var(--hogaria-safe-area-top));
+    padding-bottom: calc(64px + var(--hogaria-safe-area-bottom));
+  }
+
+  app-main-layout .layout > .bottom-nav {
+    height: calc(64px + var(--hogaria-safe-area-bottom));
+    padding-bottom: var(--hogaria-safe-area-bottom);
+    padding-left: max(var(--space-4), var(--hogaria-safe-area-left));
+    padding-right: max(var(--space-4), var(--hogaria-safe-area-right));
+  }
+}
+
+@media (min-width: 1024px) {
+  app-main-layout .layout > .main {
+    padding-top: var(--hogaria-safe-area-top);
+    padding-bottom: var(--hogaria-safe-area-bottom);
+  }
+}
+
+/* Recipe book controls share the app's form and content tokens. */
+app-recipes {
+  .recipes__collections {
+    display: flex;
+    gap: var(--space-2);
+    margin-bottom: var(--space-4);
+    border-bottom: 1px solid var(--border-default);
+  }
+
+  .recipes__collection-tab {
+    min-height: 44px;
+    padding: var(--space-2) var(--space-3);
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: var(--text-sm);
+    cursor: pointer;
+  }
+
+  .recipes__collection-tab.is-active {
+    border-bottom-color: var(--primary);
+    color: var(--text-primary);
+    font-weight: var(--font-semibold);
+  }
+
+  .recipes__collection-tab:focus-visible,
+  .recipe-book-search__field:focus-within,
+  .recipe-card__open:focus-visible,
+  .recipe-card__favorite:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+  }
+
+  .recipes__book-controls {
+    display: flex;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    margin-bottom: var(--space-4);
+  }
+
+  .recipe-book-search {
+    flex: 1 1 280px;
+    min-width: min(100%, 220px);
+  }
+
+  .recipe-book-search__label,
+  .recipe-book-filter-form__field > label,
+  .recipe-book-filter-form__label {
+    display: block;
+    margin-bottom: var(--space-1);
+    color: var(--text-secondary);
+    font-size: var(--text-sm);
+  }
+
+  .recipe-book-search__field {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-height: 44px;
+    padding-inline: var(--space-3);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-lg);
+    background: var(--bg-secondary);
+    color: var(--text-tertiary);
+  }
+
+  .recipe-book-search__field input {
+    width: 100%;
+    min-width: 0;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--text-primary);
+    font: inherit;
+    font-size: var(--text-sm);
+  }
+
+  .recipe-book-filter-form {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-4);
+  }
+
+  .recipe-book-filter-form__field app-picker,
+  .recipe-book-filter-form__field .form-input {
+    display: block;
+    width: 100%;
+  }
+
+  .recipe-book-filter-form__field .form-input {
+    box-sizing: border-box;
+    min-height: 44px;
+  }
+
+  .recipe-book-filter-form__actions {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-2);
+    padding-top: var(--space-2);
+    border-top: 1px solid var(--border-default);
+  }
+
+  .recipe-book-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-3);
+    margin-top: var(--space-6);
+  }
+
+  .recipe-book-pagination > span {
+    color: var(--text-secondary);
+    font-size: var(--text-sm);
+  }
+
+  .recipe-card__open {
+    display: block;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .recipe-card__image img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .recipe-card__cover-fallback {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    color: var(--text-tertiary);
+  }
+
+  .recipe-card__origin {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    margin-bottom: var(--space-3);
+    color: var(--text-secondary);
+    font-size: var(--text-xs);
+  }
+
+  .recipe-card__origin > span + span::before {
+    content: '· ';
+    color: var(--text-tertiary);
+  }
+
+  .recipe-detail__cover {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    aspect-ratio: 16 / 7;
+    margin-bottom: var(--space-4);
+    overflow: hidden;
+    background: var(--bg-tertiary);
+  }
+
+  .recipe-detail__cover img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .recipe-detail__source {
+    margin-bottom: var(--space-6);
+    padding-top: var(--space-4);
+    border-top: 1px solid var(--border-default);
+    overflow-wrap: anywhere;
+  }
+
+  .recipe-detail__source h3 {
+    margin-bottom: var(--space-2);
+    font-size: var(--text-base);
+  }
+
+  .recipe-detail__source p {
+    margin-bottom: var(--space-2);
+    color: var(--text-secondary);
+    font-size: var(--text-sm);
+  }
+
+  .recipe-detail__source a {
+    display: inline-block;
+    margin-top: var(--space-1);
+    color: var(--primary-dark);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+}
+
+@media (max-width: 480px) {
+  app-recipes .recipes__actions,
+  app-recipes .recipes__book-controls {
+    width: 100%;
+  }
+
+  app-recipes .recipe-book-filter-form {
+    grid-template-columns: 1fr;
+  }
+
+  app-recipes .recipe-book-filter-form__actions {
+    position: sticky;
+    bottom: 0;
+    background: var(--bg-secondary);
+  }
+}
+
+/* Mirror the approved editor rhythm: tools, breathing space, broad drawing surface, tools. */
+@media (max-width: 767px) {
+  .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-review, .plan-setup)) {
+    margin-top: 14px;
+  }
+
+  .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-review, .plan-setup))
+    > .plan-editor__toolbar {
+    margin-top: 19px;
+  }
+
+  .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-review, .plan-setup))
+    .plan-canvas-column {
+    margin-top: 22px;
+  }
+
+  .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-review, .plan-setup))
+    .plan-canvas__viewport {
+    width: calc(100% + 20px);
+    max-width: none;
+    height: min(33vh, 310px);
+    min-height: 260px;
+    margin-inline: -10px;
+    border-right: 0;
+    border-left: 0;
+    border-radius: 0;
+  }
+}

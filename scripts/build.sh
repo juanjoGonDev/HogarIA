@@ -1,5 +1,5 @@
 #!/bin/bash
-# RecipeApp Build Script
+# HogarIA Build Script
 
 set -e
 
@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="$(dirname "$SCRIPT_DIR")"
 
 echo "╔═══════════════════════════════════════════════════════════════╗"
-echo "║                    RecipeApp Builder                          ║"
+echo "║                        HogarIA Builder                        ║"
 echo "╚═══════════════════════════════════════════════════════════════╝"
 
 cd "$APP_DIR"

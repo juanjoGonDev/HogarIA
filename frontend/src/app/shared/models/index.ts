@@ -23,10 +23,7 @@ export {
   Utensil,
   UtensilCategory,
   PantryFilter,
-  PantryStats,
-  INGREDIENT_CATEGORY_LABELS,
-  STORAGE_LOCATION_LABELS,
-  UTENSIL_CATEGORY_LABELS
+  PantryStats
 } from './pantry.model';
 
 export type { MeasurementUnit } from './pantry.model';
@@ -43,12 +40,7 @@ export {
   PortionSize,
   Allergy,
   AllergySeverity,
-  MEMBER_ROLE_LABELS,
-  COOKING_LEVEL_LABELS,
-  DIET_TYPE_LABELS,
-  SPICE_TOLERANCE_LABELS,
-  PORTION_SIZE_LABELS,
-  ALLERGY_SEVERITY_LABELS
+  COOKING_LEVEL_LABEL_KEYS
 } from './household.model';
 
 // Calendar model
@@ -63,8 +55,6 @@ export {
   GoalType,
   CustomGoal,
   GoalFrequency,
-  DAY_OF_WEEK_LABELS,
-  MEAL_TYPE_LABELS,
   GOAL_TYPE_LABELS,
   DAY_ORDER,
   MEAL_ORDER
@@ -84,7 +74,9 @@ export {
   AIUtensil,
   AIRecipeResponse,
   AIRecipeIngredient,
+  AIRecipeGuidance,
   AIRecipeStep,
+  AIRecipeInstructionsByLevel,
   AINutritionInfo,
   AIStorageInfo,
   AIWeeklyPlanRequest,
@@ -93,8 +85,6 @@ export {
   AIRecommendationRequest,
   AIRecentMeal,
   AITestConnectionResponse,
-  AI_PROVIDER_LABELS,
-  DETAIL_LEVEL_LABELS,
   DetailLevel
 } from './ai-config.model';
 
@@ -108,8 +98,22 @@ export {
   AuthCredentials,
   RegisterData,
   AuthResponse,
-  TokenPayload,
-  THEME_LABELS
+  TokenPayload
 } from './user.model';
 
 export type { CookingLevel as UserCookingLevel } from './user.model';
+
+// Home profile model (nivel de cocina + secciones que se quieren usar)
+export {
+  COOKING_LEVEL_OPTIONS,
+  DEFAULT_HOME_PROFILE,
+  HOME_MODULE_OPTIONS,
+  HOME_MODULES,
+  detailLevelHintKey,
+  isCookingLevel,
+  isHomeModule,
+  toHomeProfile,
+  toggleHomeModule,
+  cookingLevelWord
+} from './home-profile';
+export type { HomeModule, HomeProfile } from './home-profile';

@@ -1,7 +1,9 @@
 import { z } from 'zod';
+import { formDefault, formField } from './form.js';
+import { COOKING_LEVELS } from '../utils/taste-profile.js';
 
 const memberRoleEnum = z.enum(['admin', 'member', 'child']);
-const cookingLevelEnum = z.enum(['beginner', 'intermediate', 'expert']);
+const cookingLevelEnum = z.enum(COOKING_LEVELS);
 const dietTypeEnum = z.enum(['omnivore', 'vegetarian', 'vegan', 'pescatarian', 'keto', 'paleo']);
 const spiceToleranceEnum = z.enum(['low', 'medium', 'high']);
 const portionSizeEnum = z.enum(['small', 'medium', 'large']);
@@ -9,26 +11,26 @@ const allergySeverityEnum = z.enum(['mild', 'moderate', 'severe']);
 
 const allergySchema = z.object({
   name: z.string().min(1).max(100),
-  severity: allergySeverityEnum.default('moderate'),
-  notes: z.string().max(200).optional().nullable()
+  severity: formDefault(allergySeverityEnum, 'moderate'),
+  notes: formField(z.string().max(200))
 });
 
 const foodPreferencesSchema = z.object({
-  dietType: dietTypeEnum.default('omnivore'),
-  cuisinePreferences: z.array(z.string()).optional().default([]),
-  spiceTolerance: spiceToleranceEnum.default('medium'),
-  portionSize: portionSizeEnum.default('medium')
+  dietType: formDefault(dietTypeEnum, 'omnivore'),
+  cuisinePreferences: formDefault(z.array(z.string()), []),
+  spiceTolerance: formDefault(spiceToleranceEnum, 'medium'),
+  portionSize: formDefault(portionSizeEnum, 'medium')
 });
 
 // Household schemas
 export const createHouseholdSchema = z.object({
   name: z.string().min(1, 'Name is required').max(100),
-  sharedPantry: z.boolean().default(true)
+  sharedPantry: formDefault(z.boolean(), true)
 });
 
 export const updateHouseholdSchema = z.object({
-  name: z.string().min(1).max(100).optional(),
-  sharedPantry: z.boolean().optional()
+  name: formField(z.string().min(1).max(100)),
+  sharedPantry: formField(z.boolean())
 });
 
 export const joinHouseholdSchema = z.object({
@@ -37,11 +39,11 @@ export const joinHouseholdSchema = z.object({
 
 // Member schemas
 export const updateMemberSchema = z.object({
-  role: memberRoleEnum.optional(),
-  cookingLevel: cookingLevelEnum.optional(),
-  preferences: foodPreferencesSchema.optional(),
-  allergies: z.array(allergySchema).optional(),
-  dislikes: z.array(z.string().max(100)).optional()
+  role: formField(memberRoleEnum),
+  cookingLevel: formField(cookingLevelEnum),
+  preferences: formField(foodPreferencesSchema),
+  allergies: formField(z.array(allergySchema)),
+  dislikes: formField(z.array(z.string().max(100)))
 });
 
 export const inviteMemberSchema = z.object({

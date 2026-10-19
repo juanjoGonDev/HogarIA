@@ -1,0 +1,39 @@
+rc: ./.lefthookrc
+
+pre-commit:
+  parallel: false
+  jobs:
+    - name: prettier
+      run: node scripts/format-staged-files.mjs
+      glob:
+        - '*.{ts,json,md,yml,yaml}'
+      exclude:
+        - pnpm-lock.yaml
+      stage_fixed: true
+
+    - name: ui-quality
+      run: pnpm run check:ui
+
+pre-push:
+  parallel: false
+  jobs:
+    - name: format-check
+      run: node scripts/check-push-format.mjs
+      glob:
+        - '*.{ts,json,md,yml,yaml}'
+      exclude:
+        - pnpm-lock.yaml
+
+    - name: ui-quality
+      run: pnpm run check:ui
+
+    - name: build
+      run: pnpm run build
+
+    - name: e2e-typecheck
+      run: pnpm run typecheck:e2e
+
+    - name: unit-tests
+      env:
+        DATABASE_PATH: ':memory:'
+      run: pnpm run test

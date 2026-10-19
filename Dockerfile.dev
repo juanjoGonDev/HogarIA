@@ -1,5 +1,5 @@
 # =============================================================================
-# Dockerfile.dev - MiCocinAI Development Environment
+# Dockerfile.dev - HogarIA Development Environment
 # =============================================================================
 # Multi-stage Dockerfile for development
 

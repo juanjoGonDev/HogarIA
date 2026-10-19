@@ -4,33 +4,36 @@ import jwt from 'jsonwebtoken';
 import { nanoid } from 'nanoid';
 import { config } from '../config/app.config.js';
 import { getDatabase } from '../config/database.js';
+import { readForm } from '../utils/form-body.js';
 import { authMiddleware } from '../middleware/auth.middleware.js';
 import {
   loginSchema,
   registerSchema,
   refreshTokenSchema,
-  forgotPasswordSchema,
   resetPasswordSchema,
   changePasswordSchema,
   updateProfileSchema
 } from '../schemas/auth.schema.js';
+import { forgotPasswordRoutes } from './forgot-password.routes.js';
+import { deleteUpload, parseImageDataUrl, MAX_AVATAR_BYTES, storeImage } from '../utils/uploads.js';
+import { avatarImageSchema } from '../schemas/auth.schema.js';
 import type { AppEnv } from '../types/hono-env.js';
+import { seedDefaultsForUser } from '../utils/seed-data.js';
+import { readTasteResponse, saveTasteProfile, updateTasteSchema } from '../utils/taste-profile.js';
 
 const authRoutes = new Hono<AppEnv>();
 
 // Helper to generate tokens
 function generateTokens(userId: string, email: string) {
-  const token = jwt.sign(
-    { sub: userId, email },
-    config.auth.jwtSecret,
-    { expiresIn: config.auth.jwtExpiresIn }
-  );
+  // Cast explícito: los tipos de jsonwebtoken exigen `number | StringValue`,
+  // mientras que la configuración tipa las duraciones como `string`.
+  const token = jwt.sign({ sub: userId, email }, config.auth.jwtSecret, {
+    expiresIn: config.auth.jwtExpiresIn as jwt.SignOptions['expiresIn']
+  });
 
-  const refreshToken = jwt.sign(
-    { sub: userId, type: 'refresh' },
-    config.auth.jwtSecret,
-    { expiresIn: config.auth.refreshTokenExpiresIn }
-  );
+  const refreshToken = jwt.sign({ sub: userId, type: 'refresh' }, config.auth.jwtSecret, {
+    expiresIn: config.auth.refreshTokenExpiresIn as jwt.SignOptions['expiresIn']
+  });
 
   return { token, refreshToken };
 }
@@ -47,7 +50,7 @@ function sanitizeUser(raw: any) {
     cookingLevel: u.cooking_level ?? 'beginner',
     preferences: u.preferences ? JSON.parse(u.preferences) : {},
     createdAt: u.created_at,
-    updatedAt: u.updated_at,
+    updatedAt: u.updated_at
   };
 }
 
@@ -61,10 +64,13 @@ authRoutes.post('/register', async (c) => {
   // Check if user exists
   const existingUser = db.prepare('SELECT id FROM users WHERE email = ?').get(input.email);
   if (existingUser) {
-    return c.json({
-      success: false,
-      message: 'Email already registered'
-    }, 409);
+    return c.json(
+      {
+        success: false,
+        message: 'Email already registered'
+      },
+      409
+    );
   }
 
   // Hash password
@@ -72,10 +78,12 @@ authRoutes.post('/register', async (c) => {
 
   // Create user
   const userId = nanoid();
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO users (id, email, name, password_hash, cooking_level, preferences)
     VALUES (?, ?, ?, ?, ?, ?)
-  `).run(
+  `
+  ).run(
     userId,
     input.email,
     input.name,
@@ -84,17 +92,30 @@ authRoutes.post('/register', async (c) => {
     JSON.stringify({ theme: 'system', language: 'es', detailLevel: 'intermediate' })
   );
 
+  // Catálogo de partida (utensilios que marcar + ingredientes de sugerencia).
+  // Al principio solo existía dentro de un hogar, así que una cuenta sin hogar
+  // se encontraba las dos pestañas de la despensa vacías. Si el alta del seed
+  // falla, el usuario se registra igual: no es condición de registro.
+  try {
+    seedDefaultsForUser(db, userId);
+  } catch (err) {
+    console.warn('[DB] No se pudo sembrar el catálogo personal:', err);
+  }
+
   // Get created user
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
   const tokens = generateTokens(userId, input.email);
 
-  return c.json({
-    success: true,
-    data: {
-      user: sanitizeUser(user),
-      ...tokens
-    }
-  }, 201);
+  return c.json(
+    {
+      success: true,
+      data: {
+        user: sanitizeUser(user),
+        ...tokens
+      }
+    },
+    201
+  );
 });
 
 // POST /api/auth/login
@@ -107,19 +128,25 @@ authRoutes.post('/login', async (c) => {
   // Find user
   const user = db.prepare('SELECT * FROM users WHERE email = ?').get(input.email) as any;
   if (!user) {
-    return c.json({
-      success: false,
-      message: 'Invalid email or password'
-    }, 401);
+    return c.json(
+      {
+        success: false,
+        message: 'Invalid email or password'
+      },
+      401
+    );
   }
 
   // Verify password
   const isValidPassword = await bcrypt.compare(input.password, user.password_hash);
   if (!isValidPassword) {
-    return c.json({
-      success: false,
-      message: 'Invalid email or password'
-    }, 401);
+    return c.json(
+      {
+        success: false,
+        message: 'Invalid email or password'
+      },
+      401
+    );
   }
 
   // Generate tokens
@@ -163,27 +190,18 @@ authRoutes.post('/refresh', async (c) => {
       }
     });
   } catch (error) {
-    return c.json({
-      success: false,
-      message: 'Invalid refresh token'
-    }, 401);
+    return c.json(
+      {
+        success: false,
+        message: 'Invalid refresh token'
+      },
+      401
+    );
   }
 });
 
 // POST /api/auth/forgot-password
-authRoutes.post('/forgot-password', async (c) => {
-  const body = await c.req.json();
-  const input = forgotPasswordSchema.parse(body);
-
-  const db = getDatabase();
-  db.prepare('SELECT id FROM users WHERE email = ?').get(input.email);
-
-  // Always return success to prevent email enumeration
-  return c.json({
-    success: true,
-    message: 'If the email exists, a reset link has been sent'
-  });
-});
+authRoutes.route('/', forgotPasswordRoutes);
 
 // POST /api/auth/reset-password
 authRoutes.post('/reset-password', async (c) => {
@@ -200,18 +218,22 @@ authRoutes.post('/reset-password', async (c) => {
     const db = getDatabase();
     const passwordHash = await bcrypt.hash(input.newPassword, config.auth.bcryptRounds);
 
-    db.prepare('UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-      .run(passwordHash, payload.sub);
+    db.prepare(
+      'UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+    ).run(passwordHash, payload.sub);
 
     return c.json({
       success: true,
       message: 'Password reset successfully'
     });
   } catch (error) {
-    return c.json({
-      success: false,
-      message: 'Invalid or expired reset token'
-    }, 400);
+    return c.json(
+      {
+        success: false,
+        message: 'Invalid or expired reset token'
+      },
+      400
+    );
   }
 });
 
@@ -226,15 +248,20 @@ authRoutes.post('/change-password', authMiddleware, async (c) => {
 
   const isValidPassword = await bcrypt.compare(input.oldPassword, user.password_hash);
   if (!isValidPassword) {
-    return c.json({
-      success: false,
-      message: 'Current password is incorrect'
-    }, 400);
+    return c.json(
+      {
+        success: false,
+        message: 'Current password is incorrect'
+      },
+      400
+    );
   }
 
   const passwordHash = await bcrypt.hash(input.newPassword, config.auth.bcryptRounds);
-  db.prepare('UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-    .run(passwordHash, userId);
+  db.prepare('UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(
+    passwordHash,
+    userId
+  );
 
   return c.json({
     success: true,
@@ -243,6 +270,82 @@ authRoutes.post('/change-password', authMiddleware, async (c) => {
 });
 
 // GET /api/auth/profile (protected)
+/**
+ * La foto de la cuenta. Escribe un fichero y guarda SU RUTA en `users.avatar`; el base64 no
+ * entra en la base de datos ni en el JSON de nadie (ver `utils/uploads.ts`). Se sirve sin token
+ * porque un `img` no puede mandar cabeceras: quien conoce la URL, ve la foto.
+ */
+authRoutes.post('/avatar', authMiddleware, async (c) => {
+  const userId = c.get('userId') as string;
+  const parsed = avatarImageSchema.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) {
+    return c.json(
+      {
+        success: false,
+        message: 'INVALID_IMAGE',
+        data: { issues: parsed.error.issues.slice(0, 3) }
+      },
+      400
+    );
+  }
+  const image = parseImageDataUrl(parsed.data.image);
+  if (!image) {
+    return c.json(
+      {
+        success: false,
+        message: 'UNSUPPORTED_IMAGE',
+        data: { allowed: ['image/jpeg', 'image/png', 'image/webp'] }
+      },
+      415
+    );
+  }
+  if (image.buffer.byteLength > MAX_AVATAR_BYTES) {
+    return c.json(
+      { success: false, message: 'IMAGE_TOO_LARGE', data: { maxBytes: MAX_AVATAR_BYTES } },
+      413
+    );
+  }
+
+  const db = getDatabase();
+  const previous = db.prepare('SELECT avatar FROM users WHERE id = ?').get(userId) as
+    { avatar: string | null } | undefined;
+  let avatar: string;
+  try {
+    avatar = storeImage('avatars', userId, image);
+  } catch (error) {
+    // Si no se puede escribir, NO se guarda la URL: una fila apuntando a la nada es un 404
+    // de por vida, y es justo lo que esta prueba evita.
+    console.error('[auth] avatar no guardado:', error instanceof Error ? error.message : error);
+    return c.json(
+      {
+        success: false,
+        message: 'UPLOAD_WRITE_FAILED',
+        data: { detail: error instanceof Error ? error.message : '' }
+      },
+      500
+    );
+  }
+  db.prepare(`UPDATE users SET avatar = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(
+    avatar,
+    userId
+  );
+  deleteUpload(previous?.avatar);
+  return c.json({ success: true, data: { avatar } });
+});
+
+// Quitar la foto: vuelve a la inicial con color, que es lo que la mayoria vera siempre.
+authRoutes.delete('/avatar', authMiddleware, async (c) => {
+  const userId = c.get('userId') as string;
+  const db = getDatabase();
+  const current = db.prepare('SELECT avatar FROM users WHERE id = ?').get(userId) as
+    { avatar: string | null } | undefined;
+  db.prepare(`UPDATE users SET avatar = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(
+    userId
+  );
+  deleteUpload(current?.avatar);
+  return c.json({ success: true, data: { avatar: null } });
+});
+
 authRoutes.get('/profile', authMiddleware, async (c) => {
   const userId = c.get('userId');
   const db = getDatabase();
@@ -250,16 +353,46 @@ authRoutes.get('/profile', authMiddleware, async (c) => {
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
 
   if (!user) {
-    return c.json({
-      success: false,
-      message: 'User not found'
-    }, 404);
+    return c.json(
+      {
+        success: false,
+        message: 'User not found'
+      },
+      404
+    );
   }
 
   return c.json({
     success: true,
     data: sanitizeUser(user)
   });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Perfil de gustos / alergias / objetivo (onboarding + Ajustes)
+// ═══════════════════════════════════════════════════════════════════
+
+// GET /api/auth/taste — lo que contestó en el onboarding
+authRoutes.get('/taste', authMiddleware, async (c) => {
+  const userId = c.get('userId');
+  const db = getDatabase();
+
+  return c.json({ success: true, data: readTasteResponse(db, userId) });
+});
+
+// PATCH /api/auth/taste — guarda el perfil (y el estado del onboarding)
+// Se fusiona sobre `users.preferences`, así que Ajustes y onboarding no se
+// pisan entre sí ni borran tema/idioma al guardar.
+authRoutes.patch('/taste', authMiddleware, async (c) => {
+  const userId = c.get('userId');
+  const parsed = await readForm(c, updateTasteSchema, 'Perfil');
+  if (!parsed.ok) return parsed.response;
+  const input = parsed.data;
+
+  const db = getDatabase();
+  const saved = saveTasteProfile(db, userId, input);
+
+  return c.json({ success: true, data: saved });
 });
 
 // PATCH /api/auth/profile (protected)

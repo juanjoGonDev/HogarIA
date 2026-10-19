@@ -1,10 +1,10 @@
-# 🚀 Cómo Ejecutar MiCocinAI
+# 🚀 Cómo Ejecutar HogarIA
 
 ## Instalación Rápida
 
 ```bash
 # 1. Entrar al directorio
-cd recipeapp
+cd MiCocinAI            # el repo; el producto se llama HogarIA
 
 # 2. Ejecutar setup (instala dependencias, configura entorno)
 ./setup.sh
@@ -78,6 +78,31 @@ make build
 
 # Ejecutar
 make start
+```
+
+### La suite de stack completo (la que pilla lo que las otras no ven)
+
+`npm run dev` levanta dos servidores y **apaga el limitador de peticiones**: es la
+configuracion correcta para 381 tests que comparten IP, y tambien la razon por la que el
+«Demasiadas solicitudes» que bloqueaba toda la casa —navegacion y visor de logs— nunca se
+vio en CI. Hay un segundo trabajo que si lo ejercita: compila el frontend, arranca **un
+unico proceso node** (el mismo `CMD` del contenedor, que ahora sirve API *y* web) con el
+limitador encendido, y comprueba el presupuesto de peticiones, el SSE del visor de logs y
+el contrato del 429.
+
+```bash
+pnpm run build                      # server/dist + frontend/dist/browser
+npx playwright test -c playwright.full-stack.config.ts
+# o, haciendo las dos cosas:
+pnpm run test:e2e:full-stack
+```
+
+Se puede puntear a mano igual que lo hace el job:
+
+```bash
+PORT=3100 NODE_ENV=production node server/dist/index.js
+curl -N localhost:3100/api/logs/stream     # ": connected" y lineas en vivo
+curl -i localhost:3100/shopping/una-lista  # index.html, no un 404
 ```
 
 ## Testing & Quality

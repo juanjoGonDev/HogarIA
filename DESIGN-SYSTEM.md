@@ -1,4 +1,4 @@
-# 🎨 Sistema de Diseño - RecipeApp
+# 🎨 Sistema de Diseño - HogarIA
 
 ## Filosofía de Diseño
 
@@ -636,6 +636,32 @@
 }
 ```
 
+#### Estados de interacción: no son un detalle, son la asequibilidad
+
+Un control que no cambia cuando el cursor pasa por encima no se distingue de un texto, y eso no lo decide
+el gusto de nadie: lo decide que el ratón ya está ahí. Los tres estados de la tabla son obligatorios en
+toda la app y los vigila `node scripts/check-ui.mjs` (regla `boton-sin-afecto`):
+
+| Estado | Qué se escribe | Para qué |
+| --- | --- | --- |
+| `:hover` | `background`, `border-color` o `color` —una o dos, nunca un `transform` suelto— | «esto se puede pulsar», antes de pulsarlo |
+| `:focus-visible` | lo pone el anillo global de `styles.scss`; solo se declara si el control lo personaliza | teclado sin ratón |
+| `:disabled` | la opacidad la pone el componente; `cursor: not-allowed` lo pone el global | «aquí no, y hay una razón» |
+
+Tres notas que salen de haberlo hecho mal:
+
+- **El hover no se pone en los deshabilitados.** Un botón apagado que se ilumina al pasar por encima enseña
+  en dos segundos a desconfiar de la pantalla entera. Se escribe `:hover:not(:disabled)`.
+- **Los `<a>` no necesitan regla propia** —`styles.scss` ya la pone—, pero los `<button>` con clase sí: el
+  reset global (`border: none; background: none`) existe para que `app-button` se pinte solo, y arrastra el
+  efecto de que un botón con una clase tímida se vea como texto. El botón *sin* clase recibe un skin global
+  (`button:not([class])`), así que lo que queda sin respuesta es siempre una decisión del CSS de la pantalla.
+- **Un `label` con su `input` dentro es un control**, y el cursor lo dice: `label:has(input)` ya pone
+  `pointer` en el global. No se repite por componente.
+
+Y la parte que no es de CSS: si algo se pulsa, tiene que parecer pulsable. Un icono suelto sin `padding` y
+sin `border-radius` es decoración, aunque tenga `cursor: pointer`.
+
 ### Inputs
 
 ```scss
@@ -720,6 +746,23 @@
   }
 }
 ```
+
+#### Vaciar un campo no es dejarlo «en blanco»
+
+Dos cosas se parecen en la pantalla y no se parecen en el modelo: **no hay valor** y **usa el valor de
+siempre**. La segunda no se describe por su aspecto —«en blanco: 09:00» no dice lo que hace el campo—, sino
+por un botón que la ejecuta: **«Por defecto»**.
+
+- En la API, `null` en el `PATCH` significa borrar la preferencia (vuelve el valor de fábrica) y la clave
+  ausente significa no tocarla. Clave a clave, además: cambiar la cena no borra el desayuno.
+- El campo del formulario se pinta siempre con un valor resuelto, nunca con un hueco: si no hay nada
+  guardado se ve `09:00`, y ese es el valor que se guarda si no se toca.
+- «Por defecto» solo aparece en la fila que se ha tocado. En la que ya vale lo de siempre no hay nada que
+  deshacer, y un botón que no hace nada es ruido —ver `app-meal-hours`, que es el mismo control en el tour y
+  en Preferencias.
+
+`check-ui` (regla `texto-sin-en-blanco`) no deja escribir «en blanco» en una cadena visible: un comentario
+de código puede hablar del lienzo; una pantalla, no.
 
 ### Cards
 
@@ -1547,6 +1590,99 @@ export class ThemeService {
 
 ---
 
+## 🌐 Idioma y textos (i18n)
+
+**Ningún texto de la interfaz se escribe en el componente.** Lo que la app dice sale de
+`frontend/src/app/core/i18n/dict/<dominio>.ts`, un fichero por pantalla, y se pide con la pipe `| t` en la
+plantilla o con `i18n.t(clave)` en el código. El motivo es de lo más prosaico: al cambiar a inglés quedaban
+etiquetas, placeholders y `title` en español repartidos por 29 pantallas, y ningún compilador se queja de eso.
+
+### Cómo se pide un texto
+
+| Caso | Se escribe | No se escribe |
+|---|---|---|
+| Texto fijo | `{{ 'nav.recipes' \| t }}` | `>Recetas<` |
+| Con un dato dentro | `{{ 'recipes.porciones' \| t:{n: recipe.servings} }}` con `'👥 {n} porciones'` | `👥 {{ n }} porciones` |
+| Un plural | `i18n.plural(n, 'dom.uno', 'dom.varios', { count: n })`, con las dos claves en el diccionario | `{{ n !== 1 ? 's' : '' }}`, o pegar el número y la palabra en la plantilla |
+| Tiempo relativo | `i18n.relativeTime(iso)`, que compone sobre las partes de `relativeTimeParts` (`core/time.ts`) | un `formatRelative()` que devuelva «hace 3 d» |
+| Etiqueta de un catálogo | `labelKey: TranslationKey` en el modelo y `\| t` al pintar | `label: 'Desayuno'` en un `readonly` de la clase, o `admin: 'Administrador'` en un `Record` |
+| Valor de fábrica de un `@Input` | Input sin valor + getter con `t()` | `@Input() label = 'Unidad o formato'` |
+| Un atributo de presentación | `[searchPlaceholder]="'dom.clave' \| t"` —el nombre no importa: **cualquier** atributo acabado en `label`, `title`, `message`, `hint`, `placeholder`, `text`, `subtitle`, `description`, `question`, `tooltip` o `alt` es texto | `customPlaceholder="Otra alergia"`, `data-label="Tienda"` (esto lo pinta el CSS con `content: attr()`, así que se ve) |
+| Lo que devuelve un `*Label` | `cookingLevelWord(level, (k) => this.i18n.t(k))` —texto ya resuelto | `return COOKING_LEVEL_LABEL_KEYS[level]`, que devuelve la clave y el `{{ }}` la pinta |
+
+Reglas que se siguen de ahí, y que no son estilo sino física del framework:
+
+- **Un texto que se guarda en un campo de clase se congela en el idioma en el que se creó el componente.** La
+  pipe `t` es impura a propósito: se re-evalúa al cambiar de idioma. Por eso se resuelve al renderizar (getter
+  o template) y nunca al construir.
+- **Dentro del objeto de parámetros no puede haber otra pipe** (`t:{name: x || ('k' | t)}` no compila). Si un
+  texto necesita a otro dentro, sale un getter al `.ts`.
+- **Una frase, una clave.** Antes de acuñar, el extractor busca el texto en todos los dominios; `common.*` y
+  `ui.*` ganan. `scripts/i18n-merge-dupes.mjs` vuelve a juntar lo que se duplicó.
+- **Un módulo sin inyección no tiene idioma, así que no lo inventa.** Los helpers puros (`core/avatar-image.ts`,
+  `core/onboarding-steps.ts`, `features/account/account-info.ts`, `shared/models/*`) devuelven **clave**
+  (`TranslationKey`, a veces con `params`), nunca la frase: quien la traduce es la pantalla, que es donde vive
+  `i18n`. Un `return 'Nada pendiente de enviar'` en un módulo puro se pinta en castellano con la app en inglés.
+- **Lo que formatea `Intl` también sigue el idioma.** El locale de formato vive en `core/time.ts`
+  (`dateLocale()`) y lo fija el `I18nService` (`en` → `en-GB`, lo demás → `es-ES`) en su `effect` y en
+  `languagechange`. Nada de `'es-ES'` literal dentro de un componente: separadores de miles, días de la semana
+  y «septiembre de 2026» salen de ahí, y los memoizadores guardan el idioma dentro de la clave de caché.
+- **Un catálogo pinta lo que lleva dentro.** `tabs = [{ label: 'Activas' }]` con `{{ tab.label }}` es una
+  pantalla que no cambia nunca de idioma, y cambia de golpe en todas las que comparten el catálogo. La lista de
+  opciones lleva la **clave**; quien no pueda aplicar la pipe (un `PickerOption[]`, el `aria-label` de una
+  sección) resuelve `this.i18n.t(clave)` una vez dentro de un `computed`. Cuando el catálogo ya estaba escrito
+  como dato (los alérgenos y gustos del perfil, las categorías de la compra), el dato no se toca y se traduce
+  en el punto de pintura con un mapa valor → clave —`tasteLabelKey`, `listCategoryLabelKey` en
+  `core/i18n/labels.ts`—; lo que no está en el catálogo se pinta tal cual, porque es texto escrito por la
+  persona y la pantalla no tiene derecho a corregirlo.
+- **Traducible es lo que la app dice, no lo que la casa guarda.** Los nombres que **escribió una persona**
+  (alimentos propios, categorías de la cesta, alérgenos, el nombre de una receta, las líneas de un ticket
+  fotografiado) se muestran tal cual: traducirlos haría que la pantalla mintiera sobre la base de datos. Lo
+  mismo aplica a lo que entiende el planificador: esas cadenas viven en el server (`MEAL_TYPE_LABELS`) y la app
+  las enseña con `t('meal.<tipo>')`, que en castellano dice lo mismo. Un dato que a la vez es texto de interfaz
+  se distingue por el nombre del campo —`value`/`aiLabel`, no `label`—.
+- **Lo que sembró la app no es texto de la persona: se traduce la lectura.** `server/src/utils/seed-data.ts` crea
+  la despensa (68 alimentos) y el juego de utensilios (54) con el nombre en castellano, y nadie los escribió:
+  dejarlos crudos no es respetar su texto, es enseñarle su propio semillero. Se resuelve en el punto de pintura
+  con `catalogLabelKey` / la pipe `catalog` (`shared/pipes/catalog-label.pipe.ts`), igual que gustos y
+  categorías, y la regla tiene tres tramos que no se pueden mezclar:
+  **lectura** de una palabra del catálogo → etiqueta traducida si está en el catálogo, crudo si no lo está;
+  **campo editable** (el input donde se escribe, el selector de unidades que guarda el dato) → el dato tal cual,
+  porque traducir lo que se edita es reescribir la base de datos con un golpe de idioma; **texto de una persona o
+  de la IA** → crudo siempre, aunque se parezca a una palabra del catálogo.
+- **Un tipo del cliente que describe otras cosas que el contrato del server es un bug silencioso.**
+  `ListEventAction` llevaba nueve acciones inventadas (`items.add`, `list.rename`, `list.clear_checked`…) que el
+  server nunca mandó, y nadie las usaba mal porque nadie las podía usar: el historial se componía en el server y
+  se pintaba `description`. Cuando un dato puede traducirse de dos formas —frase del server o clave del
+  diccionario— hay que mirar cuál es la fuente. Los `*.spec.ts` espejos en `server/src/utils/`
+  (`shopping-list-event-i18n`, `pantry-catalog-i18n`, `meal-times-mirror`) son la forma de que no se vuelva a
+  desincronizar: leen el fuente del server y el del cliente y comparan, y fallan en CI.
+- **Antes de traducir un atributo, comprobar que existe.** `app-picker` no declara `emptyText`, y durante
+  media app había tres `emptyText="…"` que Angular trataba como atributo de DOM corriente: no se pintaban,
+  no fallaban y la regla los veía como texto. Un literal que no llega a la pantalla se borra, con su clave
+  huérfana fuera del diccionario (HOGARIA-SPEC ## 12v).
+
+### Quién lo vigila
+
+`scripts/check-ui.mjs`, reglas 14 (`texto-sin-traducir`: también los nodos de texto que pegan a una `{{ }}`, y
+**cualquier** atributo acabado en `label`/`title`/`message`/`hint`/`placeholder`/`text`/`subtitle`/`description`
+/`question`/`tooltip`/`alt` —desde la tanda 23 por sufijo y no por lista, que `customPlaceholder` y
+`data-label` no estaban en la lista y se veían en castellano—), 15 (`clave-sin-traduccion`: la clave existe en `es`
+**y** en `en`, y se usa en algún sitio), 16 (`pipe-sin-importar`), 17 (`data-test-huerfano`), 18
+(`prosa-en-un-sink`: literal con pinta de frase que acaba en `toast.*`, `*Error.set`, `note`, `title` o un
+`return`, dentro o fuera de `t()` —incluidos el `cond ? 'prosa' : 'prosa'` y las variables `t(clave)`— y 19
+(`texto-en-un-catalogo`: el campo de presentación con la frase escrita, el getter que devuelve la frase en vez de
+la clave y el `Record<clave, etiqueta>`) y 20 (`clave-pintada-desnuda`: una clave del
+diccionario que llega cruda a un `{{ }}`, o un `*Label` que devuelve la clave en vez del texto). Además el tipo:
+`TranslationKey` es la unión de claves reales, así que una errata en una plantilla es error de compilación con
+`strictTemplates`. Contrato y deudas en `HOGARIA-SPEC.md` §12s, §12u, §12v y §12w.
+
+- [ ] **Pendiente**: los pictogramas dentro de las claves (`📦 Despensa`, `⏱️ {n}min`) están perdonados por
+      `sin-emoji` en cinco diccionarios. Decidir si son decoración (se quitan) o información (pasan a
+      `app-icon`) es una tanda con sus capturas, no un retoque.
+
+---
+
 ## ✅ Checklist de Implementación UI
 
 ### Componentes Base
@@ -1598,5 +1734,7 @@ export class ThemeService {
 
 ---
 
-**Última actualización:** 2026-09-13  
-**Versión:** 1.0.0
+**Última actualización:** 2026-09-21  
+**Versión:** 1.1.0  
+**Qué cambió:** la sección de idioma y textos (tanda 20): todo texto de la interfaz sale del diccionario, y
+hay cuatro reglas de `check-ui` que lo exigen.

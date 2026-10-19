@@ -1,0 +1,150 @@
+name: Publish GHCR image
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-ghcr-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish and smoke multi-architecture image
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Resolve lowercase GHCR image name
+        id: image
+        shell: bash
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish image
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ steps.image.outputs.name }}:${{ github.sha }}
+            ${{ steps.image.outputs.name }}:latest
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=release-container
+          cache-to: type=gha,mode=max,scope=release-container,ignore-error=true
+
+      - name: Verify published tags and platform manifest
+        shell: bash
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+          EXPECTED_DIGEST: ${{ steps.build.outputs.digest }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          for tag in "$GITHUB_SHA" latest; do
+            actual_digest="$(docker buildx imagetools inspect "$IMAGE:$tag" | awk '$1 == "Digest:" { print $2; exit }')"
+            if [[ "$actual_digest" != "$EXPECTED_DIGEST" ]]; then
+              echo "GHCR tag $tag resolves to an unexpected digest" >&2
+              exit 1
+            fi
+            docker buildx imagetools inspect --raw "$IMAGE:$tag" | node scripts/check-image-platforms.mjs
+          done
+
+      - name: Pull and smoke published amd64 image
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          docker pull --platform linux/amd64 "$IMAGE:$GITHUB_SHA"
+          docker run --detach --platform linux/amd64 --name hogaria-ghcr-amd64 \
+            --publish 127.0.0.1:3000:3000 \
+            --tmpfs /app/data:rw,nosuid,nodev,size=64m \
+            --env NODE_ENV=production \
+            --env DATABASE_PATH=/app/data/hogaria.sqlite \
+            --env JWT_SECRET="$(openssl rand -hex 32)" \
+            "$IMAGE:$GITHUB_SHA"
+          node scripts/container-smoke.mjs http://127.0.0.1:3000
+          for attempt in $(seq 1 40); do
+            status="$(docker inspect --format='{{.State.Health.Status}}' hogaria-ghcr-amd64 2>/dev/null || true)"
+            if [[ "$status" == "healthy" ]]; then break; fi
+            if [[ "$status" == "unhealthy" ]]; then
+              docker inspect --format='{{json .State.Health}}' hogaria-ghcr-amd64
+              exit 1
+            fi
+            sleep 2
+          done
+          health_status="$(docker inspect --format='{{.State.Health.Status}}' hogaria-ghcr-amd64)"
+          if [[ "$health_status" != "healthy" ]]; then
+            echo "amd64 Docker HEALTHCHECK failed after ${attempt} attempts: $health_status" >&2
+            docker inspect --format='{{json .State.Health}}' hogaria-ghcr-amd64
+            exit 1
+          fi
+          docker rm --force hogaria-ghcr-amd64
+
+      - name: Pull and smoke published arm64 image
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          docker pull --platform linux/arm64 "$IMAGE:$GITHUB_SHA"
+          docker run --detach --platform linux/arm64 --name hogaria-ghcr-arm64 \
+            --publish 127.0.0.1:3000:3000 \
+            --tmpfs /app/data:rw,nosuid,nodev,size=64m \
+            --env NODE_ENV=production \
+            --env DATABASE_PATH=/app/data/hogaria.sqlite \
+            --env JWT_SECRET="$(openssl rand -hex 32)" \
+            "$IMAGE:$GITHUB_SHA"
+          node scripts/container-smoke.mjs http://127.0.0.1:3000
+          for attempt in $(seq 1 40); do
+            status="$(docker inspect --format='{{.State.Health.Status}}' hogaria-ghcr-arm64 2>/dev/null || true)"
+            if [[ "$status" == "healthy" ]]; then break; fi
+            if [[ "$status" == "unhealthy" ]]; then
+              docker inspect --format='{{json .State.Health}}' hogaria-ghcr-arm64
+              exit 1
+            fi
+            sleep 2
+          done
+          health_status="$(docker inspect --format='{{.State.Health.Status}}' hogaria-ghcr-arm64)"
+          if [[ "$health_status" != "healthy" ]]; then
+            echo "arm64 Docker HEALTHCHECK failed after ${attempt} attempts: $health_status" >&2
+            docker inspect --format='{{json .State.Health}}' hogaria-ghcr-arm64
+            exit 1
+          fi
+          docker rm --force hogaria-ghcr-arm64
+
+      - name: Clean up temporary containers
+        if: always()
+        run: |
+          docker rm --force hogaria-ghcr-amd64 2>/dev/null || true
+          docker rm --force hogaria-ghcr-arm64 2>/dev/null || true

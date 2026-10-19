@@ -11,9 +11,15 @@ server/dist/
 # Database
 server/data/
 !server/data/.gitkeep
+# La BD de HogarIA (data/hogaria.sqlite) y la heredada que adopta
+/data/
+!/data/.gitkeep
 
 # Logs
 logs/
+# ...pero la pantalla de logs de la app SI se versiona (la regla "logs/" la
+# excluia entera por llamarse igual).
+!frontend/src/app/features/logs/
 *.log
 npm-debug.log*
 
@@ -36,6 +42,7 @@ Thumbs.db
 coverage/
 test-results/
 .e2e-screenshots/
+/.tmp/
 
 # Angular
 .angular/
@@ -58,3 +65,29 @@ pnpm-debug.log*
 
 # Docker
 docker-compose.override.yml
+
+# Playwright (informes y artefactos locales de la suite e2e)
+playwright-report/
+blob-report/
+
+# Puente de tests del sandbox (no es codigo del proyecto, no se commitea): un `vitest.config.ts`
+# temporal que deja ejecutar los specs puros del frontend con el vitest del server, porque aqui no hay
+# Chromium y `ng test` no arranca. Esta listado aqui para que el arbol siga limpio sin tener que
+# acordarse de excluirlo al hacer `git add`.
+server/tmp-frontend*
+server/.vitest/
+server/tmp-frontend.vitest.config.ts
+server/tmp-frontend-stubs/
+
+# Temporary local QA workspaces and generated reports; keep artifacts on disk but out of Git.
+/.tmp-ai-smoke-browser-*/
+/.tmp-ai-wizard-check/
+/.tmp-button-geometry-build-*/
+/.playwright-mcp/
+/.atl/
+/server/.coverage-spec-*/
+/frontend/.coverage-spec-*/
+/server/.e2e-isolation-coverage/
+/frontend/.qa-karma-*.conf.js
+/%PWROOT%/
+/m\[1\]\).join\(`

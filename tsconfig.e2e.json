@@ -1,0 +1,19 @@
+{
+  // Type-check de la suite e2e, que `playwright test` NO hace: Playwright transpila con
+  // esbuild, y un error de tipos acaba en un `undefined` en tiempo de ejecucion —un test
+  // que falla con «locator no visible» y no dice que el helper tenia la firma mal.
+  // Tres segundos en el job de Type Check, y es lo que habria avisado de que un spec
+  // preguntaba por un `data-test` que no existia en ningun fichero.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "types": ["node"]
+  },
+  "include": ["tests/e2e/**/*.ts", "playwright.config.ts", "playwright.full-stack.config.ts"]
+}

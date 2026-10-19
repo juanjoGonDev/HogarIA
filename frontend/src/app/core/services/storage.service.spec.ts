@@ -115,9 +115,18 @@ describe('StorageService', () => {
   describe('error handling', () => {
     it('should handle invalid JSON gracefully', () => {
       localStorage.setItem('recipeapp_invalid', 'not-json');
+      localStorage.setItem('hogar:v1:invalid', 'not-json');
 
       const result = service.get('invalid');
       expect(result).toBeNull();
+    });
+
+    it('should tolerate quota errors when persisting a value', () => {
+      spyOn(Storage.prototype, 'setItem').and.throwError('quota exceeded');
+      const log = spyOn(console, 'error');
+
+      expect(() => service.set('shopping.recent-units', ['kg'])).not.toThrow();
+      expect(log).toHaveBeenCalled();
     });
   });
 });

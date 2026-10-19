@@ -1,10 +1,13 @@
 import { Component, Input, Output, EventEmitter } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { TranslatePipe } from '../../../../core/pipes/translate.pipe';
+import { IconComponent } from '../icon/icon.component';
+import type { IconName } from '../icon/icon-paths';
 
 @Component({
   selector: 'app-rating',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, TranslatePipe, IconComponent],
   template: `
     <div class="rating" [class.rating--disabled]="disabled">
       <button
@@ -15,57 +18,66 @@ import { CommonModule } from '@angular/common';
         (click)="onStarClick(i)"
         (mouseenter)="onStarHover(i)"
         (mouseleave)="onStarLeave()"
-        [attr.aria-label]="'Rate ' + (i + 1) + ' stars'"
+        [attr.aria-label]="
+          i + 1 === 1 ? ('common.rating_uno' | t) : ('common.rating_varios' | t: { n: i + 1 })
+        "
       >
-        {{ getStarIcon(i) }}
+        <app-icon [name]="getStarIcon(i)" [size]="20" [label]="null" />
       </button>
       <span *ngIf="showValue" class="rating__value">{{ value.toFixed(1) }}</span>
     </div>
   `,
-  styles: [`
-    .rating {
-      display: inline-flex;
-      align-items: center;
-      gap: var(--space-1);
-    }
+  styles: [
+    `
+      .rating {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-1);
+      }
 
-    .rating--disabled {
-      pointer-events: none;
-      opacity: 0.7;
-    }
+      .rating--disabled {
+        pointer-events: none;
+        opacity: 0.7;
+      }
 
-    .rating__star {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      background: none;
-      border: none;
-      cursor: pointer;
-      font-size: var(--text-xl);
-      color: var(--border-default);
-      transition: color var(--duration-100) var(--ease-out), transform var(--duration-100) var(--ease-out);
-      padding: 0;
-    }
+      .rating__star {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background: none;
+        border: none;
+        cursor: pointer;
+        color: var(--border-default);
+        transition:
+          color var(--duration-100) var(--ease-out),
+          transform var(--duration-100) var(--ease-out);
+        padding: 0;
+      }
 
-    .rating__star:hover:not(:disabled) {
-      transform: scale(1.2);
-    }
+      .rating__star:hover:not(:disabled) {
+        transform: scale(1.2);
+      }
 
-    .rating__star--filled {
-      color: var(--color-warning-500);
-    }
+      .rating__star--filled {
+        color: var(--color-warning-500);
+      }
 
-    .rating__star--hovered {
-      color: var(--color-warning-400);
-    }
+      /* 400 no existe en la escala (va 50, 100, 500, 600, 700), y como una declaracion con un color
+       inexistente se descarta en silencio, aqui no pasaba nada: la estrella a punto de elegirse se
+       quedaba en el gris del borde. Un tono por debajo del relleno, para que «voy a pulsar aqui» se vea
+       como eso. */
+      .rating__star--hovered {
+        color: var(--color-warning-600);
+      }
 
-    .rating__value {
-      font-size: var(--text-sm);
-      font-weight: var(--font-medium);
-      color: var(--text-secondary);
-      margin-left: var(--space-1);
-    }
-  `]
+      .rating__value {
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        color: var(--text-secondary);
+        margin-left: var(--space-1);
+      }
+    `
+  ]
 })
 export class RatingComponent {
   @Input() value = 0;
@@ -108,9 +120,9 @@ export class RatingComponent {
     return classes.join(' ');
   }
 
-  getStarIcon(index: number): string {
-    if (index < this.value) return '★';
-    if (index <= this.hoveredIndex) return '★';
-    return '☆';
+  getStarIcon(index: number): IconName {
+    if (index < this.value) return 'star';
+    if (index <= this.hoveredIndex) return 'star';
+    return 'star_outline';
   }
 }

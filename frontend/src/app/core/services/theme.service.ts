@@ -1,4 +1,5 @@
 import { Injectable, signal, effect } from '@angular/core';
+import { STORAGE_KEYS } from './storage.service';
 
 export type Theme = 'light' | 'dark' | 'system';
 
@@ -6,7 +7,7 @@ export type Theme = 'light' | 'dark' | 'system';
   providedIn: 'root'
 })
 export class ThemeService {
-  private readonly THEME_KEY = 'theme';
+  private readonly THEME_KEY = STORAGE_KEYS.theme;
   private themeSignal = signal<Theme>(this.getStoredTheme());
   private isDarkSignal = signal<boolean>(false);
 

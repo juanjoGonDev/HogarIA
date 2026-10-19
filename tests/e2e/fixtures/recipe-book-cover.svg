@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 420" role="img" aria-label="Ilustración sintética de maíz">
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fff2dc" />
+      <stop offset="1" stop-color="#f6d5a3" />
+    </linearGradient>
+    <linearGradient id="cob" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffe77a" />
+      <stop offset="1" stop-color="#e6a82d" />
+    </linearGradient>
+  </defs>
+  <rect width="640" height="420" rx="28" fill="url(#background)" />
+  <circle cx="520" cy="82" r="42" fill="#fff9ec" opacity=".7" />
+  <path d="M123 347c91-15 127-68 169-139 8 101-48 174-149 183-15 1-23-18-20-44Z" fill="#4f8a55" />
+  <path d="M504 354c-87-24-126-81-157-154-19 99 28 177 127 197 15 3 25-14 30-43Z" fill="#6b9d5c" />
+  <path d="M259 87c-39 54-48 137-17 218 18 47 47 75 78 72 35-3 61-42 70-96 12-77-9-160-56-205-24-23-53-18-75 11Z" fill="url(#cob)" stroke="#bd8128" stroke-width="7" />
+  <path d="M241 298c-28 35-49 60-91 65 51 19 104-2 141-44M378 290c26 39 48 62 89 75-48 10-101-16-135-59" fill="none" stroke="#38764a" stroke-width="18" stroke-linecap="round" />
+  <g fill="#fff4bd" opacity=".82">
+    <ellipse cx="278" cy="142" rx="9" ry="12" /><ellipse cx="311" cy="126" rx="9" ry="12" />
+    <ellipse cx="344" cy="143" rx="9" ry="12" /><ellipse cx="267" cy="179" rx="9" ry="12" />
+    <ellipse cx="301" cy="168" rx="9" ry="12" /><ellipse cx="337" cy="181" rx="9" ry="12" />
+    <ellipse cx="274" cy="218" rx="9" ry="12" /><ellipse cx="309" cy="211" rx="9" ry="12" />
+    <ellipse cx="345" cy="222" rx="9" ry="12" /><ellipse cx="288" cy="257" rx="9" ry="12" />
+    <ellipse cx="324" cy="258" rx="9" ry="12" />
+  </g>
+  <path d="M106 88h112M106 105h77M432 330h104" stroke="#b9783f" stroke-width="5" stroke-linecap="round" opacity=".45" />
+</svg>

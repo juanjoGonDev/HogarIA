@@ -25,6 +25,29 @@ describe('TimerComponent', () => {
     expect(component.state).toBe('idle');
   });
 
+  it('exposes a named, non-live timer region for assistive technology', () => {
+    component.label = 'Temporizador del paso 1';
+    fixture.detectChanges();
+
+    const timer = fixture.nativeElement.querySelector('[role="timer"]') as HTMLElement | null;
+    expect(timer).not.toBeNull();
+    expect(timer?.getAttribute('aria-label')).toBe('Temporizador del paso 1');
+    expect(timer?.getAttribute('aria-live')).toBe('off');
+  });
+
+  it('keeps the default timer layout and supports a compact recipe layout', () => {
+    const timer = fixture.nativeElement.querySelector('[role="timer"]') as HTMLElement;
+    const startButton = fixture.nativeElement.querySelector('button') as HTMLButtonElement;
+    expect(timer.classList.contains('timer--compact')).toBeFalse();
+    expect(startButton.classList.contains('btn--primary')).toBeTrue();
+
+    component.compact = true;
+    fixture.detectChanges();
+
+    expect(timer.classList.contains('timer--compact')).toBeTrue();
+    expect(startButton.classList.contains('btn--outline')).toBeTrue();
+  });
+
   it('should format time correctly', () => {
     expect(component.formatTime(0)).toBe('00:00');
     expect(component.formatTime(30)).toBe('00:30');
@@ -88,6 +111,40 @@ describe('TimerComponent', () => {
 
     expect(component.state).toBe('finished');
     expect(component.currentTime).toBe(0);
+  }));
+
+  it('completes after a background-tab clock jump despite delayed interval ticks', fakeAsync(() => {
+    component.duration = 60;
+    component.currentTime = 60;
+    const startedAt = Date.now();
+    const now = spyOn(Date, 'now').and.returnValue(startedAt);
+    const completed = spyOn(component.timerComplete, 'emit');
+
+    component.start();
+    now.and.returnValue(startedAt + 61_000);
+    tick(1_000);
+
+    expect(component.state).toBe('finished');
+    expect(component.currentTime).toBe(0);
+    expect(completed).toHaveBeenCalledTimes(1);
+  }));
+
+  it('restarts a completed timer from its full duration', fakeAsync(() => {
+    component.duration = 1;
+    component.currentTime = 1;
+    component.start();
+    tick(1000);
+
+    expect(component.state).toBe('finished');
+
+    const reset = spyOn(component, 'reset').and.callThrough();
+    component.start();
+
+    expect(component.state).toBe('running');
+    expect(component.currentTime).toBe(1);
+    expect(reset).toHaveBeenCalledTimes(1);
+    tick(1000);
+    expect(component.state).toBe('finished');
   }));
 
   it('should emit timerStart', fakeAsync(() => {
@@ -155,6 +212,16 @@ describe('TimerComponent', () => {
     component['calculateProgress']();
 
     expect(component.progress).toBe(50);
+  });
+
+  it('keeps progress at zero for a zero-duration timer', () => {
+    component.duration = 0;
+    component.currentTime = 0;
+    component.progress = 50;
+
+    component['calculateProgress']();
+
+    expect(component.progress).toBe(0);
   });
 
   it('should have 100% progress when finished', fakeAsync(() => {

@@ -1,0 +1,583 @@
+:host {
+  display: block;
+  min-width: 0;
+}
+.plan-editor--assignment-view .plan-canvas__space--selected {
+  stroke: var(--primary);
+}
+
+/* Desktop page widths mirror the approved composition without altering HogarIA's shell. */
+@media (min-width: 1280px) {
+  .plan-editor:has(.plan-setup),
+  .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-review, .plan-setup)) {
+    max-width: 800px;
+    margin-right: auto;
+    margin-left: auto;
+    margin-top: 42px;
+  }
+
+  .plan-editor:has(.plan-review__photo) {
+    max-width: 800px;
+    margin-right: auto;
+    margin-left: auto;
+    margin-top: 42px;
+  }
+
+  .plan-editor:has(.plan-review__chat-view) {
+    max-width: 800px;
+    margin-right: auto;
+    margin-left: auto;
+    margin-top: 26px;
+    row-gap: 0;
+  }
+
+  .plan-editor--assignment-view {
+    max-width: 800px;
+    margin-right: auto;
+    margin-left: auto;
+    margin-top: 19px;
+    row-gap: 2px;
+  }
+
+  .plan-editor__header h2 {
+    font-size: 40px;
+  }
+
+  .plan-editor__header p {
+    font-size: 20px;
+  }
+
+  .plan-editor:has(.plan-setup) .plan-setup {
+    margin-top: 22px;
+  }
+
+  .plan-editor:has(.plan-review__photo) .plan-review {
+    margin-top: 8px;
+  }
+
+  .plan-editor:has(.plan-review__photo) .plan-review__photo-source,
+  .plan-editor:has(.plan-review__photo) .plan-review__photo-result {
+    min-height: 580px;
+  }
+
+  .plan-editor:has(.plan-review__photo) .plan-review__photo-source > img {
+    aspect-ratio: 1 / 1;
+  }
+
+  .plan-editor:has(.plan-review__photo) .plan-review__actions--photo {
+    margin-top: 17px;
+  }
+
+  .plan-editor:has(.plan-review__chat-view) > .plan-editor__header {
+    flex-wrap: nowrap;
+  }
+
+  .plan-editor:has(.plan-review__chat-view) > .plan-editor__header > div:first-child {
+    flex: 1 1 380px;
+    min-width: 0;
+  }
+
+  .plan-editor:has(.plan-review__chat-view) > .plan-editor__header p {
+    font-size: 18px;
+  }
+
+  .plan-editor:has(.plan-review__chat-view) .plan-review__header-actions {
+    width: 388px;
+    flex: 0 1 388px;
+    grid-template-columns: minmax(0, 1fr) minmax(164px, max-content);
+    margin-top: 9px;
+  }
+
+  .plan-editor:has(.plan-review__chat-view)
+    .plan-review__header-actions
+    > [data-test='plan-return-to-canvas'] {
+    white-space: nowrap;
+  }
+
+  .plan-editor:has(.plan-review__chat-view) .plan-review__header-actions .plan-file {
+    padding-inline: var(--space-2);
+  }
+
+  .plan-editor:has(.plan-review__chat-view) .plan-review {
+    margin-top: -5px;
+  }
+
+  .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-review, .plan-setup))
+    > .plan-canvas-toolbar {
+    margin-top: 7px;
+  }
+
+  .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-review, .plan-setup))
+    > .plan-editor__toolbar {
+    margin-top: 15px;
+  }
+
+  .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-review, .plan-setup)) .plan-tool,
+  .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-review, .plan-setup))
+    .plan-room-chip {
+    min-height: 88px;
+  }
+
+  .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-review, .plan-setup))
+    .plan-editor__workspace {
+    margin-top: 12px;
+  }
+
+  .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-review, .plan-setup))
+    .plan-canvas__viewport {
+    height: min(46vh, 422px);
+  }
+
+  .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-review, .plan-setup)):has(
+      .plan-canvas__freeform-actions
+    )
+    .plan-canvas__viewport {
+    height: min(36vh, 340px);
+    min-height: 300px;
+  }
+
+  .plan-editor.plan-editor--assignment-view:not(:has(.plan-setup, .plan-review))
+    .plan-editor__workspace {
+    grid-template-columns: minmax(0, 1.45fr) minmax(220px, 0.72fr);
+    margin-top: 21px;
+  }
+
+  .plan-editor--assignment-view .plan-canvas__zoom {
+    width: 100% !important;
+    aspect-ratio: auto;
+  }
+
+  .plan-editor--assignment-view .plan-editor__workspace .plan-canvas__viewport {
+    height: min(64vh, 620px);
+    min-height: 600px;
+  }
+
+  .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-setup, .plan-review))
+    .plan-canvas-toolbar {
+    flex-wrap: nowrap;
+    gap: var(--space-2);
+    padding: var(--space-2);
+  }
+
+  .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-setup, .plan-review))
+    .plan-canvas-toolbar__tools {
+    flex: 0 0 370px;
+    gap: 4px;
+    padding-right: var(--space-2);
+  }
+
+  .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-setup, .plan-review))
+    .plan-canvas-toolbar__rooms {
+    flex: 1 1 0;
+    gap: 4px;
+    overflow: visible;
+  }
+
+  .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-setup, .plan-review)) .plan-tool {
+    min-width: 0;
+    min-height: 88px;
+    flex: 1 1 0;
+    padding: var(--space-1) 4px;
+    font-size: 0.72rem;
+    white-space: normal;
+  }
+
+  .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-setup, .plan-review))
+    .plan-room-chip {
+    min-width: 0;
+    max-width: none;
+    min-height: 88px;
+    flex: 1 1 0;
+    padding: var(--space-1) 2px;
+    font-size: 0.7rem;
+  }
+
+  .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-setup, .plan-review))
+    .plan-tool
+    > span
+    svg,
+  .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-setup, .plan-review))
+    .plan-room-chip
+    svg {
+    width: 32px;
+    height: 32px;
+  }
+
+  .plan-editor:not(.plan-editor--assignment-view):not(:has(.plan-setup, .plan-review))
+    .plan-canvas__preview-action {
+    min-height: 60px;
+  }
+
+  .plan-editor:has(.plan-setup) .plan-setup {
+    margin-top: 22px;
+  }
+
+  .plan-editor:has(.plan-review__photo) .plan-review__photo-result .plan-compare-canvas {
+    width: min(100%, 340px);
+    height: 340px;
+    max-height: 340px;
+    justify-self: center;
+  }
+}
+
+/* The weekly screen stays map-first and compact like the approved desktop checklist. */
+@media (min-width: 1280px) {
+  .tasks-editor {
+    max-width: 800px;
+    margin-right: auto;
+    margin-left: auto;
+  }
+
+  .tasks-map-viewport {
+    height: min(63vh, 610px);
+    min-height: 560px;
+    max-height: min(63vh, 610px);
+  }
+}
+
+@media (max-width: 767px) {
+  .plan-editor--assignment-view .plan-canvas__viewport {
+    height: min(40vh, 380px);
+    min-height: min(40vh, 380px);
+  }
+
+  .plan-editor--assignment-view .plan-details:has(.plan-details__selected) .plan-details__selected {
+    min-height: min(28vh, 265px);
+  }
+
+  .plan-editor:has(.plan-review__photo) .plan-review__photo-result .plan-compare-canvas {
+    width: min(100%, 300px);
+    height: clamp(195px, 54vw, 205px);
+    max-height: 205px;
+    justify-self: center;
+  }
+
+  .tasks-map-viewport {
+    max-height: min(44vh, 286px);
+  }
+
+  .tasks-day {
+    min-height: 30px;
+  }
+}
+
+@media (max-width: 359px) {
+  .plan-editor:has(.plan-review__photo) .plan-review__photo-result .plan-compare-canvas {
+    height: 180px;
+    max-height: 180px;
+  }
+}
+
+/* Match the approved desktop review: large before/after plans and clear decisions. */
+@media (min-width: 1280px) {
+  .plan-editor:has(.plan-review__chat-view) {
+    margin-top: 32px;
+  }
+
+  .plan-editor:has(.plan-review__chat-view) > .plan-editor__header > div:first-child {
+    flex-basis: 395px;
+  }
+
+  .plan-editor:has(.plan-review__chat-view) > .plan-editor__header p {
+    font-size: 16px;
+    white-space: normal;
+  }
+
+  .plan-review__compare-card {
+    min-height: 492px;
+    padding: var(--space-3) 4px 8px;
+  }
+
+  .plan-review__compare-card .plan-compare-canvas {
+    height: 386px;
+    max-height: none;
+    aspect-ratio: auto;
+    margin-top: 25px;
+  }
+
+  .plan-review__chat-view {
+    grid-template-columns: minmax(0, 1.04fr) minmax(0, 1.02fr) minmax(240px, 0.95fr);
+    grid-template-rows: 492px minmax(44px, auto);
+  }
+
+  .plan-review__map-controls {
+    grid-column: 1 / 3;
+    grid-row: 2;
+    align-self: start;
+    justify-content: flex-start;
+    padding-inline: 2px;
+  }
+
+  .plan-chat {
+    grid-column: 3;
+    grid-row: 1 / 3;
+  }
+
+  .plan-editor:has(.plan-review__chat-view) .plan-review {
+    margin-top: 14px;
+  }
+
+  .plan-chat__messages {
+    gap: 22px;
+    margin-top: 11px;
+  }
+
+  .plan-chat .plan-review__actions {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-2);
+    margin-top: 5px;
+  }
+
+  .plan-chat .plan-review__actions .plan-button {
+    min-height: 44px;
+  }
+
+  .plan-chat__messages {
+    gap: var(--space-3);
+  }
+
+  .plan-chat__continuations {
+    gap: var(--space-2);
+    margin-top: 3px;
+  }
+
+  .plan-chat__continuations-heading {
+    margin: 0 0 23px;
+    color: var(--text-primary);
+    font-size: var(--text-base);
+    font-weight: var(--font-semibold);
+  }
+}
+
+/* Match the approved phone flow: labelled before/after plans above the conversation. */
+@media (max-width: 767px) {
+  .plan-editor:has(.plan-review__chat-view) {
+    margin-top: -15px;
+  }
+
+  .plan-editor:has(.plan-review__chat-view) > .plan-editor__header h2 {
+    font-size: 24px;
+    line-height: 1.1;
+  }
+
+  .plan-editor:has(.plan-review__chat-view) > .plan-editor__header p {
+    margin-top: 2px;
+  }
+
+  .plan-editor:has(.plan-review__chat-view) .plan-review__header-actions {
+    margin-top: -6px;
+    gap: var(--space-1);
+  }
+
+  .plan-editor:has(.plan-review__chat-view) .plan-review__header-actions .plan-file,
+  .plan-editor:has(.plan-review__chat-view) .plan-review__header-actions > .plan-button {
+    min-height: 44px;
+  }
+
+  .plan-editor:has(.plan-review__chat-view) .plan-review {
+    margin-top: -16px;
+  }
+
+  .plan-review__mobile-tabs button {
+    min-height: 40px;
+  }
+
+  .plan-review__chat-view {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+    gap: 2px;
+  }
+
+  .plan-review__mobile-tabs {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-row: 1;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-2);
+  }
+
+  .plan-review__mobile-tabs button {
+    min-height: 44px;
+    padding: var(--space-1) var(--space-2);
+    font-size: var(--text-xs);
+  }
+
+  .plan-review__compare-card {
+    display: none;
+    grid-column: 1 / -1;
+    grid-row: 2;
+    min-width: 0;
+    align-content: start;
+    gap: var(--space-2);
+    padding: var(--space-1);
+  }
+
+  .plan-review__compare-card.is-active {
+    display: grid;
+  }
+
+  .plan-review__compare-card h4 {
+    display: none;
+  }
+
+  .plan-review__compare-card .plan-compare-canvas {
+    width: min(100%, 340px);
+    height: min(70vw, 265px);
+    min-height: 260px;
+    max-height: 265px;
+    margin-top: 0;
+    aspect-ratio: 1.05 / 1;
+  }
+
+  .plan-review__map-controls {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    gap: var(--space-2);
+  }
+
+  .plan-review__zoom-group button,
+  .plan-review__map-controls > button {
+    min-height: 44px;
+  }
+
+  .plan-review__zoom-group button {
+    min-width: 44px;
+    padding-inline: var(--space-2);
+  }
+
+  .plan-review__zoom-group output {
+    min-width: 56px;
+  }
+
+  .plan-review__map-controls > button {
+    padding-inline: var(--space-2);
+    font-size: var(--text-xs);
+  }
+
+  .plan-chat {
+    grid-column: 1 / -1;
+    grid-row: 4;
+    margin-top: 0;
+    padding-block: 2px;
+  }
+
+  .plan-chat .plan-review__actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-1);
+  }
+
+  .plan-chat .plan-review__actions .plan-button {
+    min-height: 44px;
+  }
+
+  .plan-chat__messages {
+    gap: var(--space-1);
+    margin-top: 0;
+  }
+
+  .plan-chat__messages p {
+    padding: 4px var(--space-2);
+    font-size: var(--text-sm);
+    line-height: var(--leading-tight);
+  }
+
+  .plan-chat__continuations-heading {
+    display: none;
+  }
+
+  .plan-chat__continuations {
+    gap: var(--space-1);
+    margin-top: 0;
+  }
+
+  .plan-chat__continuation {
+    min-height: 44px;
+    padding: 2px 6px;
+    font-size: 11px;
+    line-height: 1.05;
+  }
+
+  .plan-chat__continuation--upload {
+    gap: var(--space-1);
+    padding: 2px;
+  }
+}
+
+@media (min-width: 1280px) {
+  .plan-setup {
+    gap: 24px;
+  }
+
+  .plan-setup__dwelling {
+    gap: 24px;
+    padding-block: 24px;
+  }
+
+  .plan-setup__methods {
+    margin-top: 0;
+  }
+
+  .plan-method-card {
+    min-height: 252px;
+  }
+
+  .plan-setup__reassurance {
+    margin-top: var(--space-1);
+  }
+
+  .plan-setup__start {
+    min-height: 60px;
+    margin-top: 2px;
+  }
+}
+
+@media (min-width: 360px) and (max-width: 767px) {
+  .plan-editor:has(.plan-setup) {
+    margin-top: 25px;
+  }
+
+  .plan-editor:has(.plan-setup) .plan-setup {
+    margin-top: -4px;
+    gap: var(--space-4);
+  }
+
+  .plan-editor:has(.plan-setup) .plan-setup__dwelling {
+    padding-block: var(--space-4);
+  }
+
+  .plan-editor:has(.plan-setup) .plan-setup__methods {
+    gap: 14px;
+  }
+
+  .plan-editor:has(.plan-setup) .plan-setup__reassurance {
+    margin-top: -8px;
+  }
+
+  .plan-editor:has(.plan-setup) .plan-setup__start {
+    margin-top: -7px;
+  }
+}
+
+/* Match the photo-review vertical rhythm without shrinking the source sketch. */
+@media (max-width: 767px) {
+  .plan-editor:has(.plan-review__photo) .plan-review__photo-source-actions {
+    margin-top: 9px;
+  }
+
+  .plan-editor:has(.plan-review__photo) .plan-review__photo-result {
+    margin-top: 9px;
+  }
+
+  .plan-editor:has(.plan-review__photo) .plan-review__photo-result .plan-compare-canvas {
+    height: 205px;
+    max-height: 205px;
+    margin-top: 10px;
+  }
+}
+
+@media (max-width: 359px) {
+  .plan-editor:has(.plan-review__photo) .plan-review__photo-result .plan-compare-canvas {
+    height: 172px;
+    max-height: 172px;
+  }
+}

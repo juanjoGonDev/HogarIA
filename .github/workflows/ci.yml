@@ -1,8 +1,14 @@
 # =============================================================================
-# CI Workflow - MiCocinAI
+# CI Workflow - HogarIA
 # =============================================================================
-# Runs on all PRs and pushes to master/main. pnpm is installed via
-# pnpm/action-setup with a version string compatible with packageManager.
+# La instalación de dependencias pesadas (node_modules y Playwright) se produce
+# una vez y se reparte por cache; la suite E2E se divide en shards con margen de
+# hasta 16 minutos para el shard más lento y la subida de artefactos.
+#
+# Ojo al editar este fichero: un `- name: Texto (con: dos puntos)` sin comillas
+# invalida el YAML y GitHub no crea NINGUN check en el PR (solo un run de 0s con
+# el path del workflow como nombre). Antes de subir: make ci-yaml
+# =============================================================================
 
 name: CI
 
@@ -11,8 +17,7 @@ on:
   push:
     branches: [master, main]
   pull_request:
-    branches: [master, main]
-    types: [opened, reopened, synchronize, ready_for_review]
+    types: [opened, reopened, synchronize, ready_for_review, edited]
 
 permissions: read-all
 
@@ -20,91 +25,277 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  NODE_VERSION: '22'
+  # OJO: aqui dentro NO van expresiones con `runner.*` ni `hashFiles()`. El `env` de
+  # nivel workflow no tiene esos contextos, y GitHub no avisa con un job rojo: invalida
+  # el fichero, no crea NINGUN check y deja un run de 0s llamado con la ruta del
+  # workflow. La clave de cache se compone por eso en cada paso `cache/save|restore`,
+  # donde si estan disponibles (y es la unica forma de que el hash del lockfile valga).
+
 jobs:
+  container-smoke:
+    name: 'Container image smoke (${{ matrix.architecture }})'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            architecture: amd64
+          - platform: linux/arm64
+            architecture: arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and load production image (no registry push)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: ${{ matrix.platform }}
+          tags: hogaria-ci:${{ matrix.architecture }}
+          push: false
+          load: true
+          cache-from: type=gha,scope=ci-container-${{ matrix.architecture }}
+          cache-to: type=gha,mode=max,scope=ci-container-${{ matrix.architecture }},ignore-error=true
+
+      - name: Start the image with a temporary database
+        run: >-
+          docker run --detach
+          --name hogaria-ci-${{ matrix.architecture }}
+          --publish 127.0.0.1:3000:3000
+          --tmpfs /app/data:rw,nosuid,nodev,size=64m
+          --env NODE_ENV=production
+          --env DATABASE_PATH=/app/data/hogaria.sqlite
+          --env JWT_SECRET="$(openssl rand -hex 32)"
+          hogaria-ci:${{ matrix.architecture }}
+
+      - name: Smoke health, API routing, and bundled frontend
+        run: node scripts/container-smoke.mjs http://127.0.0.1:3000
+
+      - name: Verify the image HEALTHCHECK becomes healthy
+        run: |
+          for attempt in $(seq 1 40); do
+            status="$(docker inspect --format='{{.State.Health.Status}}' hogaria-ci-${{ matrix.architecture }} 2>/dev/null || true)"
+            if [[ "$status" == "healthy" ]]; then exit 0; fi
+            if [[ "$status" == "unhealthy" ]]; then
+              docker inspect --format='{{json .State.Health}}' hogaria-ci-${{ matrix.architecture }}
+              exit 1
+            fi
+            sleep 2
+          done
+          echo "Docker HEALTHCHECK did not become healthy after ${attempt} attempts" >&2
+          docker inspect --format='{{json .State.Health}}' hogaria-ci-${{ matrix.architecture }}
+          exit 1
+
+      - name: Remove smoke container
+        if: always()
+        run: docker rm --force hogaria-ci-${{ matrix.architecture }} 2>/dev/null || true
+
+  # --- Un nodo instala; los demas consumen cache ---
+  install:
+    name: Install & warm caches
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # pnpm/action-setup@v4 toma la version del campo `packageManager` del
+      # package.json; pasarle `version` a la vez es un error del propio action, y
+      # duplicaria un numero que ya esta escrito en el repo.
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Los navegadores se descargan aqui y no en cada shard: `--with-deps`
+      # tambien deja los paquetes de sistema, que el runner hereda.
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Save node_modules
+        uses: actions/cache/save@v4
+        with:
+          key: ${{ runner.os }}-deps-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.run_id }}-${{ github.run_attempt }}-nm
+          path: |
+            node_modules
+            frontend/node_modules
+            server/node_modules
+
+      - name: Save Playwright browsers
+        uses: actions/cache/save@v4
+        with:
+          key: ${{ runner.os }}-deps-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.run_id }}-${{ github.run_attempt }}-pw
+          path: ~/.cache/ms-playwright
+
   # --- Type check ---
   typecheck:
     name: Type Check
     runs-on: ubuntu-latest
+    needs: install
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Restore node_modules
+        id: nm
+        uses: actions/cache/restore@v4
+        with:
+          key: ${{ runner.os }}-deps-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.run_id }}-${{ github.run_attempt }}-nm
+          path: |
+            node_modules
+            frontend/node_modules
+            server/node_modules
+
+      # pnpm/action-setup@v4 toma la version del campo `packageManager` del
+      # package.json; pasarle `version` a la vez es un error del propio action, y
+      # duplicaria un numero que ya esta escrito en el repo.
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 10.15.0
           run_install: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: 'pnpm'
+          node-version: ${{ env.NODE_VERSION }}
 
-      - name: Install dependencies
+      - name: Install dependencies (only if the cache missed)
+        if: steps.nm.outputs.cache-hit != 'true'
         run: pnpm install --frozen-lockfile
 
+      - name: UI rules (no emoji, no native select, real data-test)
+        run: node scripts/check-ui.mjs
+
+      # Playwright transpila sin mirar los tipos: un matcher con una opcion inexistente
+      # no falla, se ignora. Este step costo encontrar uno que hacia justo eso.
+      - name: E2E type check (tsc -p tsconfig.e2e.json)
+        run: pnpm run typecheck:e2e
+
+      - name: Karma coverage gate wiring
+        run: node --test scripts/karma-coverage-gate.test.mjs
+
       - name: Server type check (tsc --noEmit)
-        run: pnpm --filter server exec tsc --noEmit
+        run: pnpm --filter @hogaria/server exec tsc --noEmit
 
       - name: Frontend build (type-checks templates)
-        run: pnpm --filter frontend run build
+        run: pnpm --filter @hogaria/web run build
 
-  # --- Server unit tests ---
+  # --- Server unit tests + cobertura ---
   test-server:
     name: Server Tests
     runs-on: ubuntu-latest
+    needs: install
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Restore node_modules
+        id: nm
+        uses: actions/cache/restore@v4
+        with:
+          key: ${{ runner.os }}-deps-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.run_id }}-${{ github.run_attempt }}-nm
+          path: |
+            node_modules
+            frontend/node_modules
+            server/node_modules
+
+      # pnpm/action-setup@v4 toma la version del campo `packageManager` del
+      # package.json; pasarle `version` a la vez es un error del propio action, y
+      # duplicaria un numero que ya esta escrito en el repo.
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 10.15.0
           run_install: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: 'pnpm'
+          node-version: ${{ env.NODE_VERSION }}
 
-      - name: Install dependencies
+      - name: Install dependencies (only if the cache missed)
+        if: steps.nm.outputs.cache-hit != 'true'
         run: pnpm install --frozen-lockfile
 
-      - name: Run server tests
-        run: pnpm --filter server run test
+      - name: 'Run server tests (coverage gate 70 % per file, spec 11c)'
+        run: pnpm --filter @hogaria/server run test:coverage
+
+      # El informe subido es el HTML de istanbul: se descarga y se abre en el
+      # navegador; asi la cobertura se ve, no solo se aprueba.
+      - name: Upload coverage report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-coverage
+          path: server/coverage/
+          retention-days: 14
 
   # --- Production build ---
   build:
     name: Production Build
     runs-on: ubuntu-latest
-    needs: [typecheck, test-server]
+    needs: [install, test-server]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Restore node_modules
+        id: nm
+        uses: actions/cache/restore@v4
+        with:
+          key: ${{ runner.os }}-deps-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.run_id }}-${{ github.run_attempt }}-nm
+          path: |
+            node_modules
+            frontend/node_modules
+            server/node_modules
+
+      # pnpm/action-setup@v4 toma la version del campo `packageManager` del
+      # package.json; pasarle `version` a la vez es un error del propio action, y
+      # duplicaria un numero que ya esta escrito en el repo.
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 10.15.0
           run_install: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: 'pnpm'
+          node-version: ${{ env.NODE_VERSION }}
 
-      - name: Install dependencies
+      - name: Install dependencies (only if the cache missed)
+        if: steps.nm.outputs.cache-hit != 'true'
         run: pnpm install --frozen-lockfile
 
-      - name: Build frontend (prod)
-        run: pnpm --filter frontend run build:prod
+      - name: Build frontend
+        run: pnpm --filter @hogaria/web run build:prod
 
       - name: Build server
-        run: pnpm --filter server run build
+        run: pnpm --filter @hogaria/server run build
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -115,42 +306,213 @@ jobs:
             server/dist/
           retention-days: 3
 
-  # --- Playwright E2E ---
-  e2e:
-    name: E2E Tests
+  # --- Playwright E2E, partido en shards ---
+  # Cada shard levanta su propio par frontend+backend (webServer de Playwright),
+  # por eso se puede partir sin coordination: no comparten servidor ni datos, cada
+  # prueba registra su propio usuario. `E2E_SEED` lleva el numero de shard para
+  # que los correos de dos shards no puedan colisionar nunca.
+  # ── Stack completo: el build de produccion, un solo proceso, limites ENCENDIDOS ──
+  # Por que otro job si ya hay 381 tests e2e: porque esos corren sobre `ng serve` con
+  # `DISABLE_RATE_LIMIT=1`, y las dos unicas cosas que se han roto de verdad en las
+  # ultimas rondas viven justo en lo que esa configuracion no ejercita —el limitador que
+  # asfixiaba a toda la casa y el SSE del visor de logs detras del servidor real.
+  full-stack:
+    name: 'Full-stack E2E (prod build, limits on)'
     runs-on: ubuntu-latest
-    needs: [typecheck]
+    needs: install
+    timeout-minutes: 30
+    env:
+      E2E_SEED: r${{ github.run_id }}a${{ github.run_attempt }}fs
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Restore node_modules
+        id: nm
+        uses: actions/cache/restore@v4
+        with:
+          key: ${{ runner.os }}-deps-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.run_id }}-${{ github.run_attempt }}-nm
+          path: |
+            node_modules
+            frontend/node_modules
+            server/node_modules
+
+      - name: Restore Playwright browsers
+        id: pw
+        uses: actions/cache/restore@v4
+        with:
+          key: ${{ runner.os }}-deps-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.run_id }}-${{ github.run_attempt }}-pw
+          path: ~/.cache/ms-playwright
+
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 10.15.0
           run_install: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: 'pnpm'
+          node-version: ${{ env.NODE_VERSION }}
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - name: 'Install what the cache could not bring (cache miss only)'
+        if: steps.nm.outputs.cache-hit != 'true' || steps.pw.outputs.cache-hit != 'true'
+        run: |
+          if [ "${{ steps.nm.outputs.cache-hit }}" != "true" ]; then pnpm install --frozen-lockfile; fi
+          if [ "${{ steps.pw.outputs.cache-hit }}" != "true" ]; then pnpm exec playwright install --with-deps chromium; fi
 
-      - name: Install Playwright browsers
-        run: pnpm exec playwright install --with-deps chromium
+      # El binario sirve la web desde `frontend/dist`, asi que el build NO es opcional:
+      # sin el, este job comprobara un API a secas y passara en verde igual.
+      - name: Build server and frontend
+        run: pnpm run build
 
-      - name: Run Playwright tests (webServer config boots frontend + backend)
-        run: pnpm exec playwright test --project=chromium
+      - name: 'E2E against the single production process (rate limiter on)'
+        id: e2e-full-stack
+        run: node scripts/run-isolated-playwright.mjs --config=playwright.full-stack.config.ts --forbid-only
         env:
           CI: 'true'
+
+      - name: Publish E2E failures as annotations
+        if: failure()
+        run: node scripts/ci-e2e-summary.mjs
+        env:
+          E2E_RESULTS_FILE: ${{ steps.e2e-full-stack.outputs.e2e_results_file }}
+
+      - name: Upload the full-stack Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-full-stack
+          path: ${{ steps.e2e-full-stack.outputs.e2e_report_dir }}/
+          retention-days: 7
+
+  e2e:
+    name: 'E2E Tests (shard ${{ matrix.shard }})'
+    runs-on: ubuntu-latest
+    needs: install
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    env:
+      E2E_SEED: r${{ github.run_id }}a${{ github.run_attempt }}s${{ matrix.shard }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Restore node_modules
+        id: nm
+        uses: actions/cache/restore@v4
+        with:
+          key: ${{ runner.os }}-deps-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.run_id }}-${{ github.run_attempt }}-nm
+          path: |
+            node_modules
+            frontend/node_modules
+            server/node_modules
+
+      - name: Restore Playwright browsers
+        id: pw
+        uses: actions/cache/restore@v4
+        with:
+          key: ${{ runner.os }}-deps-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.run_id }}-${{ github.run_attempt }}-pw
+          path: ~/.cache/ms-playwright
+
+      # pnpm/action-setup@v4 toma la version del campo `packageManager` del
+      # package.json; pasarle `version` a la vez es un error del propio action, y
+      # duplicaria un numero que ya esta escrito en el repo.
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: 'Install what the cache could not bring (cache miss only)'
+        if: steps.nm.outputs.cache-hit != 'true' || steps.pw.outputs.cache-hit != 'true'
+        run: |
+          if [ "${{ steps.nm.outputs.cache-hit }}" != "true" ]; then pnpm install --frozen-lockfile; fi
+          if [ "${{ steps.pw.outputs.cache-hit }}" != "true" ]; then pnpm exec playwright install --with-deps chromium; fi
+
+      - name: Run Playwright tests (webServer config boots frontend + backend)
+        id: e2e
+        run: >-
+          node scripts/run-isolated-playwright.mjs --project=chromium
+          --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+          --forbid-only
+        env:
+          CI: 'true'
+
+      - name: Verify automatic task publication through the real scheduler
+        id: automation_e2e
+        if: matrix.shard == 1
+        run: >-
+          node scripts/run-isolated-playwright.mjs
+          tests/e2e/household-planning-automation.spec.ts
+          --grep 'publica una propuesta'
+          --project=chromium --project=mobile-chrome --workers=1 --forbid-only
+        env:
+          CI: 'true'
+          HOGARIA_E2E_AUTOMATION_CLOCK_OFFSET_DAYS: '4'
+          HOGARIA_E2E_AUTOMATION_POLL_INTERVAL_MS: '1000'
+
+      - name: Publish scheduler E2E failures as annotations
+        if: failure() && steps.automation_e2e.outcome == 'failure'
+        run: node scripts/ci-e2e-summary.mjs
+        env:
+          E2E_RESULTS_FILE: ${{ steps.automation_e2e.outputs.e2e_results_file }}
+
+      - name: Publish E2E failures as annotations
+        if: failure() && steps.e2e.outcome == 'failure'
+        run: node scripts/ci-e2e-summary.mjs
+        env:
+          E2E_RESULTS_FILE: ${{ steps.e2e.outputs.e2e_results_file }}
 
       - name: Upload Playwright report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
-          path: playwright-report/
+          name: playwright-report-${{ matrix.shard }}
+          path: ${{ steps.e2e.outputs.e2e_report_dir }}/
           retention-days: 7
+
+      - name: Upload scheduler E2E report
+        if: always() && steps.automation_e2e.outputs.e2e_report_dir != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: scheduler-e2e-report-${{ matrix.shard }}
+          path: ${{ steps.automation_e2e.outputs.e2e_report_dir }}/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      # El trace y el `error-context.md` (snapshot del DOM en el momento del fallo)
+      # son la unica forma de saber QUE se veia cuando un gesto no cuajo: sin esto,
+      # diagnosticar un test de arrastre desde CI es adivinar.
+      - name: Upload test results (trace + DOM snapshot)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.shard }}
+          path: ${{ steps.e2e.outputs.e2e_output_dir }}/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Upload scheduler E2E results (trace + DOM snapshot)
+        if: failure() && steps.automation_e2e.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: scheduler-e2e-results-${{ matrix.shard }}
+          path: ${{ steps.automation_e2e.outputs.e2e_output_dir }}/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Upload the run data (seed, durations, failures)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hogaria-run-${{ matrix.shard }}
+          path: ${{ steps.e2e.outputs.e2e_run_dir }}/junit.xml
+          retention-days: 14
+          if-no-files-found: ignore

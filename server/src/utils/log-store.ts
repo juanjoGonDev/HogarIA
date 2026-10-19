@@ -20,10 +20,37 @@ export interface LogEntry {
 const MAX_LOGS = 1500;
 const recentLogs: LogEntry[] = [];
 
+const listeners = new Set<(entry: LogEntry) => void>();
+
+/**
+ * Suscripcion a la cola de logs. El visor de la aplicacion vive de esto: sin un unico
+ * punto de salida, cada escritor (el `console` capturado, los logs que manda el
+ * navegador, un `addServerLog`) tiene que acordarse de avisar al SSE, y el que no se
+ * acuerda produce una pantalla de logs que no se mueve.
+ *
+ * Devuelve la funcion para cancelar; el listener se llama con `try/catch` porque un
+ * cliente que cierra la pestana a media escritura no puede cortar el log del servidor.
+ */
+export function onLogEntry(listener: (entry: LogEntry) => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
 export function addLog(entry: LogEntry): void {
   recentLogs.push(entry);
   if (recentLogs.length > MAX_LOGS) {
     recentLogs.splice(0, recentLogs.length - MAX_LOGS);
+  }
+  // Copia del Set: un listener que se desuscribe a si mismo (el ultimo cliente del
+  // stream yéndose mientras se escribe) no tiene por que romper el bucle.
+  for (const listener of [...listeners]) {
+    try {
+      listener(entry);
+    } catch {
+      /* un oyente caido no se propaga */
+    }
   }
 }
 

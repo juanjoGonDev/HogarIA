@@ -1,5 +1,6 @@
 import { Component, OnInit } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
+import { STORAGE_KEYS } from './core/services/storage.service';
 
 @Component({
   selector: 'app-root',
@@ -18,7 +19,7 @@ import { RouterOutlet } from '@angular/router';
 export class AppComponent implements OnInit {
   ngOnInit(): void {
     // Initialize theme from localStorage
-    const theme = localStorage.getItem('theme') || 'light';
+    const theme = localStorage.getItem(STORAGE_KEYS.theme) || 'light';
     document.documentElement.setAttribute('data-theme', theme);
   }
 }

@@ -7,23 +7,55 @@ import { ToastService } from '../../../core/services/toast.service';
 import { HouseholdService } from '../../../core/services/household.service';
 import { ButtonComponent } from '../../../shared/components/ui/button/button.component';
 import { InputComponent } from '../../../shared/components/ui/input/input.component';
+import { TranslatePipe } from '../../../core/pipes/translate.pipe';
+import { I18nService } from '../../../core/services/i18n.service';
+import type { TranslationKey } from '../../../core/i18n';
+import { MAX_BCRYPT_PASSWORD_BYTES } from '../../../core/utils/password-policy';
+import {
+  registerEmailIssue,
+  registerNameIssue,
+  registerPasswordIssue,
+  type RegisterEmailIssue,
+  type RegisterNameIssue,
+  type RegisterPasswordIssue
+} from './register-form.validation';
+
+const NAME_ERROR_KEYS: Record<RegisterNameIssue, TranslationKey> = {
+  required: 'auth.el_nombre_es_requerido',
+  tooShort: 'auth.el_nombre_debe_tener',
+  tooLong: 'auth.el_nombre_no_puede_superar'
+};
+
+const EMAIL_ERROR_KEYS: Record<RegisterEmailIssue, TranslationKey> = {
+  required: 'auth.el_email_es_requerido',
+  invalidEmail: 'auth.el_email_no_es_valido'
+};
+
+const PASSWORD_ERROR_KEYS: Record<RegisterPasswordIssue, TranslationKey> = {
+  required: 'auth.la_contrasena_es_requerida',
+  tooShort: 'auth.la_contrasena_debe_tener',
+  uppercaseRequired: 'auth.la_contrasena_necesita_mayuscula',
+  numberRequired: 'auth.la_contrasena_necesita_numero',
+  tooLongBytes: 'auth.password_max_72_bytes'
+};
 
 @Component({
   selector: 'app-register',
   standalone: true,
-  imports: [CommonModule, RouterLink, FormsModule, ButtonComponent, InputComponent],
+  imports: [TranslatePipe, CommonModule, RouterLink, FormsModule, ButtonComponent, InputComponent],
   template: `
     <form (ngSubmit)="onSubmit()" class="register-form">
-      <h2 class="register-form__title">Crear Cuenta</h2>
-      
+      <h2 class="register-form__title">{{ 'auth.register.cta' | t }}</h2>
+
       <app-input
         id="name"
         name="name"
         type="text"
-        label="Nombre"
-        placeholder="Tu nombre"
+        [label]="'auth.name' | t"
+        [placeholder]="'auth.tu_nombre' | t"
         [(ngModel)]="name"
         [required]="true"
+        [maxLength]="100"
         [error]="nameError()"
       ></app-input>
 
@@ -31,8 +63,8 @@ import { InputComponent } from '../../../shared/components/ui/input/input.compon
         id="email"
         name="email"
         type="email"
-        label="Email"
-        placeholder="tu@email.com"
+        [label]="'auth.email' | t"
+        [placeholder]="'auth.tu_email_com' | t"
         [(ngModel)]="email"
         [required]="true"
         [error]="emailError()"
@@ -42,28 +74,18 @@ import { InputComponent } from '../../../shared/components/ui/input/input.compon
         id="password"
         name="password"
         type="password"
-        label="Contraseña"
+        [label]="'auth.password' | t"
         placeholder="••••••••"
         [(ngModel)]="password"
         [required]="true"
+        [maxLength]="passwordMaxLength"
         [error]="passwordError()"
-        helper="Mínimo 6 caracteres, una mayúscula y un número"
+        [helper]="'auth.requisitos_de_contrasena' | t"
       ></app-input>
 
-      <div class="register-form__field">
-        <label class="register-form__label">Nivel de cocina</label>
-        <div class="register-form__options">
-          <button
-            *ngFor="let level of cookingLevels"
-            type="button"
-            [class]="'register-form__option' + (selectedLevel === level.value ? ' register-form__option--selected' : '')"
-            (click)="selectedLevel = level.value"
-          >
-            <span class="register-form__option-icon">{{ level.icon }}</span>
-            <span class="register-form__option-label">{{ level.label }}</span>
-          </button>
-        </div>
-      </div>
+      <p class="register-form__note">
+        {{ 'auth.al_entrar_te_preguntamos' | t }}
+      </p>
 
       <app-button
         type="submit"
@@ -72,103 +94,74 @@ import { InputComponent } from '../../../shared/components/ui/input/input.compon
         [fullWidth]="true"
         [loading]="isLoading()"
       >
-        Crear Cuenta
+        {{ 'auth.register.cta' | t }}
       </app-button>
 
       <div class="register-form__footer">
-        <span>¿Ya tienes cuenta?</span>
+        <span>{{ 'auth.already' | t }}</span>
         <a routerLink="/auth/login" class="register-form__link">
-          Inicia sesión
+          {{ 'auth.inicia_sesion' | t }}
         </a>
       </div>
     </form>
   `,
-  styles: [`
-    .register-form {
-      display: flex;
-      flex-direction: column;
-      gap: var(--space-5);
-    }
-
-    .register-form__title {
-      font-family: var(--font-display);
-      font-size: var(--text-2xl);
-      font-weight: var(--font-bold);
-      color: var(--text-primary);
-      text-align: center;
-    }
-
-    .register-form__field {
-      display: flex;
-      flex-direction: column;
-      gap: var(--space-2);
-    }
-
-    .register-form__label {
-      font-size: var(--text-sm);
-      font-weight: var(--font-medium);
-      color: var(--text-primary);
-    }
-
-    .register-form__options {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: var(--space-2);
-    }
-
-    .register-form__option {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: var(--space-1);
-      padding: var(--space-3);
-      background: var(--bg-tertiary);
-      border: 2px solid transparent;
-      border-radius: var(--radius-lg);
-      cursor: pointer;
-      transition: var(--transition-fast);
-
-      &:hover {
-        border-color: var(--border-strong);
+  styles: [
+    `
+      .register-form__note {
+        margin: 0;
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+        line-height: 1.45;
+      }
+      .register-form {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-5);
       }
 
-      &--selected {
-        border-color: var(--primary);
-        background: var(--primary-subtle);
+      .register-form__title {
+        font-family: var(--font-display);
+        font-size: var(--text-2xl);
+        font-weight: var(--font-bold);
+        color: var(--text-primary);
+        text-align: center;
       }
-    }
 
-    .register-form__option-icon {
-      font-size: var(--text-2xl);
-    }
-
-    .register-form__option-label {
-      font-size: var(--text-xs);
-      font-weight: var(--font-medium);
-      color: var(--text-secondary);
-    }
-
-    .register-form__footer {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: var(--space-2);
-      font-size: var(--text-sm);
-      color: var(--text-secondary);
-    }
-
-    .register-form__link {
-      font-weight: var(--font-semibold);
-      color: var(--primary);
-      text-decoration: none;
-
-      &:hover {
-        color: var(--primary-dark);
+      .register-form__field {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
       }
-    }
-  `]
+
+      .register-form__label {
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        color: var(--text-primary);
+      }
+
+      .register-form__footer {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: var(--space-2);
+        font-size: var(--text-sm);
+        color: var(--text-secondary);
+      }
+
+      .register-form__link {
+        font-weight: var(--font-semibold);
+        color: var(--primary);
+        text-decoration: none;
+
+        &:hover {
+          color: var(--primary-dark);
+        }
+      }
+    `
+  ]
 })
 export class RegisterComponent {
+  private readonly i18n = inject(I18nService);
   private authService = inject(AuthService);
   private toastService = inject(ToastService);
   private router = inject(Router);
@@ -178,70 +171,88 @@ export class RegisterComponent {
   name = '';
   email = '';
   password = '';
-  selectedLevel = 'beginner';
   isLoading = signal(false);
   nameError = signal('');
   emailError = signal('');
   passwordError = signal('');
+  readonly passwordMaxLength = MAX_BCRYPT_PASSWORD_BYTES;
 
   private redirectAfterAuth(): void {
     const code = this.route.snapshot.queryParamMap.get('code');
     if (code) {
       this.householdService.joinByCode(code).subscribe({
-        next: () => {
-          this.toastService.success('¡Unido!', 'Te has unido al hogar');
+        next: (result) => {
+          if (result?.success !== true) {
+            // Keep the invitation available for retry; invalid/expired links can still
+            // return to the household screen to create a home or enter another code.
+            void this.router.navigate(['/invite', code]);
+            return;
+          }
+          this.toastService.success(this.i18n.t('auth.unido'), this.i18n.t('auth.te_has_unido_al'));
           this.router.navigate(['/household']);
         },
-        error: () => this.router.navigate(['/dashboard'])
+        error: () => this.router.navigate(['/invite', code])
       });
     } else {
-      this.router.navigate(['/dashboard']);
+      // Household is the mandatory account setup step. The household screen offers
+      // create/join actions and remains available after interruption or reload.
+      void this.router.navigate(['/household']);
     }
   }
 
-  cookingLevels = [
-    { value: 'beginner', label: 'Principiante', icon: '🌱' },
-    { value: 'intermediate', label: 'Intermedio', icon: '👨‍🍳' },
-    { value: 'expert', label: 'Experto', icon: '🏆' }
-  ];
-
   onSubmit(): void {
+    if (this.isLoading()) return;
+
     this.nameError.set('');
     this.emailError.set('');
     this.passwordError.set('');
 
-    if (!this.name) {
-      this.nameError.set('El nombre es requerido');
+    const nameIssue = registerNameIssue(this.name);
+    if (nameIssue) {
+      this.nameError.set(this.i18n.t(NAME_ERROR_KEYS[nameIssue]));
       return;
     }
 
-    if (!this.email) {
-      this.emailError.set('El email es requerido');
+    const emailIssue = registerEmailIssue(this.email);
+    if (emailIssue) {
+      this.emailError.set(this.i18n.t(EMAIL_ERROR_KEYS[emailIssue]));
       return;
     }
 
-    if (!this.password || this.password.length < 6) {
-      this.passwordError.set('La contraseña debe tener al menos 6 caracteres');
+    const passwordIssue = registerPasswordIssue(this.password);
+    if (passwordIssue) {
+      this.passwordError.set(this.i18n.t(PASSWORD_ERROR_KEYS[passwordIssue]));
       return;
     }
 
     this.isLoading.set(true);
 
-    this.authService.register({
-      name: this.name,
-      email: this.email,
-      password: this.password,
-      cookingLevel: this.selectedLevel as any
-    }).subscribe({
-      next: () => {
-        this.toastService.success('¡Cuenta creada!', 'Tu cuenta ha sido creada correctamente');
-        this.householdService.loadHousehold();
-        this.redirectAfterAuth();
-      },
-      error: (error) => {
-        this.isLoading.set(false);
-        this.toastService.error('Error', error.message || 'Error al crear la cuenta');
-      }
-    });
+    // El nivel de cocina ya no se pregunta aqui: es parte del perfil y se
+    // responde en el tour (y se edita en Preferencias › Perfil).
+    this.authService
+      .register({
+        name: this.name,
+        email: this.email,
+        password: this.password
+      })
+      .subscribe({
+        next: () => {
+          this.toastService.success(
+            this.i18n.t('auth.cuenta_creada'),
+            this.i18n.t('auth.tu_cuenta_ha_sido')
+          );
+          this.redirectAfterAuth();
+        },
+        error: (error) => {
+          this.isLoading.set(false);
+          const message =
+            error?.status === 409
+              ? this.i18n.t('auth.el_email_ya_esta_registrado')
+              : error?.status === 429
+                ? this.i18n.t('ui.demasiadas_solicitudes')
+                : this.i18n.t('auth.error_al_crear_la');
+          this.toastService.error(this.i18n.t('ui.error'), message);
+        }
+      });
   }
 }

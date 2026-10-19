@@ -1,5 +1,5 @@
 #!/bin/bash
-# RecipeApp Setup Script
+# HogarIA Setup Script
 
 set -e
 
@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="$(dirname "$SCRIPT_DIR")"
 
 echo "╔═══════════════════════════════════════════════════════════════╗"
-echo "║                    RecipeApp Setup                            ║"
+echo "║                         HogarIA Setup                         ║"
 echo "╚═══════════════════════════════════════════════════════════════╝"
 
 cd "$APP_DIR"
@@ -45,7 +45,7 @@ if [ ! -f .env ]; then
     JWT_SECRET=$(openssl rand -hex 32 2>/dev/null || cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 64 | head -n 1)
     
     cat > .env << EOF
-# RecipeApp Configuration
+# HogarIA Configuration
 # Generated on $(date)
 
 # Server
@@ -53,7 +53,7 @@ NODE_ENV=development
 PORT=3000
 
 # Database
-DATABASE_PATH=./data/recipeapp.db
+DATABASE_PATH=./data/hogaria.sqlite
 
 # Authentication
 JWT_SECRET=${JWT_SECRET}

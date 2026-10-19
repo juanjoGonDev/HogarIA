@@ -1,0 +1,93 @@
+// Diccionario del dominio `caducidades`: la pantalla que ordena la despensa por lo que se
+// tira antes (HOGARIA-SPEC ## 12ak). Lo que la IA estima y lo que dice el catalogo de bolsillo
+// se distinguen en pantalla con su origen, que una fecha registrada no es lo mismo que un «~4 dias».
+export const caducidadesEs = {
+  'caducidades.titulo': 'Caducidades',
+  'caducidades.subtitulo':
+    'Lo que caduca primero, arriba. Las fechas estimadas salen del catálogo de la casa o de la IA; el ritmo, de tu historial de compras.',
+  'caducidades.volver': 'Volver al inventario',
+  'caducidades.grafica': 'Días para caducar',
+  'caducidades.grafica_hint': 'Cada barra es un producto; las estimadas llevan ≈.',
+  'caducidades.resumen_caducados': '{n} caducados',
+  'caducidades.resumen_semana': '{n} esta semana',
+  'caducidades.resumen_estimadas': '{n} estimadas',
+  'caducidades.resumen_sin_fecha': '{n} sin fecha',
+  'caducidades.producto': 'Producto',
+  'caducidades.caduca': 'Caduca',
+  'caducidades.origen': 'Origen',
+  'caducidades.ritmo': 'Ritmo de compra',
+  'caducidades.dura': 'El stock dura',
+  'caducidades.ordenar_por': 'Ordenar por {columna}',
+  'caducidades.origen.fecha': 'Fecha',
+  'caducidades.origen.ia': 'IA',
+  'caducidades.origen.catalogo': 'Catálogo',
+  'caducidades.origen.nada': 'Sin estimar',
+  'caducidades.en_n_dias': '{n} días',
+  'caducidades.estimado_en_n_dias': '≈{n} días',
+  'caducidades.caduca_hoy': 'Hoy',
+  'caducidades.caducado_hace': 'Hace {n} días',
+  'caducidades.cada_n_dias': 'cada {n} días',
+  'caducidades.de_n_en_n': 'de {n} en {n}',
+  'caducidades.dura_n_dias': '≈{n} días',
+  'caducidades.sin_datos': 'sin datos',
+  'caducidades.estimar': 'Estimar caducidades',
+  'caducidades.estimando': 'Estimando…',
+  'caducidades.estimacion_ok': '{ia} por la IA · {catalogo} por catálogo',
+  'caducidades.error_sin_ia':
+    'Falta configurar la IA para estimar lo que no está en el catálogo.',
+  'caducidades.error_json': 'El modelo no ha contestado lo que se le esperaba.',
+  'caducidades.error': 'No se ha podido estimar.',
+  'caducidades.carga_error':
+    'No se pudieron cargar las caducidades. Comprueba tu conexión e inténtalo de nuevo.',
+  'caducidades.reintentar': 'Reintentar',
+  'caducidades.sin_nada_hint':
+    'Nada con fecha ni estimación: registra la fecha al editar el artículo, o pulsa «Estimar caducidades».',
+  'caducidades.vacio': 'La despensa está vacía',
+  'caducidades.vacio_hint': 'Lo que compres y confirmes en tickets irá llenando esta pantalla.',
+  'caducidades.y_n_mas': 'y {n} más'
+} as const;
+
+export const caducidadesEn: Record<keyof typeof caducidadesEs, string> = {
+  'caducidades.titulo': 'Expiry',
+  'caducidades.subtitulo':
+    'What expires first, on top. Estimated dates come from the house catalog or the AI; the rhythm, from your purchase history.',
+  'caducidades.volver': 'Back to inventory',
+  'caducidades.grafica': 'Days to expiry',
+  'caducidades.grafica_hint': 'Each bar is a product; estimated ones carry ≈.',
+  'caducidades.resumen_caducados': '{n} expired',
+  'caducidades.resumen_semana': '{n} this week',
+  'caducidades.resumen_estimadas': '{n} estimated',
+  'caducidades.resumen_sin_fecha': '{n} undated',
+  'caducidades.producto': 'Product',
+  'caducidades.caduca': 'Expires',
+  'caducidades.origen': 'Source',
+  'caducidades.ritmo': 'Purchase rhythm',
+  'caducidades.dura': 'Stock lasts',
+  'caducidades.ordenar_por': 'Sort by {columna}',
+  'caducidades.origen.fecha': 'Date',
+  'caducidades.origen.ia': 'AI',
+  'caducidades.origen.catalogo': 'Catalog',
+  'caducidades.origen.nada': 'Unestimated',
+  'caducidades.en_n_dias': '{n} days',
+  'caducidades.estimado_en_n_dias': '≈{n} days',
+  'caducidades.caduca_hoy': 'Today',
+  'caducidades.caducado_hace': '{n} days ago',
+  'caducidades.cada_n_dias': 'every {n} days',
+  'caducidades.de_n_en_n': '{n} at a time',
+  'caducidades.dura_n_dias': '≈{n} days',
+  'caducidades.sin_datos': 'no data',
+  'caducidades.estimar': 'Estimate expiry dates',
+  'caducidades.estimando': 'Estimating…',
+  'caducidades.estimacion_ok': '{ia} by the AI · {catalogo} by catalog',
+  'caducidades.error_sin_ia': 'Set up the AI to estimate what the catalog does not cover.',
+  'caducidades.error_json': 'The model did not answer what was expected.',
+  'caducidades.error': 'Could not estimate.',
+  'caducidades.carga_error':
+    'Expiry data could not be loaded. Check your connection and try again.',
+  'caducidades.reintentar': 'Retry',
+  'caducidades.sin_nada_hint':
+    'Nothing with a date or an estimate: set the date when editing the item, or press «Estimate expiry dates».',
+  'caducidades.vacio': 'The pantry is empty',
+  'caducidades.vacio_hint': 'What you buy and confirm on receipts will fill this screen.',
+  'caducidades.y_n_mas': 'and {n} more'
+};

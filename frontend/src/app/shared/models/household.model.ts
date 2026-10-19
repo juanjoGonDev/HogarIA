@@ -1,3 +1,5 @@
+import type { CookingLevel } from './home-profile';
+
 export interface Household {
   id: string;
   name: string;
@@ -30,6 +32,16 @@ export interface HouseholdMember {
   avatar?: string;
   joinedAt: Date;
   permissions?: MemberPermissions;
+  isActive: boolean;
+}
+
+/** Resumen de una casa a la que pertenece la persona autenticada. */
+export interface HouseholdMembership {
+  id: string;
+  name: string;
+  role: MemberRole;
+  permissions: MemberPermissions;
+  active: boolean;
 }
 
 export interface InvitePreview {
@@ -41,7 +53,7 @@ export interface InvitePreview {
 
 export type MemberRole = 'admin' | 'member' | 'child';
 
-export type CookingLevel = 'beginner' | 'intermediate' | 'expert';
+export type { CookingLevel } from './home-profile';
 
 export interface FoodPreferences {
   dietType: DietType;
@@ -50,13 +62,7 @@ export interface FoodPreferences {
   portionSize: PortionSize;
 }
 
-export type DietType =
-  | 'omnivore'
-  | 'vegetarian'
-  | 'vegan'
-  | 'pescatarian'
-  | 'keto'
-  | 'paleo';
+export type DietType = 'omnivore' | 'vegetarian' | 'vegan' | 'pescatarian' | 'keto' | 'paleo';
 
 export type SpiceTolerance = 'low' | 'medium' | 'high';
 
@@ -71,41 +77,7 @@ export interface Allergy {
 
 export type AllergySeverity = 'mild' | 'moderate' | 'severe';
 
-export const MEMBER_ROLE_LABELS: Record<MemberRole, string> = {
-  admin: 'Administrador',
-  member: 'Miembro',
-  child: 'Niño'
-};
-
-export const COOKING_LEVEL_LABELS: Record<CookingLevel, string> = {
-  beginner: 'Principiante',
-  intermediate: 'Intermedio',
-  expert: 'Experto'
-};
-
-export const DIET_TYPE_LABELS: Record<DietType, string> = {
-  omnivore: 'Omnívoro',
-  vegetarian: 'Vegetariano',
-  vegan: 'Vegano',
-  pescatarian: 'Pescetariano',
-  keto: 'Keto',
-  paleo: 'Paleo'
-};
-
-export const SPICE_TOLERANCE_LABELS: Record<SpiceTolerance, string> = {
-  low: 'Bajo',
-  medium: 'Medio',
-  high: 'Alto'
-};
-
-export const PORTION_SIZE_LABELS: Record<PortionSize, string> = {
-  small: 'Pequeña',
-  medium: 'Mediana',
-  large: 'Grande'
-};
-
-export const ALLERGY_SEVERITY_LABELS: Record<AllergySeverity, string> = {
-  mild: 'Leve',
-  moderate: 'Moderada',
-  severe: 'Severa'
-};
+// Los cinco `Record<Rol, string>` que habia aqui (roles, dieta, tolerancia al picante, racion y severidad
+// de la alergia) estaban exportados y no los leia nadie: texto en espanol que ningun idioma alcanzaba y que
+// ninguna pantalla ensenaba. Lo que si se ensena lleva `LABEL_KEYS` y sale del diccionario (## 12u).
+export { COOKING_LEVEL_LABEL_KEYS } from './home-profile';

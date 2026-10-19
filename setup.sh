@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# MiCocinAI - Setup Script
+# HogarIA - Setup Script
 # =============================================================================
 # Usage: ./setup.sh
 
@@ -16,8 +16,8 @@ NC='\033[0m' # No Color
 # Header
 echo -e "${BLUE}"
 echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║                    MiCocinAI Setup                         ║"
-echo "║            Smart Recipe App with AI Integration             ║"
+echo "║                        HogarIA Setup                         ║"
+echo "║           Household, shopping and kitchen with AI            ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
 
@@ -66,14 +66,14 @@ echo ""
 echo -e "${YELLOW}📁 Setting up environment...${NC}"
 if [ ! -f .env ]; then
     cp .env.example .env 2>/dev/null || cat > .env << 'EOF'
-# MiCocinAI Environment
+# HogarIA Environment
 # Copy this file and update values
 
 # JWT Secret (change in production!)
 JWT_SECRET=change-this-to-a-secure-secret-key
 
 # Database
-DATABASE_PATH=./data/recipeapp.db
+DATABASE_PATH=./data/hogaria.sqlite
 
 # CORS
 CORS_ORIGIN=http://localhost:4200

@@ -1,6 +1,14 @@
-# 🍳 RecipeApp
+# 🏠 HogarIA
 
-Smart recipe management app with AI integration, optimized for Raspberry Pi 5.
+Cocina, compra y hogar en un solo sitio: despensa, planificador semanal con IA, lista de la compra
+con precios e histórico, tickets leídos con OCR y (pronto) tareas del hogar, calendario compartido e
+integración con Home Assistant. Optimizado para correr en tu propia máquina (Raspberry Pi 5).
+
+> **Nombres anteriores:** el proyecto nació como *RecipeApp* y se llamaba *MiCocinAI*. El código ya no:
+> los paquetes son `@hogaria/web` y `@hogaria/server`, el proyecto de Angular es `hogaria`, la base de
+> datos es `data/hogaria.sqlite` y la marca visible es HogarIA. Quedan dos huellas deliberadas: el nombre
+> del repositorio de GitHub y el prefijo `recipeapp_` de `localStorage`, que es la clave bajo la que las
+> instalaciones ya desplegadas guardaron su sesión (se migra en `main.ts`, no se renombra).
 
 ## ✨ Features
 
@@ -63,7 +71,7 @@ docker-compose logs -f
 ## 📁 Project Structure
 
 ```
-recipeapp/
+hogaria/
 ├── frontend/          # Angular application
 │   ├── src/
 │   │   ├── app/

@@ -1,0 +1,402 @@
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { Hono } from 'hono';
+import jwt from 'jsonwebtoken';
+
+process.env.DATABASE_PATH = ':memory:';
+process.env.NODE_ENV = 'test';
+
+type Sql = import('better-sqlite3').Database;
+type User = { id: string; token: string };
+type ApiResponse = { success: boolean; code?: string; data: any };
+
+let app: Hono;
+let db: Sql;
+let closeDatabase: () => void;
+let jwtSecret = '';
+
+beforeAll(async () => {
+  const database = await import('../config/database.js');
+  const { householdMealPlanningRoutes } = await import('./household-meal-planning.routes.js');
+  const { config } = await import('../config/app.config.js');
+  await database.initializeDatabase();
+  closeDatabase = database.closeDatabase;
+  db = database.getDatabase();
+  app = new Hono();
+  app.route('/api/household', householdMealPlanningRoutes);
+  app.onError((error, context) => context.json({ success: false, message: error.message }, 500));
+  jwtSecret = config.auth.jwtSecret;
+});
+
+afterAll(() => closeDatabase?.());
+
+beforeEach(() => {
+  db.exec('DROP TRIGGER IF EXISTS reject_meal_planning_update');
+  db.prepare('DELETE FROM meals').run();
+  db.prepare('DELETE FROM weekly_calendars').run();
+  db.prepare('DELETE FROM ingredients').run();
+  db.prepare('DELETE FROM household_members').run();
+  db.prepare('DELETE FROM users').run();
+  db.prepare('DELETE FROM households').run();
+});
+
+function addHousehold(id = 'home') {
+  db.prepare('INSERT INTO households (id, name, invite_code) VALUES (?, ?, ?)').run(
+    id,
+    id,
+    `INV-${id}`
+  );
+}
+
+function addUser(id: string, householdId: string | null, settings: boolean): User {
+  db.prepare(
+    `INSERT INTO users (id, email, name, password_hash, household_id, preferences)
+     VALUES (?, ?, ?, 'hash', ?, ?)`
+  ).run(
+    id,
+    `${id}@hogaria.test`,
+    id,
+    householdId,
+    JSON.stringify({
+      taste: { goals: ['weight-loss'], goalNotes: 'Quiero cuidarme', allergies: ['gluten'] }
+    })
+  );
+  if (householdId) {
+    db.prepare(
+      `INSERT INTO household_members (id, household_id, user_id, role, permissions)
+       VALUES (?, ?, ?, ?, ?)`
+    ).run(
+      `membership-${id}`,
+      householdId,
+      id,
+      settings ? 'admin' : 'member',
+      JSON.stringify({ settings })
+    );
+  }
+  return {
+    id,
+    token: jwt.sign({ sub: id, email: `${id}@hogaria.test` }, jwtSecret, { expiresIn: '1h' })
+  };
+}
+
+function addCalendarUser(id: string, canView: boolean): User {
+  db.prepare(
+    `INSERT INTO users (id, email, name, password_hash, household_id)
+     VALUES (?, ?, ?, 'hash', 'home')`
+  ).run(id, `${id}@hogaria.test`, id);
+  db.prepare(
+    `INSERT INTO household_members (id, household_id, user_id, role, permissions)
+     VALUES (?, 'home', ?, 'member', ?)`
+  ).run(`membership-${id}`, id, JSON.stringify({ calendar: { view: canView, edit: false } }));
+  return {
+    id,
+    token: jwt.sign({ sub: id, email: `${id}@hogaria.test` }, jwtSecret, { expiresIn: '1h' })
+  };
+}
+
+function call(user: User, method: string, body?: unknown, householdId = 'home') {
+  return app.request('/api/household/meal-planning', {
+    method,
+    headers: {
+      authorization: `Bearer ${user.token}`,
+      'content-type': 'application/json',
+      ...(householdId ? { 'x-household-id': householdId } : {})
+    },
+    body: body === undefined ? undefined : JSON.stringify(body)
+  });
+}
+
+function callShoppingPreview(user: User, startDate: string, endDate: string, householdId = 'home') {
+  const query = new URLSearchParams({ startDate, endDate });
+  return app.request(`/api/household/meal-planning/shopping-preview?${query}`, {
+    headers: {
+      authorization: `Bearer ${user.token}`,
+      'x-household-id': householdId
+    }
+  });
+}
+
+function addDays(date: string, days: number): string {
+  const value = new Date(`${date}T00:00:00.000Z`);
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
+}
+
+async function responseBody(response: Response): Promise<ApiResponse> {
+  return (await response.json()) as ApiResponse;
+}
+
+describe('household meal-planning settings routes', () => {
+  it('returns defaults and only the caller personal profile on GET', async () => {
+    addHousehold();
+    const member = addUser('member', 'home', false);
+
+    const response = await call(member, 'GET');
+    const json = await responseBody(response);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(json.data).toMatchObject({
+      household: {
+        objective: { goals: ['balanced'], notes: '' },
+        mealTypes: { breakfast: true, lunch: true, snack: true, dinner: true }
+      },
+      member: {
+        goalOverrideEnabled: false,
+        scheduleOverrideEnabled: false,
+        personalObjective: { goals: ['weight-loss'], notes: 'Quiero cuidarme' }
+      },
+      effective: { objective: { source: 'household', goals: ['balanced'], notes: '' } }
+    });
+    expect(JSON.stringify(json)).not.toContain('gluten');
+  });
+
+  it('lets any active member change only their own toggles and schedule', async () => {
+    addHousehold();
+    const member = addUser('member', 'home', false);
+
+    const response = await call(member, 'PATCH', {
+      member: {
+        goalOverrideEnabled: true,
+        scheduleOverrideEnabled: true,
+        schedule: { mealTypes: { dinner: false }, mealTimes: { dinner: '19:45' } }
+      }
+    });
+    const json = await responseBody(response);
+
+    expect(response.status).toBe(200);
+    expect(json.data.member.goalOverrideEnabled).toBe(true);
+    expect(json.data.effective.objective).toMatchObject({
+      source: 'member',
+      goals: ['weight-loss'],
+      notes: 'Quiero cuidarme'
+    });
+    expect(json.data.effective.schedule).toMatchObject({
+      source: 'member',
+      mealTypes: { dinner: false },
+      mealTimes: { dinner: '19:45' }
+    });
+  });
+
+  it('requires the existing settings permission to change shared defaults', async () => {
+    addHousehold();
+    const admin = addUser('admin', 'home', true);
+    const member = addUser('member', 'home', false);
+
+    const denied = await call(member, 'PATCH', {
+      household: { objective: { goals: ['variety'] } }
+    });
+    expect(denied.status).toBe(403);
+    expect((await responseBody(denied)).code).toBe('HOUSEHOLD_SETTINGS_REQUIRED');
+    const allowed = await call(admin, 'PATCH', {
+      household: {
+        objective: { goals: ['variety'], notes: 'De temporada' },
+        mealTypes: { snack: false },
+        mealTimes: { lunch: '13:30' }
+      }
+    });
+    const json = await responseBody(allowed);
+    expect(allowed.status).toBe(200);
+    expect(json.data.household.objective).toEqual({ goals: ['variety'], notes: 'De temporada' });
+    expect(json.data.household.mealTypes.snack).toBe(false);
+    expect(json.data.household.mealTimes.lunch).toBe('13:30');
+  });
+
+  it('honors the legacy admin fallback but fails closed for malformed permission JSON', async () => {
+    addHousehold();
+    const legacyAdmin = addUser('legacy-admin', 'home', true);
+    const malformed = addUser('malformed', 'home', false);
+    db.prepare('UPDATE household_members SET permissions = NULL WHERE user_id = ?').run(
+      legacyAdmin.id
+    );
+    db.prepare("UPDATE household_members SET permissions = '{' WHERE user_id = ?").run(
+      malformed.id
+    );
+
+    const allowed = await call(legacyAdmin, 'PATCH', {
+      household: { objective: { goals: ['maintenance'] } }
+    });
+    const denied = await call(malformed, 'PATCH', {
+      household: { objective: { goals: ['variety'] } }
+    });
+
+    expect(allowed.status).toBe(200);
+    expect(denied.status).toBe(403);
+  });
+
+  it('rolls back a failed shared-default write and returns a generic save error', async () => {
+    addHousehold();
+    const admin = addUser('admin', 'home', true);
+    db.exec(`
+      CREATE TRIGGER reject_meal_planning_update
+      BEFORE UPDATE OF meal_planning_preferences ON households
+      BEGIN SELECT RAISE(ABORT, 'synthetic storage failure'); END;
+    `);
+
+    const response = await call(admin, 'PATCH', {
+      household: { objective: { goals: ['variety'] } }
+    });
+
+    expect(response.status).toBe(500);
+    expect((await responseBody(response)).code).toBe('HOUSEHOLD_MEAL_PLANNING_SAVE_FAILED');
+    expect(
+      (
+        db.prepare('SELECT meal_planning_preferences FROM households WHERE id = ?').get('home') as {
+          meal_planning_preferences: string;
+        }
+      ).meal_planning_preferences
+    ).toBe('{}');
+    db.exec('DROP TRIGGER reject_meal_planning_update');
+  });
+
+  it('rejects mixed unauthorized writes atomically', async () => {
+    addHousehold();
+    const member = addUser('member', 'home', false);
+
+    const response = await call(member, 'PATCH', {
+      household: { objective: { goals: ['variety'] } },
+      member: { goalOverrideEnabled: true }
+    });
+
+    expect(response.status).toBe(403);
+    const storedMember = db
+      .prepare('SELECT meal_planning_preferences FROM household_members WHERE user_id = ?')
+      .get('member') as { meal_planning_preferences: string };
+    expect(JSON.parse(storedMember.meal_planning_preferences)).toEqual({});
+    const responseAgain = await call(member, 'GET');
+    expect((await responseBody(responseAgain)).data.household.objective.goals).toEqual([
+      'balanced'
+    ]);
+  });
+
+  it('rejects malformed patches, invalid times, missing home context, and stale home headers', async () => {
+    addHousehold();
+    const member = addUser('member', 'home', false);
+    expect((await call(member, 'PATCH', {})).status).toBe(400);
+    expect(
+      (await call(member, 'PATCH', { household: { mealTimes: { dinner: '29:00' } } })).status
+    ).toBe(400);
+    expect((await call(member, 'GET', undefined, 'other-home')).status).toBe(409);
+
+    const solo = addUser('solo', null, false);
+    expect((await call(solo, 'GET')).status).toBe(404);
+  });
+
+  it('rejects malformed JSON and unauthenticated requests', async () => {
+    addHousehold();
+    const member = addUser('member', 'home', false);
+    const malformed = await app.request('/api/household/meal-planning', {
+      method: 'PATCH',
+      headers: {
+        authorization: `Bearer ${member.token}`,
+        'content-type': 'application/json',
+        'x-household-id': 'home'
+      },
+      body: '{'
+    });
+    const unauthenticated = await app.request('/api/household/meal-planning');
+
+    expect(malformed.status).toBe(400);
+    expect((await responseBody(malformed)).code).toBe('INVALID_MEAL_PLANNING_SETTINGS');
+    expect(unauthenticated.status).toBe(401);
+  });
+
+  it('returns a read-only household preview only with calendar view permission and current household context', async () => {
+    addHousehold();
+    const member = addCalendarUser('calendar-member', true);
+    const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+    db.prepare(
+      `INSERT INTO weekly_calendars (id, household_id, user_id, week_start, week_end, goals)
+       VALUES ('shopping-calendar', 'home', ?, ?, ?, '{}')`
+    ).run(member.id, tomorrow, tomorrow);
+    db.prepare(
+      `INSERT INTO meals
+        (id, calendar_id, date, meal_type, custom_meal, servings, source_proposal_id, proposal_id, recipe_snapshot)
+       VALUES ('shopping-meal', 'shopping-calendar', ?, 'dinner', 'Synthetic dinner', 3,
+         'proposal:event', 'proposal', ?)`
+    ).run(
+      tomorrow,
+      JSON.stringify({
+        name: 'Synthetic recipe',
+        baseServings: 1,
+        ingredients: [{ name: 'Rice', quantity: 50, unit: 'g', isOptional: false }]
+      })
+    );
+    db.prepare(
+      `INSERT INTO ingredients (id, user_id, household_id, name, category, quantity, unit)
+       VALUES ('shopping-rice', ?, 'home', 'rice', 'other', 20, 'g')`
+    ).run(member.id);
+    const before = (db.prepare('SELECT total_changes() AS changes').get() as { changes: number })
+      .changes;
+
+    const response = await callShoppingPreview(member, tomorrow, tomorrow);
+    const body = await responseBody(response);
+    const after = (db.prepare('SELECT total_changes() AS changes').get() as { changes: number })
+      .changes;
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(body.data).toMatchObject({
+      startDate: tomorrow,
+      endDate: tomorrow,
+      plannedMealCount: 1,
+      requiredIngredients: [
+        expect.objectContaining({
+          name: 'Rice',
+          unit: 'g',
+          quantity: 150,
+          stockQuantity: 20,
+          missingQuantity: 130
+        })
+      ]
+    });
+    expect(JSON.stringify(body)).not.toContain(member.id);
+    expect(after).toBe(before);
+
+    db.prepare('UPDATE users SET household_id = NULL WHERE id = ?').run(member.id);
+    const beforeReadOnlyResolution = (
+      db.prepare('SELECT total_changes() AS changes').get() as { changes: number }
+    ).changes;
+    expect((await callShoppingPreview(member, tomorrow, tomorrow)).status).toBe(200);
+    expect(
+      (
+        db.prepare('SELECT household_id FROM users WHERE id = ?').get(member.id) as {
+          household_id: string | null;
+        }
+      ).household_id
+    ).toBeNull();
+    expect(
+      (db.prepare('SELECT total_changes() AS changes').get() as { changes: number }).changes
+    ).toBe(beforeReadOnlyResolution);
+
+    const noView = addCalendarUser('no-calendar-view', false);
+    expect((await callShoppingPreview(noView, tomorrow, tomorrow)).status).toBe(403);
+    expect((await callShoppingPreview(member, tomorrow, tomorrow, 'other-home')).status).toBe(409);
+    const noHousehold = addUser('no-household', null, false);
+    expect((await callShoppingPreview(noHousehold, tomorrow, tomorrow)).status).toBe(404);
+  });
+
+  it('rejects missing, past, malformed, inverted, and oversized shopping preview ranges', async () => {
+    addHousehold();
+    const member = addCalendarUser('calendar-member', true);
+    const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
+    const dayAfterTomorrow = addDays(tomorrow, 1);
+    const callQuery = (query: string) =>
+      app.request(`/api/household/meal-planning/shopping-preview${query}`, {
+        headers: {
+          authorization: `Bearer ${member.token}`,
+          'x-household-id': 'home'
+        }
+      });
+
+    for (const query of [
+      '',
+      '?startDate=2000-01-01&endDate=2000-01-01',
+      `?startDate=${tomorrow}&endDate=2026-02-30`,
+      `?startDate=${dayAfterTomorrow}&endDate=${tomorrow}`,
+      `?startDate=${tomorrow}&endDate=${addDays(tomorrow, 31)}`,
+      `?startDate=${tomorrow}&endDate=${tomorrow}&userId=private-user`
+    ]) {
+      expect((await callQuery(query)).status, query).toBe(400);
+    }
+  });
+});

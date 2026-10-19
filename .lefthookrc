@@ -1,0 +1,10 @@
+# Git for Windows may launch hooks without its bin directories in PATH.
+PATH="$PATH:/c/Program Files/Git/bin:/c/Program Files/Git/usr/bin"
+export PATH
+
+# Keep transient Vite/Node files inside the ignored checkout temp directory.
+mkdir -p "$PWD/.tmp/vite-temp"
+TEMP="$PWD/.tmp/vite-temp"
+TMP="$TEMP"
+TMPDIR="$TEMP"
+export TEMP TMP TMPDIR

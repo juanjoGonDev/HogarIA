@@ -1,134 +1,25 @@
 import { serve } from '@hono/node-server';
-import { Hono } from 'hono';
-import { cors } from 'hono/cors';
-import { prettyJSON } from 'hono/pretty-json';
-import { secureHeaders } from 'hono/secure-headers';
-import { rateLimiter } from 'hono-rate-limiter';
+import { writeFileSync } from 'node:fs';
+import { relative } from 'node:path';
 
 import { config } from './config/app.config.js';
-import { initializeDatabase } from './config/database.js';
-import { errorHandler } from './middleware/error.middleware.js';
-import { authRoutes } from './routes/auth.routes.js';
-import { pantryRoutes } from './routes/pantry.routes.js';
-import { recipeRoutes } from './routes/recipes.routes.js';
-import { householdRoutes } from './routes/household.routes.js';
-import { calendarRoutes } from './routes/calendar.routes.js';
-import { aiRoutes } from './routes/ai.routes.js';
-import { healthRoutes } from './routes/health.routes.js';
-import { logRoutes } from './routes/logs.routes.js';
+import { getDatabase, initializeDatabase } from './config/database.js';
 import { memoryMonitor } from './utils/memory-monitor.js';
 import { installConsoleCapture } from './utils/log-store.js';
+import { uploadsRoot } from './utils/uploads.js';
+import { ensureWorker } from './utils/ticket-queue.js';
+import { startHouseholdPlanningAutomationScheduler } from './utils/household-planning-automation.scheduler.js';
+import { isolatedHouseholdPlanningSchedulerOptions } from './utils/household-planning-automation.scheduler.runtime.js';
+import { createApp, rateLimitFromEnv, resolveStaticDir } from './app.js';
 
 // Install console capture BEFORE anything else so that startup messages
 // (including DB init errors) make it into the in-app log viewer.
 installConsoleCapture();
 
-const app = new Hono();
-
-// ═══════════════════════════════════════════════════════════════════
-// Global Middleware
-// ═══════════════════════════════════════════════════════════════════
-
-app.use('*', secureHeaders());
-
-// Custom logger: writes to console (which is captured into the log store for
-// the in-app viewer) with the same "← /method /path" / "→ status ms" format
-// that the user saw in their terminal.
-app.use('*', async (c, next) => {
-  const start = Date.now();
-  const { method, url } = c.req;
-  // eslint-disable-next-line no-console
-  console.log(`<-- ${method} ${url}`);
-  await next();
-  const ms = Date.now() - start;
-  const status = c.res.status;
-  const color =
-    status >= 500 ? '\x1b[31m'
-    : status >= 400 ? '\x1b[33m'
-    : status >= 300 ? '\x1b[36m'
-    : '\x1b[32m';
-  const reset = '\x1b[0m';
-  // eslint-disable-next-line no-console
-  console.log(`--> ${color}${method} ${url} ${status}${reset} ${ms}ms`);
-});
-
-app.use('*', prettyJSON());
-
-// CORS
-app.use('*', cors({
-  origin: config.cors.origin,
-  allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowHeaders: ['Content-Type', 'Authorization'],
-  exposeHeaders: ['X-Request-Id'],
-  maxAge: 86400,
-  credentials: true
-}));
-
-// Rate limiting
-// More generous limits: development use, single user, and we want to avoid
-// accidental lockouts from refresh storms (which should not happen, but still).
-// Logs and health endpoints are exempt from rate limiting.
-app.use('/api/health', (_c, next) => next());
-app.use('/api/logs', (_c, next) => next());
-app.use('/api/auth/refresh', rateLimiter({
-  windowMs: 60 * 1000, // 1 minute
-  limit: 30,          // 30 refreshes per minute is already a lot
-  standardHeaders: 'draft-6',
-  keyGenerator: (c) => {
-    return c.req.header('x-forwarded-for') ||
-           c.req.header('x-real-ip') ||
-           'unknown';
-  }
-}));
-app.use('/api/auth/login', rateLimiter({
-  windowMs: 15 * 60 * 1000,
-  limit: 20,          // 20 login attempts per 15 minutes
-  standardHeaders: 'draft-6',
-  keyGenerator: (c) => {
-    return c.req.header('x-forwarded-for') ||
-           c.req.header('x-real-ip') ||
-           'unknown';
-  }
-}));
-app.use('/api/*', rateLimiter({
-  windowMs: 60 * 1000, // 1 minute
-  limit: 300,          // 300 req/min is plenty for a single-user app
-  standardHeaders: 'draft-6',
-  keyGenerator: (c) => {
-    return c.req.header('x-forwarded-for') ||
-           c.req.header('x-real-ip') ||
-           'unknown';
-  }
-}));
-
-// ═══════════════════════════════════════════════════════════════════
-// Routes
-// ═══════════════════════════════════════════════════════════════════
-
-// Health check (no auth required)
-app.route('/health', healthRoutes);
-app.route('/api/health', healthRoutes);
-
-// API routes
-app.route('/api/auth', authRoutes);
-app.route('/api/pantry', pantryRoutes);
-app.route('/api/recipes', recipeRoutes);
-app.route('/api/household', householdRoutes);
-app.route('/api/calendar', calendarRoutes);
-app.route('/api/ai', aiRoutes);
-app.route('/api/logs', logRoutes);
-
-// Error handling
-app.onError(errorHandler);
-
-// 404 handler
-app.notFound((c) => {
-  return c.json({
-    success: false,
-    error: 'Not Found',
-    message: `Route ${c.req.method} ${c.req.url} not found`
-  }, 404);
-});
+const staticDir = resolveStaticDir();
+const app = createApp({ rateLimit: rateLimitFromEnv(), staticDir });
+let stopPlanningAutomation: (() => Promise<void>) | null = null;
+let shutdown: Promise<void> | null = null;
 
 // ═══════════════════════════════════════════════════════════════════
 // Server Startup
@@ -136,49 +27,74 @@ app.notFound((c) => {
 
 async function startServer() {
   try {
-    // Initialize database
     await initializeDatabase();
     console.log('[SERVER] ✓ Database initialized');
 
-    // Start memory monitor
+    const planningAutomation = startHouseholdPlanningAutomationScheduler(
+      getDatabase(),
+      isolatedHouseholdPlanningSchedulerOptions(process.env)
+    );
+    stopPlanningAutomation = planningAutomation.stop;
+    console.log('[SERVER] ✓ Household planning automation scheduler started');
+
+    ensureWorker();
+    console.log('[SERVER] ✓ AI queue started');
+
     memoryMonitor.start();
     console.log('[SERVER] ✓ Memory monitor started');
+    // Donde viven las fotos subidas, en absoluto y una sola vez. Sin esta linea, un 404 de un
+    // `img` obliga a adivinar con que `cwd` se arranco el proceso —y ahi se va la tarde.
+    console.log(`[SERVER] ✓ Uploads en ${uploadsRoot()}`);
 
-    // Start server
     const port = config.server.port;
-    serve({
-      fetch: app.fetch,
-      port,
-      hostname: '0.0.0.0'
-    }, (info) => {
-      console.log(`
+    serve(
+      {
+        fetch: app.fetch,
+        port,
+        hostname: config.server.host
+      },
+      (info) => {
+        if (process.env.E2E_READY_FILE) {
+          writeFileSync(process.env.E2E_READY_FILE, `${process.pid}:${info.port}\n`, {
+            flag: 'wx'
+          });
+        }
+        const shown = staticDir ? relative(process.cwd(), staticDir) : null;
+        console.log(`
 [SERVER] ══════════════════════════════════════════════════════════
-[SERVER]   MiCocinAI Server
+[SERVER]   HogarIA Server
 [SERVER]   Status:  Running
 [SERVER]   Port:    ${info.port}
 [SERVER]   Env:     ${config.server.env}
+[SERVER]   Web:     ${shown ?? 'API solo (sin estaticos)'}
 [SERVER]   PID:     ${process.pid}
 [SERVER] ══════════════════════════════════════════════════════════
-      `);
-    });
+        `);
+      }
+    );
   } catch (error) {
+    await stopPlanningAutomation?.();
+    memoryMonitor.stop();
     console.error('[SERVER] Failed to start server:', error);
     process.exit(1);
   }
 }
 
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('[SERVER] SIGTERM received. Shutting down gracefully...');
-  memoryMonitor.stop();
-  process.exit(0);
-});
+// Graceful shutdown: stop the poller first so in-flight provider work is aborted
+// and the scheduler cannot begin another occurrence while the process exits.
+function shutdownServer(signal: 'SIGTERM' | 'SIGINT'): Promise<void> {
+  if (shutdown) return shutdown;
+  console.log(`[SERVER] ${signal} received. Shutting down gracefully...`);
+  shutdown = (async () => {
+    await stopPlanningAutomation?.();
+    memoryMonitor.stop();
+    process.exit(0);
+  })();
+  return shutdown;
+}
 
-process.on('SIGINT', () => {
-  console.log('[SERVER] SIGINT received. Shutting down gracefully...');
-  memoryMonitor.stop();
-  process.exit(0);
-});
+process.on('SIGTERM', () => void shutdownServer('SIGTERM'));
+process.on('SIGINT', () => void shutdownServer('SIGINT'));
 
 startServer();
 

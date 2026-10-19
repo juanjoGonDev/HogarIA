@@ -1,0 +1,849 @@
+<section
+  class="meal-planner"
+  aria-labelledby="household-meal-planner-title"
+  [attr.aria-busy]="generating() || confirming()"
+  data-test="household-meal-planner"
+>
+  <header class="meal-planner__header">
+    <div>
+      <h2 id="household-meal-planner-title">{{ 'household.meal_proposal_title' | t }}</h2>
+      <p>{{ 'household.meal_proposal_description' | t }}</p>
+    </div>
+  </header>
+
+  <nav
+    class="meal-planner__steps"
+    role="tablist"
+    [attr.aria-label]="'household.meal_proposal_steps_label' | t"
+  >
+    <button
+      type="button"
+      role="tab"
+      id="meal-proposal-step-tab-prepare"
+      aria-controls="meal-proposal-step-panel-prepare"
+      [attr.aria-selected]="activeMealStep() === 'prepare'"
+      [attr.tabindex]="activeMealStep() === 'prepare' ? 0 : -1"
+      data-test="meal-proposal-step-tab-prepare"
+      (click)="selectMealStep('prepare')"
+      (keydown)="onMealStepKeydown($event)"
+    >
+      {{ 'household.meal_proposal_prepare_step' | t }}
+    </button>
+    <button
+      type="button"
+      role="tab"
+      id="meal-proposal-step-tab-review"
+      aria-controls="meal-proposal-step-panel-review"
+      [attr.aria-selected]="activeMealStep() === 'review'"
+      [attr.tabindex]="activeMealStep() === 'review' ? 0 : -1"
+      data-test="meal-proposal-step-tab-review"
+      (click)="selectMealStep('review')"
+      (keydown)="onMealStepKeydown($event)"
+    >
+      {{ 'household.meal_proposal_review_step' | t }}
+    </button>
+    <button
+      type="button"
+      role="tab"
+      id="meal-proposal-step-tab-shopping"
+      aria-controls="meal-shopping-step-panel"
+      [attr.aria-selected]="activeMealStep() === 'shopping'"
+      [attr.tabindex]="activeMealStep() === 'shopping' ? 0 : -1"
+      [disabled]="!canViewShopping"
+      data-test="meal-proposal-step-tab-shopping"
+      (click)="openShoppingReview()"
+      (keydown)="onMealStepKeydown($event)"
+    >
+      {{ 'household.meal_shopping_step' | t }}
+    </button>
+  </nav>
+
+  <section
+    id="meal-proposal-step-panel-prepare"
+    class="meal-planner__step-panel"
+    role="tabpanel"
+    aria-labelledby="meal-proposal-step-tab-prepare"
+    tabindex="0"
+    [hidden]="activeMealStep() !== 'prepare'"
+    data-test="meal-proposal-step-panel-prepare"
+  >
+    <ng-container *ngIf="activeMealStep() === 'prepare'">
+      <p *ngIf="!canEdit" class="meal-planner__notice" role="status">
+        {{ 'household.meal_proposal_edit_permission' | t }}
+      </p>
+
+      <div class="meal-planner__controls">
+        <section class="meal-planner__week" aria-labelledby="meal-proposal-week-label">
+          <label id="meal-proposal-week-label" for="meal-proposal-week">
+            {{ 'household.meal_proposal_week' | t }}
+          </label>
+          <div class="meal-planner__week-control">
+            <app-button
+              variant="outline"
+              size="icon"
+              [disabled]="generating() || confirming()"
+              (onClick)="shiftWeek(-1)"
+              data-test="meal-proposal-previous-week"
+            >
+              <app-icon name="chevron_left" [size]="18" [label]="null" />
+              <span class="meal-planner__visually-hidden">{{
+                'household.meal_proposal_previous_week' | t
+              }}</span>
+            </app-button>
+            <input
+              id="meal-proposal-week"
+              type="date"
+              [value]="weekStart()"
+              [disabled]="generating() || confirming()"
+              [attr.aria-label]="'household.meal_proposal_week' | t"
+              (change)="setWeekFromInput($any($event.target).value)"
+              data-test="meal-proposal-week"
+            />
+            <app-button
+              variant="outline"
+              size="icon"
+              [disabled]="generating() || confirming()"
+              (onClick)="shiftWeek(1)"
+              data-test="meal-proposal-next-week"
+            >
+              <app-icon name="chevron_right" [size]="18" [label]="null" />
+              <span class="meal-planner__visually-hidden">{{
+                'household.meal_proposal_next_week' | t
+              }}</span>
+            </app-button>
+          </div>
+          <p class="meal-planner__week-range">{{ formatWeekRange() }}</p>
+        </section>
+
+        <fieldset class="meal-planner__members" [disabled]="generating() || confirming()">
+          <legend>{{ 'household.meal_proposal_participants' | t }}</legend>
+          <p class="meal-planner__helper">
+            {{ 'household.meal_proposal_participants_help' | t }}
+          </p>
+          <div *ngIf="eligibleMembers().length" class="meal-planner__member-list">
+            <app-checkbox
+              *ngFor="let member of eligibleMembers(); trackBy: trackMember"
+              [label]="member.name"
+              [checked]="isSelected(member.id)"
+              [disabled]="!canEdit || generating() || confirming()"
+              [attr.data-test]="'meal-proposal-member-' + member.id"
+              (checkedChange)="toggleMember(member.id, $event)"
+            />
+          </div>
+          <p *ngIf="!eligibleMembers().length" class="meal-planner__notice" role="status">
+            {{ 'household.meal_proposal_no_eligible_members' | t }}
+          </p>
+        </fieldset>
+      </div>
+
+      <div class="meal-planner__actions">
+        <app-button
+          variant="primary"
+          size="md"
+          [disabled]="!canGenerate()"
+          [loading]="generating()"
+          (onClick)="generateProposal()"
+          data-test="meal-proposal-generate"
+        >
+          <app-icon *ngIf="!generating()" name="calendar_today" [size]="18" [label]="null" />
+          {{
+            (generating()
+              ? 'household.meal_proposal_generating'
+              : proposal()
+                ? 'household.meal_proposal_regenerate'
+                : 'household.meal_proposal_generate'
+            ) | t
+          }}
+        </app-button>
+        <span class="meal-planner__selection-count" aria-live="polite">
+          {{ 'household.meal_proposal_selected_count' | t: { count: selectedMemberIds().length } }}
+        </span>
+      </div>
+
+      <p *ngIf="generating()" class="meal-planner__status" role="status" aria-live="polite">
+        {{ 'household.meal_proposal_generating_status' | t }}
+      </p>
+      <p *ngIf="errorKey() as key" class="meal-planner__error" role="alert">{{ key | t }}</p>
+      <p
+        *ngIf="!proposal() && !generating() && !errorKey()"
+        class="meal-planner__empty"
+        data-test="meal-proposal-empty"
+      >
+        {{ 'household.meal_proposal_empty_state' | t }}
+      </p>
+    </ng-container>
+  </section>
+
+  <section
+    id="meal-proposal-step-panel-review"
+    class="meal-planner__step-panel"
+    role="tabpanel"
+    aria-labelledby="meal-proposal-step-tab-review"
+    tabindex="0"
+    [hidden]="activeMealStep() !== 'review'"
+    data-test="meal-proposal-step-panel-review"
+  >
+    <ng-container *ngIf="activeMealStep() === 'review'">
+      <p *ngIf="confirming()" class="meal-planner__status" role="status" aria-live="polite">
+        {{ 'household.meal_proposal_confirming' | t }}
+      </p>
+      <p *ngIf="successKey() as key" class="meal-planner__success" role="status" aria-live="polite">
+        {{
+          key
+            | t
+              : {
+                  count: savedEventsCount(),
+                  unresolved: unresolvedEventsCount()
+                }
+        }}
+      </p>
+      <p *ngIf="errorKey() as key" class="meal-planner__error" role="alert">{{ key | t }}</p>
+
+      <div
+        *ngIf="proposal() && !proposalIsCurrent() && !generating()"
+        class="meal-planner__notice"
+        role="alert"
+        data-test="meal-proposal-stale"
+      >
+        {{ 'household.meal_proposal_stale' | t }}
+      </div>
+
+      <ng-container *ngIf="proposal() as weeklyProposal; else reviewNotReady">
+        <section
+          class="meal-planner__review"
+          aria-labelledby="meal-proposal-review-title"
+          data-test="meal-proposal-review"
+        >
+          <header class="meal-planner__review-header">
+            <div>
+              <h3 id="meal-proposal-review-title">
+                {{ 'household.meal_proposal_review' | t }}
+              </h3>
+              <p>{{ formatWeekRange() }}</p>
+            </div>
+            <span class="meal-planner__event-count">
+              {{
+                'household.meal_proposal_event_count' | t: { count: weeklyProposal.events.length }
+              }}
+            </span>
+          </header>
+
+          <div *ngIf="!weeklyProposal.events.length" class="meal-planner__notice" role="status">
+            {{ 'household.meal_proposal_empty' | t }}
+          </div>
+          <div
+            *ngIf="weeklyProposal.events.length && !hasConfirmableMeals()"
+            class="meal-planner__notice"
+            role="status"
+            data-test="meal-proposal-no-confirmable-meals"
+          >
+            {{ 'household.meal_proposal_no_confirmable_meals' | t }}
+          </div>
+
+          <div *ngIf="proposalDays().length" class="meal-planner__review-day-control">
+            <app-picker
+              [label]="'household.meal_proposal_review_day' | t"
+              [options]="proposalDayOptions()"
+              [value]="selectedProposalDay().date"
+              [filterFrom]="8"
+              [floatingPanel]="true"
+              (valueChange)="selectProposalDate($event ?? '')"
+              data-test="meal-proposal-review-day"
+            />
+          </div>
+
+          <section
+            *ngIf="selectedProposalDay() as day"
+            class="meal-planner__day"
+            [attr.aria-label]="day.label"
+            data-test="meal-proposal-selected-day"
+          >
+            <h4>{{ day.label }}</h4>
+            <p id="meal-proposal-servings-help" class="meal-planner__visually-hidden">
+              {{ 'household.meal_proposal_servings_help' | t }}
+            </p>
+            <article
+              *ngFor="let event of day.events; trackBy: trackEvent"
+              class="meal-planner__event"
+              [class.meal-planner__event--unresolved]="event.status === 'unresolved'"
+              [class.meal-planner__event--shared]="isShared(event)"
+              [attr.data-test]="'meal-proposal-event-' + event.id"
+            >
+              <header class="meal-planner__event-header">
+                <div class="meal-planner__meal-label">
+                  <span>{{ mealTypeLabel(event.mealType) | t }}</span>
+                  <span *ngIf="event.time" class="meal-planner__time">
+                    <app-icon name="schedule" [size]="15" [label]="null" />
+                    {{ event.time }}
+                  </span>
+                </div>
+                <span
+                  class="meal-planner__assignment"
+                  [class.meal-planner__assignment--shared]="isShared(event)"
+                >
+                  {{ eventAssignmentLabel(event) | t }}
+                </span>
+              </header>
+
+              <ng-container *ngIf="event.status === 'scheduled'; else unresolvedEvent">
+                <h5>{{ recipeForEvent(event)?.name }}</h5>
+                <span
+                  *ngIf="recipeForEvent(event)"
+                  class="meal-planner__recipe-origin"
+                  [class.meal-planner__recipe-origin--catalog]="
+                    recipeReferenceForEvent(event)?.source === 'catalog'
+                  "
+                >
+                  {{ recipeOriginLabel(event) | t }}
+                </span>
+                <p class="meal-planner__summary">{{ event.objectiveSummary }}</p>
+                <div class="meal-planner__event-meta">
+                  <label class="meal-planner__servings-control">
+                    <span>{{ 'household.meal_proposal_servings_label' | t }}</span>
+                    <input
+                      type="number"
+                      inputmode="numeric"
+                      min="1"
+                      max="100"
+                      step="1"
+                      [value]="event.servings"
+                      [disabled]="!canEdit || confirming() || confirmed()"
+                      [attr.aria-label]="
+                        'household.meal_proposal_servings_for'
+                          | t: { meal: recipeForEvent(event)?.name }
+                      "
+                      aria-describedby="meal-proposal-servings-help"
+                      [attr.data-test]="'meal-proposal-servings-' + event.id"
+                      (change)="updateEventServings(event, $any($event.target))"
+                    />
+                  </label>
+                  <span *ngIf="recipeForEvent(event) as recipe">
+                    {{
+                      'household.meal_proposal_total_time'
+                        | t
+                          : {
+                              minutes: recipe.totalTime
+                            }
+                    }}
+                  </span>
+                </div>
+                <ul
+                  class="meal-planner__participants"
+                  [attr.aria-label]="'household.meal_proposal_assigned_to' | t"
+                >
+                  <li *ngFor="let userId of event.participantIds; trackBy: trackIndex">
+                    {{ memberName(userId) }}
+                  </li>
+                </ul>
+                <details
+                  class="meal-planner__recipe-details"
+                  *ngIf="recipeForEvent(event) as recipe"
+                  [attr.data-test]="'meal-proposal-recipe-details-' + event.id"
+                >
+                  <summary>{{ 'household.meal_proposal_recipe_details' | t }}</summary>
+                  <p>{{ recipe.description }}</p>
+                  <dl class="meal-planner__recipe-facts">
+                    <div>
+                      <dt>{{ 'household.meal_proposal_difficulty' | t }}</dt>
+                      <dd>{{ recipeDifficultyLabel(recipe.difficulty) | t }}</dd>
+                    </div>
+                    <div *ngIf="recipe.cuisine">
+                      <dt>{{ 'household.meal_proposal_cuisine' | t }}</dt>
+                      <dd>{{ recipe.cuisine }}</dd>
+                    </div>
+                    <div *ngIf="recipe.calories !== null">
+                      <dt>{{ 'household.meal_proposal_calories' | t }}</dt>
+                      <dd>{{ recipe.calories | number: '1.0-0' }} kcal</dd>
+                    </div>
+                    <div>
+                      <dt>{{ 'household.meal_proposal_base_servings' | t }}</dt>
+                      <dd>{{ recipe.baseServings }}</dd>
+                    </div>
+                  </dl>
+                  <dl class="meal-planner__recipe-times">
+                    <div>
+                      <dt>{{ 'household.meal_proposal_total_time_label' | t }}</dt>
+                      <dd>
+                        {{
+                          'household.meal_proposal_total_time' | t: { minutes: recipe.totalTime }
+                        }}
+                      </dd>
+                    </div>
+                    <div *ngFor="let time of recipeTimeBreakdown(recipe)">
+                      <ng-container *ngIf="time.minutes !== null">
+                        <dt>{{ time.label | t }}</dt>
+                        <dd>
+                          {{ 'household.meal_proposal_total_time' | t: { minutes: time.minutes } }}
+                        </dd>
+                      </ng-container>
+                    </div>
+                  </dl>
+                  <h6>
+                    {{ 'household.meal_proposal_ingredients' | t: { count: event.servings } }}
+                  </h6>
+                  <ul>
+                    <li
+                      *ngFor="
+                        let ingredient of recipe.ingredients;
+                        let ingredientIndex = index;
+                        trackBy: trackIngredient
+                      "
+                      [attr.data-test]="
+                        'meal-proposal-ingredient-' + event.id + '-' + ingredientIndex
+                      "
+                    >
+                      {{ scaledIngredientQuantity(ingredient, event) | number: '1.0-2' }}
+                      {{ ingredient.unit }} · {{ ingredient.name }}
+                      <span *ngIf="ingredient.preparation"> · {{ ingredient.preparation }}</span>
+                      <span *ngIf="ingredient.isOptional">
+                        · {{ 'household.meal_proposal_optional' | t }}</span
+                      >
+                      <span *ngIf="ingredient.notes"> · {{ ingredient.notes }}</span>
+                      <span *ngIf="ingredient.substitutes.length">
+                        · {{ 'household.meal_proposal_substitutes' | t }}:
+                        {{ ingredient.substitutes.join(', ') }}
+                      </span>
+                    </li>
+                  </ul>
+
+                  <ng-container *ngIf="recipe.utensils.length">
+                    <h6>{{ 'household.meal_proposal_utensils' | t }}</h6>
+                    <ul>
+                      <li *ngFor="let utensil of recipe.utensils; trackBy: trackIndex">
+                        {{ utensil }}
+                      </li>
+                    </ul>
+                  </ng-container>
+
+                  <ng-container *ngIf="recipe.guidance as guidance">
+                    <ng-container *ngIf="hasRecipeGuidance(guidance)">
+                      <h6>{{ 'household.meal_proposal_guidance' | t }}</h6>
+                      <dl class="meal-planner__recipe-guidance">
+                        <div *ngIf="guidance.appliances.length">
+                          <dt>{{ 'household.meal_proposal_appliances' | t }}</dt>
+                          <dd>{{ guidance.appliances.join(', ') }}</dd>
+                        </div>
+                        <div *ngIf="guidance.parallelTasks.length">
+                          <dt>{{ 'household.meal_proposal_parallel_tasks' | t }}</dt>
+                          <dd>{{ guidance.parallelTasks.join(' · ') }}</dd>
+                        </div>
+                        <div *ngIf="guidance.tipsAndVariations.length">
+                          <dt>{{ 'household.meal_proposal_tips_variations' | t }}</dt>
+                          <dd>{{ guidance.tipsAndVariations.join(' · ') }}</dd>
+                        </div>
+                        <div *ngIf="guidance.batchCookingWarning">
+                          <dt>{{ 'household.meal_proposal_batch_cooking' | t }}</dt>
+                          <dd>{{ guidance.batchCookingWarning }}</dd>
+                        </div>
+                      </dl>
+                    </ng-container>
+                  </ng-container>
+
+                  <ng-container *ngIf="recipe.instructionsByLevel">
+                    <div
+                      class="meal-planner__recipe-level-tabs"
+                      role="tablist"
+                      [attr.aria-label]="'household.meal_proposal_instruction_levels' | t"
+                    >
+                      <button
+                        *ngFor="let level of recipeInstructionLevels; trackBy: trackIndex"
+                        type="button"
+                        role="tab"
+                        [id]="recipeLevelTabId(event.id, level.value)"
+                        [attr.data-test]="'meal-proposal-recipe-level-' + level.value"
+                        [attr.data-level]="level.value"
+                        [attr.aria-selected]="selectedRecipeLevel(event.id) === level.value"
+                        [attr.aria-controls]="recipeLevelPanelId(event.id)"
+                        [attr.tabindex]="selectedRecipeLevel(event.id) === level.value ? 0 : -1"
+                        (click)="selectRecipeLevel(event.id, level.value)"
+                        (keydown)="onRecipeLevelKeydown($event, event.id)"
+                      >
+                        {{ level.label | t }}
+                      </button>
+                    </div>
+                    <section
+                      class="meal-planner__recipe-instructions"
+                      role="tabpanel"
+                      [id]="recipeLevelPanelId(event.id)"
+                      [attr.aria-labelledby]="
+                        recipeLevelTabId(event.id, selectedRecipeLevel(event.id))
+                      "
+                    >
+                      <h6>{{ 'household.meal_proposal_steps' | t }}</h6>
+                      <ol>
+                        <li
+                          *ngFor="
+                            let instructionStep of recipeInstructionSteps(event, recipe);
+                            trackBy: trackIndex
+                          "
+                        >
+                          <p>{{ instructionStep.instruction }}</p>
+                          <p
+                            *ngIf="
+                              instructionStep.duration !== null &&
+                              instructionStep.duration !== undefined
+                            "
+                          >
+                            {{
+                              'household.meal_proposal_step_duration'
+                                | t: { minutes: instructionStep.duration }
+                            }}
+                          </p>
+                          <p *ngIf="instructionStep.temperature as temperature">
+                            {{ 'household.meal_proposal_temperature' | t }}:
+                            {{ temperature.value }} °{{ temperature.unit }}
+                          </p>
+                          <p *ngIf="recipeStepTimerMinutes(instructionStep) as timerMinutes">
+                            {{ 'household.meal_proposal_timer' | t: { minutes: timerMinutes } }}
+                          </p>
+                          <p *ngIf="instructionStep.tips">{{ instructionStep.tips }}</p>
+                          <p *ngIf="instructionStep.warning" class="meal-planner__recipe-warning">
+                            <strong>{{ 'household.meal_proposal_recipe_warning' | t }}:</strong>
+                            {{ instructionStep.warning }}
+                          </p>
+                        </li>
+                      </ol>
+                    </section>
+                  </ng-container>
+
+                  <ng-container *ngIf="recipe.steps as legacySteps">
+                    <h6>{{ 'household.meal_proposal_steps' | t }}</h6>
+                    <ol>
+                      <li *ngFor="let instructionStep of legacySteps; trackBy: trackIndex">
+                        <p>{{ instructionStep.instruction }}</p>
+                        <p
+                          *ngIf="
+                            instructionStep.duration !== null &&
+                            instructionStep.duration !== undefined
+                          "
+                        >
+                          {{
+                            'household.meal_proposal_step_duration'
+                              | t: { minutes: instructionStep.duration }
+                          }}
+                        </p>
+                        <p *ngIf="instructionStep.temperature as temperature">
+                          {{ 'household.meal_proposal_temperature' | t }}:
+                          {{ temperature.value }} °{{ temperature.unit }}
+                        </p>
+                        <p *ngIf="recipeStepTimerMinutes(instructionStep) as timerMinutes">
+                          {{ 'household.meal_proposal_timer' | t: { minutes: timerMinutes } }}
+                        </p>
+                        <p *ngIf="instructionStep.tips">{{ instructionStep.tips }}</p>
+                        <p *ngIf="instructionStep.warning" class="meal-planner__recipe-warning">
+                          <strong>{{ 'household.meal_proposal_recipe_warning' | t }}:</strong>
+                          {{ instructionStep.warning }}
+                        </p>
+                      </li>
+                    </ol>
+                  </ng-container>
+
+                  <ng-container *ngIf="recipe.nutrition as nutrition">
+                    <h6>{{ 'household.meal_proposal_nutrition' | t }}</h6>
+                    <p>
+                      {{ 'household.meal_proposal_nutrition_summary' | t: nutrition }}
+                    </p>
+                  </ng-container>
+
+                  <ng-container *ngIf="recipe.storage as storage">
+                    <h6>{{ 'household.meal_proposal_storage' | t }}</h6>
+                    <p>
+                      {{ storage.method }} · {{ storage.duration }}
+                      <span *ngIf="storage.reheatingInstructions">
+                        · {{ storage.reheatingInstructions }}</span
+                      >
+                      <span *ngIf="storage.container"> · {{ storage.container }}</span>
+                      <span *ngIf="storage.freezingPossible">
+                        · {{ 'household.meal_proposal_freezing' | t }}
+                        <span *ngIf="storage.freezingDuration"
+                          >({{ storage.freezingDuration }})</span
+                        >
+                      </span>
+                    </p>
+                  </ng-container>
+
+                  <p *ngIf="recipe.tags.length" class="meal-planner__recipe-tags">
+                    {{ 'household.meal_proposal_tags' | t }}: {{ recipe.tags.join(', ') }}
+                  </p>
+                </details>
+              </ng-container>
+              <ng-template #unresolvedEvent>
+                <h5>{{ 'household.meal_proposal_needs_review' | t }}</h5>
+                <p class="meal-planner__summary">{{ event.reason }}</p>
+                <ul
+                  class="meal-planner__participants"
+                  [attr.aria-label]="'household.meal_proposal_assigned_to' | t"
+                >
+                  <li *ngFor="let userId of event.participantIds; trackBy: trackIndex">
+                    {{ memberName(userId) }}
+                  </li>
+                </ul>
+              </ng-template>
+            </article>
+          </section>
+
+          <footer class="meal-planner__review-footer">
+            <p>{{ 'household.meal_proposal_confirm_hint' | t }}</p>
+            <app-button
+              variant="primary"
+              size="md"
+              [disabled]="!canConfirm()"
+              [loading]="confirming()"
+              (onClick)="confirmProposal()"
+              data-test="meal-proposal-confirm"
+            >
+              <app-icon *ngIf="!confirming()" name="check" [size]="18" [label]="null" />
+              {{
+                (confirming()
+                  ? 'household.meal_proposal_confirming'
+                  : confirmed()
+                    ? 'household.meal_proposal_confirmed'
+                    : 'household.meal_proposal_confirm'
+                ) | t
+              }}
+            </app-button>
+            <app-button
+              *ngIf="canViewShopping"
+              variant="outline"
+              size="md"
+              (onClick)="openShoppingReview()"
+              data-test="meal-shopping-open-review"
+            >
+              <app-icon name="shopping_cart" [size]="18" [label]="null" />
+              {{ 'household.meal_shopping_open_review' | t }}
+            </app-button>
+          </footer>
+        </section>
+      </ng-container>
+
+      <ng-template #reviewNotReady>
+        <p class="meal-planner__notice" role="status" data-test="meal-proposal-review-empty">
+          {{ 'household.meal_proposal_review_empty' | t }}
+        </p>
+        <app-button
+          variant="outline"
+          size="md"
+          (onClick)="selectMealStep('prepare')"
+          data-test="meal-proposal-return-to-prepare"
+        >
+          {{ 'household.meal_proposal_return_to_prepare' | t }}
+        </app-button>
+      </ng-template>
+    </ng-container>
+  </section>
+
+  <section
+    id="meal-shopping-step-panel"
+    class="meal-planner__step-panel meal-planner__shopping-panel"
+    role="tabpanel"
+    aria-labelledby="meal-proposal-step-tab-shopping"
+    tabindex="0"
+    [hidden]="activeMealStep() !== 'shopping'"
+    data-test="meal-shopping-step-panel"
+  >
+    <ng-container *ngIf="activeMealStep() === 'shopping'">
+      <p *ngIf="shoppingLoading()" class="meal-planner__status" role="status" aria-live="polite">
+        {{ 'household.meal_shopping_loading' | t }}
+      </p>
+      <p *ngIf="shoppingErrorKey() as key" class="meal-planner__error" role="alert">
+        {{ key | t }}
+      </p>
+      <ng-container *ngIf="shoppingPreview() as preview">
+        <header class="meal-planner__shopping-header">
+          <div>
+            <h3>{{ 'household.meal_shopping_review_title' | t }}</h3>
+            <p>
+              {{
+                'household.meal_shopping_range'
+                  | t
+                    : {
+                        start: formatDate(preview.startDate),
+                        end: formatDate(preview.endDate)
+                      }
+              }}
+            </p>
+          </div>
+          <span class="meal-planner__event-count">
+            {{ 'household.meal_shopping_meal_count' | t: { count: preview.plannedMealCount } }}
+          </span>
+        </header>
+
+        <p *ngIf="!preview.sharedPantry" class="meal-planner__notice" role="status">
+          {{ 'household.meal_shopping_pantry_private' | t }}
+        </p>
+        <p
+          *ngFor="let warning of preview.warnings; trackBy: trackIndex"
+          class="meal-planner__notice"
+          role="status"
+          data-test="meal-shopping-snapshot-warning"
+        >
+          {{ 'household.meal_shopping_snapshot_warning' | t: { date: formatDate(warning.date) } }}
+        </p>
+        <p
+          *ngIf="!preview.plannedMealCount"
+          class="meal-planner__empty"
+          data-test="meal-shopping-empty"
+        >
+          {{ 'household.meal_shopping_empty' | t }}
+        </p>
+
+        <fieldset
+          *ngIf="requiredShoppingLines().length"
+          class="meal-planner__shopping-group"
+          [disabled]="shoppingSaving() || shoppingApproval() !== null"
+          data-test="meal-shopping-required"
+        >
+          <legend>{{ 'household.meal_shopping_required' | t }}</legend>
+          <div
+            *ngFor="let line of requiredShoppingLines(); trackBy: trackShoppingLine"
+            class="meal-planner__shopping-line"
+            [attr.data-test]="'meal-shopping-line-' + line.key"
+          >
+            <label class="meal-planner__shopping-item">
+              <input
+                type="checkbox"
+                [checked]="line.included"
+                [disabled]="!canViewShopping || shoppingSaving() || shoppingApproval() !== null"
+                [attr.aria-label]="'household.meal_shopping_include' | t: { name: line.name }"
+                (change)="setShoppingIncluded(line.key, $any($event.target).checked)"
+                data-test="meal-shopping-include"
+              />
+              <span class="meal-planner__shopping-name">{{ line.name }}</span>
+            </label>
+            <span
+              class="meal-planner__shopping-status"
+              [attr.data-status]="line.status"
+              data-test="meal-shopping-stock-status"
+            >
+              {{ shoppingStatusLabel(line.status) | t }}
+            </span>
+            <label class="meal-planner__shopping-quantity">
+              <span>{{ 'household.meal_shopping_quantity' | t }}</span>
+              <input
+                type="number"
+                inputmode="decimal"
+                min="0.001"
+                max="10000"
+                step="any"
+                [value]="line.addQuantity"
+                [disabled]="
+                  !line.included ||
+                  !canViewShopping ||
+                  shoppingSaving() ||
+                  shoppingApproval() !== null
+                "
+                [attr.aria-label]="
+                  'household.meal_shopping_quantity_for' | t: { name: line.name, unit: line.unit }
+                "
+                (input)="setShoppingQuantity(line.key, $any($event.target).valueAsNumber)"
+                data-test="meal-shopping-quantity"
+              />
+              <span>{{ line.unit }}</span>
+            </label>
+          </div>
+        </fieldset>
+
+        <fieldset
+          *ngIf="optionalShoppingLines().length"
+          class="meal-planner__shopping-group"
+          [disabled]="shoppingSaving() || shoppingApproval() !== null"
+          data-test="meal-shopping-optional"
+        >
+          <legend>{{ 'household.meal_shopping_optional' | t }}</legend>
+          <div
+            *ngFor="let line of optionalShoppingLines(); trackBy: trackShoppingLine"
+            class="meal-planner__shopping-line"
+            [attr.data-test]="'meal-shopping-line-' + line.key"
+          >
+            <label class="meal-planner__shopping-item">
+              <input
+                type="checkbox"
+                [checked]="line.included"
+                [disabled]="!canViewShopping || shoppingSaving() || shoppingApproval() !== null"
+                [attr.aria-label]="'household.meal_shopping_include' | t: { name: line.name }"
+                (change)="setShoppingIncluded(line.key, $any($event.target).checked)"
+                data-test="meal-shopping-include"
+              />
+              <span class="meal-planner__shopping-name">{{ line.name }}</span>
+            </label>
+            <span
+              class="meal-planner__shopping-status"
+              [attr.data-status]="line.status"
+              data-test="meal-shopping-stock-status"
+            >
+              {{ shoppingStatusLabel(line.status) | t }}
+            </span>
+            <label class="meal-planner__shopping-quantity">
+              <span>{{ 'household.meal_shopping_quantity' | t }}</span>
+              <input
+                type="number"
+                inputmode="decimal"
+                min="0.001"
+                max="10000"
+                step="any"
+                [value]="line.addQuantity"
+                [disabled]="
+                  !line.included ||
+                  !canViewShopping ||
+                  shoppingSaving() ||
+                  shoppingApproval() !== null
+                "
+                [attr.aria-label]="
+                  'household.meal_shopping_quantity_for' | t: { name: line.name, unit: line.unit }
+                "
+                (input)="setShoppingQuantity(line.key, $any($event.target).valueAsNumber)"
+                data-test="meal-shopping-quantity"
+              />
+              <span>{{ line.unit }}</span>
+            </label>
+          </div>
+        </fieldset>
+
+        <div
+          *ngIf="shoppingApproval() as approval"
+          class="meal-planner__shopping-success"
+          role="status"
+        >
+          <p>{{ 'household.meal_shopping_approved' | t }}</p>
+          <a
+            *ngIf="approval.listId as listId"
+            [routerLink]="['/shopping', listId]"
+            data-test="meal-shopping-compra-link"
+          >
+            {{ 'household.meal_shopping_open_compra' | t }}
+            <app-icon name="chevron_right" [size]="16" [label]="null" />
+          </a>
+        </div>
+
+        <footer class="meal-planner__shopping-actions">
+          <app-button
+            variant="outline"
+            size="md"
+            [disabled]="shoppingSaving()"
+            (onClick)="cancelShoppingReview()"
+            data-test="meal-shopping-cancel"
+          >
+            <app-icon name="chevron_left" [size]="18" [label]="null" />
+            {{ 'household.meal_shopping_back' | t }}
+          </app-button>
+          <app-button
+            variant="primary"
+            size="md"
+            [disabled]="!canApproveShopping()"
+            [loading]="shoppingSaving()"
+            (onClick)="approveShopping()"
+            data-test="meal-shopping-approve"
+          >
+            <app-icon *ngIf="!shoppingSaving()" name="shopping_cart" [size]="18" [label]="null" />
+            {{
+              (shoppingSaving()
+                ? 'household.meal_shopping_approving'
+                : 'household.meal_shopping_approve'
+              ) | t
+            }}
+          </app-button>
+        </footer>
+      </ng-container>
+    </ng-container>
+  </section>
+</section>

@@ -1,5 +1,6 @@
 import { Context } from 'hono';
 import { ZodError } from 'zod';
+import { describeIssues } from '../schemas/form.js';
 import { config } from '../config/app.config.js';
 import { addServerLog } from '../routes/logs.routes.js';
 
@@ -63,15 +64,23 @@ export function errorHandler(err: Error, c: Context) {
 
   // Handle Zod validation errors
   if (err instanceof ZodError) {
-    return c.json({
-      success: false,
-      error: 'Validation Error',
-      message: 'Invalid input data',
-      details: (err.issues || []).map((e: any) => ({
-        path: Array.isArray(e.path) ? e.path.join('.') : String(e.path),
-        message: e.message
-      }))
-    }, 400);
+    // `describeIssues` en vez de «Invalid input data»: ese mensaje literal es lo que veia el
+    // usuario cuando un formulario mandaba un hueco opcional, y no le decia ni el campo ni que
+    // hacer. El detalle en bruto sigue ahi (para el log y para depurar), pero arriba va la frase.
+    const report = describeIssues(err);
+    return c.json(
+      {
+        success: false,
+        error: 'Validation Error',
+        message: report.message,
+        issues: report.issues,
+        details: (err.issues || []).map((e: any) => ({
+          path: Array.isArray(e.path) ? e.path.join('.') : String(e.path),
+          message: e.message
+        }))
+      },
+      400
+    );
   }
 
   // Handle custom app errors

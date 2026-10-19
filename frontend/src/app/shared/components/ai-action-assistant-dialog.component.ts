@@ -1,0 +1,5675 @@
+import { CommonModule } from '@angular/common';
+import {
+  afterNextRender,
+  Component,
+  ElementRef,
+  EventEmitter,
+  HostListener,
+  Input,
+  Injector,
+  OnDestroy,
+  Output,
+  ViewChild,
+  computed,
+  effect,
+  inject,
+  signal
+} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { HttpErrorResponse } from '@angular/common/http';
+import { NavigationEnd, Router } from '@angular/router';
+import { filter, finalize, Subscription } from 'rxjs';
+import { I18nService } from '../../core/services/i18n.service';
+import { ConfirmService } from '../../core/services/confirm.service';
+import { PantryService } from '../../core/services/pantry.service';
+import { AiActionAssistantService } from '../../core/services/ai-action-assistant.service';
+import { AiActionAssistantExecutionService } from '../../core/services/ai-action-assistant-execution.service';
+import { HouseholdService } from '../../core/services/household.service';
+import { HouseholdMealProposalService } from '../../core/services/household-meal-proposal.service';
+import { HouseholdMealShoppingService } from '../../core/services/household-meal-shopping.service';
+import type {
+  HouseholdMealProposal,
+  HouseholdMealProposalEvent,
+  HouseholdMealProposalRecipeReference
+} from '../../core/services/household-meal-proposal.service';
+import type {
+  HouseholdMealShoppingApproval,
+  HouseholdMealShoppingIngredient,
+  HouseholdMealShoppingPreview,
+  HouseholdMealShoppingStockStatus
+} from '../../core/services/household-meal-shopping.service';
+import type {
+  AssistantAction,
+  AssistantActionCandidate,
+  AssistantActionPlan,
+  AssistantActionRefinementScope,
+  AssistantActionStatus,
+  AssistantBatchRefinementScope,
+  AssistantRecipeIngredient,
+  AssistantRecipeIngredientChange,
+  AssistantRecipeInstructionChange,
+  AssistantRouteHint
+} from '../models/ai-action-assistant.model';
+import type { AIRecipeResponse, AIRecipeIngredient, AIRecipeStep } from '../models/ai-config.model';
+import type { TranslationKey } from '../../core/i18n';
+import { pantryCategoryLabel } from '../../core/i18n/labels';
+import { TranslatePipe } from '../../core/pipes/translate.pipe';
+import type { HouseholdMember } from '../models/household.model';
+import type { HouseholdTaskPriority } from '../models/household-task.model';
+import { ButtonComponent } from './ui/button/button.component';
+import { CheckboxComponent } from './ui/checkbox/checkbox.component';
+import { IconComponent } from './ui/icon/icon.component';
+import { ModalComponent } from './ui/modal/modal.component';
+import { PickerComponent } from './ui/picker/picker.component';
+import type { PickerOption } from './ui/picker/picker.component';
+
+type AssistantStage = 'compose' | 'review' | 'refine' | 'confirm';
+type AssistantFieldKind = 'text' | 'textarea' | 'number' | 'date' | 'time' | 'select' | 'checkbox';
+type AssistantFieldValue = string | number | boolean | null;
+type HouseholdMealType = HouseholdMealProposalEvent['mealType'];
+type PantryIngredientChangeField =
+  'name' | 'category' | 'quantity' | 'unit' | 'expirationDate' | 'location' | 'notes';
+const PANTRY_CHANGE_FLAGS: Record<PantryIngredientChangeField, string> = {
+  ['name']: 'setName',
+  ['category']: 'setCategory',
+  ['quantity']: 'setQuantity',
+  ['unit']: 'setUnit',
+  ['expirationDate']: 'setExpirationDate',
+  ['location']: 'setLocation',
+  ['notes']: 'setNotes'
+};
+const ACTION_REFINEMENT_SCOPE = '__action__';
+const BATCH_REFINEMENT_SCOPE = '__batch__';
+const GROUP_REFINEMENT_SCOPE = '__group__';
+const HOUSEHOLD_TASK_PRIORITY_LABELS: Record<HouseholdTaskPriority, TranslationKey> = {
+  low: 'ai_assistant.priority.low',
+  medium: 'ai_assistant.priority.medium',
+  high: 'ai_assistant.priority.high'
+};
+
+interface AssistantField {
+  path: Array<string | number>;
+  key: TranslationKey;
+  kind: AssistantFieldKind;
+  value: AssistantFieldValue;
+  required?: boolean;
+  choices?: Array<{ value: string; label: string }>;
+}
+
+interface AssistantMealShoppingLine extends HouseholdMealShoppingIngredient {
+  key: string;
+  optional: boolean;
+  included: boolean;
+  addQuantity: number;
+}
+
+const MEAL_SHOPPING_STATUS_LABELS: Record<HouseholdMealShoppingStockStatus, TranslationKey> = {
+  matched: 'ai_assistant.meals.shopping_status_matched',
+  not_found: 'ai_assistant.meals.shopping_status_not_found',
+  ambiguous: 'ai_assistant.meals.shopping_status_ambiguous',
+  unit_mismatch: 'ai_assistant.meals.shopping_status_unit_mismatch',
+  pantry_not_shared: 'ai_assistant.meals.shopping_status_pantry_not_shared'
+};
+
+function isHouseholdTaskPriority(value: unknown): value is HouseholdTaskPriority {
+  return value === 'low' || value === 'medium' || value === 'high';
+}
+
+interface SpeechRecognitionResultLike {
+  isFinal: boolean;
+  0?: { transcript?: string };
+}
+
+interface SpeechRecognitionEventLike {
+  results: ArrayLike<SpeechRecognitionResultLike>;
+}
+
+interface SpeechRecognitionLike {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onerror: ((event: { error?: string }) => void) | null;
+  onend: (() => void) | null;
+  start(): void;
+  stop(): void;
+  abort(): void;
+  pause?: () => void;
+  resume?: () => void;
+}
+
+type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
+
+const PANTRY_UNITS = [
+  'g',
+  'kg',
+  'ml',
+  'l',
+  'cup',
+  'tbsp',
+  'tsp',
+  'unit',
+  'bunch',
+  'slice',
+  'piece'
+];
+type AssistantFieldKey =
+  | 'name'
+  | 'ingredient_name'
+  | 'quantity'
+  | 'unit'
+  | 'preparation'
+  | 'substitutes'
+  | 'isOptional'
+  | 'category'
+  | 'expirationDate'
+  | 'location'
+  | 'notes'
+  | 'store'
+  | 'listName'
+  | 'title'
+  | 'priority'
+  | 'details'
+  | 'scheduledDate'
+  | 'weekStart'
+  | 'instructions'
+  | 'spaceName'
+  | 'assignedMemberName'
+  | 'kind'
+  | 'date'
+  | 'startTime'
+  | 'endTime'
+  | 'allDay'
+  | 'sharedWithHousehold'
+  | 'description'
+  | 'difficulty'
+  | 'cuisine'
+  | 'totalTime'
+  | 'prepTime'
+  | 'cookTime'
+  | 'restTime'
+  | 'servings'
+  | 'calories'
+  | 'tags';
+
+const FIELD_LABELS: Record<AssistantFieldKey, TranslationKey> = {
+  name: 'ai_assistant.field.name',
+  ingredient_name: 'ai_assistant.field.ingredient_name',
+  quantity: 'ai_assistant.field.quantity',
+  unit: 'ai_assistant.field.unit',
+  preparation: 'ai_assistant.field.preparation',
+  substitutes: 'ai_assistant.field.substitutes',
+  isOptional: 'ai_assistant.field.isOptional',
+  category: 'ai_assistant.field.category',
+  expirationDate: 'ai_assistant.field.expirationDate',
+  location: 'ai_assistant.field.location',
+  notes: 'ai_assistant.field.notes',
+  store: 'ai_assistant.field.store',
+  listName: 'ai_assistant.field.listName',
+  title: 'ai_assistant.field.title',
+  priority: 'ai_assistant.field.priority',
+  details: 'ai_assistant.field.details',
+  scheduledDate: 'ai_assistant.field.scheduledDate',
+  weekStart: 'ai_assistant.field.weekStart',
+  instructions: 'ai_assistant.field.instructions',
+  spaceName: 'ai_assistant.field.spaceName',
+  assignedMemberName: 'ai_assistant.field.assignedMemberName',
+  kind: 'ai_assistant.field.kind',
+  date: 'ai_assistant.field.date',
+  startTime: 'ai_assistant.field.startTime',
+  endTime: 'ai_assistant.field.endTime',
+  allDay: 'ai_assistant.field.allDay',
+  sharedWithHousehold: 'ai_assistant.field.sharedWithHousehold',
+  description: 'ai_assistant.field.description',
+  difficulty: 'ai_assistant.field.difficulty',
+  cuisine: 'ai_assistant.field.cuisine',
+  totalTime: 'ai_assistant.field.totalTime',
+  prepTime: 'ai_assistant.field.prepTime',
+  cookTime: 'ai_assistant.field.cookTime',
+  restTime: 'ai_assistant.field.restTime',
+  servings: 'ai_assistant.field.servings',
+  calories: 'ai_assistant.field.calories',
+  tags: 'ai_assistant.field.tags'
+};
+
+const STATUS_LABELS: Record<AssistantActionStatus, TranslationKey> = {
+  pending: 'ai_assistant.status.pending',
+  succeeded: 'ai_assistant.status.succeeded',
+  failed: 'ai_assistant.status.failed',
+  blocked: 'ai_assistant.status.blocked'
+};
+const DOMAIN_LABELS: Record<AssistantAction['domain'], TranslationKey> = {
+  pantry: 'ai_assistant.domain.pantry',
+  shopping: 'ai_assistant.domain.shopping',
+  household: 'ai_assistant.domain.household',
+  calendar: 'ai_assistant.domain.calendar',
+  recipes: 'ai_assistant.domain.recipes'
+};
+const ACTION_LABELS: Record<AssistantAction['actionType'], TranslationKey> = {
+  add_ingredient: 'ai_assistant.action.add_ingredient',
+  update_ingredient: 'ai_assistant.action.update_ingredient',
+  create_list: 'ai_assistant.action.create_list',
+  update_list: 'ai_assistant.action.update_list',
+  update_item: 'ai_assistant.domain.shopping',
+  add_item: 'ai_assistant.action.add_item',
+  create_task: 'ai_assistant.action.create_task',
+  update_task: 'ai_assistant.action.update_task',
+  plan_meals: 'ai_assistant.action.plan_meals',
+  create_event: 'ai_assistant.action.create_event',
+  update_event: 'ai_assistant.action.update_event',
+  update_content: 'ai_assistant.action.update_recipe_content',
+  create_draft: 'ai_assistant.action.create_draft'
+};
+const EVENT_KINDS: Array<{ value: string; labelKey: TranslationKey }> = [
+  { value: 'appointment', labelKey: 'ai_assistant.event_kind.appointment' },
+  { value: 'home', labelKey: 'ai_assistant.event_kind.home' },
+  { value: 'shopping', labelKey: 'ai_assistant.event_kind.shopping' },
+  { value: 'personal', labelKey: 'ai_assistant.event_kind.personal' },
+  { value: 'other', labelKey: 'ai_assistant.event_kind.other' }
+];
+const DIFFICULTIES: Array<{ value: string; labelKey: TranslationKey }> = [
+  { value: 'easy', labelKey: 'ai_assistant.difficulty.easy' },
+  { value: 'medium', labelKey: 'ai_assistant.difficulty.medium' },
+  { value: 'hard', labelKey: 'ai_assistant.difficulty.hard' }
+];
+
+@Component({
+  selector: 'app-ai-action-assistant-dialog',
+  standalone: true,
+  imports: [
+    CommonModule,
+    TranslatePipe,
+    ButtonComponent,
+    CheckboxComponent,
+    IconComponent,
+    ModalComponent,
+    PickerComponent
+  ],
+  template: `
+    <app-modal
+      [isOpen]="modalOpen()"
+      [title]="'ai_assistant.title' | t"
+      size="lg"
+      [closable]="!executing()"
+      [closeOnOverlay]="!executing()"
+      [showFooter]="true"
+      [adaptToVisualViewport]="true"
+      [safeAreaAware]="true"
+      (onClose)="requestClose()"
+    >
+      @switch (stage()) {
+        @case ('compose') {
+          <section class="assistant__compose" data-test="ai-assistant-compose">
+            <div class="assistant__input-group">
+              <label class="visually-hidden" for="ai-assistant-prompt">
+                {{ 'ai_assistant.prompt_label' | t }}
+              </label>
+              <div class="assistant__prompt-shell">
+                <textarea
+                  id="ai-assistant-prompt"
+                  #composePrompt
+                  class="assistant__prompt"
+                  rows="1"
+                  maxlength="2000"
+                  [value]="prompt()"
+                  [placeholder]="'ai_assistant.prompt_placeholder' | t"
+                  [disabled]="loading()"
+                  [attr.aria-describedby]="promptError() ? 'ai-assistant-prompt-error' : null"
+                  [attr.aria-invalid]="promptError() ? 'true' : null"
+                  data-test="ai-assistant-prompt"
+                  (input)="updatePrompt($event)"
+                ></textarea>
+                <div class="assistant__field-tools">
+                  <ng-container *ngIf="voiceSupported(); else voiceFallback">
+                    <span
+                      *ngIf="voiceState() !== 'listening' && voiceState() !== 'paused'"
+                      id="ai-assistant-voice-warning"
+                      class="assistant__voice-warning"
+                      role="note"
+                    >
+                      {{ 'ai_assistant.voice_warning' | t }}
+                    </span>
+                    <details class="assistant__privacy">
+                      <summary>{{ 'ai_assistant.privacy_title' | t }}</summary>
+                      <div class="assistant__voice-note" role="note">
+                        <app-icon name="help_outline" [size]="18" [label]="null" />
+                        <p>{{ 'ai_assistant.privacy_copy' | t }}</p>
+                      </div>
+                    </details>
+
+                    <div class="assistant__voice-controls">
+                      <app-button
+                        *ngIf="voiceState() !== 'listening' && voiceState() !== 'paused'"
+                        describedBy="ai-assistant-voice-warning"
+                        variant="outline"
+                        size="icon"
+                        [touchTarget]="true"
+                        [disabled]="loading()"
+                        [attr.title]="'ai_assistant.voice_start' | t"
+                        data-test="ai-assistant-voice-start"
+                        (onClick)="startVoice()"
+                      >
+                        <app-icon name="mic" [size]="20" [label]="null" />
+                        <span class="visually-hidden">{{ 'ai_assistant.voice_start' | t }}</span>
+                      </app-button>
+                      <app-button
+                        *ngIf="voiceState() === 'listening'"
+                        variant="danger"
+                        size="icon"
+                        [touchTarget]="true"
+                        [disabled]="loading() || voiceStopPending()"
+                        [attr.title]="'ai_assistant.voice_stop' | t"
+                        data-test="ai-assistant-voice-stop"
+                        (onClick)="stopVoice()"
+                      >
+                        <app-icon name="stop" [size]="18" [label]="null" />
+                        <span class="visually-hidden">{{ 'ai_assistant.voice_stop' | t }}</span>
+                      </app-button>
+                      <app-button
+                        *ngIf="voiceState() === 'listening' && supportsPause()"
+                        variant="ghost"
+                        size="icon"
+                        [touchTarget]="true"
+                        [disabled]="loading() || voiceStopPending()"
+                        [attr.title]="'ai_assistant.voice_pause' | t"
+                        (onClick)="pauseVoice()"
+                      >
+                        <app-icon name="pause" [size]="18" [label]="null" />
+                        <span class="visually-hidden">{{ 'ai_assistant.voice_pause' | t }}</span>
+                      </app-button>
+                      <app-button
+                        *ngIf="voiceState() === 'paused'"
+                        variant="secondary"
+                        size="icon"
+                        [touchTarget]="true"
+                        [attr.title]="'ai_assistant.voice_resume' | t"
+                        (onClick)="resumeVoice()"
+                      >
+                        <app-icon name="play_arrow" [size]="20" [label]="null" />
+                        <span class="visually-hidden">{{ 'ai_assistant.voice_resume' | t }}</span>
+                      </app-button>
+                      <app-button
+                        *ngIf="voiceState() === 'listening' || voiceState() === 'paused'"
+                        variant="ghost"
+                        size="icon"
+                        [touchTarget]="true"
+                        [attr.title]="'ai_assistant.cancel' | t"
+                        (onClick)="cancelVoice()"
+                      >
+                        <app-icon name="close" [size]="18" [label]="null" />
+                        <span class="visually-hidden">{{ 'ai_assistant.cancel' | t }}</span>
+                      </app-button>
+                    </div>
+                  </ng-container>
+                </div>
+              </div>
+              <div *ngIf="prompt().length" class="assistant__input-meta">
+                <span class="assistant__counter">{{ prompt().length }}/2000</span>
+              </div>
+              <p
+                *ngIf="promptError() as promptErrorKey"
+                id="ai-assistant-prompt-error"
+                class="assistant__error"
+                role="alert"
+              >
+                {{ promptErrorKey | t }}
+              </p>
+            </div>
+
+            <ng-template #voiceFallback>
+              <p class="assistant__hint" role="note">{{ 'ai_assistant.voice_unsupported' | t }}</p>
+            </ng-template>
+
+            <p
+              *ngIf="voiceState() === 'listening'"
+              class="assistant__status"
+              role="status"
+              aria-live="polite"
+            >
+              {{
+                (voiceStopPending() ? 'ai_assistant.voice_finalizing' : 'ai_assistant.listening')
+                  | t
+              }}
+            </p>
+
+            <p
+              #voiceErrorAlert
+              *ngIf="voiceError() as voiceErrorKey"
+              class="assistant__error"
+              role="alert"
+            >
+              {{ voiceErrorKey | t }}
+            </p>
+
+            <p
+              #assistantErrorAlert
+              *ngIf="errorKey() as errorMessageKey"
+              class="assistant__error"
+              role="alert"
+              data-test="ai-assistant-error"
+            >
+              {{ errorMessageKey | t }}
+            </p>
+            <p *ngIf="loading()" class="assistant__status" role="status" aria-live="polite">
+              <span class="assistant__spinner" aria-hidden="true"></span>
+              {{ 'ai_assistant.processing' | t }}
+            </p>
+          </section>
+        }
+
+        @case ('review') {
+          @if (plan(); as currentPlan) {
+            <section class="assistant__review" data-test="ai-assistant-review">
+              <header class="assistant__stage-heading">
+                <div>
+                  <h2 #stageHeading tabindex="-1">{{ 'ai_assistant.review_title' | t }}</h2>
+                  <p class="assistant__summary-label">{{ 'ai_assistant.plan_summary' | t }}</p>
+                  <p class="assistant__summary">{{ currentPlan.summary }}</p>
+                </div>
+                <app-button variant="ghost" [touchTarget]="true" (onClick)="returnToCompose()">
+                  {{ 'ai_assistant.back_to_review' | t }}
+                </app-button>
+              </header>
+
+              <section
+                *ngIf="currentPlan.questions.length"
+                class="assistant__questions"
+                role="alert"
+              >
+                <h3>{{ 'ai_assistant.questions' | t }}</h3>
+                <ul>
+                  <li *ngFor="let question of currentPlan.questions">{{ question }}</li>
+                </ul>
+                <p>{{ 'ai_assistant.refine_needs_clarification' | t }}</p>
+              </section>
+
+              <div class="assistant__selection-tools">
+                <span>{{ 'ai_assistant.selected_count' | t: { count: selectedCount() } }}</span>
+                <div>
+                  <app-button variant="outline" [touchTarget]="true" (onClick)="selectAll()">
+                    {{ 'ai_assistant.select_all' | t }}
+                  </app-button>
+                  <app-button variant="ghost" [touchTarget]="true" (onClick)="selectNone()">
+                    {{ 'ai_assistant.select_none' | t }}
+                  </app-button>
+                  <app-button
+                    *ngIf="refinableActions().length > 1"
+                    variant="ghost"
+                    [touchTarget]="true"
+                    [disabled]="loading()"
+                    data-test="ai-assistant-refine-batch"
+                    (onClick)="beginBatchRefine()"
+                  >
+                    {{ 'ai_assistant.refine_batch' | t }}
+                  </app-button>
+                </div>
+              </div>
+
+              <div
+                *ngIf="refinableDomains().length"
+                class="assistant__group-tools"
+                data-test="ai-assistant-refine-groups"
+              >
+                <span>{{ 'ai_assistant.refine_groups_label' | t }}</span>
+                <app-button
+                  *ngFor="let domain of refinableDomains()"
+                  variant="ghost"
+                  [touchTarget]="true"
+                  [disabled]="loading()"
+                  data-test="ai-assistant-refine-group"
+                  (onClick)="beginGroupRefine(domain)"
+                >
+                  {{ groupRefineLabel(domain) }}
+                </app-button>
+              </div>
+
+              <div
+                class="assistant__actions"
+                [attr.aria-label]="'ai_assistant.proposals' | t"
+                data-test="ai-assistant-actions"
+              >
+                <article
+                  *ngFor="let action of currentPlan.actions; trackBy: trackAction"
+                  class="assistant__action"
+                  [class.assistant__action--selected]="action.selected"
+                  [attr.data-action-id]="action.id"
+                >
+                  <header class="assistant__action-header">
+                    <app-checkbox
+                      [checked]="action.selected"
+                      [label]="action.title"
+                      [hint]="actionDomainLabel(action) | t"
+                      (checkedChange)="setSelected(action.id, $event)"
+                    />
+                    <div class="assistant__action-controls">
+                      <app-button
+                        *ngIf="action.kind !== 'household.plan_meals'"
+                        variant="ghost"
+                        [touchTarget]="true"
+                        [disabled]="loading() || action.status === 'succeeded'"
+                        [attr.aria-label]="'ai_assistant.action_refine' | t"
+                        data-test="ai-assistant-refine"
+                        (onClick)="beginRefine(action.id)"
+                      >
+                        {{ 'ai_assistant.action_refine' | t }}
+                      </app-button>
+                      <app-button
+                        variant="ghost"
+                        [touchTarget]="true"
+                        [disabled]="hasDependents(action.id) || loading()"
+                        data-test="ai-assistant-remove"
+                        (onClick)="omitAction(action.id)"
+                      >
+                        <app-icon name="close" [size]="18" [label]="null" />
+                        <span>{{ 'ai_assistant.action_remove' | t }}</span>
+                      </app-button>
+                    </div>
+                  </header>
+                  <p class="assistant__action-summary">{{ action.summary }}</p>
+                  <p
+                    *ngIf="taskPriority(action) as priority"
+                    class="assistant__action-summary"
+                    data-test="ai-assistant-task-priority"
+                  >
+                    {{ 'ai_assistant.field.priority' | t }}: {{ taskPriorityLabel(priority) }}
+                  </p>
+                  <p
+                    *ngIf="action.kind === 'household.update_task'"
+                    class="assistant__action-summary"
+                    data-test="ai-assistant-task-target"
+                  >
+                    {{
+                      'ai_assistant.task_target'
+                        | t
+                          : {
+                              title: action.executionTarget.snapshot.title,
+                              date: action.executionTarget.snapshot.scheduledDate,
+                              details: action.executionTarget.snapshot.details || '—'
+                            }
+                    }}
+                  </p>
+                  <p
+                    *ngIf="action.kind === 'shopping.update_list'"
+                    class="assistant__action-summary"
+                    data-test="ai-assistant-shopping-target"
+                  >
+                    {{
+                      'ai_assistant.shopping_list_target'
+                        | t
+                          : {
+                              name: action.executionTarget.snapshot.name,
+                              store: action.executionTarget.snapshot.store || '—'
+                            }
+                    }}
+                  </p>
+                  <ng-container *ngIf="action.kind === 'shopping.update_item'">
+                    <p
+                      class="assistant__action-summary"
+                      data-test="ai-assistant-shopping-item-target"
+                    >
+                      {{ 'ai_assistant.field.listName' | t }}: «{{
+                        action.executionTarget.snapshot.listName
+                      }}» · {{ 'ai_assistant.field.name' | t }}: «{{
+                        action.executionTarget.snapshot.name
+                      }}» · {{ 'ai_assistant.field.quantity' | t }}:
+                      {{ action.executionTarget.snapshot.quantity }}
+                      {{ action.executionTarget.snapshot.unit || '—' }} ·
+                      {{ 'ai_assistant.field.category' | t }}:
+                      {{ action.executionTarget.snapshot.category || '—' }}
+                    </p>
+                    <p
+                      class="assistant__action-summary"
+                      data-test="ai-assistant-shopping-item-changes"
+                    >
+                      {{ shoppingItemChangeSummary(action) }}
+                    </p>
+                  </ng-container>
+                  <p
+                    *ngIf="action.kind === 'pantry.update_ingredient'"
+                    class="assistant__action-summary"
+                    data-test="ai-assistant-pantry-target"
+                  >
+                    {{
+                      'ai_assistant.pantry_ingredient_target'
+                        | t
+                          : {
+                              name: action.executionTarget.snapshot.name,
+                              quantity: action.executionTarget.snapshot.quantity,
+                              unit: action.executionTarget.snapshot.unit,
+                              category: pantryCategoryName(
+                                action.executionTarget.snapshot.category
+                              ),
+                              expirationDate: action.executionTarget.snapshot.expirationDate || '—',
+                              location: pantryLocationLabel(
+                                action.executionTarget.snapshot.location
+                              ),
+                              notes: action.executionTarget.snapshot.notes || '—'
+                            }
+                    }}
+                  </p>
+                  <p
+                    *ngIf="action.kind === 'calendar.update_event'"
+                    class="assistant__action-summary"
+                    data-test="ai-assistant-calendar-target"
+                  >
+                    {{
+                      'ai_assistant.calendar_event_target'
+                        | t
+                          : {
+                              title: action.executionTarget.snapshot.title,
+                              date: action.executionTarget.snapshot.date,
+                              time: calendarEventTimeLabel(action),
+                              location: action.executionTarget.snapshot.location || '—',
+                              notes: action.executionTarget.snapshot.notes || '—'
+                            }
+                    }}
+                  </p>
+                  <p
+                    *ngIf="action.kind === 'recipes.update_content'"
+                    class="assistant__action-summary"
+                    data-test="ai-assistant-recipe-target"
+                  >
+                    {{
+                      'ai_assistant.recipe_target'
+                        | t
+                          : {
+                              name: action.executionTarget.snapshot.name,
+                              servings: action.executionTarget.snapshot.servings
+                            }
+                    }}
+                  </p>
+                  <span class="assistant__status-tag" [attr.data-status]="action.status">
+                    {{ statusLabel(action.status) | t }}
+                  </span>
+                  <ul *ngIf="action.warnings.length" class="assistant__warnings">
+                    <li *ngFor="let warning of action.warnings">
+                      {{ 'ai_assistant.warning' | t: { message: warning } }}
+                    </li>
+                  </ul>
+                  <ul *ngIf="action.dependsOn.length" class="assistant__dependencies">
+                    <li *ngFor="let dependencyId of action.dependsOn">
+                      {{ 'ai_assistant.dependency' | t: { title: actionTitle(dependencyId) } }}
+                    </li>
+                  </ul>
+                  <p *ngIf="hasDependents(action.id)" class="assistant__hint">
+                    {{ 'ai_assistant.dependency_required' | t }}
+                  </p>
+
+                  <details
+                    class="assistant__details"
+                    [attr.data-test]="'ai-assistant-action-details-' + action.id"
+                  >
+                    <summary>{{ 'ai_assistant.action_details' | t }}</summary>
+                    <div class="assistant__fields">
+                      <label
+                        *ngFor="let field of editableFields(action); trackBy: trackField"
+                        class="assistant__field"
+                      >
+                        <span>{{ field.key | t }}</span>
+                        <app-picker
+                          *ngIf="field.kind === 'select'"
+                          [value]="field.value === null ? null : field.value.toString()"
+                          [options]="field.choices ?? []"
+                          [label]="field.key | t"
+                          [disabled]="loading()"
+                          [floatingPanel]="true"
+                          (valueChange)="updateField(action.id, field.path, $event ?? '')"
+                        ></app-picker>
+                        <input
+                          *ngIf="
+                            field.kind !== 'select' &&
+                            field.kind !== 'textarea' &&
+                            field.kind !== 'checkbox'
+                          "
+                          [type]="field.kind"
+                          [value]="field.value ?? ''"
+                          [required]="field.required || false"
+                          [min]="
+                            field.kind === 'number' && field.required
+                              ? action.kind === 'pantry.update_ingredient' &&
+                                field.path[1] === 'quantity'
+                                ? 0
+                                : 0.01
+                              : null
+                          "
+                          [step]="field.kind === 'number' ? 'any' : null"
+                          [disabled]="loading()"
+                          (input)="
+                            updateField(
+                              action.id,
+                              field.path,
+                              $any($event.target).value,
+                              field.kind
+                            )
+                          "
+                        />
+                        <textarea
+                          *ngIf="field.kind === 'textarea'"
+                          rows="2"
+                          [value]="field.value ?? ''"
+                          [required]="field.required || false"
+                          [disabled]="loading()"
+                          (input)="updateField(action.id, field.path, $any($event.target).value)"
+                        ></textarea>
+                        <input
+                          *ngIf="field.kind === 'checkbox'"
+                          type="checkbox"
+                          [checked]="field.value === true"
+                          [disabled]="loading()"
+                          (change)="updateField(action.id, field.path, $any($event.target).checked)"
+                        />
+                        <small
+                          *ngIf="fieldError(action, field)"
+                          class="assistant__field-error"
+                          role="alert"
+                        >
+                          {{ 'ai_assistant.field_invalid' | t }}
+                        </small>
+                      </label>
+
+                      <ng-container *ngIf="action.kind === 'recipes.create_draft'">
+                        <fieldset class="assistant__recipe-section">
+                          <legend>{{ 'ai_assistant.field.ingredients' | t }}</legend>
+                          <div
+                            *ngFor="let ingredient of recipeIngredients(action); let index = index"
+                            class="assistant__recipe-row"
+                          >
+                            <label class="assistant__field">
+                              <span>{{ 'ai_assistant.field.ingredient_name' | t }}</span>
+                              <input
+                                [value]="ingredient.name"
+                                (input)="
+                                  updateField(
+                                    action.id,
+                                    ['recipe', 'ingredients', index, 'name'],
+                                    $any($event.target).value
+                                  )
+                                "
+                              />
+                            </label>
+                            <label class="assistant__field">
+                              <span>{{ 'ai_assistant.field.quantity' | t }}</span>
+                              <input
+                                type="number"
+                                min="0.01"
+                                step="any"
+                                [value]="ingredient.quantity"
+                                (input)="
+                                  updateField(
+                                    action.id,
+                                    ['recipe', 'ingredients', index, 'quantity'],
+                                    $any($event.target).value,
+                                    'number'
+                                  )
+                                "
+                              />
+                            </label>
+                            <label class="assistant__field">
+                              <span>{{ 'ai_assistant.field.unit' | t }}</span>
+                              <app-picker
+                                [value]="ingredient.unit"
+                                [options]="pantryUnitOptions"
+                                [label]="'ai_assistant.field.unit' | t"
+                                [disabled]="loading()"
+                                [floatingPanel]="true"
+                                (valueChange)="
+                                  updateField(
+                                    action.id,
+                                    ['recipe', 'ingredients', index, 'unit'],
+                                    $event ?? ''
+                                  )
+                                "
+                              ></app-picker>
+                            </label>
+                            <label class="assistant__field">
+                              <span>{{ 'ai_assistant.field.preparation' | t }}</span>
+                              <input
+                                [value]="ingredient.preparation ?? ''"
+                                (input)="
+                                  updateField(
+                                    action.id,
+                                    ['recipe', 'ingredients', index, 'preparation'],
+                                    $any($event.target).value
+                                  )
+                                "
+                              />
+                            </label>
+                          </div>
+                        </fieldset>
+                        <fieldset class="assistant__recipe-section">
+                          <legend>{{ 'ai_assistant.field.instructionsByLevel' | t }}</legend>
+                          <section
+                            *ngFor="let level of recipeLevels"
+                            class="assistant__recipe-level"
+                          >
+                            <h4>{{ levelLabel(level) }}</h4>
+                            <label
+                              *ngFor="let step of recipeSteps(action, level); let index = index"
+                              class="assistant__field"
+                            >
+                              <span>{{
+                                'ai_assistant.field.step' | t: { number: index + 1 }
+                              }}</span>
+                              <textarea
+                                rows="2"
+                                [value]="step.instruction"
+                                (input)="
+                                  updateField(
+                                    action.id,
+                                    ['recipe', 'instructionsByLevel', level, index, 'instruction'],
+                                    $any($event.target).value
+                                  )
+                                "
+                              ></textarea>
+                            </label>
+                          </section>
+                        </fieldset>
+                      </ng-container>
+                      <ng-container *ngIf="action.kind === 'recipes.update_content'">
+                        <fieldset
+                          *ngIf="action.payload.changes.servings !== null"
+                          class="assistant__recipe-section"
+                          data-test="ai-assistant-recipe-servings"
+                        >
+                          <legend>{{ 'ai_assistant.field.servings' | t }}</legend>
+                          <p>
+                            {{ action.executionTarget.snapshot.servings }} →
+                            {{ action.payload.changes.servings }}
+                          </p>
+                          <label class="assistant__field">
+                            <span>{{ 'ai_assistant.field.servings' | t }}</span>
+                            <input
+                              type="number"
+                              min="1"
+                              max="100"
+                              step="1"
+                              [value]="action.payload.changes.servings"
+                              [disabled]="loading()"
+                              (input)="
+                                updateField(
+                                  action.id,
+                                  ['changes', 'servings'],
+                                  $any($event.target).value,
+                                  'number'
+                                )
+                              "
+                            />
+                          </label>
+                          <small
+                            *ngIf="!recipeServingsValid(action)"
+                            class="assistant__field-error"
+                            role="alert"
+                          >
+                            {{ 'ai_assistant.field_invalid' | t }}
+                          </small>
+                          <ul *ngIf="recipeServingsValid(action)">
+                            <li *ngFor="let ingredient of recipeServingsPreview(action)">
+                              {{ ingredient.name }}: {{ ingredient.before }} {{ ingredient.unit }} →
+                              {{ ingredient.after }} {{ ingredient.unit }}
+                            </li>
+                          </ul>
+                        </fieldset>
+                        <fieldset
+                          *ngIf="action.payload.changes.ingredients.length"
+                          class="assistant__recipe-section"
+                          data-test="ai-assistant-recipe-ingredient-changes"
+                        >
+                          <legend>{{ 'ai_assistant.field.ingredients' | t }}</legend>
+                          <article
+                            *ngFor="
+                              let change of action.payload.changes.ingredients;
+                              let index = index;
+                              trackBy: trackRecipeIngredientChange
+                            "
+                            class="assistant__recipe-change"
+                          >
+                            <header>
+                              <strong>{{ recipeIngredientOperationLabel(change) | t }}</strong>
+                              <app-button
+                                variant="ghost"
+                                [touchTarget]="true"
+                                [disabled]="loading()"
+                                (onClick)="removeRecipeIngredientChange(action.id, index)"
+                              >
+                                <app-icon name="close" [size]="18" [label]="null" />
+                                <span>{{ 'ai_assistant.recipe_remove_change' | t }}</span>
+                              </app-button>
+                            </header>
+                            <p>
+                              <span>{{ 'ai_assistant.recipe_before' | t }}:</span>
+                              {{ recipeIngredientBefore(action, change) }}
+                            </p>
+                            <p>
+                              <span>{{ 'ai_assistant.recipe_after' | t }}:</span>
+                              {{ recipeIngredientAfter(action, change) }}
+                            </p>
+                            <label
+                              *ngFor="
+                                let field of recipeIngredientEditFields(action, index);
+                                trackBy: trackField
+                              "
+                              class="assistant__field"
+                            >
+                              <span>{{ field.key | t }}</span>
+                              <app-picker
+                                *ngIf="field.kind === 'select'"
+                                [value]="field.value === null ? null : field.value.toString()"
+                                [options]="field.choices ?? []"
+                                [label]="field.key | t"
+                                [disabled]="loading()"
+                                [floatingPanel]="true"
+                                (valueChange)="updateField(action.id, field.path, $event ?? '')"
+                              ></app-picker>
+                              <input
+                                *ngIf="
+                                  field.kind !== 'select' &&
+                                  field.kind !== 'checkbox' &&
+                                  field.kind !== 'textarea'
+                                "
+                                [type]="field.kind"
+                                [value]="field.value ?? ''"
+                                [required]="field.required || false"
+                                [min]="field.kind === 'number' ? 0.01 : null"
+                                [step]="field.kind === 'number' ? 'any' : null"
+                                [disabled]="loading()"
+                                (input)="
+                                  updateField(
+                                    action.id,
+                                    field.path,
+                                    $any($event.target).value,
+                                    field.kind
+                                  )
+                                "
+                              />
+                              <textarea
+                                *ngIf="field.kind === 'textarea'"
+                                rows="2"
+                                [value]="field.value ?? ''"
+                                [required]="field.required || false"
+                                [disabled]="loading()"
+                                (input)="
+                                  updateField(action.id, field.path, $any($event.target).value)
+                                "
+                              ></textarea>
+                              <input
+                                *ngIf="field.kind === 'checkbox'"
+                                type="checkbox"
+                                [checked]="field.value === true"
+                                [disabled]="loading()"
+                                (change)="
+                                  updateField(action.id, field.path, $any($event.target).checked)
+                                "
+                              />
+                              <small
+                                *ngIf="fieldError(action, field)"
+                                class="assistant__field-error"
+                                role="alert"
+                              >
+                                {{ 'ai_assistant.field_invalid' | t }}
+                              </small>
+                            </label>
+                          </article>
+                        </fieldset>
+                        <fieldset
+                          *ngIf="action.payload.changes.instructions.length"
+                          class="assistant__recipe-section"
+                          data-test="ai-assistant-recipe-instruction-changes"
+                        >
+                          <legend>{{ 'ai_assistant.field.instructionsByLevel' | t }}</legend>
+                          <article
+                            *ngFor="
+                              let change of action.payload.changes.instructions;
+                              let index = index;
+                              trackBy: trackRecipeInstructionChange
+                            "
+                            class="assistant__recipe-change"
+                          >
+                            <p>
+                              {{ levelLabel(change.level) }} ·
+                              {{ 'ai_assistant.field.step' | t: { number: change.stepNumber } }}
+                            </p>
+                            <p>
+                              <span>{{ 'ai_assistant.recipe_before' | t }}:</span>
+                              {{ recipeInstructionBefore(action, change) }}
+                            </p>
+                            <label class="assistant__field">
+                              <span>{{ 'ai_assistant.recipe_after' | t }}</span>
+                              <textarea
+                                rows="2"
+                                [value]="change.instruction"
+                                [disabled]="loading()"
+                                (input)="
+                                  updateField(
+                                    action.id,
+                                    ['changes', 'instructions', index, 'instruction'],
+                                    $any($event.target).value
+                                  )
+                                "
+                              ></textarea>
+                            </label>
+                            <app-button
+                              variant="ghost"
+                              [touchTarget]="true"
+                              [disabled]="loading()"
+                              (onClick)="removeRecipeInstructionChange(action.id, index)"
+                            >
+                              <app-icon name="close" [size]="18" [label]="null" />
+                              <span>{{ 'ai_assistant.recipe_remove_change' | t }}</span>
+                            </app-button>
+                          </article>
+                        </fieldset>
+                      </ng-container>
+                    </div>
+                  </details>
+                  <section
+                    *ngIf="action.kind === 'household.plan_meals'"
+                    class="assistant__meal-planner"
+                    [attr.data-test]="'ai-assistant-meals-' + action.id"
+                  >
+                    <h3>{{ 'ai_assistant.meals.heading' | t }}</h3>
+                    <p class="assistant__hint">{{ 'ai_assistant.meals.participants' | t }}</p>
+                    <p *ngIf="!mealParticipants().length" class="assistant__error" role="alert">
+                      {{ 'ai_assistant.meals.no_members' | t }}
+                    </p>
+                    <div class="assistant__meal-participants">
+                      <label *ngFor="let member of mealParticipants(); trackBy: trackMember">
+                        <input
+                          type="checkbox"
+                          [checked]="isMealParticipantSelected(action.id, member.id)"
+                          [disabled]="mealProposalBusy(action.id) || executing()"
+                          (change)="
+                            toggleMealParticipant(action.id, member.id, $any($event.target).checked)
+                          "
+                        />
+                        <span>{{ member.name }}</span>
+                      </label>
+                    </div>
+                    <app-button
+                      variant="outline"
+                      [touchTarget]="true"
+                      [loading]="mealProposalBusy(action.id)"
+                      [disabled]="!canGenerateMealProposal(action) || loading() || executing()"
+                      data-test="ai-assistant-meals-generate"
+                      (onClick)="generateMealProposal(action)"
+                    >
+                      {{ 'ai_assistant.meals.generate' | t }}
+                    </app-button>
+                    <p
+                      *ngIf="mealProposalFor(action.id) as mealPlan"
+                      class="assistant__status"
+                      role="status"
+                      data-test="ai-assistant-meals-preview-ready"
+                    >
+                      {{ 'ai_assistant.meals.preview_ready' | t }}
+                    </p>
+                    <ng-container *ngIf="mealProposalFor(action.id) as mealPlan">
+                      <details class="assistant__meal-preview" open>
+                        <summary>{{ mealPlan.weekStart }} · {{ mealPlan.events.length }}</summary>
+                        <ol>
+                          <li *ngFor="let event of mealPlan.events; trackBy: trackMealEvent">
+                            <strong>{{ event.date }} · {{ mealTypeLabel(event.mealType) }}</strong>
+                            <ng-container *ngIf="event.status === 'scheduled'; else unresolvedMeal">
+                              <p>{{ mealRecipeName(mealPlan, event) }}</p>
+                              <label class="assistant__field assistant__meal-servings">
+                                <span>
+                                  {{ 'ai_assistant.meals.servings' | t }} ·
+                                  {{ mealRecipeName(mealPlan, event) }}
+                                </span>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  max="100"
+                                  step="1"
+                                  [value]="event.servings"
+                                  [disabled]="mealProposalBusy(action.id) || executing()"
+                                  (change)="
+                                    updateMealServings(action.id, event, $any($event.target))
+                                  "
+                                />
+                              </label>
+                              <details
+                                *ngIf="mealRecipe(mealPlan, event) as recipe"
+                                class="assistant__meal-recipe"
+                              >
+                                <summary>
+                                  {{ recipe.recipe.name }} ·
+                                  {{ 'ai_assistant.meals.ingredients' | t }}
+                                </summary>
+                                <p>{{ recipe.recipe.description }}</p>
+                                <ul>
+                                  <li *ngFor="let ingredient of recipe.recipe.ingredients">
+                                    {{ ingredient.name }} · {{ ingredient.quantity }}
+                                    {{ ingredient.unit }}
+                                  </li>
+                                </ul>
+                              </details>
+                            </ng-container>
+                            <ng-template #unresolvedMeal>
+                              <p class="assistant__hint">
+                                {{ 'ai_assistant.meals.unresolved' | t: { reason: event.reason } }}
+                              </p>
+                            </ng-template>
+                          </li>
+                        </ol>
+                      </details>
+                      <label class="assistant__meal-refinement">
+                        <span>{{ 'ai_assistant.meals.refine_label' | t }}</span>
+                        <textarea
+                          rows="2"
+                          maxlength="1000"
+                          [value]="mealRefinementText(action.id)"
+                          [disabled]="mealProposalBusy(action.id) || executing()"
+                          [placeholder]="'ai_assistant.meals.refine_placeholder' | t"
+                          (input)="setMealRefinementText(action.id, $any($event.target).value)"
+                        ></textarea>
+                      </label>
+                      <app-button
+                        variant="ghost"
+                        [touchTarget]="true"
+                        [loading]="mealProposalBusy(action.id)"
+                        [disabled]="!canRefineMealProposal(action) || loading() || executing()"
+                        data-test="ai-assistant-meals-refine"
+                        (onClick)="refineMealProposal(action)"
+                      >
+                        {{ 'ai_assistant.meals.refine' | t }}
+                      </app-button>
+                    </ng-container>
+                    <p
+                      #assistantErrorAlert
+                      *ngIf="errorKey() as errorMessageKey"
+                      class="assistant__error"
+                      role="alert"
+                    >
+                      {{ errorMessageKey | t }}
+                    </p>
+                  </section>
+                  <p
+                    *ngIf="action.selected && !isActionValid(action)"
+                    class="assistant__error"
+                    role="alert"
+                  >
+                    {{ 'ai_assistant.action_invalid' | t }}
+                  </p>
+                  <p
+                    *ngIf="action.selected && hasUnselectedDependency(action)"
+                    class="assistant__error"
+                    role="alert"
+                  >
+                    {{ 'ai_assistant.dependency_unselected' | t }}
+                  </p>
+                </article>
+              </div>
+              <p *ngIf="!currentPlan.actions.length" class="assistant__empty" role="status">
+                {{ 'ai_assistant.no_actions' | t }}
+              </p>
+            </section>
+          }
+        }
+
+        @case ('refine') {
+          <section class="assistant__refine" data-test="ai-assistant-refine-stage">
+            <h2 #stageHeading tabindex="-1">{{ 'ai_assistant.refine_title' | t }}</h2>
+            <p>{{ 'ai_assistant.refine_hint' | t }}</p>
+            <p
+              *ngIf="refinementBatchScope(); else singleActionRefinement"
+              class="assistant__refine-target"
+            >
+              {{ batchRefinementScopeLabel() }}
+            </p>
+            <ng-template #singleActionRefinement>
+              <p *ngIf="refiningAction() as action" class="assistant__refine-target">
+                {{ action.title }}
+              </p>
+              <label for="ai-assistant-refine-scope">{{
+                'ai_assistant.refine_scope_label' | t
+              }}</label>
+              <app-picker
+                id="ai-assistant-refine-scope"
+                data-test="ai-assistant-refine-scope"
+                [value]="refinementScopeValue()"
+                [options]="refinementScopeOptions(refiningAction())"
+                [label]="'ai_assistant.refine_scope_label' | t"
+                [disabled]="loading()"
+                [floatingPanel]="true"
+                (valueChange)="chooseRefinementScope($event)"
+              ></app-picker>
+            </ng-template>
+            <label for="ai-assistant-refine-input">{{ 'ai_assistant.refine_label' | t }}</label>
+            <textarea
+              id="ai-assistant-refine-input"
+              rows="4"
+              maxlength="1000"
+              [value]="refinementPrompt()"
+              [placeholder]="'ai_assistant.refine_placeholder' | t"
+              [disabled]="loading()"
+              (input)="refinementPrompt.set($any($event.target).value)"
+            ></textarea>
+            <p *ngIf="refinementQuestions().length" class="assistant__questions" role="alert">
+              {{ refinementQuestions().join(' ') }}
+            </p>
+            <p
+              #assistantErrorAlert
+              *ngIf="errorKey() as errorMessageKey"
+              class="assistant__error"
+              role="alert"
+            >
+              {{ errorMessageKey | t }}
+            </p>
+            <p *ngIf="loading()" class="assistant__status" role="status" aria-live="polite">
+              <span class="assistant__spinner" aria-hidden="true"></span>
+              {{ 'ai_assistant.processing' | t }}
+            </p>
+          </section>
+        }
+
+        @case ('confirm') {
+          @if (plan(); as currentPlan) {
+            <section class="assistant__confirm" data-test="ai-assistant-confirm">
+              <h2 #stageHeading tabindex="-1">{{ 'ai_assistant.confirm_title' | t }}</h2>
+              <p>{{ 'ai_assistant.confirm_copy' | t }}</p>
+              <ul class="assistant__confirm-list">
+                <li *ngFor="let action of selectedActions()">
+                  <strong>
+                    {{ actionDomainLabel(action) | t }} · {{ actionLabel(action) | t }}
+                  </strong>
+                  <span class="assistant__confirm-status">{{
+                    statusLabel(action.status) | t
+                  }}</span>
+                  <p
+                    *ngIf="action.kind === 'household.update_task'"
+                    class="assistant__action-summary"
+                  >
+                    {{
+                      'ai_assistant.task_target'
+                        | t
+                          : {
+                              title: action.executionTarget.snapshot.title,
+                              date: action.executionTarget.snapshot.scheduledDate,
+                              details: action.executionTarget.snapshot.details || '—'
+                            }
+                    }}
+                  </p>
+                  <p
+                    *ngIf="action.kind === 'shopping.update_list'"
+                    class="assistant__action-summary"
+                    data-test="ai-assistant-shopping-target-confirm"
+                  >
+                    {{
+                      'ai_assistant.shopping_list_target'
+                        | t
+                          : {
+                              name: action.executionTarget.snapshot.name,
+                              store: action.executionTarget.snapshot.store || '—'
+                            }
+                    }}
+                  </p>
+                  <ng-container *ngIf="action.kind === 'shopping.update_item'">
+                    <p
+                      class="assistant__action-summary"
+                      data-test="ai-assistant-shopping-item-target-confirm"
+                    >
+                      {{ 'ai_assistant.field.listName' | t }}: «{{
+                        action.executionTarget.snapshot.listName
+                      }}» · {{ 'ai_assistant.field.name' | t }}: «{{
+                        action.executionTarget.snapshot.name
+                      }}» · {{ 'ai_assistant.field.quantity' | t }}:
+                      {{ action.executionTarget.snapshot.quantity }}
+                      {{ action.executionTarget.snapshot.unit || '—' }} ·
+                      {{ 'ai_assistant.field.category' | t }}:
+                      {{ action.executionTarget.snapshot.category || '—' }}
+                    </p>
+                    <p
+                      class="assistant__action-summary"
+                      data-test="ai-assistant-shopping-item-changes-confirm"
+                    >
+                      {{ shoppingItemChangeSummary(action) }}
+                    </p>
+                  </ng-container>
+                  <p
+                    *ngIf="action.kind === 'pantry.update_ingredient'"
+                    class="assistant__action-summary"
+                    data-test="ai-assistant-pantry-target-confirm"
+                  >
+                    {{
+                      'ai_assistant.pantry_ingredient_target'
+                        | t
+                          : {
+                              name: action.executionTarget.snapshot.name,
+                              quantity: action.executionTarget.snapshot.quantity,
+                              unit: action.executionTarget.snapshot.unit,
+                              category: pantryCategoryName(
+                                action.executionTarget.snapshot.category
+                              ),
+                              expirationDate: action.executionTarget.snapshot.expirationDate || '—',
+                              location: pantryLocationLabel(
+                                action.executionTarget.snapshot.location
+                              ),
+                              notes: action.executionTarget.snapshot.notes || '—'
+                            }
+                    }}
+                  </p>
+                  <p
+                    *ngIf="action.kind === 'calendar.update_event'"
+                    class="assistant__action-summary"
+                    data-test="ai-assistant-calendar-target-confirm"
+                  >
+                    {{
+                      'ai_assistant.calendar_event_target'
+                        | t
+                          : {
+                              title: action.executionTarget.snapshot.title,
+                              date: action.executionTarget.snapshot.date,
+                              time: calendarEventTimeLabel(action),
+                              location: action.executionTarget.snapshot.location || '—',
+                              notes: action.executionTarget.snapshot.notes || '—'
+                            }
+                    }}
+                  </p>
+                  <p
+                    *ngIf="action.kind === 'recipes.update_content'"
+                    class="assistant__action-summary"
+                    data-test="ai-assistant-recipe-target-confirm"
+                  >
+                    {{
+                      'ai_assistant.recipe_target'
+                        | t
+                          : {
+                              name: action.executionTarget.snapshot.name,
+                              servings: action.executionTarget.snapshot.servings
+                            }
+                    }}
+                  </p>
+                  <dl class="assistant__confirm-fields" data-test="ai-assistant-confirm-fields">
+                    <div
+                      *ngFor="let field of editableFields(action); trackBy: trackField"
+                      class="assistant__confirm-field"
+                    >
+                      <dt>{{ field.key | t }}</dt>
+                      <dd>{{ confirmationFieldValue(field) }}</dd>
+                    </div>
+                    <ng-container *ngIf="action.kind === 'recipes.create_draft'">
+                      <div class="assistant__confirm-field">
+                        <dt>{{ 'ai_assistant.field.ingredients' | t }}</dt>
+                        <dd>
+                          <ul>
+                            <li *ngFor="let ingredient of recipeIngredients(action)">
+                              {{ ingredient.name }} — {{ ingredient.quantity }}
+                              {{ ingredient.unit }}
+                              <span *ngIf="ingredient.preparation">
+                                ({{ ingredient.preparation }})
+                              </span>
+                            </li>
+                          </ul>
+                        </dd>
+                      </div>
+                      <div *ngFor="let level of recipeLevels" class="assistant__confirm-field">
+                        <dt>
+                          {{ 'ai_assistant.field.instructionsByLevel' | t }} —
+                          {{ levelLabel(level) }}
+                        </dt>
+                        <dd>
+                          <ol>
+                            <li *ngFor="let step of recipeSteps(action, level)">
+                              {{ step.instruction }}
+                            </li>
+                          </ol>
+                        </dd>
+                      </div>
+                    </ng-container>
+                    <ng-container *ngIf="action.kind === 'recipes.update_content'">
+                      <div class="assistant__confirm-field">
+                        <dt>{{ 'ai_assistant.recipe_changes' | t }}</dt>
+                        <dd>
+                          <ul data-test="ai-assistant-recipe-change-summary">
+                            <li *ngFor="let line of recipeUpdateSummaryLines(action)">
+                              {{ line }}
+                            </li>
+                          </ul>
+                        </dd>
+                      </div>
+                    </ng-container>
+                  </dl>
+                  <section
+                    *ngIf="mealProposalFor(action.id) as mealPlan"
+                    class="assistant__meal-confirmation"
+                    data-test="ai-assistant-meals-confirmation"
+                  >
+                    <p>
+                      {{
+                        'ai_assistant.meals.confirm_summary'
+                          | t: { count: confirmableMealCount(mealPlan), week: mealPlan.weekStart }
+                      }}
+                    </p>
+                    <ul>
+                      <li *ngFor="let event of mealPlan.events; trackBy: trackMealEvent">
+                        {{ event.date }} · {{ mealTypeLabel(event.mealType) }} ·
+                        {{ mealRecipeName(mealPlan, event) }} · {{ event.servings }}
+                        {{ 'ai_assistant.meals.servings' | t }}
+                      </li>
+                    </ul>
+                  </section>
+                  <span
+                    *ngIf="action.kind === 'calendar.create_event'"
+                    class="assistant__confirm-status"
+                  >
+                    {{
+                      action.payload.sharedWithHousehold
+                        ? ('ai_assistant.event_shared' | t)
+                        : ('ai_assistant.event_private' | t)
+                    }}
+                  </span>
+                </li>
+              </ul>
+              <p
+                #assistantErrorAlert
+                *ngIf="errorKey() as errorMessageKey"
+                class="assistant__error"
+                role="alert"
+              >
+                {{ errorMessageKey | t }}
+              </p>
+              <p
+                *ngIf="executionMessage()"
+                class="assistant__status"
+                role="status"
+                aria-live="polite"
+              >
+                {{ executionMessage()! | t: { count: completedCount() } }}
+              </p>
+              <section
+                *ngFor="let action of confirmedMealPlanActions()"
+                class="assistant__meal-shopping"
+                [attr.data-test]="'ai-assistant-meals-shopping-' + action.id"
+              >
+                <h3>{{ 'ai_assistant.meals.shopping_heading' | t }}</h3>
+                <p>{{ 'ai_assistant.meals.shopping_preview_copy' | t }}</p>
+                <app-button
+                  *ngIf="
+                    !mealShoppingPreview(action.id) ||
+                    mealShoppingError(action.id) ||
+                    !hasSelectableMealShoppingLines(action.id)
+                  "
+                  variant="outline"
+                  [touchTarget]="true"
+                  [loading]="mealShoppingLoadingFor(action.id)"
+                  [disabled]="!canOpenMealShopping(action) || executing()"
+                  data-test="ai-assistant-meals-shopping-open"
+                  (onClick)="openMealShoppingReview(action)"
+                >
+                  {{
+                    (mealShoppingError(action.id)
+                      ? 'ai_assistant.meals.shopping_reload'
+                      : 'ai_assistant.meals.shopping_open'
+                    ) | t
+                  }}
+                </app-button>
+                <p
+                  *ngIf="mealShoppingLoadingFor(action.id)"
+                  class="assistant__status"
+                  role="status"
+                  aria-live="polite"
+                >
+                  {{ 'ai_assistant.meals.shopping_loading' | t }}
+                </p>
+                <p
+                  *ngIf="mealShoppingError(action.id) as shoppingError"
+                  class="assistant__error"
+                  role="alert"
+                >
+                  {{ shoppingError | t }}
+                </p>
+                <ng-container *ngIf="mealShoppingPreview(action.id) as shoppingPreview">
+                  <p class="assistant__hint">
+                    {{
+                      'ai_assistant.meals.shopping_range'
+                        | t: { start: shoppingPreview.startDate, end: shoppingPreview.endDate }
+                    }}
+                    ·
+                    {{
+                      'ai_assistant.meals.shopping_meal_count'
+                        | t: { count: shoppingPreview.plannedMealCount }
+                    }}
+                  </p>
+                  <p *ngIf="!shoppingPreview.sharedPantry" class="assistant__hint" role="note">
+                    {{ 'ai_assistant.meals.shopping_stock_unknown' | t }}
+                  </p>
+                  <ul *ngIf="shoppingPreview.warnings.length" class="assistant__shopping-warnings">
+                    <li *ngFor="let warning of shoppingPreview.warnings">
+                      {{
+                        'ai_assistant.meals.shopping_snapshot_warning' | t: { date: warning.date }
+                      }}
+                    </li>
+                  </ul>
+                  <p *ngIf="shoppingPreview.plannedMealCount === 0" class="assistant__hint">
+                    {{ 'ai_assistant.meals.shopping_empty' | t }}
+                  </p>
+                  <ng-container *ngIf="shoppingPreview.plannedMealCount > 0">
+                    <p
+                      *ngIf="!hasSelectableMealShoppingLines(action.id)"
+                      class="assistant__hint"
+                      data-test="ai-assistant-meals-shopping-no-shortages"
+                    >
+                      {{ 'ai_assistant.meals.shopping_no_shortages' | t }}
+                    </p>
+                    <section class="assistant__shopping-group">
+                      <h4>{{ 'ai_assistant.meals.shopping_required' | t }}</h4>
+                      <ul class="assistant__shopping-lines">
+                        <li
+                          *ngFor="
+                            let line of mealShoppingLinesFor(action.id, false);
+                            trackBy: trackMealShoppingLine
+                          "
+                          class="assistant__shopping-line"
+                        >
+                          <label>
+                            <input
+                              type="checkbox"
+                              [checked]="line.included"
+                              [disabled]="
+                                !canAddMealShoppingLine(line) ||
+                                mealShoppingSavingFor(action.id) ||
+                                !!mealShoppingApproval(action.id)
+                              "
+                              [attr.aria-label]="
+                                'ai_assistant.meals.shopping_include' | t: { name: line.name }
+                              "
+                              (change)="
+                                setMealShoppingIncluded(
+                                  action.id,
+                                  line.key,
+                                  $any($event.target).checked
+                                )
+                              "
+                            />
+                            <span>{{ line.name }} · {{ line.quantity }} {{ line.unit }}</span>
+                          </label>
+                          <p>
+                            {{ mealShoppingStatusLabel(line.status) | t }}
+                            <span *ngIf="canAddMealShoppingLine(line)">
+                              ·
+                              {{
+                                'ai_assistant.meals.shopping_missing_quantity'
+                                  | t: { quantity: line.missingQuantity, unit: line.unit }
+                              }}
+                            </span>
+                          </p>
+                          <label
+                            *ngIf="canAddMealShoppingLine(line)"
+                            class="assistant__shopping-quantity"
+                          >
+                            <span>{{ 'ai_assistant.meals.shopping_quantity' | t }}</span>
+                            <input
+                              type="number"
+                              min="0.000001"
+                              max="10000"
+                              step="any"
+                              [value]="line.addQuantity"
+                              [disabled]="
+                                mealShoppingSavingFor(action.id) ||
+                                !!mealShoppingApproval(action.id)
+                              "
+                              [attr.aria-label]="
+                                'ai_assistant.meals.shopping_quantity_for'
+                                  | t: { name: line.name, unit: line.unit }
+                              "
+                              (change)="
+                                setMealShoppingQuantity(action.id, line.key, $any($event.target))
+                              "
+                            />
+                          </label>
+                        </li>
+                      </ul>
+                    </section>
+                    <section
+                      *ngIf="mealShoppingLinesFor(action.id, true).length"
+                      class="assistant__shopping-group"
+                    >
+                      <h4>{{ 'ai_assistant.meals.shopping_optional' | t }}</h4>
+                      <ul class="assistant__shopping-lines">
+                        <li
+                          *ngFor="
+                            let line of mealShoppingLinesFor(action.id, true);
+                            trackBy: trackMealShoppingLine
+                          "
+                          class="assistant__shopping-line"
+                        >
+                          <label>
+                            <input
+                              type="checkbox"
+                              [checked]="line.included"
+                              [disabled]="
+                                !canAddMealShoppingLine(line) ||
+                                mealShoppingSavingFor(action.id) ||
+                                !!mealShoppingApproval(action.id)
+                              "
+                              [attr.aria-label]="
+                                'ai_assistant.meals.shopping_include' | t: { name: line.name }
+                              "
+                              (change)="
+                                setMealShoppingIncluded(
+                                  action.id,
+                                  line.key,
+                                  $any($event.target).checked
+                                )
+                              "
+                            />
+                            <span>{{ line.name }} · {{ line.quantity }} {{ line.unit }}</span>
+                          </label>
+                          <p>
+                            {{ mealShoppingStatusLabel(line.status) | t }}
+                            <span *ngIf="canAddMealShoppingLine(line)">
+                              ·
+                              {{
+                                'ai_assistant.meals.shopping_missing_quantity'
+                                  | t: { quantity: line.missingQuantity, unit: line.unit }
+                              }}
+                            </span>
+                          </p>
+                          <label
+                            *ngIf="canAddMealShoppingLine(line)"
+                            class="assistant__shopping-quantity"
+                          >
+                            <span>{{ 'ai_assistant.meals.shopping_quantity' | t }}</span>
+                            <input
+                              type="number"
+                              min="0.000001"
+                              max="10000"
+                              step="any"
+                              [value]="line.addQuantity"
+                              [disabled]="
+                                mealShoppingSavingFor(action.id) ||
+                                !!mealShoppingApproval(action.id)
+                              "
+                              [attr.aria-label]="
+                                'ai_assistant.meals.shopping_quantity_for'
+                                  | t: { name: line.name, unit: line.unit }
+                              "
+                              (change)="
+                                setMealShoppingQuantity(action.id, line.key, $any($event.target))
+                              "
+                            />
+                          </label>
+                        </li>
+                      </ul>
+                    </section>
+                    <app-button
+                      *ngIf="
+                        !mealShoppingApproval(action.id) &&
+                        hasSelectableMealShoppingLines(action.id)
+                      "
+                      variant="primary"
+                      [touchTarget]="true"
+                      [loading]="mealShoppingSavingFor(action.id)"
+                      [disabled]="!canApproveMealShopping(action.id)"
+                      data-test="ai-assistant-meals-shopping-approve"
+                      (onClick)="approveMealShopping(action.id)"
+                    >
+                      {{
+                        (mealShoppingSavingFor(action.id)
+                          ? 'ai_assistant.meals.shopping_approving'
+                          : 'ai_assistant.meals.shopping_approve'
+                        ) | t
+                      }}
+                    </app-button>
+                    <p
+                      *ngIf="mealShoppingApproval(action.id)"
+                      class="assistant__status"
+                      role="status"
+                      aria-live="polite"
+                      data-test="ai-assistant-meals-shopping-success"
+                    >
+                      {{ 'ai_assistant.meals.shopping_success' | t }}
+                    </p>
+                  </ng-container>
+                </ng-container>
+              </section>
+            </section>
+          }
+        }
+      }
+
+      <div footer class="assistant__footer">
+        <app-button
+          variant="ghost"
+          [touchTarget]="true"
+          [disabled]="loading()"
+          (onClick)="requestClose()"
+        >
+          {{ 'ai_assistant.close' | t }}
+        </app-button>
+        @switch (stage()) {
+          @case ('compose') {
+            <app-button
+              variant="primary"
+              [touchTarget]="true"
+              [loading]="loading()"
+              [disabled]="loading() || !prompt().trim()"
+              data-test="ai-assistant-submit"
+              (onClick)="propose()"
+              >{{ 'ai_assistant.send' | t }}</app-button
+            >
+          }
+          @case ('review') {
+            <app-button
+              variant="primary"
+              [touchTarget]="true"
+              [disabled]="!canContinue() || loading()"
+              data-test="ai-assistant-continue"
+              (onClick)="goToConfirmation()"
+              >{{ 'ai_assistant.continue' | t }}</app-button
+            >
+          }
+          @case ('refine') {
+            <app-button
+              variant="outline"
+              [touchTarget]="true"
+              [disabled]="loading()"
+              (onClick)="cancelRefine()"
+            >
+              {{ 'ai_assistant.back_to_review' | t }}
+            </app-button>
+            <app-button
+              variant="primary"
+              [touchTarget]="true"
+              [loading]="loading()"
+              [disabled]="loading() || !refinementPrompt().trim()"
+              (onClick)="refineCurrentAction()"
+              >{{ 'ai_assistant.refine_submit' | t }}</app-button
+            >
+          }
+          @case ('confirm') {
+            <app-button variant="outline" [touchTarget]="true" (onClick)="returnToReview()">
+              {{ 'ai_assistant.back_to_review' | t }}
+            </app-button>
+            <app-button
+              variant="primary"
+              [touchTarget]="true"
+              [loading]="loading()"
+              [disabled]="loading() || !canExecuteSelected()"
+              data-test="ai-assistant-confirm-submit"
+              (onClick)="executeSelected()"
+              >{{ 'ai_assistant.confirm_action' | t }}</app-button
+            >
+          }
+        }
+      </div>
+    </app-modal>
+  `,
+  styles: [
+    `
+      :host {
+        display: block;
+        --primary: var(--color-primary-700);
+        --primary-dark: var(--color-primary-800);
+      }
+
+      .assistant__compose,
+      .assistant__review,
+      .assistant__refine,
+      .assistant__confirm {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: var(--space-4);
+        min-width: 0;
+      }
+
+      .assistant__stage-heading h2,
+      .assistant__refine h2,
+      .assistant__confirm h2 {
+        margin: 0;
+        color: var(--text-primary);
+        font-size: var(--text-lg);
+        font-weight: var(--font-semibold);
+        line-height: var(--leading-tight);
+      }
+
+      .assistant__refine > p,
+      .assistant__confirm > p {
+        margin: var(--space-2) 0 0;
+        color: var(--text-secondary);
+        font-size: var(--text-sm);
+        line-height: var(--leading-normal);
+      }
+
+      .assistant__voice-note,
+      .assistant__questions {
+        display: flex;
+        align-items: flex-start;
+        gap: var(--space-3);
+        padding: var(--space-3);
+        border: 1px solid var(--border-default);
+        border-radius: var(--radius-md);
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+      }
+
+      .assistant__voice-note strong,
+      .assistant__summary-label {
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+      }
+
+      .assistant__voice-note p,
+      .assistant__questions p {
+        margin: var(--space-1) 0 0;
+        color: var(--text-secondary);
+        font-size: var(--text-xs);
+        line-height: var(--leading-normal);
+      }
+
+      .assistant__privacy > summary {
+        width: max-content;
+        min-height: 44px;
+        padding: 0 var(--space-2);
+        border-radius: var(--radius-sm);
+        color: var(--text-secondary);
+        font-size: var(--text-xs);
+        line-height: var(--button-control-height);
+        white-space: nowrap;
+        cursor: pointer;
+      }
+
+      .assistant__privacy {
+        flex: 0 0 auto;
+      }
+
+      .assistant__privacy > summary:hover {
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+      }
+
+      .assistant__privacy > summary:focus-visible {
+        outline: 2px solid var(--primary);
+        outline-offset: 2px;
+      }
+
+      .assistant__privacy .assistant__voice-note {
+        position: absolute;
+        right: 0;
+        bottom: calc(100% + var(--space-2));
+        z-index: 3;
+        width: min(22rem, calc(100% - 2 * var(--space-3)));
+        margin: 0;
+        box-shadow: var(--shadow-md);
+      }
+
+      .assistant__prompt-shell {
+        position: relative;
+        min-width: 0;
+      }
+
+      .assistant__field-tools {
+        position: absolute;
+        right: var(--space-2);
+        bottom: var(--space-1);
+        left: var(--space-2);
+        z-index: 1;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: var(--space-1);
+        min-width: 0;
+        min-height: var(--button-control-height);
+      }
+
+      .assistant__voice-warning {
+        display: flex;
+        align-items: center;
+        flex: 1 1 auto;
+        min-width: 0;
+        min-height: var(--button-control-height);
+        color: var(--text-secondary);
+        font-size: var(--text-xs);
+        line-height: 1.1;
+        overflow-wrap: anywhere;
+      }
+
+      .assistant__field input[type='checkbox'] {
+        width: 20px;
+        height: 20px;
+        flex: 0 0 auto;
+        margin: 0;
+        accent-color: var(--primary);
+      }
+
+      .assistant__input-group,
+      .assistant__field {
+        display: grid;
+        gap: var(--space-2);
+        min-width: 0;
+      }
+
+      .assistant__input-group > label,
+      .assistant__field > span,
+      .assistant__refine > label {
+        color: var(--text-primary);
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+      }
+
+      .assistant__input-group textarea,
+      .assistant__refine textarea,
+      .assistant__field input,
+      .assistant__field textarea,
+      .assistant__field select {
+        box-sizing: border-box;
+        width: 100%;
+        min-height: var(--button-control-height);
+        border: 1px solid var(--border-default);
+        border-radius: var(--radius-md);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        padding: var(--space-3);
+        font: inherit;
+        font-size: var(--text-sm);
+      }
+
+      .assistant__input-group textarea,
+      .assistant__refine textarea,
+      .assistant__field textarea {
+        min-height: 76px;
+        resize: vertical;
+        line-height: var(--leading-normal);
+      }
+
+      .assistant__input-group .assistant__prompt {
+        display: block;
+        height: 116px;
+        min-height: 116px;
+        max-height: 240px;
+        resize: none;
+        overflow-y: hidden;
+        padding-bottom: calc(var(--button-control-height) + var(--space-3));
+        border-radius: var(--radius-lg);
+        border-color: color-mix(in srgb, var(--primary) 24%, var(--border-default));
+        background: color-mix(in srgb, var(--primary) 3%, var(--bg-primary));
+        transition: var(--transition-fast);
+      }
+
+      .assistant__input-group .assistant__prompt::placeholder {
+        color: var(--text-secondary);
+        opacity: 1;
+      }
+
+      .assistant__input-group .assistant__prompt:hover:not(:disabled) {
+        border-color: color-mix(in srgb, var(--primary) 46%, var(--border-default));
+      }
+
+      .assistant__input-group .assistant__prompt:focus-visible {
+        border-color: var(--border-default);
+        background: var(--bg-primary);
+        box-shadow: none;
+        outline-offset: 1px;
+      }
+
+      .assistant__input-group textarea:focus-visible,
+      .assistant__refine textarea:focus-visible,
+      .assistant__field input:focus-visible,
+      .assistant__field textarea:focus-visible,
+      .assistant__field select:focus-visible {
+        outline: 2px solid var(--primary);
+        outline-offset: 2px;
+      }
+
+      .assistant__input-meta,
+      .assistant__selection-tools,
+      .assistant__selection-tools > div,
+      .assistant__action-header,
+      .assistant__action-controls,
+      .assistant__stage-heading,
+      .assistant__footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-3);
+        min-width: 0;
+      }
+
+      .assistant__counter,
+      .assistant__hint,
+      .assistant__selection-tools,
+      .assistant__summary-label {
+        color: var(--text-secondary);
+        font-size: var(--text-xs);
+        line-height: var(--leading-normal);
+      }
+
+      .assistant__counter {
+        flex: 0 0 auto;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .assistant__voice-controls,
+      .assistant__footer {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: var(--space-2);
+      }
+
+      .assistant__voice-controls {
+        flex: 0 0 auto;
+        flex-wrap: nowrap;
+        gap: var(--space-1);
+      }
+
+      .assistant__status,
+      .assistant__error,
+      .assistant__empty {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        margin: 0;
+        font-size: var(--text-sm);
+        line-height: var(--leading-normal);
+      }
+
+      .assistant__status {
+        color: var(--text-secondary);
+      }
+
+      .assistant__error,
+      .assistant__field-error {
+        color: var(--error);
+      }
+
+      .assistant__spinner {
+        width: 16px;
+        height: 16px;
+        border: 2px solid var(--border-default);
+        border-top-color: var(--primary);
+        border-radius: 50%;
+        animation: assistant-spin 0.7s linear infinite;
+      }
+
+      .assistant__stage-heading {
+        align-items: flex-start;
+      }
+
+      .assistant__summary-label {
+        display: block;
+        margin: var(--space-3) 0 var(--space-1);
+      }
+
+      .assistant__summary,
+      .assistant__action-summary {
+        margin: 0;
+        color: var(--text-secondary);
+        font-size: var(--text-sm);
+        line-height: var(--leading-normal);
+        overflow-wrap: anywhere;
+      }
+
+      .assistant__questions {
+        display: block;
+        border-color: color-mix(in srgb, var(--warning) 45%, var(--border-default));
+      }
+
+      .assistant__questions h3 {
+        margin: 0;
+        font-size: var(--text-sm);
+      }
+
+      .assistant__questions ul {
+        margin: var(--space-2) 0 0;
+        padding-left: var(--space-5);
+        color: var(--text-primary);
+        font-size: var(--text-sm);
+      }
+
+      .assistant__selection-tools {
+        flex-wrap: wrap;
+        padding-bottom: var(--space-2);
+        border-bottom: 1px solid var(--border-default);
+      }
+
+      .assistant__selection-tools > div {
+        flex-wrap: wrap;
+      }
+
+      .assistant__group-tools {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: var(--space-2);
+        min-width: 0;
+        padding-bottom: var(--space-2);
+      }
+
+      .assistant__group-tools > span {
+        color: var(--text-secondary);
+        font-size: var(--text-xs);
+      }
+
+      .assistant__actions {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: var(--space-3);
+        min-width: 0;
+      }
+
+      .assistant__action {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: var(--space-3);
+        min-width: 0;
+        padding: var(--space-4);
+        border: 1px solid var(--border-default);
+        border-radius: var(--radius-lg);
+        background: var(--bg-primary);
+      }
+
+      .assistant__action--selected {
+        border-color: color-mix(in srgb, var(--primary) 65%, var(--border-default));
+        box-shadow: inset 3px 0 0 var(--primary);
+      }
+
+      .assistant__action-header {
+        align-items: flex-start;
+      }
+
+      .assistant__action-controls {
+        flex: 0 0 auto;
+      }
+
+      .assistant__status-tag {
+        justify-self: start;
+        padding: var(--space-1) var(--space-2);
+        border-radius: var(--radius-full);
+        background: var(--bg-secondary);
+        color: var(--text-secondary);
+        font-size: var(--text-xs);
+      }
+
+      .assistant__warnings,
+      .assistant__dependencies {
+        margin: 0;
+        padding-left: var(--space-5);
+        color: var(--text-secondary);
+        font-size: var(--text-xs);
+      }
+
+      .assistant__details {
+        border-top: 1px solid var(--border-default);
+        padding-top: var(--space-2);
+      }
+
+      .assistant__details > summary {
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+        color: var(--primary-dark);
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        cursor: pointer;
+      }
+
+      .assistant__fields {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: var(--space-3);
+        padding-top: var(--space-3);
+      }
+
+      .assistant__meal-planner,
+      .assistant__meal-confirmation,
+      .assistant__meal-shopping {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: var(--space-3);
+        min-width: 0;
+        padding: var(--space-3);
+        border: 1px solid var(--border-default);
+        border-radius: var(--radius-md);
+        background: var(--bg-secondary);
+      }
+
+      .assistant__meal-planner h3,
+      .assistant__meal-planner p,
+      .assistant__meal-confirmation p,
+      .assistant__meal-shopping h3,
+      .assistant__meal-shopping h4,
+      .assistant__meal-shopping p {
+        margin: 0;
+      }
+
+      .assistant__meal-shopping h3,
+      .assistant__meal-shopping h4 {
+        color: var(--text-primary);
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+      }
+
+      .assistant__shopping-group {
+        display: grid;
+        gap: var(--space-2);
+        min-width: 0;
+      }
+
+      .assistant__shopping-lines,
+      .assistant__shopping-warnings {
+        display: grid;
+        gap: var(--space-2);
+        min-width: 0;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .assistant__shopping-line {
+        display: grid;
+        gap: var(--space-1);
+        min-width: 0;
+        padding: var(--space-2) 0;
+        border-top: 1px solid var(--border-default);
+      }
+
+      .assistant__shopping-line > label:first-child {
+        display: flex;
+        align-items: flex-start;
+        gap: var(--space-2);
+        min-height: 44px;
+        color: var(--text-primary);
+        font-size: var(--text-sm);
+        line-height: var(--leading-normal);
+      }
+
+      .assistant__shopping-line input[type='checkbox'] {
+        width: 20px;
+        height: 20px;
+        flex: 0 0 auto;
+        margin: 0;
+        accent-color: var(--primary);
+      }
+
+      .assistant__shopping-line input:focus-visible {
+        outline: 2px solid var(--primary);
+        outline-offset: 2px;
+      }
+
+      .assistant__shopping-line p,
+      .assistant__shopping-warnings {
+        color: var(--text-secondary);
+        font-size: var(--text-xs);
+        line-height: var(--leading-normal);
+      }
+
+      .assistant__shopping-quantity {
+        display: grid;
+        gap: var(--space-1);
+        min-width: 0;
+        margin-inline-start: calc(20px + var(--space-2));
+        color: var(--text-secondary);
+        font-size: var(--text-xs);
+      }
+
+      .assistant__shopping-quantity input {
+        box-sizing: border-box;
+        width: 100%;
+        min-height: var(--button-control-height);
+        padding: var(--space-2) var(--space-3);
+        border: 1px solid var(--border-default);
+        border-radius: var(--radius-md);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        font: inherit;
+      }
+
+      .assistant__meal-participants {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: var(--space-1) var(--space-3);
+      }
+
+      .assistant__meal-participants label {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        min-height: 44px;
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+
+      .assistant__meal-preview,
+      .assistant__meal-recipe {
+        min-width: 0;
+        padding-top: var(--space-2);
+        border-top: 1px solid var(--border-default);
+      }
+
+      .assistant__meal-preview > summary,
+      .assistant__meal-recipe > summary {
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+        color: var(--primary-dark);
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        cursor: pointer;
+        overflow-wrap: anywhere;
+      }
+
+      .assistant__meal-preview ol,
+      .assistant__meal-confirmation ul {
+        display: grid;
+        gap: var(--space-3);
+        margin: var(--space-2) 0 0;
+        padding-left: var(--space-5);
+      }
+
+      .assistant__meal-preview li,
+      .assistant__meal-recipe li {
+        overflow-wrap: anywhere;
+      }
+
+      .assistant__meal-servings {
+        max-width: 260px;
+        margin-top: var(--space-2);
+      }
+
+      .assistant__meal-refinement {
+        display: grid;
+        gap: var(--space-2);
+        min-width: 0;
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+      }
+
+      .assistant__meal-refinement textarea {
+        width: 100%;
+        min-height: 76px;
+        padding: var(--space-3);
+        border: 1px solid var(--border-default);
+        border-radius: var(--radius-md);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        font: inherit;
+        font-weight: var(--font-normal);
+        line-height: var(--leading-normal);
+        resize: vertical;
+      }
+
+      .assistant__meal-servings input:focus-visible,
+      .assistant__meal-participants input:focus-visible,
+      .assistant__meal-refinement textarea:focus-visible {
+        outline: 2px solid var(--primary);
+        outline-offset: 2px;
+      }
+
+      .assistant__field-error {
+        font-size: var(--text-xs);
+      }
+
+      .assistant__recipe-section {
+        display: grid;
+        grid-column: 1 / -1;
+        gap: var(--space-3);
+        min-width: 0;
+        margin: 0;
+        padding: var(--space-3);
+        border: 1px solid var(--border-default);
+        border-radius: var(--radius-md);
+      }
+
+      .assistant__recipe-section legend,
+      .assistant__recipe-level h4 {
+        color: var(--text-primary);
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+      }
+
+      .assistant__recipe-row {
+        display: grid;
+        grid-template-columns: 2fr 1fr 1fr 2fr;
+        gap: var(--space-2);
+        min-width: 0;
+      }
+
+      .assistant__recipe-change {
+        display: grid;
+        gap: var(--space-2);
+        min-width: 0;
+        padding: var(--space-3);
+        border: 1px solid var(--border-default);
+        border-radius: var(--radius-md);
+      }
+
+      .assistant__recipe-change > header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-2);
+      }
+
+      .assistant__recipe-change p {
+        margin: 0;
+        overflow-wrap: anywhere;
+      }
+
+      .assistant__recipe-level {
+        display: grid;
+        gap: var(--space-2);
+      }
+
+      .assistant__recipe-level h4 {
+        margin: 0;
+      }
+
+      .assistant__refine-target {
+        margin: 0 !important;
+        padding: var(--space-3);
+        border-left: 3px solid var(--primary);
+        background: var(--bg-secondary);
+        color: var(--text-primary) !important;
+        overflow-wrap: anywhere;
+      }
+
+      .assistant__confirm-list {
+        display: grid;
+        gap: var(--space-3);
+        margin: 0;
+        padding-left: var(--space-5);
+        color: var(--text-primary);
+      }
+
+      .assistant__confirm-fields {
+        display: grid;
+        gap: var(--space-2);
+        margin: var(--space-2) 0 0;
+      }
+
+      .assistant__confirm-field {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+        gap: var(--space-2);
+        min-width: 0;
+      }
+
+      .assistant__confirm-field dt {
+        color: var(--text-secondary);
+        font-size: var(--text-xs);
+        font-weight: var(--font-medium);
+      }
+
+      .assistant__confirm-field dd {
+        min-width: 0;
+        margin: 0;
+        overflow-wrap: anywhere;
+      }
+
+      .assistant__confirm-field ul,
+      .assistant__confirm-field ol {
+        margin: 0;
+        padding-left: var(--space-4);
+      }
+
+      .assistant__confirm-status {
+        display: block;
+        margin-top: var(--space-1);
+        color: var(--text-secondary);
+        font-size: var(--text-xs);
+      }
+
+      @keyframes assistant-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      @media (max-width: 640px) {
+        .assistant__stage-heading,
+        .assistant__action-header,
+        .assistant__recipe-change > header {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .assistant__fields,
+        .assistant__recipe-row,
+        .assistant__confirm-field,
+        .assistant__meal-participants {
+          grid-template-columns: minmax(0, 1fr);
+        }
+
+        .assistant__action-controls {
+          width: 100%;
+          justify-content: flex-start;
+          flex-wrap: wrap;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .assistant__spinner {
+          animation: none;
+        }
+      }
+    `
+  ]
+})
+export class AiActionAssistantDialogComponent implements OnDestroy {
+  private readonly router = inject(Router);
+  @ViewChild('stageHeading') private stageHeading?: ElementRef<HTMLElement>;
+  @ViewChild('composePrompt') private composePrompt?: ElementRef<HTMLTextAreaElement>;
+  @ViewChild('assistantErrorAlert') private assistantErrorAlert?: ElementRef<HTMLElement>;
+  @ViewChild('voiceErrorAlert') private voiceErrorAlert?: ElementRef<HTMLElement>;
+
+  @Input() routeHint: AssistantRouteHint | undefined;
+  @Output() readonly dismiss = new EventEmitter<void>();
+
+  private readonly assistant = inject(AiActionAssistantService);
+  private readonly execution = inject(AiActionAssistantExecutionService);
+  private readonly household = inject(HouseholdService);
+  private readonly mealProposalService = inject(HouseholdMealProposalService);
+  private readonly mealShoppingService = inject(HouseholdMealShoppingService);
+  private readonly confirmService = inject(ConfirmService);
+  private readonly i18n = inject(I18nService);
+  private readonly pantry = inject(PantryService);
+  private readonly injector = inject(Injector);
+  private requestSubscription: Subscription | null = null;
+  private mealRequestSubscriptions: Subscription[] = [];
+  private recognition: SpeechRecognitionLike | null = null;
+
+  readonly stage = signal<AssistantStage>('compose');
+  readonly modalOpen = signal(true);
+  readonly prompt = signal('');
+  readonly promptError = signal<TranslationKey | null>(null);
+  readonly plan = signal<AssistantActionPlan | null>(null);
+  readonly loading = signal(false);
+  readonly executing = signal(false);
+  readonly errorKey = signal<TranslationKey | null>(null);
+  readonly refinementPrompt = signal('');
+  readonly refinementQuestions = signal<string[]>([]);
+  readonly refiningActionId = signal<string | null>(null);
+  readonly refiningActionIds = signal<string[]>([]);
+  readonly refinementBatchScope = signal<AssistantBatchRefinementScope | null>(null);
+  readonly refinementScopeValue = signal(ACTION_REFINEMENT_SCOPE);
+  readonly voiceState = signal<'idle' | 'listening' | 'paused' | 'error'>('idle');
+  readonly voiceStopPending = signal(false);
+  readonly voiceError = signal<TranslationKey | null>(null);
+  readonly executionMessage = signal<TranslationKey | null>(null);
+  readonly completedCount = signal(0);
+  readonly mealParticipantSelections = signal<Record<string, string[]>>({});
+  readonly mealProposals = signal<Record<string, HouseholdMealProposal>>({});
+  readonly mealManualServings = signal<Record<string, Record<string, number>>>({});
+  readonly mealRefinementInstructions = signal<Record<string, string>>({});
+  readonly mealProposalLoading = signal<Record<string, boolean>>({});
+  readonly mealShoppingPreviews = signal<Record<string, HouseholdMealShoppingPreview>>({});
+  readonly mealShoppingLines = signal<Record<string, AssistantMealShoppingLine[]>>({});
+  readonly mealShoppingLoading = signal<Record<string, boolean>>({});
+  readonly mealShoppingSaving = signal<Record<string, boolean>>({});
+  readonly mealShoppingApprovals = signal<Record<string, HouseholdMealShoppingApproval>>({});
+  readonly mealShoppingErrors = signal<Record<string, TranslationKey | null>>({});
+  private proposalHouseholdId: string | null = null;
+  private readonly closeConfirmationPending = signal(false);
+
+  readonly selectedActions = computed(
+    () => this.plan()?.actions.filter((action) => action.selected) ?? []
+  );
+  readonly selectedCount = computed(() => this.selectedActions().length);
+  readonly refinableActions = computed(
+    () =>
+      this.plan()?.actions.filter(
+        (action) => action.status !== 'succeeded' && action.kind !== 'household.plan_meals'
+      ) ?? []
+  );
+  readonly confirmedMealPlanActions = computed(
+    () =>
+      this.plan()?.actions.filter(
+        (action) => action.kind === 'household.plan_meals' && action.status === 'succeeded'
+      ) ?? []
+  );
+  readonly refinableDomains = computed(() => {
+    const counts = new Map<AssistantAction['domain'], number>();
+    for (const action of this.refinableActions()) {
+      counts.set(action.domain, (counts.get(action.domain) ?? 0) + 1);
+    }
+    return [...counts.entries()].filter(([, count]) => count > 1).map(([domain]) => domain);
+  });
+  readonly refiningActions = computed(() => {
+    const targetIds = new Set(this.refiningActionIds());
+    return this.plan()?.actions.filter((action) => targetIds.has(action.id)) ?? [];
+  });
+  readonly refiningAction = computed(
+    () => this.plan()?.actions.find((action) => action.id === this.refiningActionId()) ?? null
+  );
+  readonly voiceSupported = computed(() => Boolean(this.speechRecognitionConstructor()));
+  readonly supportsPause = signal(false);
+  readonly pantryUnitOptions: PickerOption[] = PANTRY_UNITS.map((value) => ({
+    value,
+    label: value
+  }));
+  readonly recipeLevels = ['basic', 'intermediate', 'expert'] as const;
+  private bodyOverflowBeforeLock: string | null = null;
+
+  constructor() {
+    this.router.events
+      .pipe(
+        filter((event): event is NavigationEnd => event instanceof NavigationEnd),
+        takeUntilDestroyed()
+      )
+      .subscribe(() => this.cancelVoice());
+    this.pantry.loadCategories();
+    effect(() => {
+      if (this.modalOpen() || this.closeConfirmationPending()) this.lockBodyScroll();
+      else this.restoreBodyScroll();
+    });
+  }
+
+  ngOnDestroy(): void {
+    this.requestSubscription?.unsubscribe();
+    this.mealRequestSubscriptions.forEach((subscription) => subscription.unsubscribe());
+    this.cancelVoice();
+    this.restoreBodyScroll();
+  }
+
+  updatePrompt(event: Event): void {
+    const prompt = event.target as HTMLTextAreaElement;
+    this.prompt.set(prompt.value);
+    this.resizePrompt();
+    this.promptError.set(null);
+    this.errorKey.set(null);
+  }
+
+  @HostListener('window:resize')
+  onViewportResize(): void {
+    this.resizePrompt();
+  }
+
+  private resizePrompt(value?: string): void {
+    const prompt = this.composePrompt?.nativeElement;
+    if (!prompt) return;
+    if (value !== undefined) prompt.value = value;
+
+    prompt.style.height = 'auto';
+    const styles = getComputedStyle(prompt);
+    const minimumHeight = Number.parseFloat(styles.minHeight);
+    const maximumHeight = Number.parseFloat(styles.maxHeight);
+    const borderHeight =
+      Number.parseFloat(styles.borderTopWidth) + Number.parseFloat(styles.borderBottomWidth);
+    const contentHeight =
+      styles.boxSizing === 'border-box'
+        ? prompt.scrollHeight
+        : prompt.scrollHeight + (Number.isFinite(borderHeight) ? borderHeight : 0);
+    const height = Math.min(
+      Number.isFinite(maximumHeight) ? maximumHeight : contentHeight,
+      Math.max(Number.isFinite(minimumHeight) ? minimumHeight : 0, contentHeight)
+    );
+
+    prompt.style.height = String(height) + 'px';
+    prompt.style.overflowY = contentHeight > height ? 'auto' : 'hidden';
+  }
+
+  propose(): void {
+    if (this.loading()) return;
+    const prompt = this.prompt().trim();
+    if (!prompt) {
+      this.promptError.set('ai_assistant.prompt_required');
+      return;
+    }
+    this.stopVoice();
+    this.proposalHouseholdId = this.household.activeHouseholdId();
+    this.errorKey.set(null);
+    this.loading.set(true);
+    this.requestSubscription = this.assistant
+      .propose({ prompt, ...(this.routeHint ? { route: this.routeHint } : {}) })
+      .subscribe({
+        next: (plan) => {
+          this.plan.set(plan);
+          this.mealParticipantSelections.set(
+            Object.fromEntries(
+              plan.actions
+                .filter((action) => action.kind === 'household.plan_meals')
+                .map((action) => [action.id, []])
+            )
+          );
+          this.mealProposals.set({});
+          this.mealManualServings.set({});
+          this.mealRefinementInstructions.set({});
+          this.mealProposalLoading.set({});
+          this.setStage('review');
+          this.loading.set(false);
+          this.requestSubscription = null;
+        },
+        error: (error: unknown) => {
+          this.setRequestError(error);
+          this.loading.set(false);
+          this.requestSubscription = null;
+        }
+      });
+  }
+
+  returnToCompose(): void {
+    this.setStage('compose');
+    this.errorKey.set(null);
+  }
+
+  returnToReview(): void {
+    this.setStage('review');
+  }
+
+  selectAll(): void {
+    this.updateActions((actions) => actions.map((action) => ({ ...action, selected: true })));
+  }
+
+  selectNone(): void {
+    this.updateActions((actions) => actions.map((action) => ({ ...action, selected: false })));
+  }
+
+  setSelected(id: string, selected: boolean): void {
+    this.updateActions((actions) =>
+      actions.map((action) => (action.id === id ? { ...action, selected } : action))
+    );
+  }
+
+  omitAction(id: string): void {
+    if (this.hasDependents(id)) return;
+    this.invalidateMealProposalDraft(id);
+    this.updateActions((actions) => actions.filter((action) => action.id !== id));
+  }
+
+  hasDependents(id: string): boolean {
+    return this.plan()?.actions.some((action) => action.dependsOn.includes(id)) ?? false;
+  }
+
+  hasUnselectedDependency(action: AssistantAction): boolean {
+    const selectedIds = new Set(this.selectedActions().map((item) => item.id));
+    const succeededIds = new Set(
+      this.plan()
+        ?.actions.filter((item) => item.status === 'succeeded')
+        .map((item) => item.id) ?? []
+    );
+    return action.dependsOn.some((id) => !selectedIds.has(id) && !succeededIds.has(id));
+  }
+
+  actionTitle(id: string): string {
+    return this.plan()?.actions.find((action) => action.id === id)?.title ?? id;
+  }
+
+  canContinue(): boolean {
+    const selected = this.selectedActions();
+    const currentPlan = this.plan();
+    return Boolean(
+      currentPlan &&
+      this.household.activeHouseholdId() === this.proposalHouseholdId &&
+      selected.length > 0 &&
+      currentPlan.questions.length === 0 &&
+      selected.every(
+        (action) =>
+          (action.status === 'succeeded' ||
+            (this.isActionValid(action) && this.isSpecializedProposalReady(action))) &&
+          !this.hasUnselectedDependency(action)
+      )
+    );
+  }
+
+  mealParticipants(): HouseholdMember[] {
+    const household = this.household.household();
+    if (!this.proposalHouseholdId || household?.id !== this.proposalHouseholdId) return [];
+    return household.members.filter(
+      (member) => member.isActive && member.permissions?.calendar?.view === true
+    );
+  }
+
+  selectedMealParticipantIds(actionId: string): string[] {
+    return this.mealParticipantSelections()[actionId] ?? [];
+  }
+
+  isMealParticipantSelected(actionId: string, memberId: string): boolean {
+    return this.selectedMealParticipantIds(actionId).includes(memberId);
+  }
+
+  toggleMealParticipant(actionId: string, memberId: string, checked: boolean): void {
+    if (
+      this.mealProposalBusy(actionId) ||
+      !this.mealParticipants().some((member) => member.id === memberId)
+    ) {
+      return;
+    }
+    const current = new Set(this.selectedMealParticipantIds(actionId));
+    if (checked) current.add(memberId);
+    else current.delete(memberId);
+    this.mealParticipantSelections.update((selections) => ({
+      ...selections,
+      [actionId]: [...current]
+    }));
+    this.invalidateMealProposalDraft(actionId);
+  }
+
+  mealProposalFor(actionId: string): HouseholdMealProposal | null {
+    return this.mealProposals()[actionId] ?? null;
+  }
+
+  canOpenMealShopping(action: AssistantAction): boolean {
+    return (
+      action.kind === 'household.plan_meals' &&
+      action.status === 'succeeded' &&
+      Boolean(this.proposalHouseholdId) &&
+      this.household.activeHouseholdId() === this.proposalHouseholdId &&
+      !this.mealShoppingLoadingFor(action.id) &&
+      !this.mealShoppingSavingFor(action.id)
+    );
+  }
+
+  openMealShoppingReview(action: AssistantAction): void {
+    if (action.kind !== 'household.plan_meals' || !this.canOpenMealShopping(action)) return;
+    const householdId = this.proposalHouseholdId;
+    if (!householdId) return;
+    const range = this.mealShoppingRange(action.payload.weekStart);
+    if (!range || range.startDate > range.endDate) {
+      this.setMealShoppingError(action.id, 'ai_assistant.meals.shopping_no_future');
+      return;
+    }
+
+    this.mealShoppingPreviews.update((previews) => omitRecordKey(previews, action.id));
+    this.mealShoppingLines.update((lines) => omitRecordKey(lines, action.id));
+    this.mealShoppingApprovals.update((approvals) => omitRecordKey(approvals, action.id));
+    this.setMealShoppingError(action.id, null);
+    this.setMealShoppingLoading(action.id, true);
+    const subscription = this.mealShoppingService
+      .loadPreview(householdId, range.startDate, range.endDate)
+      .pipe(finalize(() => this.setMealShoppingLoading(action.id, false)))
+      .subscribe({
+        next: (preview) => {
+          if (this.household.activeHouseholdId() !== householdId || action.status !== 'succeeded') {
+            this.setMealShoppingError(action.id, 'ai_assistant.error_context_changed');
+            return;
+          }
+          if (!this.isMealShoppingPreviewForRange(preview, range.startDate, range.endDate)) {
+            this.setMealShoppingError(action.id, 'ai_assistant.meals.shopping_invalid_preview');
+            return;
+          }
+          this.mealShoppingPreviews.update((previews) => ({ ...previews, [action.id]: preview }));
+          this.mealShoppingLines.update((lines) => ({
+            ...lines,
+            [action.id]: [
+              ...preview.requiredIngredients.map((item) => this.makeMealShoppingLine(item, false)),
+              ...preview.optionalIngredients.map((item) => this.makeMealShoppingLine(item, true))
+            ]
+          }));
+        },
+        error: (error: unknown) =>
+          this.setMealShoppingError(action.id, this.mapMealShoppingError(error))
+      });
+    this.mealRequestSubscriptions.push(subscription);
+  }
+
+  mealShoppingPreview(actionId: string): HouseholdMealShoppingPreview | null {
+    return this.mealShoppingPreviews()[actionId] ?? null;
+  }
+
+  mealShoppingLinesFor(actionId: string, optional: boolean): AssistantMealShoppingLine[] {
+    return (this.mealShoppingLines()[actionId] ?? []).filter((line) => line.optional === optional);
+  }
+
+  mealShoppingLoadingFor(actionId: string): boolean {
+    return this.mealShoppingLoading()[actionId] === true;
+  }
+
+  mealShoppingSavingFor(actionId: string): boolean {
+    return this.mealShoppingSaving()[actionId] === true;
+  }
+
+  mealShoppingError(actionId: string): TranslationKey | null {
+    return this.mealShoppingErrors()[actionId] ?? null;
+  }
+
+  mealShoppingApproval(actionId: string): HouseholdMealShoppingApproval | null {
+    return this.mealShoppingApprovals()[actionId] ?? null;
+  }
+
+  mealShoppingStatusLabel(status: HouseholdMealShoppingStockStatus): TranslationKey {
+    return MEAL_SHOPPING_STATUS_LABELS[status];
+  }
+
+  canAddMealShoppingLine(line: AssistantMealShoppingLine): boolean {
+    return (
+      (line.status === 'not_found' || line.status === 'matched') &&
+      line.missingQuantity !== null &&
+      line.missingQuantity > 0
+    );
+  }
+
+  hasSelectableMealShoppingLines(actionId: string): boolean {
+    return (
+      this.mealShoppingLines()[actionId]?.some((line) => this.canAddMealShoppingLine(line)) ?? false
+    );
+  }
+
+  setMealShoppingIncluded(actionId: string, key: string, included: boolean): void {
+    this.mealShoppingLines.update((states) => ({
+      ...states,
+      [actionId]: (states[actionId] ?? []).map((line) =>
+        line.key === key && this.canAddMealShoppingLine(line) ? { ...line, included } : line
+      )
+    }));
+  }
+
+  setMealShoppingQuantity(actionId: string, key: string, input: HTMLInputElement): void {
+    const quantity = input.valueAsNumber;
+    if (!Number.isFinite(quantity) || quantity <= 0 || quantity > 10_000) {
+      const current = this.mealShoppingLines()[actionId]?.find((line) => line.key === key);
+      if (current) input.value = String(current.addQuantity);
+      return;
+    }
+    this.mealShoppingLines.update((states) => ({
+      ...states,
+      [actionId]: (states[actionId] ?? []).map((line) =>
+        line.key === key && this.canAddMealShoppingLine(line)
+          ? { ...line, addQuantity: quantity }
+          : line
+      )
+    }));
+  }
+
+  canApproveMealShopping(actionId: string): boolean {
+    const preview = this.mealShoppingPreview(actionId);
+    return (
+      Boolean(preview) &&
+      Boolean(this.proposalHouseholdId) &&
+      this.household.activeHouseholdId() === this.proposalHouseholdId &&
+      !this.mealShoppingLoadingFor(actionId) &&
+      !this.mealShoppingSavingFor(actionId) &&
+      !this.mealShoppingError(actionId) &&
+      this.mealShoppingApproval(actionId) === null &&
+      this.mealShoppingLinesFor(actionId, false)
+        .concat(this.mealShoppingLinesFor(actionId, true))
+        .some((line) => line.included && this.canAddMealShoppingLine(line)) &&
+      this.mealShoppingLinesFor(actionId, false)
+        .concat(this.mealShoppingLinesFor(actionId, true))
+        .every(
+          (line) =>
+            !line.included ||
+            (this.canAddMealShoppingLine(line) &&
+              Number.isFinite(line.addQuantity) &&
+              line.addQuantity > 0 &&
+              line.addQuantity <= 10_000)
+        )
+    );
+  }
+
+  approveMealShopping(actionId: string): void {
+    if (!this.canApproveMealShopping(actionId)) return;
+    const householdId = this.proposalHouseholdId;
+    const preview = this.mealShoppingPreview(actionId);
+    if (!householdId || !preview) return;
+    const items = this.mealShoppingLinesFor(actionId, false)
+      .concat(this.mealShoppingLinesFor(actionId, true))
+      .filter((line) => line.included && this.canAddMealShoppingLine(line))
+      .map((line) => ({ name: line.name, unit: line.unit, quantity: line.addQuantity }));
+
+    this.setMealShoppingError(actionId, null);
+    this.mealShoppingSaving.update((states) => ({ ...states, [actionId]: true }));
+    const subscription = this.mealShoppingService
+      .approve(householdId, {
+        startDate: preview.startDate,
+        endDate: preview.endDate,
+        previewId: preview.previewId,
+        items
+      })
+      .pipe(
+        finalize(() =>
+          this.mealShoppingSaving.update((states) => ({ ...states, [actionId]: false }))
+        )
+      )
+      .subscribe({
+        next: (approval) => {
+          if (this.household.activeHouseholdId() !== householdId) {
+            this.setMealShoppingError(actionId, 'ai_assistant.error_context_changed');
+            return;
+          }
+          this.mealShoppingApprovals.update((approvals) => ({
+            ...approvals,
+            [actionId]: approval
+          }));
+        },
+        error: (error: unknown) =>
+          this.setMealShoppingError(actionId, this.mapMealShoppingError(error))
+      });
+    this.mealRequestSubscriptions.push(subscription);
+  }
+
+  trackMealShoppingLine(_index: number, line: AssistantMealShoppingLine): string {
+    return line.key;
+  }
+
+  private mealShoppingRange(weekStart: string): { startDate: string; endDate: string } | null {
+    const endDate = addIsoDays(weekStart, 6);
+    if (!endDate) return null;
+    const today = new Date().toISOString().slice(0, 10);
+    return { startDate: weekStart < today ? today : weekStart, endDate };
+  }
+
+  private isMealShoppingPreviewForRange(
+    preview: HouseholdMealShoppingPreview,
+    startDate: string,
+    endDate: string
+  ): boolean {
+    return (
+      preview.startDate === startDate &&
+      preview.endDate === endDate &&
+      /^[a-f0-9]{64}$/.test(preview.previewId) &&
+      Number.isInteger(preview.plannedMealCount) &&
+      preview.plannedMealCount >= 0 &&
+      Array.isArray(preview.requiredIngredients) &&
+      Array.isArray(preview.optionalIngredients) &&
+      Array.isArray(preview.warnings)
+    );
+  }
+
+  private makeMealShoppingLine(
+    ingredient: HouseholdMealShoppingIngredient,
+    optional: boolean
+  ): AssistantMealShoppingLine {
+    const canAdd =
+      (ingredient.status === 'not_found' || ingredient.status === 'matched') &&
+      ingredient.missingQuantity !== null &&
+      ingredient.missingQuantity > 0;
+    return {
+      ...ingredient,
+      key: JSON.stringify([normalizeAssistantShoppingName(ingredient.name), ingredient.unit]),
+      optional,
+      included: canAdd && !optional,
+      addQuantity: ingredient.missingQuantity ?? ingredient.quantity
+    };
+  }
+
+  private setMealShoppingLoading(actionId: string, loading: boolean): void {
+    this.mealShoppingLoading.update((states) => ({ ...states, [actionId]: loading }));
+  }
+
+  private setMealShoppingError(actionId: string, error: TranslationKey | null): void {
+    this.mealShoppingErrors.update((errors) => ({ ...errors, [actionId]: error }));
+  }
+
+  private mapMealShoppingError(error: unknown): TranslationKey {
+    if (error instanceof HttpErrorResponse) {
+      const code =
+        typeof error.error === 'object' && error.error !== null && 'code' in error.error
+          ? String((error.error as { code?: unknown }).code)
+          : '';
+      if (error.status === 403 || code === 'HOUSEHOLD_CALENDAR_VIEW_REQUIRED') {
+        return 'ai_assistant.meals.shopping_permission';
+      }
+      if (error.status === 409 && code === 'HOUSEHOLD_CONTEXT_CHANGED') {
+        return 'ai_assistant.error_context_changed';
+      }
+      if (error.status === 409 && code === 'MEAL_SHOPPING_PREVIEW_STALE') {
+        return 'ai_assistant.meals.shopping_stale';
+      }
+      if (error.status === 400 && code === 'MEAL_SHOPPING_ITEM_NOT_IN_PREVIEW') {
+        return 'ai_assistant.meals.shopping_invalid_preview';
+      }
+    }
+    return 'ai_assistant.meals.shopping_error';
+  }
+
+  mealProposalBusy(actionId: string): boolean {
+    return this.mealProposalLoading()[actionId] === true;
+  }
+
+  mealRefinementText(actionId: string): string {
+    return this.mealRefinementInstructions()[actionId] ?? '';
+  }
+
+  setMealRefinementText(actionId: string, value: string): void {
+    this.mealRefinementInstructions.update((instructions) => ({
+      ...instructions,
+      [actionId]: value.slice(0, 1000)
+    }));
+  }
+
+  canGenerateMealProposal(action: AssistantAction): boolean {
+    return (
+      action.kind === 'household.plan_meals' &&
+      this.isActionValid(action) &&
+      Boolean(this.proposalHouseholdId) &&
+      this.household.activeHouseholdId() === this.proposalHouseholdId &&
+      this.selectedMealParticipantIds(action.id).length > 0 &&
+      !this.mealProposalBusy(action.id)
+    );
+  }
+
+  generateMealProposal(action: AssistantAction): void {
+    if (action.kind !== 'household.plan_meals') return;
+    const householdId = this.proposalHouseholdId;
+    const householdMemberIds = this.selectedMealParticipantIds(action.id);
+    if (!householdMemberIds.length) {
+      this.errorKey.set('ai_assistant.meals.error_members');
+      return;
+    }
+    if (!this.canGenerateMealProposal(action) || !householdId) return;
+
+    this.errorKey.set(null);
+    this.setMealProposalLoading(action.id, true);
+    const subscription = this.mealProposalService
+      .createAssistantProposal(householdId, {
+        weekStart: action.payload.weekStart,
+        householdMemberIds,
+        instructions: action.payload.instructions
+      })
+      .pipe(finalize(() => this.setMealProposalLoading(action.id, false)))
+      .subscribe({
+        next: (proposal) => {
+          if (!this.isMealProposalResponseCurrent(action, proposal, householdMemberIds)) {
+            this.errorKey.set('ai_assistant.meals.error_stale');
+            return;
+          }
+          this.mealProposals.update((proposals) => ({ ...proposals, [action.id]: proposal }));
+        },
+        error: (error: unknown) => this.setRequestError(error)
+      });
+    this.mealRequestSubscriptions.push(subscription);
+  }
+
+  canRefineMealProposal(action: AssistantAction): boolean {
+    return (
+      action.kind === 'household.plan_meals' &&
+      this.isMealProposalCurrent(action) &&
+      Boolean(this.mealRefinementText(action.id).trim()) &&
+      !this.mealProposalBusy(action.id)
+    );
+  }
+
+  refineMealProposal(action: AssistantAction): void {
+    if (action.kind !== 'household.plan_meals' || !this.canRefineMealProposal(action)) return;
+    const householdId = this.proposalHouseholdId;
+    const proposal = this.mealProposalFor(action.id);
+    if (!householdId || !proposal) return;
+
+    this.errorKey.set(null);
+    this.setMealProposalLoading(action.id, true);
+    const subscription = this.mealProposalService
+      .refineAssistantProposal(householdId, {
+        proposalId: proposal.proposalId,
+        weekStart: proposal.weekStart,
+        householdMemberIds: [...this.selectedMealParticipantIds(action.id)],
+        recipes: proposal.recipes,
+        events: proposal.events,
+        instructions: this.mealRefinementText(action.id).trim()
+      })
+      .pipe(finalize(() => this.setMealProposalLoading(action.id, false)))
+      .subscribe({
+        next: (refined) => {
+          if (
+            !this.isMealProposalResponseCurrent(
+              action,
+              refined,
+              this.selectedMealParticipantIds(action.id)
+            )
+          ) {
+            this.errorKey.set('ai_assistant.meals.error_stale');
+            return;
+          }
+          const instruction = this.mealRefinementText(action.id).trim();
+          const overrides = this.mealManualServings()[action.id] ?? {};
+          const nextProposal = this.refinementChangesServings(instruction)
+            ? refined
+            : this.applyMealServingsOverrides(refined, overrides);
+          this.mealProposals.update((proposals) => ({ ...proposals, [action.id]: nextProposal }));
+          if (this.refinementChangesServings(instruction)) {
+            this.mealManualServings.update((current) => ({ ...current, [action.id]: {} }));
+          }
+          this.setMealRefinementText(action.id, '');
+        },
+        error: (error: unknown) => this.setRequestError(error)
+      });
+    this.mealRequestSubscriptions.push(subscription);
+  }
+
+  updateMealServings(
+    actionId: string,
+    event: HouseholdMealProposalEvent,
+    input: HTMLInputElement
+  ): void {
+    const servings = Number(input.value);
+    if (!Number.isInteger(servings) || servings < 1 || servings > 100) {
+      input.value = String(event.servings);
+      return;
+    }
+    this.mealProposals.update((proposals) => {
+      const proposal = proposals[actionId];
+      if (!proposal) return proposals;
+      const updatedProposal = {
+        ...proposal,
+        events: proposal.events.map((candidate) =>
+          candidate.id === event.id ? { ...candidate, servings } : candidate
+        )
+      };
+      return { ...proposals, [actionId]: updatedProposal };
+    });
+    this.mealManualServings.update((overrides) => ({
+      ...overrides,
+      [actionId]: {
+        ...(overrides[actionId] ?? {}),
+        [this.mealEventIdentity(event)]: servings
+      }
+    }));
+  }
+
+  mealRecipe(
+    proposal: HouseholdMealProposal,
+    event: HouseholdMealProposalEvent
+  ): HouseholdMealProposalRecipeReference | null {
+    return event.recipeAlias
+      ? (proposal.recipes.find((recipe) => recipe.alias === event.recipeAlias) ?? null)
+      : null;
+  }
+
+  mealRecipeName(proposal: HouseholdMealProposal, event: HouseholdMealProposalEvent): string {
+    return this.mealRecipe(proposal, event)?.recipe.name ?? '—';
+  }
+
+  mealTypeLabel(mealType: HouseholdMealType): string {
+    const key: Record<HouseholdMealType, TranslationKey> = {
+      breakfast: 'ai_assistant.meals.breakfast',
+      lunch: 'ai_assistant.meals.lunch',
+      dinner: 'ai_assistant.meals.dinner',
+      snack: 'ai_assistant.meals.snack'
+    };
+    return this.i18n.t(key[mealType]);
+  }
+
+  confirmableMealCount(proposal: HouseholdMealProposal): number {
+    return proposal.events.filter((event) => event.status === 'scheduled').length;
+  }
+
+  trackMember(_index: number, member: HouseholdMember): string {
+    return member.id;
+  }
+
+  trackMealEvent(_index: number, event: HouseholdMealProposalEvent): string {
+    return event.id;
+  }
+
+  canExecuteSelected(): boolean {
+    return (
+      this.canContinue() &&
+      this.selectedActions().some((action) =>
+        ['pending', 'failed', 'blocked'].includes(action.status)
+      )
+    );
+  }
+
+  private isSpecializedProposalReady(action: AssistantAction): boolean {
+    return action.kind !== 'household.plan_meals' || this.isMealProposalCurrent(action);
+  }
+
+  private isMealProposalCurrent(action: AssistantAction): boolean {
+    if (action.kind !== 'household.plan_meals') return false;
+    const proposal = this.mealProposalFor(action.id);
+    const selectedIds = this.selectedMealParticipantIds(action.id);
+    if (
+      !proposal ||
+      !this.proposalHouseholdId ||
+      this.household.activeHouseholdId() !== this.proposalHouseholdId ||
+      proposal.weekStart !== action.payload.weekStart ||
+      !this.sameIds(
+        selectedIds,
+        proposal.participants.map((member) => member.householdMemberId)
+      ) ||
+      this.confirmableMealCount(proposal) === 0
+    ) {
+      return false;
+    }
+    const aliases = new Set(proposal.participants.map((participant) => participant.alias));
+    return proposal.events.every((event) =>
+      event.status === 'unresolved'
+        ? event.servings === 0 && event.recipeAlias === null
+        : Number.isInteger(event.servings) &&
+          event.servings >= 1 &&
+          event.servings <= 100 &&
+          Boolean(this.mealRecipe(proposal, event)) &&
+          event.participantAliases.every((alias) => aliases.has(alias))
+    );
+  }
+
+  private isMealProposalResponseCurrent(
+    action: Extract<AssistantAction, { kind: 'household.plan_meals' }>,
+    proposal: HouseholdMealProposal,
+    expectedMemberIds: string[]
+  ): boolean {
+    return (
+      this.household.activeHouseholdId() === this.proposalHouseholdId &&
+      proposal.weekStart === action.payload.weekStart &&
+      this.sameIds(expectedMemberIds, this.selectedMealParticipantIds(action.id)) &&
+      this.sameIds(
+        expectedMemberIds,
+        proposal.participants.map((participant) => participant.householdMemberId)
+      )
+    );
+  }
+
+  private sameIds(left: readonly string[], right: readonly string[]): boolean {
+    return left.length === right.length && left.every((id) => right.includes(id));
+  }
+
+  private setMealProposalLoading(actionId: string, loading: boolean): void {
+    this.mealProposalLoading.update((states) => ({ ...states, [actionId]: loading }));
+  }
+
+  private invalidateMealProposalDraft(actionId: string): void {
+    this.mealProposals.update((proposals) => {
+      if (!Object.prototype.hasOwnProperty.call(proposals, actionId)) return proposals;
+      const next = { ...proposals };
+      delete next[actionId];
+      return next;
+    });
+    this.mealManualServings.update((overrides) => {
+      if (!Object.prototype.hasOwnProperty.call(overrides, actionId)) return overrides;
+      const next = { ...overrides };
+      delete next[actionId];
+      return next;
+    });
+    this.mealRefinementInstructions.update((instructions) => ({ ...instructions, [actionId]: '' }));
+    this.mealShoppingPreviews.update((previews) => omitRecordKey(previews, actionId));
+    this.mealShoppingLines.update((lines) => omitRecordKey(lines, actionId));
+    this.mealShoppingErrors.update((errors) => omitRecordKey(errors, actionId));
+    this.mealShoppingLoading.update((states) => omitRecordKey(states, actionId));
+  }
+
+  private mealEventIdentity(event: HouseholdMealProposalEvent): string {
+    return JSON.stringify([event.date, event.mealType, [...event.participantAliases].sort()]);
+  }
+
+  private refinementChangesServings(instruction: string): boolean {
+    return /\b(servings?|portions?|raciones?|porciones?)\b/i.test(instruction);
+  }
+
+  private applyMealServingsOverrides(
+    proposal: HouseholdMealProposal,
+    overrides: Record<string, number>
+  ): HouseholdMealProposal {
+    return {
+      ...proposal,
+      events: proposal.events.map((event) => {
+        const servings = overrides[this.mealEventIdentity(event)];
+        return event.status === 'scheduled' && servings !== undefined
+          ? { ...event, servings }
+          : event;
+      })
+    };
+  }
+
+  goToConfirmation(): void {
+    if (this.canContinue()) this.setStage('confirm');
+  }
+
+  beginRefine(id: string): void {
+    const action = this.plan()?.actions.find((candidate) => candidate.id === id);
+    if (!action || action.status === 'succeeded') return;
+    this.refiningActionId.set(id);
+    this.refiningActionIds.set([id]);
+    this.refinementBatchScope.set(null);
+    this.refinementPrompt.set('');
+    this.refinementScopeValue.set(ACTION_REFINEMENT_SCOPE);
+    this.refinementQuestions.set([]);
+    this.errorKey.set(null);
+    this.setStage('refine');
+  }
+
+  beginBatchRefine(): void {
+    const actions = this.refinableActions();
+    if (actions.length < 2) return;
+    this.refiningActionId.set(null);
+    this.refiningActionIds.set(actions.map((action) => action.id));
+    this.refinementBatchScope.set({ kind: 'batch' });
+    this.refinementScopeValue.set(BATCH_REFINEMENT_SCOPE);
+    this.refinementPrompt.set('');
+    this.refinementQuestions.set([]);
+    this.errorKey.set(null);
+    this.setStage('refine');
+  }
+
+  beginGroupRefine(domain: AssistantAction['domain']): void {
+    const actions = this.domainGroupActions(domain);
+    if (actions.length < 2) return;
+    this.refiningActionId.set(null);
+    this.refiningActionIds.set(actions.map((action) => action.id));
+    this.refinementBatchScope.set({ kind: 'group', domain });
+    this.refinementScopeValue.set(GROUP_REFINEMENT_SCOPE);
+    this.refinementPrompt.set('');
+    this.refinementQuestions.set([]);
+    this.errorKey.set(null);
+    this.setStage('refine');
+  }
+
+  domainGroupActions(domain: AssistantAction['domain']): AssistantAction[] {
+    return this.refinableActions().filter((action) => action.domain === domain);
+  }
+
+  groupRefineLabel(domain: AssistantAction['domain']): string {
+    return this.i18n.t('ai_assistant.refine_group_button', {
+      domain: this.i18n.t(DOMAIN_LABELS[domain])
+    });
+  }
+
+  batchRefinementScopeLabel(): string {
+    const scope = this.refinementBatchScope();
+    const count = this.refiningActions().length;
+    return scope?.kind === 'group'
+      ? this.i18n.t('ai_assistant.refine_group_scope', {
+          domain: this.i18n.t(DOMAIN_LABELS[scope.domain]),
+          count
+        })
+      : this.i18n.t('ai_assistant.refine_batch_scope', { count });
+  }
+
+  cancelRefine(): void {
+    this.setStage('review');
+    this.refinementPrompt.set('');
+    this.refinementQuestions.set([]);
+    this.refiningActionId.set(null);
+    this.refiningActionIds.set([]);
+    this.refinementBatchScope.set(null);
+    this.refinementScopeValue.set(ACTION_REFINEMENT_SCOPE);
+    this.errorKey.set(null);
+  }
+
+  refinementScopeOptions(action: AssistantAction | null): PickerOption[] {
+    const options: PickerOption[] = [
+      {
+        value: ACTION_REFINEMENT_SCOPE,
+        label: this.i18n.t('ai_assistant.refine_scope_action')
+      }
+    ];
+    if (!action) return options;
+
+    const paths = this.editableFields(action).map((field) => ({
+      path: field.path,
+      label: this.i18n.t('ai_assistant.refine_scope_field', {
+        field: this.i18n.t(field.key)
+      })
+    }));
+    if (action.kind === 'recipes.create_draft') {
+      paths.unshift(
+        {
+          path: ['recipe', 'ingredients'],
+          label: this.i18n.t('ai_assistant.refine_scope_group', {
+            field: this.i18n.t('ai_assistant.field.ingredients')
+          })
+        },
+        {
+          path: ['recipe', 'instructionsByLevel'],
+          label: this.i18n.t('ai_assistant.refine_scope_group', {
+            field: this.i18n.t('ai_assistant.field.instructionsByLevel')
+          })
+        }
+      );
+    } else if (action.kind === 'recipes.update_content') {
+      paths.unshift(
+        {
+          path: ['changes', 'ingredients'],
+          label: this.i18n.t('ai_assistant.refine_scope_group', {
+            field: this.i18n.t('ai_assistant.field.ingredients')
+          })
+        },
+        {
+          path: ['changes', 'instructions'],
+          label: this.i18n.t('ai_assistant.refine_scope_group', {
+            field: this.i18n.t('ai_assistant.field.instructionsByLevel')
+          })
+        }
+      );
+      if (action.payload.changes.servings !== null) {
+        paths.push({
+          path: ['changes', 'servings'],
+          label: this.i18n.t('ai_assistant.refine_scope_field', {
+            field: this.i18n.t('ai_assistant.field.servings')
+          })
+        });
+      }
+      action.payload.changes.ingredients.forEach((_change, index) => {
+        for (const field of this.recipeIngredientEditFields(action, index)) {
+          paths.push({
+            path: field.path,
+            label: this.i18n.t('ai_assistant.refine_scope_field', {
+              field: this.i18n.t(field.key)
+            })
+          });
+        }
+      });
+      action.payload.changes.instructions.forEach((change, index) => {
+        paths.push({
+          path: ['changes', 'instructions', index, 'instruction'],
+          label: this.i18n.t('ai_assistant.refine_scope_field', {
+            field: this.i18n.t('ai_assistant.field.step', { number: change.stepNumber })
+          })
+        });
+      });
+    }
+    const seen = new Set<string>();
+    for (const { path, label } of paths) {
+      const value = JSON.stringify(path);
+      if (seen.has(value)) continue;
+      seen.add(value);
+      options.push({ value, label });
+    }
+    return options;
+  }
+
+  chooseRefinementScope(value: string | null): void {
+    const action = this.refiningAction();
+    const selectedValue = value ?? ACTION_REFINEMENT_SCOPE;
+    if (
+      action &&
+      this.refinementScopeOptions(action).some((option) => option.value === selectedValue)
+    ) {
+      this.refinementScopeValue.set(selectedValue);
+      this.refinementQuestions.set([]);
+    }
+  }
+
+  refineCurrentAction(): void {
+    if (this.loading()) return;
+    const actions = this.refiningActions();
+    const instruction = this.refinementPrompt().trim();
+    if (!actions.length || !instruction) return;
+    this.loading.set(true);
+    this.errorKey.set(null);
+    const batchScope = this.refinementBatchScope();
+    if (batchScope) {
+      this.requestSubscription = this.assistant
+        .refineBatch({
+          instruction,
+          scope: batchScope,
+          actions: actions.map((action) => ({
+            actionId: action.id,
+            action: this.toCandidate(action)
+          }))
+        })
+        .subscribe({
+          next: (result) => {
+            const expectedIds = new Set(actions.map((action) => action.id));
+            const replacementIds = result.replacements.map(({ actionId }) => actionId);
+            if (
+              result.questions.length > 0 ||
+              result.replacements.length !== actions.length ||
+              new Set(replacementIds).size !== replacementIds.length ||
+              replacementIds.some((id) => !expectedIds.has(id))
+            ) {
+              this.refinementQuestions.set(result.questions);
+              if (result.questions.length === 0) this.errorKey.set('ai_assistant.error_general');
+              this.loading.set(false);
+              this.requestSubscription = null;
+              return;
+            }
+
+            const replacements = new Map(
+              result.replacements.map(({ actionId, replacement }) => [actionId, replacement])
+            );
+            this.updateActions(
+              (currentActions) =>
+                currentActions.map((current) => {
+                  const replacement = replacements.get(current.id);
+                  return replacement ? this.applyRefinedAction(current, replacement) : current;
+                }),
+              result.summary,
+              result.questions
+            );
+            this.finishRefinement();
+          },
+          error: (error: unknown) => {
+            this.setRequestError(error);
+            this.loading.set(false);
+            this.requestSubscription = null;
+          }
+        });
+      return;
+    }
+
+    const action = actions[0];
+    if (!action) {
+      this.loading.set(false);
+      return;
+    }
+    const candidate = this.toCandidate(action);
+    const scope: AssistantActionRefinementScope =
+      this.refinementScopeValue() === ACTION_REFINEMENT_SCOPE
+        ? { kind: 'action' }
+        : { kind: 'field', path: JSON.parse(this.refinementScopeValue()) };
+    this.requestSubscription = this.assistant
+      .refine({ actionId: action.id, instruction, action: candidate, scope })
+      .subscribe({
+        next: (result) => {
+          if (!result.replacement) {
+            this.refinementQuestions.set(result.questions);
+            this.loading.set(false);
+            this.requestSubscription = null;
+            return;
+          }
+          this.updateActions(
+            (currentActions) =>
+              currentActions.map((current) =>
+                current.id === action.id
+                  ? this.applyRefinedAction(
+                      current,
+                      result.replacement as AssistantActionCandidate,
+                      scope.kind === 'field' ? scope.path : undefined
+                    )
+                  : current
+              ),
+            result.summary,
+            result.questions
+          );
+          this.finishRefinement();
+        },
+        error: (error: unknown) => {
+          this.setRequestError(error);
+          this.loading.set(false);
+          this.requestSubscription = null;
+        }
+      });
+  }
+
+  private finishRefinement(): void {
+    this.setStage('review');
+    this.refinementQuestions.set([]);
+    this.refiningActionId.set(null);
+    this.refiningActionIds.set([]);
+    this.refinementBatchScope.set(null);
+    this.refinementScopeValue.set(ACTION_REFINEMENT_SCOPE);
+    this.loading.set(false);
+    this.requestSubscription = null;
+  }
+
+  private applyRefinedAction(
+    current: AssistantAction,
+    replacement: AssistantActionCandidate,
+    overrideManualPath?: Array<string | number>
+  ): AssistantAction {
+    let payload: unknown = replacement.payload;
+    const manualFields = current.manualFields ?? [];
+    const retainedManualFields: string[] = [];
+    for (const serializedPath of manualFields) {
+      const path = JSON.parse(serializedPath) as Array<string | number>;
+      if (overrideManualPath && this.pathStartsWith(path, overrideManualPath)) continue;
+      const manualValue = this.readPath(current.payload, path);
+      if (manualValue === undefined) continue;
+      const mapped = this.mapRecipeUpdateManualPath(current, replacement, path);
+      if (mapped) {
+        payload = this.writePath(payload, mapped.path, mapped.value ?? manualValue);
+        retainedManualFields.push(JSON.stringify(mapped.path));
+      } else {
+        payload = this.writePath(payload, path, manualValue);
+        retainedManualFields.push(serializedPath);
+      }
+    }
+    const remainingManualFields = [...new Set(retainedManualFields)];
+    return {
+      ...current,
+      ...replacement,
+      id: current.id,
+      domain: current.domain,
+      actionType: current.actionType,
+      payload,
+      dependsOn: current.dependsOn,
+      selected: current.selected,
+      status: 'pending',
+      manualFields: remainingManualFields
+    } as AssistantAction;
+  }
+
+  private mapRecipeUpdateManualPath(
+    current: AssistantAction,
+    replacement: AssistantActionCandidate,
+    path: Array<string | number>
+  ): { path: Array<string | number>; value?: unknown } | null {
+    if (
+      current.kind !== 'recipes.update_content' ||
+      replacement.kind !== 'recipes.update_content' ||
+      path[0] !== 'changes' ||
+      (path[1] !== 'ingredients' && path[1] !== 'instructions') ||
+      typeof path[2] !== 'number'
+    ) {
+      return null;
+    }
+
+    const index = path[2];
+    if (path[1] === 'ingredients') {
+      const previous = current.payload.changes.ingredients[index];
+      if (!previous) return null;
+      const next = replacement.payload.changes.ingredients;
+      const identity = (change: AssistantRecipeIngredientChange) =>
+        `${change.operation}:${this.comparablePantryName(
+          change.operation === 'add' ? change.ingredient.name : change.targetName
+        )}`;
+      let nextIndex = next.findIndex((change) => identity(change) === identity(previous));
+      if (nextIndex < 0 && previous.operation === 'add' && next[index]?.operation === 'add') {
+        nextIndex = index;
+      }
+      if (nextIndex < 0) {
+        return {
+          path: ['changes', 'ingredients', next.length],
+          value: previous
+        };
+      }
+      return { path: [...path.slice(0, 2), nextIndex, ...path.slice(3)] };
+    }
+
+    const previous = current.payload.changes.instructions[index];
+    if (!previous) return null;
+    const next = replacement.payload.changes.instructions;
+    const nextIndex = next.findIndex(
+      (change) => change.level === previous.level && change.stepNumber === previous.stepNumber
+    );
+    if (nextIndex < 0) {
+      return {
+        path: ['changes', 'instructions', next.length],
+        value: previous
+      };
+    }
+    return { path: [...path.slice(0, 2), nextIndex, ...path.slice(3)] };
+  }
+
+  editableFields(action: AssistantAction): AssistantField[] {
+    switch (action.kind) {
+      case 'pantry.add_ingredient':
+        return [
+          this.field('name', ['name'], action.payload.name, 'text', true),
+          this.field('quantity', ['quantity'], action.payload.quantity, 'number', true),
+          this.field(
+            'unit',
+            ['unit'],
+            action.payload.unit,
+            'select',
+            true,
+            PANTRY_UNITS.map((value) => ({ value, label: value }))
+          ),
+          this.field('category', ['category'], action.payload.category, 'text', true),
+          this.field('expirationDate', ['expirationDate'], action.payload.expirationDate, 'date'),
+          this.field('location', ['location'], action.payload.location, 'select', true, [
+            { value: 'pantry', label: this.i18n.t('ai_assistant.location.pantry') },
+            { value: 'fridge', label: this.i18n.t('ai_assistant.location.fridge') },
+            { value: 'freezer', label: this.i18n.t('ai_assistant.location.freezer') },
+            { value: 'counter', label: this.i18n.t('ai_assistant.location.counter') }
+          ]),
+          this.field('notes', ['notes'], action.payload.notes, 'textarea')
+        ];
+      case 'pantry.update_ingredient': {
+        const { changes } = action.payload;
+        const snapshot = action.executionTarget.snapshot;
+        return [
+          this.field(
+            'name',
+            ['changes', 'name'],
+            changes.setName ? changes.name : snapshot.name,
+            'text',
+            true
+          ),
+          this.field(
+            'category',
+            ['changes', 'category'],
+            changes.setCategory ? changes.category : snapshot.category,
+            'select',
+            true,
+            this.pantryCategoryChoices(
+              snapshot.category,
+              changes.setCategory ? changes.category : null
+            )
+          ),
+          this.field(
+            'quantity',
+            ['changes', 'quantity'],
+            changes.setQuantity ? changes.quantity : snapshot.quantity,
+            'number',
+            true
+          ),
+          this.field(
+            'unit',
+            ['changes', 'unit'],
+            changes.setUnit ? changes.unit : snapshot.unit,
+            'select',
+            true,
+            PANTRY_UNITS.map((value) => ({ value, label: value }))
+          ),
+          this.field(
+            'expirationDate',
+            ['changes', 'expirationDate'],
+            changes.setExpirationDate
+              ? changes.expirationDate
+              : (snapshot.expirationDate?.slice(0, 10) ?? null),
+            'date'
+          ),
+          this.field(
+            'location',
+            ['changes', 'location'],
+            changes.setLocation ? changes.location : snapshot.location,
+            'select',
+            false,
+            [
+              { value: 'pantry', label: this.i18n.t('ai_assistant.location.pantry') },
+              { value: 'fridge', label: this.i18n.t('ai_assistant.location.fridge') },
+              { value: 'freezer', label: this.i18n.t('ai_assistant.location.freezer') },
+              { value: 'counter', label: this.i18n.t('ai_assistant.location.counter') }
+            ]
+          ),
+          this.field(
+            'notes',
+            ['changes', 'notes'],
+            changes.setNotes ? changes.notes : snapshot.notes,
+            'textarea'
+          )
+        ];
+      }
+      case 'shopping.create_list':
+        return [
+          this.field('name', ['name'], action.payload.name, 'text', true),
+          this.field('store', ['store'], action.payload.store, 'text')
+        ];
+      case 'shopping.update_list':
+        return [
+          this.field(
+            'name',
+            ['changes', 'name'],
+            action.payload.changes.setName
+              ? action.payload.changes.name
+              : action.executionTarget.snapshot.name,
+            'text',
+            true
+          ),
+          this.field(
+            'store',
+            ['changes', 'store'],
+            action.payload.changes.setStore
+              ? action.payload.changes.store
+              : action.executionTarget.snapshot.store,
+            'text'
+          )
+        ];
+      case 'shopping.update_item': {
+        const { changes } = action.payload;
+        const snapshot = action.executionTarget.snapshot;
+        return [
+          this.field(
+            'name',
+            ['changes', 'name'],
+            changes.setName ? changes.name : snapshot.name,
+            'text',
+            true
+          ),
+          this.field(
+            'quantity',
+            ['changes', 'quantity'],
+            changes.setQuantity ? changes.quantity : snapshot.quantity,
+            'number',
+            true
+          ),
+          this.field(
+            'unit',
+            ['changes', 'unit'],
+            changes.setUnit ? changes.unit : snapshot.unit,
+            'text'
+          ),
+          this.field(
+            'category',
+            ['changes', 'category'],
+            changes.setCategory ? changes.category : snapshot.category,
+            'text'
+          )
+        ];
+      }
+      case 'shopping.add_item':
+        return [
+          this.field('listName', ['listName'], action.payload.listName, 'text', true),
+          this.field('name', ['name'], action.payload.name, 'text', true),
+          this.field('quantity', ['quantity'], action.payload.quantity, 'number'),
+          this.field('unit', ['unit'], action.payload.unit, 'text'),
+          this.field('category', ['category'], action.payload.category, 'text')
+        ];
+      case 'household.plan_meals':
+        return [
+          this.field('weekStart', ['weekStart'], action.payload.weekStart, 'date', true),
+          this.field('instructions', ['instructions'], action.payload.instructions, 'textarea')
+        ];
+      case 'household.create_task':
+        return [
+          this.field('title', ['title'], action.payload.title, 'text', true),
+          this.field(
+            'priority',
+            ['priority'],
+            action.payload.priority,
+            'select',
+            true,
+            this.householdTaskPriorityChoices()
+          ),
+          this.field('details', ['details'], action.payload.details, 'textarea'),
+          this.field(
+            'scheduledDate',
+            ['scheduledDate'],
+            action.payload.scheduledDate,
+            'date',
+            true
+          ),
+          this.field('spaceName', ['spaceName'], action.payload.spaceName, 'text'),
+          this.field(
+            'assignedMemberName',
+            ['assignedMemberName'],
+            action.payload.assignedMemberName,
+            'text'
+          )
+        ];
+      case 'household.update_task':
+        return [
+          this.field('title', ['changes', 'title'], action.payload.changes.title, 'text'),
+          this.field(
+            'priority',
+            ['changes', 'priority'],
+            action.payload.changes.priority ?? action.executionTarget.snapshot.priority,
+            'select',
+            true,
+            this.householdTaskPriorityChoices()
+          ),
+          this.field('details', ['changes', 'details'], action.payload.changes.details, 'textarea'),
+          this.field(
+            'scheduledDate',
+            ['changes', 'scheduledDate'],
+            action.payload.changes.scheduledDate,
+            'date'
+          ),
+          this.field(
+            'spaceName',
+            ['changes', 'spaceName'],
+            action.payload.changes.spaceName,
+            'text'
+          ),
+          this.field(
+            'assignedMemberName',
+            ['changes', 'assignedMemberName'],
+            action.payload.changes.assignedMemberName,
+            'text'
+          )
+        ];
+      case 'calendar.create_event':
+        return [
+          this.field('title', ['title'], action.payload.title, 'text', true),
+          this.field(
+            'kind',
+            ['kind'],
+            action.payload.kind,
+            'select',
+            true,
+            EVENT_KINDS.map(({ value, labelKey }) => ({ value, label: this.i18n.t(labelKey) }))
+          ),
+          this.field('date', ['date'], action.payload.date, 'date', true),
+          this.field('startTime', ['startTime'], action.payload.startTime, 'time'),
+          this.field('endTime', ['endTime'], action.payload.endTime, 'time'),
+          this.field('allDay', ['allDay'], action.payload.allDay, 'checkbox'),
+          this.field(
+            'sharedWithHousehold',
+            ['sharedWithHousehold'],
+            action.payload.sharedWithHousehold,
+            'checkbox'
+          ),
+          this.field('location', ['location'], action.payload.location, 'text'),
+          this.field('notes', ['notes'], action.payload.notes, 'textarea')
+        ];
+      case 'calendar.update_event': {
+        const { changes } = action.payload;
+        const snapshot = action.executionTarget.snapshot;
+        return [
+          this.field(
+            'title',
+            ['changes', 'title'],
+            changes.title !== undefined ? changes.title : snapshot.title,
+            'text',
+            true
+          ),
+          this.field(
+            'kind',
+            ['changes', 'kind'],
+            changes.kind !== undefined ? changes.kind : snapshot.kind,
+            'select',
+            true,
+            EVENT_KINDS.map(({ value, labelKey }) => ({ value, label: this.i18n.t(labelKey) }))
+          ),
+          this.field(
+            'date',
+            ['changes', 'date'],
+            changes.date !== undefined ? changes.date : snapshot.date,
+            'date',
+            true
+          ),
+          this.field(
+            'startTime',
+            ['changes', 'startTime'],
+            changes.allDay === true
+              ? null
+              : changes.startTime !== undefined
+                ? changes.startTime
+                : snapshot.startTime,
+            'time'
+          ),
+          this.field(
+            'endTime',
+            ['changes', 'endTime'],
+            changes.allDay === true
+              ? null
+              : changes.endTime !== undefined
+                ? changes.endTime
+                : snapshot.endTime,
+            'time'
+          ),
+          this.field(
+            'allDay',
+            ['changes', 'allDay'],
+            changes.allDay ?? snapshot.allDay,
+            'checkbox'
+          ),
+          this.field(
+            'location',
+            ['changes', 'location'],
+            changes.location !== undefined ? changes.location : snapshot.location,
+            'text'
+          ),
+          this.field(
+            'notes',
+            ['changes', 'notes'],
+            changes.notes !== undefined ? changes.notes : snapshot.notes,
+            'textarea'
+          )
+        ];
+      }
+      case 'recipes.update_content':
+        return [];
+      case 'recipes.create_draft': {
+        const recipe = action.payload.recipe;
+        return [
+          this.field('name', ['recipe', 'name'], recipe.name, 'text', true),
+          this.field(
+            'description',
+            ['recipe', 'description'],
+            recipe.description,
+            'textarea',
+            true
+          ),
+          this.field(
+            'difficulty',
+            ['recipe', 'difficulty'],
+            recipe.difficulty,
+            'select',
+            true,
+            DIFFICULTIES.map(({ value, labelKey }) => ({ value, label: this.i18n.t(labelKey) }))
+          ),
+          this.field('cuisine', ['recipe', 'cuisine'], recipe.cuisine, 'text'),
+          this.field('totalTime', ['recipe', 'totalTime'], recipe.totalTime, 'number', true),
+          this.field('prepTime', ['recipe', 'prepTime'], recipe.prepTime, 'number', true),
+          this.field('cookTime', ['recipe', 'cookTime'], recipe.cookTime, 'number', true),
+          this.field('restTime', ['recipe', 'restTime'], recipe.restTime, 'number'),
+          this.field('calories', ['recipe', 'calories'], recipe.calories, 'number'),
+          this.field('tags', ['recipe', 'tags'], recipe.tags.join(', '), 'text')
+        ];
+      }
+    }
+  }
+
+  recipeIngredients(action: AssistantAction): AIRecipeIngredient[] {
+    return action.kind === 'recipes.create_draft' ? action.payload.recipe.ingredients : [];
+  }
+
+  recipeSteps(action: AssistantAction, level: (typeof this.recipeLevels)[number]): AIRecipeStep[] {
+    return action.kind === 'recipes.create_draft'
+      ? action.payload.recipe.instructionsByLevel[level]
+      : [];
+  }
+
+  recipeIngredientEditFields(action: AssistantAction, index: number): AssistantField[] {
+    if (action.kind !== 'recipes.update_content') return [];
+    const change = action.payload.changes.ingredients[index];
+    if (!change || change.operation === 'remove') return [];
+    const basePath = ['changes', 'ingredients', index];
+    const fields: AssistantField[] = [];
+    const addField = (
+      key: AssistantFieldKey,
+      property: string,
+      value: AssistantFieldValue,
+      kind: AssistantFieldKind,
+      required = false,
+      suffix: string[] = []
+    ) => fields.push(this.field(key, [...basePath, ...suffix, property], value, kind, required));
+
+    if (change.operation === 'add') {
+      addField('ingredient_name', 'name', change.ingredient.name, 'text', true, ['ingredient']);
+      addField('quantity', 'quantity', change.ingredient.quantity, 'number', true, ['ingredient']);
+      fields.push(
+        this.field(
+          'unit',
+          [...basePath, 'ingredient', 'unit'],
+          change.ingredient.unit,
+          'select',
+          true,
+          PANTRY_UNITS.map((value) => ({ value, label: value }))
+        )
+      );
+      addField('preparation', 'preparation', change.ingredient.preparation, 'text', false, [
+        'ingredient'
+      ]);
+      addField('isOptional', 'isOptional', change.ingredient.isOptional, 'checkbox', false, [
+        'ingredient'
+      ]);
+      addField(
+        'substitutes',
+        'substitutes',
+        change.ingredient.substitutes.join(', '),
+        'text',
+        false,
+        ['ingredient']
+      );
+      addField('notes', 'notes', change.ingredient.notes, 'textarea', false, ['ingredient']);
+      return fields;
+    }
+
+    const changesPath = ['changes'];
+    const changes = change.changes;
+    if (changes.name !== undefined) {
+      addField('ingredient_name', 'name', changes.name, 'text', true, changesPath);
+    }
+    if (changes.quantity !== undefined) {
+      addField('quantity', 'quantity', changes.quantity, 'number', true, changesPath);
+    }
+    if (changes.unit !== undefined) {
+      fields.push(
+        this.field(
+          'unit',
+          [...basePath, ...changesPath, 'unit'],
+          changes.unit,
+          'select',
+          true,
+          PANTRY_UNITS.map((value) => ({ value, label: value }))
+        )
+      );
+    }
+    if (changes.preparation !== undefined) {
+      addField('preparation', 'preparation', changes.preparation, 'text', false, changesPath);
+    }
+    if (changes.isOptional !== undefined) {
+      addField('isOptional', 'isOptional', changes.isOptional, 'checkbox', false, changesPath);
+    }
+    if (changes.substitutes !== undefined) {
+      addField(
+        'substitutes',
+        'substitutes',
+        changes.substitutes.join(', '),
+        'text',
+        false,
+        changesPath
+      );
+    }
+    if (changes.notes !== undefined) {
+      addField('notes', 'notes', changes.notes, 'textarea', false, changesPath);
+    }
+    return fields;
+  }
+
+  recipeIngredientOperationLabel(change: AssistantRecipeIngredientChange): TranslationKey {
+    return change.operation === 'add'
+      ? 'ai_assistant.recipe_operation.add'
+      : change.operation === 'update'
+        ? 'ai_assistant.recipe_operation.update'
+        : 'ai_assistant.recipe_operation.remove';
+  }
+
+  recipeIngredientBefore(
+    action: Extract<AssistantAction, { kind: 'recipes.update_content' }>,
+    change: AssistantRecipeIngredientChange
+  ): string {
+    if (change.operation === 'add') return '—';
+    const matches = action.executionTarget.snapshot.ingredients.filter(
+      (ingredient) =>
+        this.comparablePantryName(ingredient.name) === this.comparablePantryName(change.targetName)
+    );
+    return matches.length === 1 ? this.formatRecipeIngredient(matches[0]!) : '—';
+  }
+
+  recipeIngredientAfter(
+    action: Extract<AssistantAction, { kind: 'recipes.update_content' }>,
+    change: AssistantRecipeIngredientChange
+  ): string {
+    if (change.operation === 'remove') return '—';
+    if (change.operation === 'add') return this.formatRecipeIngredient(change.ingredient);
+    const before = action.executionTarget.snapshot.ingredients.find(
+      (ingredient) =>
+        this.comparablePantryName(ingredient.name) === this.comparablePantryName(change.targetName)
+    );
+    return before ? this.formatRecipeIngredient({ ...before, ...change.changes }) : '—';
+  }
+
+  recipeInstructionBefore(
+    action: Extract<AssistantAction, { kind: 'recipes.update_content' }>,
+    change: AssistantRecipeInstructionChange
+  ): string {
+    const storedSteps = action.executionTarget.snapshot.steps;
+    const steps = Array.isArray(storedSteps)
+      ? change.level === 'legacy'
+        ? storedSteps
+        : []
+      : change.level === 'legacy'
+        ? []
+        : storedSteps[change.level];
+    const matches = steps.filter((step) => step.stepNumber === change.stepNumber);
+    return matches.length === 1 ? matches[0]!.instruction : '—';
+  }
+
+  recipeServingsPreview(
+    action: AssistantAction
+  ): Array<{ name: string; before: number; after: number; unit: string }> {
+    if (action.kind !== 'recipes.update_content') return [];
+    const { servings } = action.payload.changes;
+    const beforeServings = action.executionTarget.snapshot.servings;
+    if (servings === null || !Number.isInteger(servings) || servings < 1 || beforeServings < 1) {
+      return [];
+    }
+    const scale = servings / beforeServings;
+    return action.executionTarget.snapshot.ingredients.map((ingredient) => ({
+      name: ingredient.name,
+      before: ingredient.quantity,
+      after: Number((ingredient.quantity * scale).toFixed(3)),
+      unit: ingredient.unit
+    }));
+  }
+
+  recipeServingsValid(action: AssistantAction): boolean {
+    if (action.kind !== 'recipes.update_content') return false;
+    const servings = action.payload.changes.servings;
+    return servings !== null && Number.isInteger(servings) && servings >= 1 && servings <= 100;
+  }
+
+  recipeUpdateSummaryLines(action: AssistantAction): string[] {
+    if (action.kind !== 'recipes.update_content') return [];
+    const lines: string[] = [];
+    if (action.payload.changes.servings !== null) {
+      lines.push(
+        this.i18n.t('ai_assistant.recipe_servings_summary', {
+          before: action.executionTarget.snapshot.servings,
+          after: action.payload.changes.servings
+        })
+      );
+      for (const ingredient of this.recipeServingsPreview(action)) {
+        lines.push(
+          this.i18n.t('ai_assistant.recipe_quantity_summary', {
+            name: ingredient.name,
+            before: ingredient.before,
+            after: ingredient.after,
+            unit: ingredient.unit
+          })
+        );
+      }
+    }
+    for (const change of action.payload.changes.ingredients) {
+      lines.push(
+        this.i18n.t('ai_assistant.recipe_change_summary', {
+          operation: this.i18n.t(this.recipeIngredientOperationLabel(change)),
+          before: this.recipeIngredientBefore(action, change),
+          after: this.recipeIngredientAfter(action, change)
+        })
+      );
+    }
+    for (const change of action.payload.changes.instructions) {
+      lines.push(
+        this.i18n.t('ai_assistant.recipe_instruction_summary', {
+          level: this.levelLabel(change.level),
+          number: change.stepNumber,
+          before: this.recipeInstructionBefore(action, change),
+          after: change.instruction
+        })
+      );
+    }
+    return lines;
+  }
+
+  removeRecipeIngredientChange(actionId: string, index: number): void {
+    this.updateActions((actions) =>
+      actions.map((action) => {
+        if (action.id !== actionId || action.kind !== 'recipes.update_content') return action;
+        const ingredients = action.payload.changes.ingredients.filter(
+          (_item, itemIndex) => itemIndex !== index
+        );
+        return {
+          ...action,
+          payload: { ...action.payload, changes: { ...action.payload.changes, ingredients } },
+          manualFields: [
+            ...new Set([...(action.manualFields ?? []), JSON.stringify(['changes', 'ingredients'])])
+          ]
+        };
+      })
+    );
+  }
+
+  removeRecipeInstructionChange(actionId: string, index: number): void {
+    this.updateActions((actions) =>
+      actions.map((action) => {
+        if (action.id !== actionId || action.kind !== 'recipes.update_content') return action;
+        const instructions = action.payload.changes.instructions.filter(
+          (_item, itemIndex) => itemIndex !== index
+        );
+        return {
+          ...action,
+          payload: { ...action.payload, changes: { ...action.payload.changes, instructions } },
+          manualFields: [
+            ...new Set([
+              ...(action.manualFields ?? []),
+              JSON.stringify(['changes', 'instructions'])
+            ])
+          ]
+        };
+      })
+    );
+  }
+
+  private formatRecipeIngredient(ingredient: AssistantRecipeIngredient): string {
+    const parts = [`${ingredient.name} · ${ingredient.quantity} ${ingredient.unit}`];
+    if (ingredient.preparation) parts.push(ingredient.preparation);
+    if (ingredient.isOptional) parts.push(this.i18n.t('ai_assistant.recipe_optional'));
+    if (ingredient.substitutes?.length) {
+      parts.push(
+        `${this.i18n.t('ai_assistant.field.substitutes')}: ${ingredient.substitutes.join(', ')}`
+      );
+    }
+    if (ingredient.notes)
+      parts.push(`${this.i18n.t('ai_assistant.field.notes')}: ${ingredient.notes}`);
+    return parts.join(' · ');
+  }
+
+  levelLabel(level: string): string {
+    return level === 'legacy'
+      ? this.i18n.t('ai_assistant.level.legacy')
+      : level === 'basic'
+        ? this.i18n.t('ai_assistant.level.basic')
+        : level === 'intermediate'
+          ? this.i18n.t('ai_assistant.level.intermediate')
+          : this.i18n.t('ai_assistant.level.expert');
+  }
+
+  pantryLocationLabel(location: string | null): string {
+    if (location === 'pantry') return this.i18n.t('ai_assistant.location.pantry');
+    if (location === 'fridge') return this.i18n.t('ai_assistant.location.fridge');
+    if (location === 'freezer') return this.i18n.t('ai_assistant.location.freezer');
+    if (location === 'counter') return this.i18n.t('ai_assistant.location.counter');
+    return location || '—';
+  }
+
+  pantryCategoryName(categoryKey: string | null): string {
+    if (!categoryKey) return '—';
+    const category = this.pantry.categories().find((candidate) => candidate.key === categoryKey);
+    return pantryCategoryLabel(category ?? categoryKey, (key) => this.i18n.t(key));
+  }
+
+  calendarEventTimeLabel(
+    action: Extract<AssistantAction, { kind: 'calendar.update_event' }>
+  ): string {
+    const snapshot = action.executionTarget.snapshot;
+    if (snapshot.allDay) return this.i18n.t('ai_assistant.field.allDay');
+    if (!snapshot.startTime && !snapshot.endTime) return '—';
+    return [snapshot.startTime, snapshot.endTime].filter(Boolean).join('–');
+  }
+
+  confirmationFieldValue(field: AssistantField): string {
+    if (field.value === null || field.value === '') return '—';
+    if (typeof field.value === 'boolean') {
+      return this.i18n.t(field.value ? 'ai_assistant.value.yes' : 'ai_assistant.value.no');
+    }
+    if (field.kind === 'select') {
+      return (
+        field.choices?.find((choice) => choice.value === String(field.value))?.label ??
+        String(field.value)
+      );
+    }
+    return String(field.value);
+  }
+
+  fieldError(action: AssistantAction, field: AssistantField): boolean {
+    if (!field.required) return false;
+    return field.value === null || field.value === undefined || String(field.value).trim() === '';
+  }
+
+  isActionValid(action: AssistantAction): boolean {
+    if (this.editableFields(action).some((field) => this.fieldError(action, field))) return false;
+    if (action.kind === 'pantry.add_ingredient') {
+      return (
+        action.payload.quantity > 0 &&
+        action.payload.quantity <= 100000 &&
+        action.payload.category.trim().length <= 64 &&
+        (action.payload.expirationDate === null || this.isIsoDate(action.payload.expirationDate))
+      );
+    }
+    if (action.kind === 'pantry.update_ingredient') {
+      const { changes } = action.payload;
+      const target = action.executionTarget;
+      const changed =
+        (changes.setName && changes.name !== target.snapshot.name) ||
+        (changes.setCategory && changes.category !== target.snapshot.category) ||
+        (changes.setQuantity && changes.quantity !== target.snapshot.quantity) ||
+        (changes.setUnit && changes.unit !== target.snapshot.unit) ||
+        (changes.setExpirationDate && changes.expirationDate !== target.snapshot.expirationDate) ||
+        (changes.setLocation && changes.location !== target.snapshot.location) ||
+        (changes.setNotes && changes.notes !== target.snapshot.notes);
+      return (
+        target.kind === 'pantry-ingredient' &&
+        target.id.length > 0 &&
+        this.comparablePantryName(action.payload.targetName) ===
+          this.comparablePantryName(target.snapshot.name) &&
+        changes.setName === (changes.name !== null) &&
+        (changes.name === null ||
+          (changes.name.trim().length > 0 && changes.name.trim().length <= 3000)) &&
+        changes.setCategory === (changes.category !== null) &&
+        (changes.category === null ||
+          (changes.category.trim().length > 0 &&
+            changes.category.trim().length <= 64 &&
+            (!changes.setCategory ||
+              changes.category === target.snapshot.category ||
+              this.pantry.categories().some((category) => category.key === changes.category)))) &&
+        changes.setQuantity === (changes.quantity !== null) &&
+        (changes.quantity === null ||
+          (Number.isFinite(changes.quantity) &&
+            changes.quantity >= 0 &&
+            changes.quantity <= 100000)) &&
+        changes.setUnit === (changes.unit !== null) &&
+        (changes.unit === null || PANTRY_UNITS.includes(changes.unit)) &&
+        (changes.setExpirationDate || changes.expirationDate === null) &&
+        (changes.expirationDate === null || this.isIsoDate(changes.expirationDate)) &&
+        changes.setLocation === (changes.location !== null) &&
+        (changes.location === null ||
+          ['fridge', 'freezer', 'pantry', 'counter'].includes(changes.location)) &&
+        (changes.setNotes || changes.notes === null) &&
+        (changes.notes === null || changes.notes.length <= 500) &&
+        changed
+      );
+    }
+    if (action.kind === 'shopping.create_list') {
+      return (
+        action.payload.name.trim().length <= 80 &&
+        (action.payload.store === null || action.payload.store.length <= 80)
+      );
+    }
+    if (action.kind === 'shopping.update_list') {
+      const { changes } = action.payload;
+      const target = action.executionTarget;
+      const nameChanged =
+        changes.setName && changes.name !== null && changes.name !== target.snapshot.name;
+      const storeChanged = changes.setStore && changes.store !== target.snapshot.store;
+      return (
+        target.kind === 'shopping-list' &&
+        target.id.length > 0 &&
+        target.version > 0 &&
+        this.comparableName(action.payload.targetName) ===
+          this.comparableName(target.snapshot.name) &&
+        changes.setName === (changes.name !== null) &&
+        (changes.setStore || changes.store === null) &&
+        (changes.name === null ||
+          (changes.name.trim().length > 0 && changes.name.trim().length <= 80)) &&
+        (changes.store === null ||
+          (changes.store.trim().length > 0 && changes.store.trim().length <= 80)) &&
+        (nameChanged || storeChanged)
+      );
+    }
+    if (action.kind === 'shopping.update_item') {
+      const { changes } = action.payload;
+      const target = action.executionTarget;
+      const snapshot = target.snapshot;
+      const changed =
+        (changes.setName && changes.name !== snapshot.name) ||
+        (changes.setQuantity && changes.quantity !== snapshot.quantity) ||
+        (changes.setUnit && changes.unit !== snapshot.unit) ||
+        (changes.setCategory && changes.category !== snapshot.category);
+      return (
+        target.kind === 'shopping-item' &&
+        target.id.length > 0 &&
+        target.listId.length > 0 &&
+        Number.isInteger(target.version) &&
+        target.version > 0 &&
+        !snapshot.checked &&
+        snapshot.deletedAt === null &&
+        this.comparableName(action.payload.listName) === this.comparableName(snapshot.listName) &&
+        this.comparableName(action.payload.targetName) === this.comparableName(snapshot.name) &&
+        (action.payload.matchUnit
+          ? action.payload.targetUnit === snapshot.unit
+          : action.payload.targetUnit === null) &&
+        changes.setName === (changes.name !== null) &&
+        changes.setQuantity === (changes.quantity !== null) &&
+        (changes.setUnit || changes.unit === null) &&
+        (changes.setCategory || changes.category === null) &&
+        (changes.name === null ||
+          (changes.name.trim().length > 0 && changes.name.trim().length <= 200)) &&
+        (changes.quantity === null ||
+          (Number.isFinite(changes.quantity) &&
+            changes.quantity > 0 &&
+            changes.quantity <= 10000)) &&
+        (changes.unit === null ||
+          (changes.unit.trim().length > 0 && changes.unit.trim().length <= 48)) &&
+        (changes.category === null ||
+          (changes.category.trim().length > 0 && changes.category.trim().length <= 48)) &&
+        changed
+      );
+    }
+    if (action.kind === 'shopping.add_item') {
+      return (
+        action.payload.listName.trim().length <= 80 &&
+        action.payload.name.trim().length <= 200 &&
+        (action.payload.quantity === null ||
+          (action.payload.quantity > 0 && action.payload.quantity <= 100000)) &&
+        (action.payload.unit === null || action.payload.unit.length <= 48) &&
+        (action.payload.category === null || action.payload.category.length <= 48)
+      );
+    }
+    if (action.kind === 'household.plan_meals') {
+      return (
+        this.isIsoDate(action.payload.weekStart) &&
+        new Date(`${action.payload.weekStart}T00:00:00.000Z`).getUTCDay() === 1 &&
+        action.payload.instructions.length <= 1000
+      );
+    }
+    if (action.kind === 'household.create_task') {
+      return (
+        this.isIsoDate(action.payload.scheduledDate) &&
+        isHouseholdTaskPriority(action.payload.priority) &&
+        action.payload.title.trim().length <= 160 &&
+        (action.payload.details === null || action.payload.details.length <= 500) &&
+        (action.payload.spaceName === null || action.payload.spaceName.length <= 120) &&
+        (action.payload.assignedMemberName === null ||
+          action.payload.assignedMemberName.length <= 120)
+      );
+    }
+    if (action.kind === 'household.update_task') {
+      const { changes } = action.payload;
+      const newDate = changes.scheduledDate ?? action.executionTarget.snapshot.scheduledDate;
+      return (
+        action.executionTarget.kind === 'household-task' &&
+        this.isIsoDate(action.executionTarget.snapshot.scheduledDate) &&
+        this.isIsoDate(newDate) &&
+        this.mondayOf(newDate) === action.executionTarget.weekStart &&
+        (changes.priority === null || isHouseholdTaskPriority(changes.priority)) &&
+        (changes.title === null || changes.title.trim().length <= 160) &&
+        (changes.details === null || changes.details.length <= 500) &&
+        (changes.spaceName === null || changes.spaceName.length <= 120) &&
+        (changes.assignedMemberName === null || changes.assignedMemberName.length <= 120) &&
+        Object.values(changes).some((value) => value !== null && value !== '')
+      );
+    }
+    if (action.kind === 'calendar.create_event') {
+      if (
+        !this.isIsoDate(action.payload.date) ||
+        action.payload.title.trim().length > 120 ||
+        (action.payload.location !== null && action.payload.location.length > 120) ||
+        (action.payload.notes !== null && action.payload.notes.length > 500) ||
+        (action.payload.sharedWithHousehold && !this.proposalHouseholdId)
+      ) {
+        return false;
+      }
+      if (
+        (action.payload.startTime !== null && !this.isValidTime(action.payload.startTime)) ||
+        (action.payload.endTime !== null && !this.isValidTime(action.payload.endTime)) ||
+        (action.payload.startTime &&
+          action.payload.endTime &&
+          action.payload.endTime < action.payload.startTime)
+      )
+        return false;
+    }
+    if (action.kind === 'calendar.update_event') {
+      const { changes } = action.payload;
+      const target = action.executionTarget;
+      const snapshot = target.snapshot;
+      const hasNewTime =
+        (changes.startTime !== undefined && changes.startTime !== null) ||
+        (changes.endTime !== undefined && changes.endTime !== null);
+      const nextAllDay = changes.allDay ?? (hasNewTime ? false : snapshot.allDay);
+      const nextStartTime = nextAllDay
+        ? null
+        : changes.startTime !== undefined
+          ? changes.startTime
+          : snapshot.startTime;
+      const nextEndTime = nextAllDay
+        ? null
+        : changes.endTime !== undefined
+          ? changes.endTime
+          : snapshot.endTime;
+      const allowedFields = [
+        'title',
+        'kind',
+        'date',
+        'startTime',
+        'endTime',
+        'allDay',
+        'notes',
+        'location'
+      ];
+      const changed = Object.entries(changes).some(
+        ([field, value]) => value !== snapshot[field as keyof typeof snapshot]
+      );
+      return (
+        target.kind === 'calendar-event' &&
+        Boolean(target.id) &&
+        target.householdId === this.proposalHouseholdId &&
+        snapshot.source === 'user' &&
+        snapshot.recurrence === 'none' &&
+        this.comparableName(action.payload.targetTitle) === this.comparableName(snapshot.title) &&
+        action.payload.targetDate === snapshot.date &&
+        action.payload.targetStartTime === snapshot.startTime &&
+        this.isIsoDate(snapshot.date) &&
+        Object.keys(changes).length > 0 &&
+        Object.keys(changes).every((field) => allowedFields.includes(field)) &&
+        (changes.title === undefined ||
+          (changes.title.trim().length > 0 && changes.title.length <= 120)) &&
+        (changes.kind === undefined || EVENT_KINDS.some(({ value }) => value === changes.kind)) &&
+        (changes.date === undefined || this.isIsoDate(changes.date)) &&
+        (changes.startTime === undefined ||
+          changes.startTime === null ||
+          this.isValidTime(changes.startTime)) &&
+        (changes.endTime === undefined ||
+          changes.endTime === null ||
+          this.isValidTime(changes.endTime)) &&
+        (changes.notes === undefined || changes.notes === null || changes.notes.length <= 500) &&
+        (changes.location === undefined ||
+          changes.location === null ||
+          changes.location.length <= 120) &&
+        !(
+          nextAllDay &&
+          ((changes.startTime !== undefined && changes.startTime !== null) ||
+            (changes.endTime !== undefined && changes.endTime !== null))
+        ) &&
+        (nextAllDay || Boolean(nextStartTime || nextEndTime)) &&
+        !(nextStartTime && nextEndTime && nextEndTime < nextStartTime) &&
+        changed
+      );
+    }
+    if (action.kind === 'recipes.update_content') {
+      return this.isRecipeUpdateValid(action);
+    }
+    if (action.kind === 'recipes.create_draft') {
+      const recipe = action.payload.recipe;
+      return (
+        recipe.name.trim().length <= 120 &&
+        recipe.description.trim().length > 0 &&
+        recipe.difficulty !== undefined &&
+        Number.isInteger(recipe.totalTime) &&
+        recipe.totalTime > 0 &&
+        recipe.totalTime <= 1440 &&
+        Number.isInteger(recipe.prepTime) &&
+        recipe.prepTime > 0 &&
+        recipe.prepTime <= 1440 &&
+        Number.isInteger(recipe.cookTime) &&
+        recipe.cookTime >= 0 &&
+        recipe.cookTime <= 1440 &&
+        (recipe.restTime === null ||
+          (Number.isInteger(recipe.restTime) && recipe.restTime >= 0 && recipe.restTime <= 1440)) &&
+        (recipe.calories === null || recipe.calories > 0) &&
+        recipe.ingredients.length > 0 &&
+        recipe.ingredients.length <= 80 &&
+        recipe.instructionsByLevel.basic.length > 0 &&
+        recipe.instructionsByLevel.intermediate.length > 0 &&
+        recipe.instructionsByLevel.expert.length > 0 &&
+        [
+          ...recipe.instructionsByLevel.basic,
+          ...recipe.instructionsByLevel.intermediate,
+          ...recipe.instructionsByLevel.expert
+        ].every((step) => Boolean(step.instruction.trim())) &&
+        recipe.ingredients.every(
+          (ingredient) =>
+            ingredient.name.trim() &&
+            ingredient.name.trim().length <= 120 &&
+            ingredient.quantity > 0 &&
+            ingredient.quantity <= 1000000
+        )
+      );
+    }
+    return true;
+  }
+
+  private isRecipeUpdateValid(
+    action: Extract<AssistantAction, { kind: 'recipes.update_content' }>
+  ): boolean {
+    const { changes } = action.payload;
+    const snapshot = action.executionTarget.snapshot;
+    const comparable = (value: string) => this.comparablePantryName(value);
+    const steps = snapshot.steps;
+    if (
+      action.executionTarget.kind !== 'recipe' ||
+      !action.executionTarget.id ||
+      comparable(action.payload.targetName) !== comparable(snapshot.name) ||
+      !Number.isInteger(snapshot.servings) ||
+      snapshot.servings < 1 ||
+      snapshot.ingredients.length < 1 ||
+      (Array.isArray(steps) && steps.length < 1)
+    ) {
+      return false;
+    }
+
+    if (
+      changes.servings !== null &&
+      (!Number.isInteger(changes.servings) ||
+        changes.servings < 1 ||
+        changes.servings > 100 ||
+        changes.ingredients.length > 0 ||
+        this.recipeServingsPreview(action).some(
+          (item) => !Number.isFinite(item.after) || item.after <= 0
+        ))
+    ) {
+      return false;
+    }
+
+    const ingredientTargets = changes.ingredients.map((change) =>
+      comparable(change.operation === 'add' ? change.ingredient.name : change.targetName)
+    );
+    if (new Set(ingredientTargets).size !== ingredientTargets.length) return false;
+    let afterIngredientCount = snapshot.ingredients.length;
+    let changedIngredient = false;
+    for (const change of changes.ingredients) {
+      if (change.operation === 'add') {
+        const ingredient = change.ingredient;
+        if (
+          snapshot.ingredients.some(
+            (current) => comparable(current.name) === comparable(ingredient.name)
+          ) ||
+          !ingredient.name.trim() ||
+          ingredient.name.trim().length > 160 ||
+          !Number.isFinite(ingredient.quantity) ||
+          ingredient.quantity <= 0 ||
+          ingredient.quantity > 100000 ||
+          !PANTRY_UNITS.includes(ingredient.unit) ||
+          (ingredient.preparation !== null && ingredient.preparation.length > 500) ||
+          ingredient.substitutes.length > 12 ||
+          ingredient.substitutes.some((item) => !item.trim() || item.length > 160) ||
+          (ingredient.notes !== null && ingredient.notes.length > 500)
+        ) {
+          return false;
+        }
+        afterIngredientCount += 1;
+        changedIngredient = true;
+        continue;
+      }
+
+      const matches = snapshot.ingredients.filter(
+        (ingredient) => comparable(ingredient.name) === comparable(change.targetName)
+      );
+      if (matches.length !== 1) return false;
+      if (change.operation === 'remove') {
+        afterIngredientCount -= 1;
+        changedIngredient = true;
+        continue;
+      }
+
+      const before = matches[0]!;
+      const entries = Object.entries(change.changes);
+      if (
+        entries.length === 0 ||
+        entries.every(([key, value]) => value === before[key as keyof AssistantRecipeIngredient]) ||
+        (change.changes.name !== undefined &&
+          (!change.changes.name.trim() || change.changes.name.trim().length > 160)) ||
+        (change.changes.quantity !== undefined &&
+          (!Number.isFinite(change.changes.quantity) ||
+            change.changes.quantity <= 0 ||
+            change.changes.quantity > 100000)) ||
+        (change.changes.unit !== undefined && !PANTRY_UNITS.includes(change.changes.unit)) ||
+        (change.changes.preparation !== undefined &&
+          change.changes.preparation !== null &&
+          change.changes.preparation.length > 500) ||
+        (change.changes.substitutes !== undefined &&
+          (change.changes.substitutes.length > 12 ||
+            change.changes.substitutes.some((item) => !item.trim() || item.length > 160))) ||
+        (change.changes.notes !== undefined &&
+          change.changes.notes !== null &&
+          change.changes.notes.length > 500)
+      ) {
+        return false;
+      }
+      changedIngredient = true;
+    }
+    if (afterIngredientCount < 1) return false;
+
+    const instructionTargets = changes.instructions.map(
+      (change) => `${change.level}:${change.stepNumber}`
+    );
+    if (new Set(instructionTargets).size !== instructionTargets.length) return false;
+    let changedInstruction = false;
+    for (const change of changes.instructions) {
+      const availableSteps = Array.isArray(steps)
+        ? change.level === 'legacy'
+          ? steps
+          : []
+        : change.level === 'legacy'
+          ? []
+          : steps[change.level];
+      const matches = availableSteps.filter((step) => step.stepNumber === change.stepNumber);
+      if (
+        !Number.isInteger(change.stepNumber) ||
+        change.stepNumber < 1 ||
+        matches.length !== 1 ||
+        !change.instruction.trim() ||
+        change.instruction.length > 4000 ||
+        matches[0]!.instruction === change.instruction
+      ) {
+        return false;
+      }
+      changedInstruction = true;
+    }
+
+    return (
+      changedIngredient ||
+      changedInstruction ||
+      (changes.servings !== null && changes.servings !== snapshot.servings)
+    );
+  }
+
+  updateField(
+    actionId: string,
+    path: Array<string | number>,
+    rawValue: string | number | boolean,
+    kind?: AssistantFieldKind
+  ): void {
+    const currentAction = this.plan()?.actions.find((action) => action.id === actionId);
+    if (
+      currentAction?.kind === 'shopping.update_list' &&
+      path[0] === 'changes' &&
+      (path[1] === 'name' || path[1] === 'store')
+    ) {
+      const field = path[1];
+      const rawText = typeof rawValue === 'string' ? rawValue : String(rawValue);
+      const normalizedText = rawText.trim();
+      const nextValue = field === 'store' && normalizedText === '' ? null : normalizedText;
+      const beforeValue = currentAction.executionTarget.snapshot[field];
+      const changed = nextValue !== beforeValue;
+      const serializedPath = JSON.stringify(path);
+      this.updateActions((actions) =>
+        actions.map((action) => {
+          if (action.id !== actionId || action.kind !== 'shopping.update_list') return action;
+          const changes =
+            field === 'name'
+              ? {
+                  ...action.payload.changes,
+                  name: changed ? (nextValue as string) : null,
+                  setName: changed
+                }
+              : {
+                  ...action.payload.changes,
+                  store: changed ? nextValue : null,
+                  setStore: changed
+                };
+          return {
+            ...action,
+            payload: { ...action.payload, changes },
+            manualFields: [...new Set([...(action.manualFields ?? []), serializedPath])]
+          };
+        })
+      );
+      return;
+    }
+
+    if (
+      currentAction?.kind === 'shopping.update_item' &&
+      path[0] === 'changes' &&
+      typeof path[1] === 'string' &&
+      ['name', 'quantity', 'unit', 'category'].includes(path[1])
+    ) {
+      const field = path[1] as 'name' | 'quantity' | 'unit' | 'category';
+      const rawText = typeof rawValue === 'string' ? rawValue.trim() : String(rawValue);
+      const nextValue =
+        field === 'quantity'
+          ? rawValue === ''
+            ? null
+            : Number(rawValue)
+          : field === 'name'
+            ? rawText || null
+            : rawText || null;
+      const beforeValue = currentAction.executionTarget.snapshot[field];
+      const changed = nextValue !== beforeValue;
+      const flagField = `set${field[0]!.toUpperCase()}${field.slice(1)}` as
+        'setName' | 'setQuantity' | 'setUnit' | 'setCategory';
+      const serializedPath = JSON.stringify(path);
+      const flagPath = JSON.stringify(['changes', flagField]);
+      this.updateActions((actions) =>
+        actions.map((action) => {
+          if (action.id !== actionId || action.kind !== 'shopping.update_item') return action;
+          const changes = {
+            ...action.payload.changes,
+            [field]: changed ? nextValue : null,
+            [flagField]: changed
+          };
+          return {
+            ...action,
+            payload: { ...action.payload, changes } as typeof action.payload,
+            manualFields: [...new Set([...(action.manualFields ?? []), serializedPath, flagPath])]
+          };
+        })
+      );
+      return;
+    }
+
+    if (
+      currentAction?.kind === 'pantry.update_ingredient' &&
+      path[0] === 'changes' &&
+      typeof path[1] === 'string' &&
+      Object.prototype.hasOwnProperty.call(PANTRY_CHANGE_FLAGS, path[1])
+    ) {
+      const field = path[1] as PantryIngredientChangeField;
+      let nextValue: AssistantFieldValue = rawValue;
+      if (field === 'quantity') nextValue = rawValue === '' ? null : Number(rawValue);
+      else if (field === 'expirationDate' || field === 'notes') {
+        nextValue = rawValue === '' ? null : String(rawValue);
+      } else {
+        nextValue = String(rawValue).trim();
+      }
+      const beforeValue = currentAction.executionTarget.snapshot[field];
+      const changed = nextValue !== beforeValue;
+      const serializedPath = JSON.stringify(path);
+      const flagPath = JSON.stringify(['changes', PANTRY_CHANGE_FLAGS[field]]);
+      this.updateActions((actions) =>
+        actions.map((action) => {
+          if (action.id !== actionId || action.kind !== 'pantry.update_ingredient') return action;
+          const changes = {
+            ...action.payload.changes,
+            [field]: changed ? nextValue : null,
+            [PANTRY_CHANGE_FLAGS[field]]: changed
+          };
+          return {
+            ...action,
+            payload: { ...action.payload, changes },
+            manualFields: [...new Set([...(action.manualFields ?? []), serializedPath, flagPath])]
+          } as AssistantAction;
+        })
+      );
+      return;
+    }
+
+    if (
+      currentAction?.kind === 'calendar.update_event' &&
+      path[0] === 'changes' &&
+      typeof path[1] === 'string' &&
+      ['title', 'kind', 'date', 'startTime', 'endTime', 'allDay', 'notes', 'location'].includes(
+        path[1]
+      )
+    ) {
+      const field = path[1] as keyof typeof currentAction.payload.changes;
+      let nextValue: string | boolean | null;
+      if (field === 'allDay') {
+        nextValue = rawValue === true;
+      } else if (field === 'startTime' || field === 'endTime') {
+        nextValue = rawValue === '' ? null : String(rawValue).trim();
+      } else if (field === 'notes' || field === 'location') {
+        const text = String(rawValue).trim();
+        nextValue = text === '' ? null : text;
+      } else {
+        nextValue = String(rawValue).trim();
+      }
+
+      const snapshot = currentAction.executionTarget.snapshot;
+      const beforeValue = snapshot[field];
+      const serializedPath = JSON.stringify(path);
+      this.updateActions((actions) =>
+        actions.map((action) => {
+          if (action.id !== actionId || action.kind !== 'calendar.update_event') return action;
+          const changes: Record<string, string | boolean | null | undefined> = {
+            ...action.payload.changes
+          };
+          if (nextValue === beforeValue) delete changes[field];
+          else changes[field] = nextValue;
+          if (field === 'allDay' && nextValue === true) {
+            delete changes['startTime'];
+            delete changes['endTime'];
+          }
+          if (
+            (field === 'startTime' || field === 'endTime') &&
+            nextValue !== null &&
+            (snapshot.allDay || changes['allDay'] === true)
+          ) {
+            changes['allDay'] = false;
+          }
+          return {
+            ...action,
+            payload: {
+              ...action.payload,
+              changes: changes as typeof action.payload.changes
+            },
+            manualFields: [...new Set([...(action.manualFields ?? []), serializedPath])]
+          };
+        })
+      );
+      return;
+    }
+
+    if (
+      this.plan()?.actions.some(
+        (action) => action.id === actionId && action.kind === 'household.plan_meals'
+      )
+    ) {
+      this.invalidateMealProposalDraft(actionId);
+    }
+    let value: unknown = rawValue;
+    if (kind === 'number') value = rawValue === '' ? null : Number(rawValue);
+    if (
+      rawValue === '' &&
+      ((path[0] === 'expirationDate' && path.length === 1) ||
+        ((path[0] === 'startTime' || path[0] === 'endTime') && path.length === 1) ||
+        (path[0] === 'recipe' && path[1] === 'restTime'))
+    ) {
+      value = null;
+    }
+    if (rawValue === '' && path[0] === 'changes') value = null;
+    if (path[0] === 'recipe' && path[1] === 'tags' && typeof rawValue === 'string') {
+      value = rawValue
+        .split(',')
+        .map((tag) => tag.trim())
+        .filter(Boolean);
+    }
+    if (path[0] === 'changes' && path.includes('substitutes') && typeof rawValue === 'string') {
+      value = rawValue
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+    const serializedPath = JSON.stringify(path);
+    const updatedListName =
+      currentAction?.kind === 'shopping.create_list' && path.length === 1 && path[0] === 'name'
+        ? String(value ?? '').trim()
+        : null;
+    this.updateActions((actions) =>
+      actions.map((action) => {
+        if (action.id === actionId) {
+          return {
+            ...action,
+            payload: this.writePath(action.payload, path, value),
+            manualFields: [...new Set([...(action.manualFields ?? []), serializedPath])]
+          } as AssistantAction;
+        }
+        if (
+          updatedListName !== null &&
+          action.kind === 'shopping.add_item' &&
+          action.dependsOn.includes(actionId) &&
+          !action.manualFields?.includes(JSON.stringify(['listName']))
+        ) {
+          return { ...action, payload: { ...action.payload, listName: updatedListName } };
+        }
+        return action;
+      })
+    );
+  }
+
+  toggleRecipeIngredientOptional(actionId: string, index: number, checked: boolean): void {
+    this.updateField(actionId, ['recipe', 'ingredients', index, 'isOptional'], checked);
+  }
+
+  statusLabel(status: AssistantActionStatus): TranslationKey {
+    return STATUS_LABELS[status];
+  }
+
+  domainLabel(domain: AssistantAction['domain']): TranslationKey {
+    return DOMAIN_LABELS[domain];
+  }
+
+  actionDomainLabel(action: AssistantAction): TranslationKey {
+    return action.kind === 'household.plan_meals'
+      ? 'ai_assistant.domain.meals'
+      : this.domainLabel(action.domain);
+  }
+
+  actionLabel(action: AssistantAction): TranslationKey {
+    return ACTION_LABELS[action.actionType];
+  }
+
+  taskPriority(action: AssistantAction): HouseholdTaskPriority | null {
+    if (action.kind === 'household.create_task') return action.payload.priority;
+    if (action.kind === 'household.update_task') {
+      return action.payload.changes.priority ?? action.executionTarget.snapshot.priority;
+    }
+    return null;
+  }
+
+  taskPriorityLabel(priority: HouseholdTaskPriority): string {
+    return this.i18n.t(HOUSEHOLD_TASK_PRIORITY_LABELS[priority]);
+  }
+
+  shoppingItemChangeSummary(action: AssistantAction): string {
+    if (action.kind !== 'shopping.update_item') return '';
+    const { changes } = action.payload;
+    const snapshot = action.executionTarget.snapshot;
+    const rows: Array<{
+      key: AssistantFieldKey;
+      before: string | number | null;
+      after: string | number | null;
+    }> = [];
+    if (changes.setName) rows.push({ key: 'name', before: snapshot.name, after: changes.name });
+    if (changes.setQuantity) {
+      rows.push({ key: 'quantity', before: snapshot.quantity, after: changes.quantity });
+    }
+    if (changes.setUnit) rows.push({ key: 'unit', before: snapshot.unit, after: changes.unit });
+    if (changes.setCategory) {
+      rows.push({ key: 'category', before: snapshot.category, after: changes.category });
+    }
+    return rows
+      .map(
+        ({ key, before, after }) =>
+          `${this.i18n.t(FIELD_LABELS[key])}: ${before ?? '—'} → ${after ?? '—'}`
+      )
+      .join(' · ');
+  }
+
+  fieldKey(key: AssistantFieldKey): TranslationKey {
+    return FIELD_LABELS[key];
+  }
+
+  trackAction(_index: number, action: AssistantAction): string {
+    return action.id;
+  }
+
+  trackField(_index: number, field: AssistantField): string {
+    return field.path.join('.');
+  }
+
+  trackRecipeIngredientChange(index: number, change: AssistantRecipeIngredientChange): string {
+    return change.operation === 'add'
+      ? `add:${index}`
+      : `${change.operation}:${change.targetName.normalize('NFKC').trim().toLocaleLowerCase()}`;
+  }
+
+  trackRecipeInstructionChange(_index: number, change: AssistantRecipeInstructionChange): string {
+    return `${change.level}:${change.stepNumber}`;
+  }
+
+  private field(
+    key: AssistantFieldKey,
+    path: Array<string | number>,
+    value: AssistantFieldValue,
+    kind: AssistantFieldKind,
+    required = false,
+    choices?: AssistantField['choices']
+  ): AssistantField {
+    return { key: this.fieldKey(key), path, value, kind, required, choices };
+  }
+
+  private householdTaskPriorityChoices(): PickerOption[] {
+    return (['low', 'medium', 'high'] as const).map((priority) => ({
+      value: priority,
+      label: this.taskPriorityLabel(priority)
+    }));
+  }
+
+  private updateActions(
+    mutate: (actions: AssistantAction[]) => AssistantAction[],
+    summary?: string,
+    questions?: string[]
+  ): void {
+    const current = this.plan();
+    if (!current) return;
+    this.plan.set({
+      ...current,
+      ...(summary ? { summary } : {}),
+      ...(questions ? { questions } : {}),
+      actions: mutate(current.actions)
+    });
+  }
+
+  private setActionStatus(id: string, status: AssistantActionStatus): void {
+    this.updateActions((actions) =>
+      actions.map((action) => (action.id === id ? { ...action, status } : action))
+    );
+  }
+
+  private readPath(root: unknown, path: Array<string | number>): unknown {
+    let current = root;
+    for (const segment of path) {
+      if (Array.isArray(current) && typeof segment === 'number' && segment < current.length) {
+        current = current[segment];
+      } else if (
+        current !== null &&
+        typeof current === 'object' &&
+        typeof segment === 'string' &&
+        Object.prototype.hasOwnProperty.call(current, segment)
+      ) {
+        current = (current as Record<string, unknown>)[segment];
+      } else {
+        return undefined;
+      }
+    }
+    return current;
+  }
+
+  private pathStartsWith(path: Array<string | number>, prefix: Array<string | number>): boolean {
+    return (
+      prefix.length <= path.length && prefix.every((segment, index) => segment === path[index])
+    );
+  }
+
+  private writePath(root: unknown, path: Array<string | number>, value: unknown): unknown {
+    if (path.length === 0 || !root || typeof root !== 'object') return root;
+    const [head, ...tail] = path;
+    if (Array.isArray(root)) {
+      const copy = [...root];
+      const index = Number(head);
+      copy[index] = tail.length ? this.writePath(copy[index], tail, value) : value;
+      return copy;
+    }
+    const copy: Record<string, unknown> = { ...(root as Record<string, unknown>) };
+    const key = String(head);
+    copy[key] = tail.length ? this.writePath(copy[key], tail, value) : value;
+    return copy;
+  }
+
+  private toCandidate(action: AssistantAction): AssistantActionCandidate {
+    const {
+      id: _id,
+      domain: _domain,
+      actionType: _actionType,
+      selected: _selected,
+      status: _status,
+      manualFields: _manualFields,
+      executionTarget: _executionTarget,
+      ...candidate
+    } = action;
+    return { ...candidate, dependsOn: [] } as AssistantActionCandidate;
+  }
+
+  private isIsoDate(value: string): boolean {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    const timestamp = Date.parse(`${value}T00:00:00.000Z`);
+    return Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === value;
+  }
+
+  private comparableName(value: string): string {
+    return value.normalize('NFC').trim().toLocaleLowerCase();
+  }
+
+  private comparablePantryName(value: string): string {
+    return value.normalize('NFC').replace(/\s+/g, ' ').trim().toLowerCase();
+  }
+
+  private pantryCategoryChoices(...keys: Array<string | null>): PickerOption[] {
+    const options = new Map<string, PickerOption>();
+    const label = (category: { key: string; name?: string | null } | string) =>
+      pantryCategoryLabel(category, (key) => this.i18n.t(key));
+    for (const category of this.pantry.categories()) {
+      options.set(category.key, { value: category.key, label: label(category) });
+    }
+    for (const key of keys) {
+      if (key && !options.has(key)) options.set(key, { value: key, label: label(key) });
+    }
+    return [...options.values()];
+  }
+
+  private mondayOf(date: string): string {
+    const value = new Date(`${date}T00:00:00.000Z`);
+    const offset = (value.getUTCDay() + 6) % 7;
+    value.setUTCDate(value.getUTCDate() - offset);
+    return value.toISOString().slice(0, 10);
+  }
+
+  private isValidTime(value: string): boolean {
+    return /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+  }
+
+  private lockBodyScroll(): void {
+    if (typeof document === 'undefined' || this.bodyOverflowBeforeLock !== null) return;
+    this.bodyOverflowBeforeLock = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+  }
+
+  private restoreBodyScroll(): void {
+    if (typeof document === 'undefined' || this.bodyOverflowBeforeLock === null) return;
+    document.body.style.overflow = this.bodyOverflowBeforeLock;
+    this.bodyOverflowBeforeLock = null;
+  }
+
+  private mapError(error: unknown): TranslationKey {
+    const response =
+      error instanceof HttpErrorResponse
+        ? error
+        : (error as { original?: unknown } | null | undefined)?.original;
+    if (response instanceof HttpErrorResponse) {
+      const code = response.error?.code;
+      if (code === 'AI_NOT_CONFIGURED') return 'ai_assistant.error_not_configured';
+      if (code === 'AI_PROVIDER_NOT_CONFIGURED') return 'ai_assistant.error_not_configured';
+      if (code === 'ASSISTANT_BUSY') return 'ai_assistant.error_busy';
+      if (code === 'AI_TIMEOUT') return 'ai_assistant.error_timeout';
+      if (code === 'AI_PROVIDER_TIMEOUT') return 'ai_assistant.error_timeout';
+      if (code === 'INVALID_AI_RESULT') return 'ai_assistant.error_invalid';
+      if (code === 'AI_PROVIDER_ERROR') return 'ai_assistant.error_provider';
+      if (
+        code === 'HOUSEHOLD_CALENDAR_EDIT_REQUIRED' ||
+        code === 'HOUSEHOLD_CALENDAR_VIEW_REQUIRED'
+      ) {
+        return 'ai_assistant.error_permission';
+      }
+      if (
+        code === 'HOUSEHOLD_CONTEXT_CHANGED' ||
+        code === 'ASSISTANT_HOUSEHOLD_CONTEXT_CHANGED' ||
+        code === 'MEAL_PROPOSAL_RECIPE_CHANGED'
+      ) {
+        return 'ai_assistant.error_context_changed';
+      }
+    }
+    return 'ai_assistant.error_general';
+  }
+
+  private setRequestError(error: unknown): void {
+    this.errorKey.set(this.mapError(error));
+    this.revealAssistantError();
+  }
+
+  private revealAssistantError(): void {
+    afterNextRender(
+      () => this.assistantErrorAlert?.nativeElement.scrollIntoView({ block: 'nearest' }),
+      { injector: this.injector }
+    );
+  }
+
+  private speechRecognitionConstructor(): SpeechRecognitionConstructor | null {
+    if (typeof window === 'undefined') return null;
+    const voiceWindow = window as unknown as {
+      SpeechRecognition?: SpeechRecognitionConstructor;
+      webkitSpeechRecognition?: SpeechRecognitionConstructor;
+    };
+    return voiceWindow.SpeechRecognition ?? voiceWindow.webkitSpeechRecognition ?? null;
+  }
+
+  private mapVoiceError(error?: string): TranslationKey {
+    switch (error) {
+      case 'not-allowed':
+        return 'ai_assistant.voice_permission';
+      case 'service-not-allowed':
+        return 'ai_assistant.voice_service_unavailable';
+      case 'no-speech':
+        return 'ai_assistant.voice_no_transcript';
+      case 'audio-capture':
+        return 'ai_assistant.voice_no_microphone';
+      case 'network':
+        return 'ai_assistant.voice_service_unavailable';
+      default:
+        return 'ai_assistant.voice_error';
+    }
+  }
+
+  private showVoiceError(errorKey: TranslationKey): void {
+    this.voiceError.set(errorKey);
+    this.voiceState.set('error');
+    afterNextRender(
+      () => this.voiceErrorAlert?.nativeElement.scrollIntoView({ block: 'nearest' }),
+      { injector: this.injector }
+    );
+  }
+
+  startVoice(): void {
+    if (this.recognition) return;
+    const Recognition = this.speechRecognitionConstructor();
+    if (!Recognition) {
+      this.showVoiceError('ai_assistant.voice_unsupported');
+      return;
+    }
+    this.voiceError.set(null);
+    try {
+      const recognition = new Recognition();
+      let hasVoiceTranscript = false;
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = this.i18n.resolved() === 'es' ? 'es-ES' : 'en-GB';
+      recognition.onresult = (event) => {
+        if (this.recognition !== recognition) return;
+        const transcript = Array.from(event.results)
+          .map((result) => result[0]?.transcript ?? '')
+          .join(' ')
+          .trimStart();
+        hasVoiceTranscript ||= transcript.trim().length > 0;
+        this.prompt.set(transcript);
+        this.resizePrompt(transcript);
+      };
+      recognition.onerror = (event) => {
+        if (this.recognition !== recognition) return;
+        this.voiceStopPending.set(false);
+        this.supportsPause.set(false);
+        this.showVoiceError(this.mapVoiceError(event.error));
+        this.recognition = null;
+      };
+      recognition.onend = () => {
+        if (this.recognition !== recognition) return;
+        const sessionWasActive =
+          this.voiceState() === 'listening' || this.voiceState() === 'paused';
+        if (sessionWasActive) {
+          if (hasVoiceTranscript) {
+            this.voiceState.set('idle');
+          } else {
+            this.showVoiceError('ai_assistant.voice_no_transcript');
+          }
+        }
+        this.supportsPause.set(false);
+        this.voiceStopPending.set(false);
+        this.recognition = null;
+      };
+      this.recognition = recognition;
+      this.voiceStopPending.set(false);
+      this.supportsPause.set(Boolean(recognition.pause && recognition.resume));
+      recognition.start();
+      this.voiceState.set('listening');
+    } catch {
+      this.showVoiceError('ai_assistant.voice_permission');
+      this.recognition = null;
+      this.voiceStopPending.set(false);
+      this.supportsPause.set(false);
+    }
+  }
+
+  stopVoice(): void {
+    if (!this.recognition || this.voiceStopPending()) return;
+    const recognition = this.recognition;
+    this.voiceStopPending.set(true);
+    try {
+      recognition.stop();
+    } catch {
+      this.cancelVoice();
+      this.showVoiceError('ai_assistant.voice_error');
+    }
+  }
+
+  pauseVoice(): void {
+    if (this.voiceStopPending()) return;
+    this.recognition?.pause?.();
+    if (this.recognition?.pause) this.voiceState.set('paused');
+  }
+
+  resumeVoice(): void {
+    this.recognition?.resume?.();
+    if (this.recognition?.resume) this.voiceState.set('listening');
+  }
+
+  cancelVoice(): void {
+    const recognition = this.recognition;
+    this.recognition = null;
+    this.voiceState.set('idle');
+    this.supportsPause.set(false);
+    this.voiceStopPending.set(false);
+    recognition?.abort();
+  }
+
+  private setStage(stage: AssistantStage): void {
+    this.stage.set(stage);
+    afterNextRender(
+      () => {
+        const focusTarget =
+          stage === 'compose'
+            ? this.composePrompt?.nativeElement
+            : this.stageHeading?.nativeElement;
+        focusTarget?.focus();
+        if (stage === 'compose') this.resizePrompt();
+      },
+      {
+        injector: this.injector
+      }
+    );
+  }
+
+  async requestClose(): Promise<void> {
+    if (this.closeConfirmationPending()) return;
+    this.cancelVoice();
+    if (!this.prompt().trim() && !this.plan()) {
+      this.modalOpen.set(false);
+      this.dismiss.emit();
+      return;
+    }
+    const hasExecutionResults =
+      this.plan()?.actions.some((action) => action.status !== 'pending') ?? false;
+    this.closeConfirmationPending.set(true);
+    this.modalOpen.set(false);
+    let discard: boolean;
+    try {
+      discard = await this.confirmService.confirm({
+        title: this.i18n.t(
+          hasExecutionResults
+            ? 'ai_assistant.close_after_execution_title'
+            : 'ai_assistant.discard_title'
+        ),
+        message: this.i18n.t(
+          hasExecutionResults
+            ? 'ai_assistant.close_after_execution_copy'
+            : 'ai_assistant.discard_copy'
+        ),
+        confirmText: this.i18n.t(
+          hasExecutionResults ? 'ai_assistant.close_action' : 'ai_assistant.discard_action'
+        ),
+        cancelText: this.i18n.t('ai_assistant.cancel'),
+        variant: hasExecutionResults ? 'primary' : 'danger'
+      });
+    } finally {
+      this.closeConfirmationPending.set(false);
+    }
+    if (discard) {
+      this.requestSubscription?.unsubscribe();
+      this.mealRequestSubscriptions.forEach((subscription) => subscription.unsubscribe());
+      this.dismiss.emit();
+    } else {
+      this.modalOpen.set(true);
+    }
+  }
+
+  async executeSelected(): Promise<void> {
+    if (!this.canExecuteSelected() || this.executing()) return;
+    this.errorKey.set(null);
+    this.loading.set(true);
+    this.executing.set(true);
+    let hadFailure = false;
+
+    try {
+      for (const action of this.selectedActionsInDependencyOrder()) {
+        if (!['pending', 'failed', 'blocked'].includes(action.status)) continue;
+        const dependencies = action.dependsOn.map(
+          (id) => this.plan()?.actions.find((candidate) => candidate.id === id) ?? null
+        );
+        if (dependencies.some((dependency) => dependency?.status !== 'succeeded')) {
+          this.setActionStatus(action.id, 'blocked');
+          hadFailure = true;
+          continue;
+        }
+
+        try {
+          await this.execution.execute(
+            action,
+            this.proposalHouseholdId,
+            action.kind === 'household.plan_meals'
+              ? (this.mealProposalFor(action.id) ?? undefined)
+              : undefined
+          );
+          this.setActionStatus(action.id, 'succeeded');
+        } catch (error) {
+          this.setActionStatus(action.id, 'failed');
+          this.errorKey.set(this.mapExecutionError(error));
+          this.revealAssistantError();
+          hadFailure = true;
+        }
+      }
+
+      this.completedCount.set(
+        this.selectedActions().filter((action) => action.status === 'succeeded').length
+      );
+      this.executionMessage.set(
+        hadFailure ? 'ai_assistant.execution_partial' : 'ai_assistant.execution_complete'
+      );
+    } finally {
+      this.loading.set(false);
+      this.executing.set(false);
+    }
+  }
+
+  private selectedActionsInDependencyOrder(): AssistantAction[] {
+    const remaining = this.selectedActions().filter((action) => action.status !== 'succeeded');
+    const succeededIds = new Set(
+      this.plan()
+        ?.actions.filter((action) => action.status === 'succeeded')
+        .map((action) => action.id) ?? []
+    );
+    const ordered: AssistantAction[] = [];
+    const orderedIds = new Set<string>();
+
+    while (remaining.length) {
+      const readyIndex = remaining.findIndex((action) =>
+        action.dependsOn.every(
+          (dependencyId) => succeededIds.has(dependencyId) || orderedIds.has(dependencyId)
+        )
+      );
+      if (readyIndex < 0) return [...ordered, ...remaining];
+
+      const [readyAction] = remaining.splice(readyIndex, 1);
+      ordered.push(readyAction);
+      orderedIds.add(readyAction.id);
+    }
+
+    return ordered;
+  }
+
+  private mapExecutionError(error: unknown): TranslationKey {
+    if (error instanceof Error) {
+      if (error.message === 'ASSISTANT_HOUSEHOLD_CONTEXT_CHANGED') {
+        return 'ai_assistant.error_context_changed';
+      }
+      if (error.message === 'ASSISTANT_ACTION_ALREADY_ATTEMPTED') {
+        return 'ai_assistant.error_no_retry';
+      }
+      if (error.message === 'ASSISTANT_ACTION_PAYLOAD_CHANGED_AFTER_ATTEMPT') {
+        return 'ai_assistant.error_action_changed_after_attempt';
+      }
+      if (error.message === 'ASSISTANT_SHOPPING_LIST_NOT_UNIQUE') {
+        return 'ai_assistant.error_list_ambiguous';
+      }
+      if (error.message === 'ASSISTANT_TASK_SPACE_NOT_UNIQUE') {
+        return 'ai_assistant.error_space_ambiguous';
+      }
+      if (error.message === 'ASSISTANT_TASK_MEMBER_NOT_UNIQUE') {
+        return 'ai_assistant.error_member_ambiguous';
+      }
+      if (error.message === 'ASSISTANT_TASK_ID_CONFLICT') {
+        return 'ai_assistant.error_task_conflict';
+      }
+      if (error.message === 'ASSISTANT_TASK_STALE' || error.message === 'TASK_TARGET_CHANGED') {
+        return 'ai_assistant.error_task_stale';
+      }
+      if (error.message === 'ASSISTANT_TASK_CROSS_WEEK') {
+        return 'ai_assistant.error_task_cross_week';
+      }
+    }
+    const httpError =
+      error instanceof HttpErrorResponse
+        ? error
+        : ((error as { original?: HttpErrorResponse } | null)?.original ?? null);
+    if (httpError?.error?.code === 'ASSISTANT_INGREDIENT_STALE') {
+      return 'ai_assistant.error_ingredient_stale';
+    }
+    if (httpError?.error?.code === 'ASSISTANT_INGREDIENT_NAME_CONFLICT') {
+      return 'ai_assistant.error_ingredient_name_conflict';
+    }
+    if (httpError?.status === 403) return 'ai_assistant.error_permission';
+    if (httpError && httpError.status >= 400 && httpError.status < 500) {
+      return 'ai_assistant.error_domain_rejected';
+    }
+    return 'ai_assistant.error_execution_uncertain';
+  }
+}
+
+function omitRecordKey<T>(record: Record<string, T>, key: string): Record<string, T> {
+  if (!Object.prototype.hasOwnProperty.call(record, key)) return record;
+  const next = { ...record };
+  delete next[key];
+  return next;
+}
+
+function addIsoDays(value: string, days: number): string | null {
+  const date = new Date(`${value}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value) return null;
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function normalizeAssistantShoppingName(value: string): string {
+  return value.normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase('es');
+}

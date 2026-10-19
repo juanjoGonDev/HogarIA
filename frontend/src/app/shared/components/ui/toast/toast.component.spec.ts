@@ -84,25 +84,70 @@ describe('ToastComponent', () => {
     expect(toastService.toasts().length).toBe(0);
   });
 
+  it('renders decorative SVG status icons and a close SVG while keeping the close action named', () => {
+    for (const type of ['success', 'error', 'warning', 'info'] as const) {
+      toastService.show({ type, title: `Toast ${type}`, duration: 0, dismissible: true });
+    }
+    fixture.detectChanges();
+
+    const toasts: NodeListOf<HTMLElement> = fixture.nativeElement.querySelectorAll('.toast');
+    expect(toasts.length).toBe(4);
+    for (const toast of Array.from(toasts)) {
+      const statusIcon = toast.querySelector('.toast__icon svg');
+      const closeButton = toast.querySelector<HTMLButtonElement>('.toast__close');
+      expect(statusIcon?.getAttribute('aria-hidden')).toBe('true');
+      expect(toast.querySelector('.toast__icon')?.textContent?.trim()).toBe('');
+      expect(closeButton?.getAttribute('aria-label')).toBeTruthy();
+      expect(closeButton?.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
+    }
+  });
+
+  it('announces toast content through a live region with urgency matching its type', () => {
+    toastService.success('Saved', undefined, { duration: 0 });
+    toastService.error('Could not save', undefined, { duration: 0 });
+    toastService.warning('Review this', undefined, { duration: 0 });
+    toastService.info('Tip', undefined, { duration: 0 });
+    fixture.detectChanges();
+
+    const toasts: NodeListOf<HTMLElement> = fixture.nativeElement.querySelectorAll('.toast');
+    const byTitle = new Map(Array.from(toasts, toast => [
+      toast.querySelector('.toast__title')?.textContent?.trim(), toast
+    ]));
+
+    expect(byTitle.get('Saved')?.getAttribute('role')).toBe('status');
+    expect(byTitle.get('Saved')?.getAttribute('aria-live')).toBe('polite');
+    expect(byTitle.get('Could not save')?.getAttribute('role')).toBe('alert');
+    expect(byTitle.get('Could not save')?.getAttribute('aria-live')).toBe('assertive');
+    expect(byTitle.get('Review this')?.getAttribute('role')).toBe('status');
+    expect(byTitle.get('Review this')?.getAttribute('aria-live')).toBe('polite');
+    expect(byTitle.get('Tip')?.getAttribute('role')).toBe('status');
+    expect(byTitle.get('Tip')?.getAttribute('aria-live')).toBe('polite');
+    for (const toast of Array.from(toasts)) {
+      expect(toast.getAttribute('aria-atomic')).toBe('true');
+    }
+  });
+
+  it('announces bottom action toasts politely as well', () => {
+    toastService.show({ title: 'Item removed', position: 'bottom', duration: 0, action: {
+      label: 'Undo', run: () => undefined
+    } });
+    fixture.detectChanges();
+
+    const toast: HTMLElement = fixture.nativeElement.querySelector('.toast-container--bottom .toast');
+    expect(toast.getAttribute('role')).toBe('status');
+    expect(toast.getAttribute('aria-live')).toBe('polite');
+  });
+
   describe('getIcon', () => {
-    it('should return success icon', () => {
-      expect(component.getIcon('success')).toBe('✓');
-    });
-
-    it('should return error icon', () => {
-      expect(component.getIcon('error')).toBe('✕');
-    });
-
-    it('should return warning icon', () => {
-      expect(component.getIcon('warning')).toBe('⚠');
-    });
-
-    it('should return info icon', () => {
-      expect(component.getIcon('info')).toBe('ℹ');
+    it('maps each toast state to the local SVG registry', () => {
+      expect(component.getIcon('success')).toBe('check_circle');
+      expect(component.getIcon('error')).toBe('error_outline');
+      expect(component.getIcon('warning')).toBe('sync_problem');
+      expect(component.getIcon('info')).toBe('help_outline');
     });
 
     it('should return info icon for unknown type', () => {
-      expect(component.getIcon('unknown')).toBe('ℹ');
+      expect(component.getIcon('unknown')).toBe('help_outline');
     });
   });
 

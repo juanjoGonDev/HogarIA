@@ -1,0 +1,477 @@
+:host {
+  display: block;
+  min-width: 0;
+}
+
+.task-card__priority {
+  display: inline-flex;
+  width: max-content;
+  align-items: center;
+  min-height: 24px;
+  padding-inline: var(--space-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-full);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-tight);
+}
+
+.task-card__priority[data-priority='medium'] {
+  border-color: var(--color-warning-100);
+  background: var(--warning-subtle);
+  color: var(--color-warning-700);
+}
+
+.task-card__priority[data-priority='high'] {
+  border-color: var(--color-error-100);
+  background: var(--error-subtle);
+  color: var(--color-error-700);
+}
+
+.task-card__details summary {
+  display: flex;
+  width: max-content;
+  min-width: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+}
+
+.tasks-create__reveal {
+  display: none;
+}
+/* Match the compact, map-first weekly checklist in the approved phone flow. */
+@media (max-width: 767px) {
+  .tasks-layout {
+    gap: 0;
+  }
+
+  .tasks-plan-panel {
+    position: relative;
+  }
+
+  .tasks-floor-tabs {
+    position: static;
+    z-index: auto;
+    margin: 0 var(--space-2) var(--space-2);
+    gap: var(--space-1);
+  }
+
+  .tasks-floor-tabs__tab {
+    min-height: 44px;
+    padding-block: var(--space-1);
+  }
+
+  .tasks-plan-canvas {
+    height: 100%;
+    margin: 0;
+  }
+
+  .tasks-map-viewport {
+    aspect-ratio: 1.1 / 1;
+    max-height: min(52vh, 320px);
+  }
+
+  .tasks-zone-heading h3 {
+    font-size: var(--text-sm);
+    line-height: var(--leading-tight);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .tasks-create__title-caption,
+  .tasks-assignment-settings h3 {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .tasks-repeat-rule {
+    font-size: 0.7rem !important;
+  }
+
+  .tasks-create {
+    gap: 0;
+  }
+
+  .tasks-assignment-settings {
+    gap: 0;
+    padding: 0;
+  }
+
+  .tasks-create__details summary {
+    min-height: 24px;
+    box-sizing: border-box;
+    height: 24px;
+    padding: 0;
+  }
+
+  .tasks-day {
+    grid-template-columns: minmax(48px, 0.2fr) minmax(0, 1fr);
+    min-height: 44px;
+    border-bottom: 0;
+  }
+
+  .task-card:has(.task-card__details[open]) {
+    min-height: max-content;
+  }
+
+  .tasks-day__header {
+    min-height: 44px;
+  }
+
+  .task-card {
+    grid-template-columns: 44px minmax(0, 1fr);
+    box-sizing: border-box;
+    height: auto;
+    min-height: 44px;
+    align-items: center;
+    padding-inline: 0;
+  }
+
+  .task-card__title input,
+  .task-card__complete,
+  .task-card__details summary {
+    box-sizing: border-box;
+    height: 44px;
+    min-height: 44px !important;
+  }
+
+  .task-card__title input {
+    padding: 0 4px !important;
+  }
+
+  .task-card__complete {
+    width: 44px;
+  }
+
+  .task-card__details summary {
+    width: 44px;
+  }
+
+  .task-card__complete input {
+    width: 20px;
+    height: 20px;
+  }
+
+  .task-card__member-avatar {
+    width: 24px;
+    height: 24px;
+  }
+
+  .task-card__member-name {
+    max-width: 88px;
+    font-size: 0.72rem;
+  }
+
+  .tasks-schedule__footer {
+    gap: var(--space-1);
+    row-gap: 0;
+    padding: 2px var(--space-1);
+  }
+
+  .tasks-schedule__footer > .tasks-button {
+    min-height: 44px;
+  }
+
+  .tasks-schedule__more-actions > summary {
+    width: 44px;
+    min-height: 44px;
+  }
+}
+
+/* Match the approved desktop checklist proportions while keeping floor selection in the map. */
+@media (min-width: 1280px) {
+  .tasks-editor {
+    max-width: 800px;
+    margin-top: 35px;
+    margin-right: auto;
+    margin-left: auto;
+  }
+
+  .tasks-editor__header h2 {
+    font-size: 40px;
+  }
+
+  .tasks-editor__header p {
+    font-size: 20px;
+  }
+
+  .tasks-layout {
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 310px);
+    gap: var(--space-3);
+  }
+
+  .tasks-plan-panel {
+    position: relative;
+    margin-top: 7px;
+  }
+
+  .tasks-floor-tabs {
+    position: absolute;
+    z-index: 2;
+    top: var(--space-2);
+    left: var(--space-2);
+  }
+
+  .tasks-board {
+    padding: var(--space-2);
+  }
+
+  .tasks-editor__message--success {
+    overflow: hidden;
+    font-size: 10px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .tasks-board__context .tasks-weekbar {
+    flex-wrap: nowrap;
+    gap: 4px;
+  }
+
+  .tasks-weekbar .tasks-button--icon {
+    width: 44px;
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .tasks-weekbar__range h3 {
+    overflow: hidden;
+    font-size: 11px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .tasks-create__primary-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 0.95fr);
+    gap: 4px;
+  }
+
+  .tasks-create__submit {
+    padding: var(--space-2) 4px;
+    font-size: 12px;
+    white-space: normal;
+  }
+
+  .tasks-assignment-settings {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-1);
+  }
+
+  .tasks-assignment-settings h3 {
+    font-size: var(--text-sm);
+  }
+
+  .tasks-assignment-mode label {
+    min-height: 44px;
+    align-items: center;
+    gap: 4px;
+    padding: 4px;
+    font-size: 11px;
+  }
+
+  .tasks-repeat-rule {
+    gap: 4px !important;
+    font-size: 10px !important;
+    white-space: nowrap;
+  }
+}
+
+/* Let a multi-storey picker float over the drawing instead of shrinking the mobile map. */
+@media (max-width: 767px) {
+  .tasks-plan-panel {
+    position: relative;
+    margin-top: -10px;
+  }
+
+  .tasks-floor-tabs {
+    position: static;
+    z-index: auto;
+    margin: 0 var(--space-2) var(--space-2);
+  }
+
+  .tasks-floor-tabs__tab {
+    min-height: 44px;
+    padding: var(--space-1) var(--space-2);
+    font-size: var(--text-xs);
+  }
+
+  .tasks-map-viewport {
+    height: min(44vh, 286px);
+    min-height: min(44vh, 286px);
+    max-height: min(44vh, 286px);
+    width: calc(100% + 12px);
+    margin-inline: -6px;
+  }
+
+  .tasks-create--collapsed-mobile {
+    display: none;
+  }
+
+  .tasks-board .tasks-create__reveal {
+    display: flex;
+    width: calc(100% - 2 * var(--space-2));
+    min-height: 44px;
+    align-items: center;
+    justify-self: center;
+    gap: var(--space-1);
+  }
+}
+
+/* Keep the mobile task form compact without removing its accessible labels. */
+@media (max-width: 767px) {
+  .tasks-board {
+    gap: 0;
+  }
+
+  .tasks-board__context {
+    margin-top: 0;
+  }
+
+  .tasks-create__primary-row {
+    margin-top: 5px;
+  }
+
+  .tasks-create__title {
+    position: relative;
+  }
+
+  .tasks-create__title-caption {
+    position: absolute;
+    top: -18px;
+    left: 0;
+    display: block;
+    width: auto;
+    height: auto;
+    padding: 0;
+    margin: 0;
+    overflow: visible;
+    clip: auto;
+    white-space: normal;
+    border: 0;
+    color: var(--text-secondary);
+    font-size: var(--text-xs);
+  }
+
+  .tasks-assignment-settings {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 2px 8px;
+    padding: 0 var(--space-2);
+  }
+
+  .tasks-assignment-settings h3 {
+    grid-column: 1 / -1;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .tasks-assignment-mode {
+    grid-column: 1 / -1;
+  }
+
+  .tasks-assignment-settings > .tasks-repeat-rule {
+    grid-column: 1;
+    align-self: center;
+    justify-self: start;
+    gap: 4px !important;
+    margin: 0;
+    font-size: 10px !important;
+    line-height: var(--leading-tight);
+  }
+
+  .tasks-create__details {
+    grid-column: 2;
+    align-self: center;
+    min-width: 0;
+    margin: 0;
+  }
+
+  .tasks-create__details summary {
+    min-height: 24px;
+    padding: 0;
+    font-size: var(--text-xs);
+    white-space: nowrap;
+  }
+
+  .tasks-repeat-rule {
+    font-size: 11px !important;
+  }
+
+  .tasks-schedule__header h3 {
+    margin: 0;
+    font-size: var(--text-sm);
+  }
+
+  .tasks-schedule {
+    gap: 0;
+    margin-top: -2px;
+  }
+
+  .task-card {
+    height: 44px;
+    min-height: 44px;
+    box-sizing: border-box;
+  }
+
+  .tasks-schedule__footer {
+    row-gap: 0;
+    margin-top: var(--space-2);
+  }
+
+  .tasks-board .tasks-create__primary-row {
+    margin-top: 0;
+  }
+
+  .tasks-board .tasks-assignment-mode label {
+    box-sizing: border-box;
+    height: 44px;
+    min-height: 44px;
+    align-items: center;
+    min-width: 0;
+    padding-inline: 2px;
+    font-size: var(--text-xs);
+    line-height: var(--leading-tight);
+    white-space: normal;
+  }
+}
+
+@media (min-width: 768px) {
+  .tasks-board .tasks-schedule__header.visually-hidden {
+    position: static;
+    width: auto;
+    height: auto;
+    padding: var(--space-1) var(--space-3);
+    margin: 0;
+    overflow: visible;
+    clip: auto;
+    white-space: normal;
+    border-bottom: 1px solid var(--border-default);
+  }
+}
+
+@media (max-width: 359px) {
+  .tasks-assignment-settings {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tasks-assignment-settings > .tasks-repeat-rule,
+  .tasks-create__details {
+    grid-column: 1 / -1;
+  }
+}

@@ -1,0 +1,706 @@
+<section class="tasks-editor" [attr.aria-busy]="loading() || saving() || loadingSpaces()">
+  <app-household-meal-settings
+    *ngIf="showMealSettings"
+    [householdId]="householdId"
+    [canEdit]="canEditMealSettings"
+  />
+  <div class="tasks-layout" data-test="tasks-layout">
+    <main class="tasks-main">
+      <header class="tasks-editor__header">
+        <div>
+          <h2>{{ 'household.tasks_title' | t }}</h2>
+          <p>{{ 'household.tasks_description' | t }}</p>
+        </div>
+      </header>
+      <section class="tasks-plan-panel" aria-labelledby="tasks-plan-title">
+        <header class="tasks-plan-panel__header visually-hidden">
+          <div>
+            <h3 id="tasks-plan-title">{{ 'household.tasks_plan_title' | t }}</h3>
+            <p>{{ 'household.tasks_plan_hint' | t }}</p>
+          </div>
+          <span class="tasks-plan-panel__count" *ngIf="spaces().length">
+            {{ spaces().length }}
+          </span>
+        </header>
+
+        <div
+          *ngIf="floors().length > 1"
+          class="tasks-floor-tabs"
+          role="tablist"
+          [attr.aria-label]="'household.plan_floor' | t"
+        >
+          <button
+            *ngFor="let floor of floors()"
+            type="button"
+            role="tab"
+            class="tasks-floor-tabs__tab"
+            [class.is-selected]="floor.id === activeFloor()?.id"
+            [attr.aria-selected]="floor.id === activeFloor()?.id"
+            [attr.data-test]="'tasks-floor-' + floor.id"
+            (click)="selectFloor(floor.id)"
+          >
+            {{ floor.name }}
+          </button>
+        </div>
+
+        <div class="tasks-map-viewport" [class.tasks-map-viewport--empty]="!activeFloor()">
+          <svg
+            class="tasks-plan-canvas"
+            data-test="tasks-plan-canvas"
+            [attr.viewBox]="planViewBox()"
+            role="group"
+            [attr.aria-label]="'household.tasks_plan_title' | t"
+          >
+            <rect width="10000" height="10000" class="tasks-plan-canvas__paper" />
+
+            <ng-container *ngIf="activeFloor() as floor">
+              <polygon
+                *ngFor="let space of floor.spaces"
+                [attr.points]="spacePoints(space)"
+                [attr.data-space-id]="space.id"
+                [attr.data-kind]="space.kind"
+                class="tasks-map__area"
+                [ngClass]="assignmentClass(space.id)"
+                [class.is-selected]="activeSpaceId() === space.id"
+                [attr.aria-label]="areaLabel(space) + ', ' + spaceAssignmentLabel(space.id)"
+                [attr.aria-pressed]="activeSpaceId() === space.id"
+                role="button"
+                tabindex="0"
+                (click)="selectMapSpace(space.id)"
+                (keydown.enter)="selectMapSpace(space.id)"
+                (keydown.space)="$event.preventDefault(); selectMapSpace(space.id)"
+              />
+              <line
+                *ngFor="let wall of floor.walls"
+                [attr.x1]="wall.from.x"
+                [attr.y1]="wall.from.y"
+                [attr.x2]="wall.to.x"
+                [attr.y2]="wall.to.y"
+                [class.tasks-plan-canvas__wall--exterior]="wall.kind === 'exterior'"
+                class="tasks-plan-canvas__wall"
+                aria-hidden="true"
+              />
+              <ng-container *ngFor="let opening of floor.openings">
+                <ng-container *ngIf="openingLine(floor, opening) as segment">
+                  <line
+                    [attr.x1]="segment.from.x"
+                    [attr.y1]="segment.from.y"
+                    [attr.x2]="segment.to.x"
+                    [attr.y2]="segment.to.y"
+                    class="tasks-plan-canvas__opening"
+                    [class.tasks-plan-canvas__opening--main]="opening.isMainEntrance"
+                    aria-hidden="true"
+                  />
+                  <ng-container *ngIf="doorSwing(floor, opening) as swing">
+                    <line
+                      [attr.x1]="swing.hinge.x"
+                      [attr.y1]="swing.hinge.y"
+                      [attr.x2]="swing.leafTip.x"
+                      [attr.y2]="swing.leafTip.y"
+                      class="tasks-plan-canvas__door-leaf"
+                      aria-hidden="true"
+                    />
+                    <path
+                      [attr.d]="swing.arc"
+                      class="tasks-plan-canvas__door-swing"
+                      aria-hidden="true"
+                    />
+                  </ng-container>
+                  <line
+                    *ngFor="let rail of openingRails(floor, opening)"
+                    [attr.x1]="rail.from.x"
+                    [attr.y1]="rail.from.y"
+                    [attr.x2]="rail.to.x"
+                    [attr.y2]="rail.to.y"
+                    class="tasks-plan-canvas__window-rail"
+                    aria-hidden="true"
+                  />
+                  <circle
+                    *ngIf="opening.isMainEntrance"
+                    [attr.cx]="segment.from.x"
+                    [attr.cy]="segment.from.y"
+                    r="150"
+                    class="tasks-plan-canvas__entrance-mark"
+                    aria-hidden="true"
+                  />
+                </ng-container>
+              </ng-container>
+              <g
+                *ngFor="let space of floor.spaces"
+                class="tasks-map__label"
+                [attr.data-space-id]="space.id"
+                aria-hidden="true"
+              >
+                <svg
+                  *ngIf="spaceMapGlyphVisible(space)"
+                  householdAreaGlyph
+                  [kind]="space.kind"
+                  [attr.x]="spaceCenter(space).x - 400"
+                  [attr.y]="spaceCenter(space).y - 1_050"
+                  width="800"
+                  height="800"
+                  viewBox="0 0 64 64"
+                  class="tasks-map__glyph"
+                  aria-hidden="true"
+                ></svg>
+                <text
+                  [attr.x]="spaceCenter(space).x"
+                  [attr.y]="spaceCenter(space).y - 120"
+                  class="tasks-map__name"
+                  [class.tasks-map__name--compact]="!spaceMapGlyphVisible(space)"
+                >
+                  {{ areaLabel(space) }}
+                </text>
+                <g *ngFor="let member of assignedMembers(space.id); let memberIndex = index">
+                  <circle
+                    [attr.cx]="
+                      spaceCenter(space).x +
+                      (memberIndex - (assignedMembers(space.id).length - 1) / 2) * 520
+                    "
+                    [attr.cy]="spaceCenter(space).y + 280"
+                    r="260"
+                    [attr.data-owner-index]="memberColorIndex(member.userId)"
+                    class="tasks-map__avatar"
+                  />
+                  <text
+                    [attr.x]="
+                      spaceCenter(space).x +
+                      (memberIndex - (assignedMembers(space.id).length - 1) / 2) * 520
+                    "
+                    [attr.y]="spaceCenter(space).y + 280"
+                    [attr.data-owner-index]="memberColorIndex(member.userId)"
+                    class="tasks-map__avatar-initials"
+                  >
+                    {{ memberInitials(member) }}
+                  </text>
+                </g>
+                <text
+                  *ngIf="spaceMapAssigneeLabelVisible(space)"
+                  [attr.x]="spaceCenter(space).x"
+                  [attr.y]="spaceCenter(space).y + 680"
+                  class="tasks-map__owner"
+                >
+                  {{ spaceMapAssigneeLabel(space.id) }}
+                </text>
+              </g>
+            </ng-container>
+          </svg>
+
+          <div
+            *ngIf="!activeFloor() && !loadingSpaces()"
+            class="tasks-map-empty"
+            data-test="tasks-plan-empty"
+          >
+            <span class="tasks-map-empty__icon" aria-hidden="true">⌂</span>
+            <h4>{{ 'household.tasks_plan_empty_title' | t }}</h4>
+            <p>{{ 'household.tasks_plan_empty' | t }}</p>
+          </div>
+        </div>
+
+        <div class="tasks-map-legend" [attr.aria-label]="'household.tasks_plan_legend' | t">
+          <span
+            ><i class="tasks-map-legend__swatch tasks-map-legend__swatch--assigned"></i
+            >{{ 'household.plan_zone_assigned' | t }}</span
+          >
+          <span
+            ><i class="tasks-map-legend__swatch tasks-map-legend__swatch--shared"></i
+            >{{ 'household.plan_zone_shared' | t }}</span
+          >
+          <span
+            ><i class="tasks-map-legend__swatch tasks-map-legend__swatch--unassigned"></i
+            >{{ 'household.plan_zone_unassigned' | t }}</span
+          >
+        </div>
+      </section>
+    </main>
+
+    <aside class="tasks-board" [attr.aria-label]="'household.tasks_weekly_assignment' | t">
+      <p *ngIf="!canEdit" class="tasks-editor__notice" data-test="tasks-read-only">
+        {{ 'household.tasks_read_only' | t }}
+      </p>
+      <p
+        *ngIf="errorKey() as error"
+        class="tasks-editor__message tasks-editor__message--error"
+        role="alert"
+      >
+        {{ error | t }}
+      </p>
+      <p
+        *ngIf="noticeKey() as notice"
+        class="tasks-editor__message tasks-editor__message--success"
+        role="status"
+      >
+        {{ notice | t }}
+      </p>
+      <div class="tasks-board__context">
+        <section class="tasks-zone-heading" aria-live="polite">
+          <div class="tasks-zone-heading__title">
+            <span class="tasks-zone-heading__eyebrow visually-hidden">
+              {{ 'household.tasks_selected_zone' | t }}
+            </span>
+            <h3>
+              {{
+                activeSpaceId() ? areaName(activeSpaceId()) : ('household.tasks_select_zone' | t)
+              }}
+            </h3>
+          </div>
+          <div class="tasks-zone-heading__controls" *ngIf="spaces().length">
+            <app-picker
+              id="household-tasks-filter-area"
+              [label]="'household.tasks_filter_area' | t"
+              [options]="areaFilterOptions()"
+              [value]="filterSpaceId()"
+              (valueChange)="filterSpaceId.set($event ?? '')"
+            />
+          </div>
+          <span *ngIf="activeSpaceId()" class="tasks-zone-heading__owner">
+            {{ spaceMapAssigneeLabel(activeSpaceId()!) }}
+          </span>
+          <div
+            class="tasks-weekbar"
+            role="group"
+            [attr.aria-label]="'household.tasks_weekly_assignment' | t"
+          >
+            <button
+              type="button"
+              class="tasks-button tasks-button--icon"
+              [disabled]="loading() || saving()"
+              [attr.aria-label]="'household.tasks_previous_week' | t"
+              (click)="shiftWeek(-1)"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="m15 18-6-6 6-6" />
+              </svg>
+            </button>
+            <div class="tasks-weekbar__range">
+              <span class="visually-hidden">{{ 'household.tasks_weekly_assignment' | t }}</span>
+              <h3>{{ weekRangeLabel() }}</h3>
+            </div>
+            <button
+              type="button"
+              class="tasks-button tasks-button--icon"
+              [disabled]="loading() || saving()"
+              [attr.aria-label]="'household.tasks_next_week' | t"
+              (click)="shiftWeek(1)"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="m9 18 6-6-6-6" />
+              </svg>
+            </button>
+            <span class="tasks-weekbar__version">
+              {{ 'household.tasks_week_version' | t: { version: snapshot().version } }}
+            </span>
+          </div>
+        </section>
+      </div>
+
+      <button
+        *ngIf="canEdit && draftTasks().length > 0 && !showTaskCreationForm()"
+        type="button"
+        class="tasks-button tasks-button--primary tasks-create__reveal"
+        data-test="tasks-create-open"
+        (click)="showTaskCreationForm.set(true)"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M12 5v14M5 12h14" />
+        </svg>
+        {{ 'household.tasks_add' | t }}
+      </button>
+      <section
+        *ngIf="canEdit"
+        class="tasks-create"
+        [class.tasks-create--collapsed-mobile]="draftTasks().length > 0 && !showTaskCreationForm()"
+        [attr.aria-label]="'household.tasks_add' | t"
+      >
+        <div class="tasks-create__primary-row">
+          <label class="tasks-create__title">
+            <span class="tasks-create__title-caption">
+              {{ 'household.tasks_name_short' | t }}
+            </span>
+            <input
+              [ngModel]="newTitle()"
+              (ngModelChange)="newTitle.set($event)"
+              [placeholder]="'household.tasks_name_placeholder' | t"
+              [attr.aria-label]="'household.tasks_name' | t"
+            />
+          </label>
+          <button
+            type="button"
+            class="tasks-button tasks-create__submit"
+            data-test="tasks-add"
+            [disabled]="!newTitle().trim() || draftTasks().length >= 200 || loading() || saving()"
+            (click)="addTask()"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            {{ 'household.tasks_add_button' | t }}
+          </button>
+        </div>
+        <section
+          *ngIf="canEdit"
+          class="tasks-assignment-settings"
+          aria-labelledby="tasks-assignment-mode-title"
+        >
+          <h3 id="tasks-assignment-mode-title">{{ 'household.tasks_assignment_heading' | t }}</h3>
+          <div
+            class="tasks-assignment-mode"
+            role="radiogroup"
+            [attr.aria-label]="'household.tasks_assignment_mode' | t"
+          >
+            <label [class.is-selected]="!randomAssignmentMode()">
+              <input
+                type="radio"
+                name="task-assignment-mode"
+                [checked]="!randomAssignmentMode()"
+                (change)="randomAssignmentMode.set(false)"
+              />
+              <span>{{ 'household.tasks_manual_mode' | t }}</span>
+            </label>
+            <label [class.is-selected]="randomAssignmentMode()">
+              <input
+                type="radio"
+                name="task-assignment-mode"
+                [checked]="randomAssignmentMode()"
+                aria-describedby="tasks-random-mode-description"
+                (change)="randomAssignmentMode.set(true)"
+              />
+              <span>{{ 'household.tasks_fair_mode' | t }}</span>
+            </label>
+          </div>
+          <p id="tasks-random-mode-description" class="visually-hidden">
+            {{ 'household.tasks_random_title' | t }} ·
+            {{ 'household.tasks_random_description' | t }}
+          </p>
+          <label class="tasks-repeat-rule">
+            <input type="checkbox" checked disabled />
+            <span aria-hidden="true">{{ 'household.tasks_nonconsecutive_rule_short' | t }}</span>
+            <span class="visually-hidden">{{ 'household.tasks_nonconsecutive_rule' | t }}</span>
+          </label>
+          <details class="tasks-create__details">
+            <summary>
+              <span aria-hidden="true">{{ 'household.tasks_create_advanced_short' | t }}</span>
+              <span class="visually-hidden">{{ 'household.tasks_create_advanced' | t }}</span>
+            </summary>
+            <div class="tasks-create__fields">
+              <div class="tasks-editor__field">
+                <span>{{ 'household.tasks_day' | t }}</span>
+                <app-picker
+                  id="household-tasks-new-day"
+                  [label]="'household.tasks_day' | t"
+                  [options]="dayOptions()"
+                  [value]="newDate()"
+                  (valueChange)="newDate.set($event || weekStart())"
+                />
+              </div>
+              <div class="tasks-editor__field">
+                <span>{{ 'household.tasks_area' | t }}</span>
+                <app-picker
+                  id="household-tasks-new-area"
+                  [label]="'household.tasks_area' | t"
+                  [options]="spaceOptions()"
+                  [value]="newSpaceId()"
+                  (valueChange)="newSpaceId.set($event ?? '')"
+                />
+              </div>
+              <div class="tasks-editor__field">
+                <span>{{ 'household.tasks_priority' | t }}</span>
+                <app-picker
+                  id="household-tasks-new-priority"
+                  [label]="'household.tasks_priority' | t"
+                  [options]="priorityPickerOptions()"
+                  [value]="newPriority()"
+                  (valueChange)="setNewPriority($event)"
+                />
+              </div>
+              <div class="tasks-editor__field" *ngIf="!randomAssignmentMode()">
+                <span>{{ 'household.tasks_assignee' | t }}</span>
+                <app-picker
+                  id="household-tasks-new-assignee"
+                  [label]="'household.tasks_assignee' | t"
+                  [options]="memberOptions()"
+                  [value]="newMemberId()"
+                  (valueChange)="newMemberId.set($event ?? '')"
+                />
+              </div>
+            </div>
+            <label>
+              <span>{{ 'household.tasks_details' | t }}</span>
+              <input
+                [ngModel]="newDetails()"
+                (ngModelChange)="newDetails.set($event)"
+                maxlength="500"
+              />
+            </label>
+          </details>
+        </section>
+      </section>
+
+      <section
+        *ngIf="randomPreview() as preview"
+        class="tasks-random-preview"
+        aria-live="polite"
+        data-test="tasks-random-preview"
+      >
+        <div>
+          <h3>{{ 'household.tasks_preview_title' | t }}</h3>
+          <p>{{ 'household.tasks_preview_description' | t }}</p>
+        </div>
+        <ul>
+          <li *ngFor="let task of preview">
+            <span>{{ task.scheduledDate }} · {{ task.title }}</span>
+            <strong>{{ memberName(task.assignedMemberId) }}</strong>
+          </li>
+        </ul>
+        <div class="tasks-editor__actions">
+          <button
+            type="button"
+            class="tasks-button tasks-button--quiet"
+            (click)="discardRandomPreview()"
+          >
+            {{ 'household.tasks_discard_preview' | t }}
+          </button>
+          <button
+            type="button"
+            class="tasks-button tasks-button--primary"
+            (click)="applyRandomPreview()"
+          >
+            {{ 'household.tasks_use_distribution' | t }}
+          </button>
+        </div>
+      </section>
+
+      <div *ngIf="loading()" class="tasks-editor__loading" role="status">
+        {{ 'household.tasks_loading' | t }}
+      </div>
+      <section
+        *ngIf="!loading()"
+        class="tasks-schedule"
+        data-test="tasks-week"
+        aria-labelledby="tasks-schedule-title"
+      >
+        <header class="tasks-schedule__header visually-hidden">
+          <div>
+            <h3 id="tasks-schedule-title">{{ 'household.tasks_weekly_assignment' | t }}</h3>
+          </div>
+        </header>
+        <div class="tasks-days">
+          <section *ngFor="let day of weekDays()" class="tasks-day" [attr.data-date]="day.date">
+            <header class="tasks-day__header">
+              <h4 [attr.aria-label]="day.label">
+                <span class="tasks-day__label-full">{{ day.label }}</span>
+                <span class="tasks-day__label-short">{{ day.shortLabel }}</span>
+              </h4>
+              <span class="tasks-day__count">{{ tasksForDay(day.date).length }}</span>
+            </header>
+            <ul *ngIf="tasksForDay(day.date).length; else noTasks">
+              <li
+                *ngFor="let task of tasksForDay(day.date)"
+                class="task-card"
+                [class.task-card--compact]="tasksForDay(day.date).length === 1"
+                [class.task-card--completed]="task.completed"
+              >
+                <label class="task-card__complete">
+                  <input
+                    type="checkbox"
+                    [checked]="task.completed"
+                    [disabled]="!canEdit || saving()"
+                    [attr.aria-label]="'household.tasks_mark_complete' | t: { name: task.title }"
+                    (change)="updateTask(task.id, { completed: $any($event.target).checked })"
+                  />
+                  <span class="visually-hidden">{{
+                    'household.tasks_mark_complete' | t: { name: task.title }
+                  }}</span>
+                </label>
+                <div class="task-card__fields">
+                  <label class="task-card__title" *ngIf="tasksForDay(day.date).length > 1">
+                    <span class="visually-hidden">{{ 'household.tasks_name' | t }}</span>
+                    <input
+                      [ngModel]="task.title"
+                      [disabled]="!canEdit || saving()"
+                      (ngModelChange)="updateTask(task.id, { title: $event })"
+                    />
+                  </label>
+                  <div class="task-card__assignment">
+                    <span class="task-card__member-avatar" aria-hidden="true">{{
+                      memberInitialsForId(task.assignedMemberId)
+                    }}</span>
+                    <span class="task-card__member-name">{{
+                      memberName(task.assignedMemberId)
+                    }}</span>
+                  </div>
+                  <details class="task-card__details">
+                    <summary
+                      [attr.aria-label]="
+                        ('household.tasks_priority' | t) +
+                        ': ' +
+                        taskPriorityLabel(task.priority) +
+                        '. ' +
+                        ('household.tasks_edit_details' | t)
+                      "
+                    >
+                      <span
+                        class="task-card__priority"
+                        [attr.data-priority]="task.priority"
+                        aria-hidden="true"
+                      >
+                        {{ taskPriorityLabel(task.priority) }}
+                      </span>
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <circle cx="5" cy="12" r="1.5" fill="currentColor" />
+                        <circle cx="12" cy="12" r="1.5" fill="currentColor" />
+                        <circle cx="19" cy="12" r="1.5" fill="currentColor" />
+                      </svg>
+                    </summary>
+                    <div class="task-card__more-fields">
+                      <label
+                        class="task-card__title task-card__title--details"
+                        *ngIf="tasksForDay(day.date).length === 1"
+                      >
+                        <span>{{ 'household.tasks_name' | t }}</span>
+                        <input
+                          [ngModel]="task.title"
+                          [disabled]="!canEdit || saving()"
+                          (ngModelChange)="updateTask(task.id, { title: $event })"
+                        />
+                      </label>
+                      <div class="tasks-editor__field">
+                        <span>{{ 'household.tasks_assignee' | t }}</span>
+                        <app-picker
+                          [id]="'household-task-member-' + task.id"
+                          [label]="('household.tasks_assignee' | t) + ': ' + task.title"
+                          [options]="memberOptions(task.assignedMemberId)"
+                          [value]="task.assignedMemberId ?? ''"
+                          [disabled]="!canEdit || saving()"
+                          (valueChange)="updateTask(task.id, { assignedMemberId: $event || null })"
+                        />
+                      </div>
+                      <div class="tasks-editor__field">
+                        <span>{{ 'household.tasks_priority' | t }}</span>
+                        <app-picker
+                          [id]="'household-task-priority-' + task.id"
+                          [attr.data-test]="'household-task-priority-' + task.id"
+                          [label]="('household.tasks_priority' | t) + ': ' + task.title"
+                          [options]="priorityPickerOptions()"
+                          [value]="task.priority"
+                          [disabled]="!canEdit || saving()"
+                          (valueChange)="setTaskPriority(task.id, $event)"
+                        />
+                      </div>
+                      <div class="tasks-editor__field">
+                        <span>{{ 'household.tasks_area' | t }}</span>
+                        <app-picker
+                          [id]="'household-task-area-' + task.id"
+                          [label]="('household.tasks_area' | t) + ': ' + task.title"
+                          [options]="spaceOptions(task.spaceId)"
+                          [value]="task.spaceId ?? ''"
+                          [disabled]="!canEdit || saving()"
+                          (valueChange)="updateTask(task.id, { spaceId: $event || null })"
+                        />
+                      </div>
+                      <div class="tasks-editor__field">
+                        <span>{{ 'household.tasks_day' | t }}</span>
+                        <app-picker
+                          [id]="'household-task-day-' + task.id"
+                          [label]="('household.tasks_day' | t) + ': ' + task.title"
+                          [options]="dayOptions(task.scheduledDate)"
+                          [value]="task.scheduledDate"
+                          [disabled]="!canEdit || saving()"
+                          (valueChange)="
+                            updateTask(task.id, { scheduledDate: $event || task.scheduledDate })
+                          "
+                        />
+                      </div>
+                      <label>
+                        <span>{{ 'household.tasks_details' | t }}</span>
+                        <input
+                          [ngModel]="task.details ?? ''"
+                          maxlength="500"
+                          [disabled]="!canEdit || saving()"
+                          (ngModelChange)="updateTask(task.id, { details: $event || null })"
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        class="tasks-link tasks-link--danger"
+                        [disabled]="!canEdit || saving()"
+                        [attr.aria-label]="'household.tasks_remove' | t: { name: task.title }"
+                        (click)="deleteTask(task.id)"
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                          <path
+                            d="M6 6 18 18M18 6 6 18"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-linecap="round"
+                            stroke-width="2"
+                          />
+                        </svg>
+                        {{ 'household.tasks_remove_short' | t }}
+                      </button>
+                    </div>
+                  </details>
+                </div>
+              </li>
+            </ul>
+            <ng-template #noTasks
+              ><p class="tasks-day__empty">{{ 'household.tasks_no_day_tasks' | t }}</p></ng-template
+            >
+          </section>
+        </div>
+        <div
+          class="tasks-schedule__footer"
+          [class.tasks-schedule__footer--has-randomizer]="canEdit && draftTasks().length > 0"
+        >
+          <p class="tasks-schedule__summary">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M4 19h16M7 16v-5m5 5V5m5 11V9" />
+            </svg>
+            <span>{{ assignmentSummary() }}</span>
+          </p>
+          <details class="tasks-schedule__more-actions" data-test="tasks-actions-menu">
+            <summary [attr.aria-label]="'household.tasks_more_actions' | t">
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <circle cx="5" cy="12" r="1.5" />
+                <circle cx="12" cy="12" r="1.5" />
+                <circle cx="19" cy="12" r="1.5" />
+              </svg>
+            </summary>
+            <div>
+              <button
+                *ngIf="canEdit && draftTasks().length"
+                type="button"
+                class="tasks-button"
+                data-test="tasks-randomize"
+                [disabled]="loading() || saving() || !!randomPreview()"
+                (click)="createRandomPreview()"
+              >
+                {{ 'household.tasks_randomize' | t }}
+              </button>
+              <button
+                type="button"
+                class="tasks-button tasks-button--quiet"
+                [disabled]="!canEdit || !isDirty() || saving()"
+                (click)="discardChanges()"
+              >
+                {{ 'household.tasks_discard' | t }}
+              </button>
+            </div>
+          </details>
+          <button
+            type="button"
+            class="tasks-button tasks-button--primary"
+            data-test="tasks-save"
+            [disabled]="!canEdit || !isDirty() || saving() || !!randomPreview()"
+            (click)="saveWeek()"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="m5 12 4 4L19 6" />
+            </svg>
+            {{ saving() ? ('household.tasks_saving' | t) : ('household.tasks_save' | t) }}
+          </button>
+        </div>
+      </section>
+    </aside>
+  </div>
+</section>

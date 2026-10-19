@@ -1,6 +1,6 @@
-# 🔒 Security Configuration - MiCocinAI
+# 🔒 Security Configuration - HogarIA
 
-This document describes the security measures implemented in MiCocinAI.
+This document describes the security measures implemented in HogarIA.
 
 ## Table of Contents
 

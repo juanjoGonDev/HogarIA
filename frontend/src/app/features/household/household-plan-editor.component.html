@@ -1,0 +1,1706 @@
+<section
+  class="plan-editor"
+  [class.plan-editor--assignment-view]="assignmentViewActive()"
+  [class.plan-editor--freeform]="tool() === 'freeform'"
+  [attr.aria-busy]="loading() || saving() || proposing()"
+  (click)="closeAdvancedSettings($event)"
+>
+  <header class="plan-editor__header">
+    <div>
+      <h2>
+        {{
+          setupVisible()
+            ? ('household.plan_setup_title' | t)
+            : assignmentViewActive()
+              ? ('household.tasks_plan_title' | t)
+              : proposal() && proposalPresentation() === 'chat'
+                ? ('household.plan_section_title' | t)
+                : proposal() && attachment()
+                  ? ('household.plan_photo_review_title' | t)
+                  : ('household.plan_title' | t)
+        }}
+      </h2>
+      <p>
+        <span class="plan-editor__description--full">
+          {{
+            setupVisible()
+              ? ('household.plan_setup_description' | t)
+              : assignmentViewActive()
+                ? ('household.plan_assignment_description' | t)
+                : proposal() && proposalPresentation() === 'chat'
+                  ? ('household.plan_adjust_chat_description' | t)
+                  : proposal() && attachment()
+                    ? ('household.plan_photo_review_description' | t)
+                    : ('household.plan_description' | t)
+          }}
+        </span>
+        <span class="plan-editor__description--compact">
+          {{
+            setupVisible()
+              ? ('household.plan_setup_description' | t)
+              : assignmentViewActive()
+                ? ('household.plan_assignment_description_compact' | t)
+                : proposal() && attachment() && proposalPresentation() === 'photo'
+                  ? ('household.plan_photo_review_description_compact' | t)
+                  : ('household.plan_description_compact' | t)
+          }}
+        </span>
+      </p>
+    </div>
+    <details
+      *ngIf="!setupVisible() && !proposal() && !assignmentViewActive()"
+      class="plan-editor__advanced-settings"
+    >
+      <summary class="plan-advanced-summary">
+        <span class="plan-more-label">{{ 'household.plan_more_options' | t }}</span>
+        <span class="plan-more-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" focusable="false">
+            <circle cx="5" cy="12" r="1.5" />
+            <circle cx="12" cy="12" r="1.5" />
+            <circle cx="19" cy="12" r="1.5" />
+          </svg>
+        </span>
+      </summary>
+      <div class="plan-editor__advanced-settings-content">
+        <div class="plan-options-group plan-options-group--drawing">
+          <button
+            *ngIf="canEdit"
+            type="button"
+            class="plan-button plan-button--quiet plan-menu-action plan-draw-area-toggle"
+            data-test="plan-draw-area"
+            data-close-advanced-settings
+            [class.is-selected]="tool() === 'space'"
+            [attr.aria-pressed]="tool() === 'space'"
+            (click)="setTool('space')"
+          >
+            <span class="plan-menu-action__content">
+              <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+                <path d="M4 5h16v14H4z" stroke-dasharray="3 3" />
+                <path d="M4 5v4m0 7v3h4m8 0h4v-4" />
+              </svg>
+              <span class="plan-menu-action__label">{{ 'household.plan_draw_area' | t }}</span>
+            </span>
+          </button>
+          <app-switch
+            class="plan-snap-control plan-snap-setting-mobile"
+            data-test="plan-snap-grid-mobile"
+            [visibleLabel]="true"
+            [labelledBy]="'plan-snap-label-mobile'"
+            [attr.title]="'household.plan_snap_grid' | t"
+            [checked]="snapToGrid()"
+            (checkedChange)="snapToGrid.set($event)"
+          >
+            <span id="plan-snap-label-mobile">{{ 'household.plan_snap_grid' | t }}</span>
+          </app-switch>
+        </div>
+
+        <div class="plan-options-group plan-options-group--dwelling">
+          <div class="plan-editor__field plan-editor__dwelling-type">
+            <span>{{ 'household.plan_dwelling_type' | t }}</span>
+            <app-picker
+              id="household-plan-dwelling-type"
+              [label]="'household.plan_dwelling_type' | t"
+              [options]="dwellingTypeOptions()"
+              [value]="draft().dwellingType"
+              [disabled]="!canEdit"
+              (valueChange)="setDwellingTypeFromPicker($event)"
+            />
+          </div>
+          <label *ngIf="draft().dwellingType === 'other'" class="plan-editor__dwelling-other">
+            <span>{{ 'household.plan_dwelling_other_label' | t }}</span>
+            <input
+              [ngModel]="draft().dwellingTypeLabel"
+              [disabled]="!canEdit"
+              (ngModelChange)="setDwellingTypeLabel($event)"
+            />
+          </label>
+        </div>
+
+        <div class="plan-options-group plan-options-group--floors">
+          <label class="plan-editor__floor-name" *ngIf="activeFloor() as floor">
+            <span>{{ 'household.plan_floor_name' | t }}</span>
+            <input
+              [ngModel]="floor.name"
+              [disabled]="!canEdit"
+              (ngModelChange)="renameFloor($event)"
+            />
+          </label>
+          <div class="plan-options-floor-actions">
+            <button
+              *ngIf="canEdit"
+              type="button"
+              class="plan-button plan-button--quiet plan-menu-action"
+              data-test="plan-add-floor"
+              (click)="addFloor()"
+            >
+              <span class="plan-menu-action__content">
+                <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+                <span class="plan-menu-action__label">{{ 'household.plan_add_floor' | t }}</span>
+              </span>
+            </button>
+            <button
+              *ngIf="canEdit"
+              type="button"
+              class="plan-button plan-button--quiet plan-menu-action"
+              data-test="plan-add-basement"
+              (click)="addBasement()"
+            >
+              <span class="plan-menu-action__content">
+                <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+                  <path d="M4 5h16M6 5v10a6 6 0 0 0 12 0V5M9 19h6" />
+                </svg>
+                <span class="plan-menu-action__label">{{ 'household.plan_add_basement' | t }}</span>
+              </span>
+            </button>
+          </div>
+          <button
+            *ngIf="canEdit && draft().floors.length > 1"
+            type="button"
+            class="plan-button plan-menu-action plan-button--danger"
+            data-test="plan-remove-floor"
+            (click)="removeFloor()"
+          >
+            <span class="plan-menu-action__content">
+              <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+                <path d="M4 7h16m-10 4v6m4-6v6M6 7l1 14h10l1-14M9 7V4h6v3" />
+              </svg>
+              <span class="plan-menu-action__label">{{ 'household.plan_remove_floor' | t }}</span>
+            </span>
+          </button>
+        </div>
+
+        <div class="plan-options-footer">
+          <span class="plan-editor__version">{{
+            'household.plan_revision' | t: { version: snapshot().version }
+          }}</span>
+          <button
+            type="button"
+            class="plan-button plan-button--quiet plan-menu-action"
+            data-test="plan-discard-changes"
+            [disabled]="!canEdit || !isDirty() || saving()"
+            (click)="discardChanges()"
+          >
+            <span class="plan-menu-action__content">
+              <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+                <path d="M4 10V4m0 6h6m-6 0 4-4m0 0a8 8 0 1 1-1.5 9" />
+              </svg>
+              <span class="plan-menu-action__label">{{
+                'household.plan_discard_changes' | t
+              }}</span>
+            </span>
+          </button>
+        </div>
+      </div>
+    </details>
+    <div
+      *ngIf="proposal() && proposalPresentation() === 'chat'"
+      class="plan-review__header-actions"
+    >
+      <label class="plan-file plan-file--compact">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M12 16V4m-5 5 5-5 5 5M4 14v5h16v-5" />
+        </svg>
+        <span>{{ 'household.plan_upload_new_sketch' | t }}</span>
+        <input
+          data-test="plan-chat-photo-upload"
+          type="file"
+          accept="image/jpeg,image/png,image/webp,application/pdf"
+          [disabled]="!canEdit || proposing() || saving()"
+          (change)="startPhotoFollowup($event)"
+        />
+      </label>
+      <button
+        type="button"
+        class="plan-button"
+        data-test="plan-return-to-canvas"
+        [disabled]="saving() || proposing()"
+        (click)="continueEditingProposal()"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M13 5h6v6m0-6-9 9M17 13v6H5V7h6" />
+        </svg>
+        {{ 'household.plan_continue_editing' | t }}
+      </button>
+    </div>
+  </header>
+
+  <div
+    *ngIf="!setupVisible() && !proposal() && assignmentViewActive()"
+    class="plan-assignment__floor-tabs"
+    role="group"
+    [attr.aria-label]="'household.plan_floor' | t"
+    data-test="plan-assignment-floor-tabs"
+  >
+    <button
+      *ngFor="let floor of draft().floors"
+      type="button"
+      class="plan-floor-tabs__tab"
+      [class.is-selected]="floor.id === selectedFloorId()"
+      [attr.aria-pressed]="floor.id === selectedFloorId()"
+      (click)="selectFloor(floor.id)"
+    >
+      {{ floor.name }}
+    </button>
+  </div>
+
+  <p *ngIf="!canEdit" class="plan-editor__notice" data-test="plan-read-only">
+    {{ 'household.plan_read_only' | t }}
+  </p>
+  <p
+    *ngIf="errorKey() as error"
+    class="plan-editor__message plan-editor__message--error"
+    role="alert"
+  >
+    {{ error | t }}
+  </p>
+  <p
+    *ngIf="noticeKey() as notice"
+    class="plan-editor__message plan-editor__message--success"
+    role="status"
+  >
+    {{ notice | t }}
+  </p>
+  <label
+    *ngIf="!setupVisible() && !proposal() && orphanedTaskIds().length"
+    class="plan-review__confirm"
+    data-test="plan-orphan-task-confirm"
+  >
+    <input
+      type="checkbox"
+      [ngModel]="confirmOrphanedTasks()"
+      (ngModelChange)="confirmOrphanedTasks.set($event)"
+    />
+    {{ 'household.plan_orphan_tasks_confirm' | t: { count: orphanedTaskIds().length } }}
+  </label>
+
+  <p *ngIf="loading()" class="plan-editor__loading" role="status">
+    {{ 'household.plan_loading' | t }}
+  </p>
+
+  <ng-container *ngIf="!loading()">
+    <section *ngIf="setupVisible()" class="plan-setup" data-test="plan-setup">
+      <div class="plan-setup__dwelling">
+        <div
+          class="plan-setup__dwelling-types"
+          role="group"
+          [attr.aria-label]="'household.plan_dwelling_type' | t"
+        >
+          <h3>{{ 'household.plan_dwelling_type' | t }}</h3>
+          <div class="plan-setup__dwelling-cards">
+            <button
+              *ngFor="let type of dwellingCardTypes"
+              type="button"
+              class="plan-setup__dwelling-card"
+              [class.is-selected]="draft().dwellingType === type"
+              [attr.aria-pressed]="draft().dwellingType === type"
+              [attr.aria-label]="dwellingTypeLabel(type)"
+              [attr.data-test]="type === 'detached_house' ? 'plan-dwelling-house' : null"
+              (click)="setSetupDwellingType(type)"
+            >
+              <span class="plan-setup__dwelling-icon" aria-hidden="true">
+                <svg viewBox="0 0 64 64" fill="none" focusable="false">
+                  <g
+                    *ngIf="type === 'apartment'; else houseIcon"
+                    stroke="currentColor"
+                    stroke-width="3.2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <path d="M16 56V9h32v47M11 56h42" />
+                    <path
+                      d="M23 17h5v5h-5zM36 17h5v5h-5zM23 29h5v5h-5zM36 29h5v5h-5zM23 41h5v5h-5zM36 41h5v5h-5z"
+                    />
+                  </g>
+                  <ng-template #houseIcon>
+                    <g
+                      *ngIf="type === 'detached_house'; else otherHouseIcon"
+                      stroke="currentColor"
+                      stroke-width="3.2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <path d="m9 29 23-20 23 20M16 27v29h32V27M27 56V39h10v17" />
+                      <path d="M43 20V11h9v15" />
+                    </g>
+                  </ng-template>
+                  <ng-template #otherHouseIcon>
+                    <g
+                      *ngIf="type === 'terraced_house'; else otherDwellingIcon"
+                      stroke="currentColor"
+                      stroke-width="3.2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <path d="m4 29 15-15 15 15M30 29l15-15 15 15M9 28v28h40V28M24 56V41h10v15" />
+                    </g>
+                  </ng-template>
+                  <ng-template #otherDwellingIcon>
+                    <circle cx="16" cy="32" r="3.5" fill="currentColor" />
+                    <circle cx="32" cy="32" r="3.5" fill="currentColor" />
+                    <circle cx="48" cy="32" r="3.5" fill="currentColor" />
+                  </ng-template>
+                </svg>
+              </span>
+              <span>{{ dwellingCardLabel(type) }}</span>
+              <span class="plan-setup__radio" aria-hidden="true"></span>
+            </button>
+          </div>
+        </div>
+        <div class="plan-setup__floor-count">
+          <span>{{ 'household.plan_setup_floors' | t }}</span>
+          <app-picker
+            id="household-plan-setup-floor-count"
+            data-test="plan-floor-count"
+            [label]="'household.plan_setup_floors' | t"
+            [options]="setupFloorOptions"
+            [value]="setupFloorCount().toString()"
+            (valueChange)="setSetupFloorCount($event ?? '1')"
+          />
+        </div>
+      </div>
+
+      <div
+        class="plan-setup__methods"
+        role="group"
+        [attr.aria-label]="'household.plan_setup_method' | t"
+      >
+        <button
+          type="button"
+          class="plan-method-card"
+          data-test="plan-method-canvas"
+          [class.is-selected]="selectedEntryMethod() === 'canvas'"
+          [attr.aria-pressed]="selectedEntryMethod() === 'canvas'"
+          (click)="selectEntryMethod('canvas')"
+        >
+          <span class="plan-method-card__icon" aria-hidden="true">
+            <svg viewBox="0 0 64 64" fill="none" focusable="false">
+              <path
+                d="M10 13h28v18M10 13v38h17"
+                stroke="currentColor"
+                stroke-width="3.2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+              <path
+                d="m34 48 18-21 6 5-18 21-9 3 3-8Z"
+                stroke="var(--primary)"
+                stroke-width="3.2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </span>
+          <strong>{{ 'household.plan_method_canvas' | t }}</strong>
+          <span>{{ 'household.plan_method_canvas_help' | t }}</span>
+          <span class="plan-method-card__chevron" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path d="m9 18 6-6-6-6" />
+            </svg>
+          </span>
+        </button>
+        <button
+          type="button"
+          class="plan-method-card"
+          data-test="plan-method-photo"
+          [class.is-selected]="selectedEntryMethod() === 'photo'"
+          [attr.aria-pressed]="selectedEntryMethod() === 'photo'"
+          (click)="selectEntryMethod('photo')"
+        >
+          <span class="plan-method-card__icon" aria-hidden="true">
+            <svg viewBox="0 0 64 64" fill="none" focusable="false">
+              <rect
+                x="9"
+                y="10"
+                width="46"
+                height="44"
+                rx="4"
+                stroke="currentColor"
+                stroke-width="3.2"
+              />
+              <path
+                d="m13 47 14-15 11 11 5-6 8 10"
+                stroke="currentColor"
+                stroke-width="3.2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+              <circle cx="43" cy="22" r="5" stroke="var(--primary)" stroke-width="3.2" />
+            </svg>
+          </span>
+          <strong>{{ 'household.plan_method_photo' | t }}</strong>
+          <span>{{ 'household.plan_method_photo_help' | t }}</span>
+          <span class="plan-method-card__chevron" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path d="m9 18 6-6-6-6" />
+            </svg>
+          </span>
+        </button>
+        <button
+          type="button"
+          class="plan-method-card"
+          data-test="plan-method-guided"
+          [class.is-selected]="selectedEntryMethod() === 'guided'"
+          [attr.aria-pressed]="selectedEntryMethod() === 'guided'"
+          (click)="selectEntryMethod('guided')"
+        >
+          <span class="plan-method-card__icon" aria-hidden="true">
+            <svg viewBox="0 0 64 64" fill="none" focusable="false">
+              <rect
+                x="8"
+                y="9"
+                width="18"
+                height="18"
+                rx="2"
+                stroke="currentColor"
+                stroke-width="3.2"
+              />
+              <rect
+                x="38"
+                y="9"
+                width="18"
+                height="18"
+                rx="2"
+                stroke="var(--primary)"
+                stroke-width="3.2"
+              />
+              <rect
+                x="8"
+                y="39"
+                width="18"
+                height="18"
+                rx="2"
+                stroke="currentColor"
+                stroke-width="3.2"
+              />
+              <rect
+                x="38"
+                y="39"
+                width="18"
+                height="18"
+                rx="2"
+                stroke="currentColor"
+                stroke-width="3.2"
+              />
+            </svg>
+          </span>
+          <strong>{{ 'household.plan_method_guided' | t }}</strong>
+          <span>{{ 'household.plan_method_guided_help' | t }}</span>
+          <span class="plan-method-card__chevron" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path d="m9 18 6-6-6-6" />
+            </svg>
+          </span>
+        </button>
+      </div>
+      <p class="plan-setup__reassurance">{{ 'household.plan_setup_reassurance' | t }}</p>
+      <button
+        type="button"
+        class="plan-button plan-button--primary plan-setup__start"
+        data-test="plan-start"
+        [disabled]="!canEdit"
+        (click)="startPlan()"
+      >
+        {{ 'household.plan_setup_start' | t }}
+      </button>
+    </section>
+
+    <section
+      *ngIf="!setupVisible() && proposal() as proposed"
+      class="plan-review"
+      data-test="plan-proposal-review"
+      aria-live="polite"
+    >
+      <div class="plan-review__summary">
+        <div>
+          <span class="plan-review__eyebrow">{{ 'household.plan_proposal_badge' | t }}</span>
+          <h3>{{ 'household.plan_proposal_title' | t }}</h3>
+          <p>
+            {{ 'household.plan_diff_added' | t: { count: proposed.diff.addedSpaceIds.length } }}
+            ·
+            {{ 'household.plan_diff_removed' | t: { count: proposed.diff.removedSpaceIds.length } }}
+            ·
+            {{
+              'household.plan_diff_changed' | t: { count: proposed.diff.modifiedSpaceIds.length }
+            }}
+          </p>
+        </div>
+      </div>
+
+      <label
+        *ngIf="proposed.orphanedTaskIds.length"
+        class="plan-review__confirm"
+        data-test="plan-proposal-orphan-confirm"
+      >
+        <input
+          type="checkbox"
+          [ngModel]="confirmOrphanedTasks()"
+          (ngModelChange)="confirmOrphanedTasks.set($event)"
+        />
+        {{ 'household.plan_orphan_tasks_confirm' | t: { count: proposed.orphanedTaskIds.length } }}
+      </label>
+
+      <div
+        *ngIf="proposalPresentation() === 'photo'"
+        class="plan-review__photo"
+        data-test="plan-proposal-photo"
+      >
+        <section class="plan-review__photo-source">
+          <div class="plan-review__card-heading">
+            <h4>{{ 'household.plan_photo_original' | t }}</h4>
+            <span>{{ attachment()?.name }}</span>
+          </div>
+          <img
+            *ngIf="isImageAttachment() && attachmentPreviewUrl() as previewUrl"
+            data-test="plan-attachment-preview"
+            [src]="previewUrl"
+            [alt]="'household.plan_photo_original_alt' | t"
+          />
+          <a
+            *ngIf="!isImageAttachment() && attachmentPreviewUrl() as previewUrl"
+            class="plan-link"
+            [href]="previewUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+            >{{ 'household.plan_open_pdf' | t }}</a
+          >
+          <div class="plan-review__photo-source-actions">
+            <label class="plan-file plan-file--compact">
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <rect x="3" y="4" width="18" height="16" rx="2" />
+                <circle cx="8.5" cy="9" r="1.5" />
+                <path d="m4 17 5-5 3 3 3-4 5 6" />
+              </svg>
+              <span>{{ 'household.plan_upload_another' | t }}</span>
+              <input
+                data-test="plan-photo-upload"
+                type="file"
+                accept="image/jpeg,image/png,image/webp,application/pdf"
+                (change)="onAttachmentChange($event)"
+              />
+            </label>
+            <label class="plan-file plan-file--compact plan-file--camera">
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M4 7h3l1.5-2h7L17 7h3a1 1 0 0 1 1 1v10H3V8a1 1 0 0 1 1-1Z" />
+                <circle cx="12" cy="13" r="3.5" />
+              </svg>
+              <span>{{ 'household.plan_take_photo' | t }}</span>
+              <input
+                data-test="plan-photo-camera"
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                capture="environment"
+                (change)="onAttachmentChange($event)"
+              />
+            </label>
+          </div>
+        </section>
+        <section class="plan-review__photo-result">
+          <div class="plan-review__card-heading">
+            <h4>{{ 'household.plan_proposal_title_short' | t }}</h4>
+            <span class="plan-review__ready">{{ 'household.plan_proposal_ready' | t }}</span>
+            <button
+              type="button"
+              class="plan-button plan-button--quiet plan-review__photo-discard"
+              data-test="plan-proposal-discard"
+              [attr.aria-label]="'household.plan_discard_proposal' | t"
+              [attr.title]="'household.plan_discard_proposal' | t"
+              [disabled]="saving()"
+              (click)="discardProposal()"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M6 6l12 12M18 6 6 18" />
+              </svg>
+            </button>
+          </div>
+          <app-household-plan-preview-map
+            [floor]="comparisonFloor(proposed.proposal)"
+            [ariaLabel]="'household.plan_proposal_map' | t"
+          ></app-household-plan-preview-map>
+          <p>{{ 'household.plan_proposal_editable' | t }}</p>
+          <p class="plan-review__photo-entry-question">
+            {{ 'household.plan_photo_entry_question' | t }}
+          </p>
+          <button
+            type="button"
+            class="plan-button plan-button--primary plan-review__photo-apply"
+            data-test="plan-proposal-apply"
+            [disabled]="!canApplyProposal()"
+            (click)="applyProposal()"
+          >
+            {{ saving() ? ('household.plan_saving' | t) : ('household.plan_photo_confirm' | t) }}
+          </button>
+          <button
+            type="button"
+            class="plan-button plan-button--quiet plan-review__chat-action"
+            data-test="plan-proposal-chat"
+            (click)="setProposalPresentation('chat')"
+          >
+            {{ 'household.plan_photo_change' | t }}
+          </button>
+        </section>
+      </div>
+
+      <div
+        *ngIf="proposalPresentation() === 'chat'"
+        class="plan-review__chat-view"
+        data-test="plan-proposal-chat-view"
+      >
+        <div
+          class="plan-review__mobile-tabs"
+          role="group"
+          [attr.aria-label]="'household.plan_compare_title' | t"
+        >
+          <button
+            type="button"
+            [class.is-selected]="previewMode() === 'current'"
+            [attr.aria-pressed]="previewMode() === 'current'"
+            (click)="setPreviewMode('current')"
+          >
+            {{ 'household.plan_compare_current' | t: { version: proposed.baseVersion } }}
+          </button>
+          <button
+            type="button"
+            [class.is-selected]="previewMode() === 'proposal'"
+            [attr.aria-pressed]="previewMode() === 'proposal'"
+            (click)="setPreviewMode('proposal')"
+          >
+            {{ 'household.plan_compare_proposal' | t: { version: proposed.baseVersion + 1 } }}
+          </button>
+        </div>
+        <section
+          class="plan-review__compare-card plan-review__compare-card--current"
+          [class.is-active]="previewMode() === 'current'"
+        >
+          <h4>{{ 'household.plan_compare_current' | t: { version: proposed.baseVersion } }}</h4>
+          <app-household-plan-preview-map
+            [floor]="comparisonFloor(proposed.current ?? proposed.draft)"
+            [zoom]="previewZoom()"
+            [ariaLabel]="'household.plan_compare_current' | t: { version: proposed.baseVersion }"
+          ></app-household-plan-preview-map>
+        </section>
+        <section
+          class="plan-review__compare-card plan-review__compare-card--proposal"
+          [class.is-active]="previewMode() === 'proposal'"
+        >
+          <h4>
+            {{ 'household.plan_compare_proposal' | t: { version: proposed.baseVersion + 1 } }}
+          </h4>
+          <app-household-plan-preview-map
+            [floor]="comparisonFloor(proposed.proposal)"
+            [zoom]="previewZoom()"
+            [ariaLabel]="
+              'household.plan_compare_proposal' | t: { version: proposed.baseVersion + 1 }
+            "
+          ></app-household-plan-preview-map>
+        </section>
+        <div
+          class="plan-review__map-controls"
+          data-test="plan-chat-map-controls"
+          role="group"
+          [attr.aria-label]="'household.plan_zoom' | t"
+        >
+          <div class="plan-review__zoom-group">
+            <button
+              type="button"
+              data-test="plan-chat-zoom-out"
+              [attr.aria-label]="'household.plan_zoom_out' | t"
+              (click)="changePreviewZoom(-10)"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M5 12h14" />
+              </svg>
+            </button>
+            <output data-test="plan-preview-zoom" aria-live="polite">{{ previewZoom() }}%</output>
+            <button
+              type="button"
+              data-test="plan-chat-zoom-in"
+              [attr.aria-label]="'household.plan_zoom_in' | t"
+              (click)="changePreviewZoom(10)"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+            </button>
+          </div>
+          <button
+            type="button"
+            data-test="plan-chat-fit"
+            [attr.aria-label]="'household.plan_fit_view' | t"
+            (click)="resetPreviewZoom()"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M8 3H4v4m12-4h4v4M4 17v4h4m12-4v4h-4" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+            <span>{{ 'household.plan_fit_view' | t }}</span>
+          </button>
+        </div>
+        <aside class="plan-chat" aria-labelledby="plan-chat-title">
+          <h4 id="plan-chat-title">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path
+                d="m12 2 2.2 6.4L20.5 11l-6.3 2.6L12 20l-2.2-6.4L3.5 11l6.3-2.6L12 2Z"
+                fill="currentColor"
+                stroke="none"
+              />
+              <path
+                d="m19 14 .9 2.6 2.6.9-2.6.9-.9 2.6-.9-2.6-2.6-.9 2.6-.9.9-2.6Z"
+                fill="currentColor"
+                stroke="none"
+              />
+            </svg>
+            {{ 'household.plan_assistant_title' | t }}
+          </h4>
+          <div class="plan-chat__messages" aria-live="polite">
+            <p class="plan-chat__user-message">
+              {{ prompt() || ('household.plan_chat_default_message' | t) }}
+            </p>
+            <p class="plan-chat__assistant-message">
+              <span class="plan-chat__assistant-avatar" aria-hidden="true">
+                <svg viewBox="0 0 24 24" focusable="false">
+                  <path
+                    d="m2 11 10-8 10 8v10a1 1 0 0 1-1 1h-6v-7H9v7H3a1 1 0 0 1-1-1V11Z"
+                    fill="currentColor"
+                    stroke="none"
+                  />
+                </svg>
+              </span>
+              <span class="plan-chat__assistant-copy">{{
+                chatProposalMessage(
+                  proposed.diff.addedSpaceIds.length,
+                  proposed.diff.modifiedSpaceIds.length
+                )
+              }}</span>
+            </p>
+          </div>
+          <div class="plan-review__actions">
+            <button
+              type="button"
+              class="plan-button plan-button--quiet"
+              data-test="plan-proposal-discard"
+              [disabled]="saving()"
+              (click)="discardProposal()"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M3.5 9V4.5M3.5 9H8M3.8 8.7A8.5 8.5 0 1 1 4 16" />
+              </svg>
+              <span>{{ 'household.plan_chat_undo' | t }}</span>
+            </button>
+            <button
+              type="button"
+              class="plan-button plan-button--primary"
+              data-test="plan-proposal-apply"
+              [disabled]="!canApplyProposal()"
+              (click)="applyProposal()"
+            >
+              {{ saving() ? ('household.plan_saving' | t) : ('household.plan_chat_apply' | t) }}
+            </button>
+          </div>
+          <nav
+            class="plan-chat__continuations"
+            data-test="plan-chat-continuations"
+            aria-labelledby="plan-chat-next-steps-title"
+          >
+            <h5 id="plan-chat-next-steps-title" class="plan-chat__continuations-heading">
+              {{ 'household.plan_chat_next_steps' | t }}
+            </h5>
+            <button
+              type="button"
+              class="plan-chat__continuation"
+              data-test="plan-chat-continuation"
+              [disabled]="saving() || proposing()"
+              (click)="continueEditingProposal(true)"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M4 5h16v11H9l-5 4V5Z" />
+                <path d="M8 9h8M8 12h5" />
+              </svg>
+              <span>{{ 'household.plan_continue_existing_chat' | t }}</span>
+            </button>
+            <button
+              type="button"
+              class="plan-chat__continuation"
+              data-test="plan-chat-continuation"
+              [disabled]="saving() || proposing()"
+              (click)="continueEditingProposal()"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5" />
+              </svg>
+              <span>{{ 'household.plan_start_new_chat' | t }}</span>
+            </button>
+            <label
+              class="plan-chat__continuation plan-chat__continuation--upload"
+              data-test="plan-chat-continuation"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M12 16V4m-5 5 5-5 5 5M4 14v5h16v-5" />
+              </svg>
+              <span>{{ 'household.plan_upload_new_sketch' | t }}</span>
+              <input
+                data-test="plan-chat-continuation-photo"
+                type="file"
+                accept="image/jpeg,image/png,image/webp,application/pdf"
+                [disabled]="!canEdit || proposing() || saving()"
+                (change)="startPhotoFollowup($event)"
+              />
+            </label>
+            <button
+              type="button"
+              class="plan-chat__continuation"
+              data-test="plan-chat-continuation"
+              [disabled]="saving() || proposing()"
+              (click)="continueEditingProposal()"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M19 12H5m0 0 6-6m-6 6 6 6" />
+              </svg>
+              <span>{{ 'household.plan_return_to_canvas' | t }}</span>
+            </button>
+          </nav>
+        </aside>
+      </div>
+
+      <div
+        *ngIf="proposalPresentation() === 'photo'"
+        class="plan-review__actions plan-review__actions--photo"
+      >
+        <button
+          type="button"
+          class="plan-button plan-button--primary plan-review__photo-continue"
+          data-test="plan-proposal-continue"
+          [disabled]="saving() || proposing()"
+          (click)="continueEditingProposal()"
+        >
+          {{ 'household.plan_photo_continue' | t }}
+        </button>
+      </div>
+    </section>
+
+    <ng-container *ngIf="!setupVisible() && !proposal()">
+      <div class="plan-editor__toolbar" data-test="plan-canvas-toolbar">
+        <div
+          class="plan-floor-tabs"
+          role="group"
+          [attr.aria-label]="'household.plan_floor' | t"
+          data-test="plan-floor-tabs"
+        >
+          <button
+            *ngFor="let floor of draft().floors"
+            type="button"
+            class="plan-floor-tabs__tab"
+            [class.is-selected]="floor.id === selectedFloorId()"
+            [attr.aria-pressed]="floor.id === selectedFloorId()"
+            (click)="selectFloor(floor.id)"
+          >
+            {{ floor.name }}
+          </button>
+        </div>
+        <div class="plan-editor__toolbar-actions">
+          <app-switch
+            class="plan-snap-control"
+            data-test="plan-snap-grid"
+            [visibleLabel]="true"
+            [labelledBy]="'plan-snap-label-desktop'"
+            [attr.title]="'household.plan_snap_grid' | t"
+            [checked]="snapToGrid()"
+            (checkedChange)="snapToGrid.set($event)"
+          >
+            <span id="plan-snap-label-desktop" class="plan-snap-label">
+              {{ 'household.plan_snap_grid' | t }}
+            </span>
+          </app-switch>
+          <button
+            type="button"
+            class="plan-button plan-toolbar-icon"
+            data-test="plan-undo"
+            [attr.aria-label]="'household.plan_undo' | t"
+            [title]="'household.plan_undo' | t"
+            [disabled]="!canEdit || !undoStack().length || saving()"
+            (click)="undo()"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M4 8V4m0 4h4M4.4 8.4A8.5 8.5 0 1 1 5 16" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            class="plan-button plan-toolbar-icon"
+            data-test="plan-redo"
+            [attr.aria-label]="'household.plan_redo' | t"
+            [title]="'household.plan_redo' | t"
+            [disabled]="!canEdit || !redoStack().length || saving()"
+            (click)="redo()"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M20 8V4m0 4h-4m3.6.4A8.5 8.5 0 1 0 19 16" />
+            </svg>
+          </button>
+          <div
+            class="plan-canvas__zoom-controls plan-editor__quick-zoom"
+            role="group"
+            [attr.aria-label]="'household.plan_zoom' | t"
+          >
+            <button
+              type="button"
+              class="plan-button"
+              [attr.aria-label]="'household.plan_zoom_out' | t"
+              (click)="changeCanvasZoom(-10)"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M5 12h14" />
+              </svg>
+            </button>
+            <span>{{ canvasZoom() }}%</span>
+            <button
+              type="button"
+              class="plan-button"
+              [attr.aria-label]="'household.plan_zoom_in' | t"
+              (click)="changeCanvasZoom(10)"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="plan-canvas-toolbar" [attr.aria-label]="'household.plan_tools' | t">
+        <div
+          class="plan-canvas-toolbar__tools"
+          role="group"
+          [attr.aria-label]="'household.plan_draw_tools' | t"
+        >
+          <button
+            type="button"
+            class="plan-tool"
+            [class.is-selected]="tool() === 'select'"
+            [attr.aria-pressed]="tool() === 'select'"
+            (click)="setTool('select')"
+          >
+            <span aria-hidden="true">
+              <svg viewBox="0 0 64 64">
+                <path d="M18 8v45l12-13 8 17 8-4-8-17h16L18 8Z" fill="currentColor" stroke="none" />
+              </svg> </span
+            >{{ 'household.plan_tool_select' | t }}
+          </button>
+          <button
+            type="button"
+            class="plan-tool"
+            [class.is-selected]="tool() === 'wall'"
+            [attr.aria-pressed]="tool() === 'wall'"
+            (click)="setTool('wall')"
+          >
+            <span aria-hidden="true">
+              <svg viewBox="0 0 64 64"><path d="M10 32h44" /></svg> </span
+            >{{ 'household.plan_tool_wall' | t }}
+          </button>
+          <button
+            type="button"
+            class="plan-tool"
+            data-test="plan-tool-freeform"
+            [class.is-selected]="tool() === 'freeform' || tool() === 'space'"
+            [attr.aria-pressed]="tool() === 'freeform' || tool() === 'space'"
+            [attr.aria-label]="
+              (tool() === 'space' ? 'household.plan_draw_area' : 'household.plan_draw_freeform') | t
+            "
+            (click)="setTool('freeform')"
+          >
+            <span aria-hidden="true">
+              <svg *ngIf="tool() === 'space'; else freeformToolIcon" viewBox="0 0 64 64">
+                <path d="M13 18h37v31H13z" stroke-dasharray="5 5" />
+                <path d="M13 18v8m0 15v8h8m19 0h10v-8" />
+              </svg>
+              <ng-template #freeformToolIcon>
+                <svg viewBox="0 0 64 64"><path d="m12 17 31-6 10 24-22 20-19-17z" /></svg>
+              </ng-template>
+            </span>
+            {{
+              (tool() === 'space' ? 'household.plan_draw_area' : 'household.plan_draw_freeform') | t
+            }}
+          </button>
+          <button
+            type="button"
+            class="plan-tool"
+            [class.is-selected]="tool() === 'door'"
+            [attr.aria-pressed]="tool() === 'door'"
+            (click)="setTool('door')"
+          >
+            <span aria-hidden="true">
+              <svg viewBox="0 0 64 64">
+                <path d="M14 52V30a20 20 0 0 1 20-20h14v42H14Z" />
+              </svg> </span
+            >{{ 'household.plan_tool_door' | t }}
+          </button>
+          <button
+            type="button"
+            class="plan-tool"
+            [class.is-selected]="tool() === 'window'"
+            [attr.aria-pressed]="tool() === 'window'"
+            (click)="setTool('window')"
+          >
+            <span aria-hidden="true">
+              <svg viewBox="0 0 64 64">
+                <path d="M10 17h44v30H10zM11 27h42M11 37h42M32 27v10" />
+              </svg> </span
+            >{{ 'household.plan_tool_window' | t }}
+          </button>
+        </div>
+        <div *ngIf="tool() === 'wall'" class="plan-canvas-toolbar__wall-kind plan-editor__field">
+          <span>{{ 'household.plan_wall_type' | t }}</span>
+          <app-picker
+            id="household-plan-wall-kind"
+            [label]="'household.plan_wall_type' | t"
+            [options]="wallKindOptions()"
+            [value]="selectedWallKind()"
+            [disabled]="!canEdit"
+            [floatingPanel]="true"
+            (valueChange)="setSelectedWallKindFromPicker($event)"
+          />
+        </div>
+        <div
+          class="plan-canvas-toolbar__rooms"
+          role="group"
+          [attr.aria-label]="'household.plan_quick_add' | t"
+        >
+          <button
+            type="button"
+            class="plan-room-chip"
+            *ngFor="
+              let kind of ['kitchen', 'living_room', 'bathroom', 'bedroom', 'hallway', 'patio']
+            "
+            [disabled]="!canEdit"
+            (click)="addQuickArea($any(kind))"
+            (focus)="bringQuickAreaIntoView($event)"
+          >
+            <svg
+              householdAreaGlyph
+              [kind]="$any(kind)"
+              viewBox="0 0 64 64"
+              aria-hidden="true"
+            ></svg>
+            {{ areaLabel($any(kind)) }}
+          </button>
+        </div>
+      </div>
+
+      <div class="plan-editor__workspace">
+        <main class="plan-canvas-column">
+          <div class="plan-canvas__heading">
+            <div>
+              <h3>{{ shownFloor().name }}</h3>
+              <span>{{ 'household.plan_canvas_instruction' | t }}</span>
+            </div>
+            <span *ngIf="tool() !== 'select'" class="plan-canvas__tool-hint" role="status">{{
+              'household.plan_draw_hint' | t
+            }}</span>
+          </div>
+          <div class="plan-canvas__viewport">
+            <div class="plan-canvas__zoom" [style.transform]="'scale(' + canvasZoom() / 100 + ')'">
+              <svg
+                class="plan-canvas"
+                [attr.viewBox]="canvasViewBox"
+                role="group"
+                tabindex="0"
+                [attr.aria-label]="'household.plan_canvas' | t"
+                [class.plan-canvas--drawing]="tool() !== 'select'"
+                (pointerdown)="onCanvasPointerDown($event)"
+                (pointermove)="onCanvasPointerMove($event)"
+                (pointerup)="onCanvasPointerUp($event)"
+                (pointercancel)="onCanvasPointerUp($event)"
+              >
+                <g *ngFor="let wall of shownFloor()?.walls">
+                  <line
+                    [attr.x1]="wall.from.x"
+                    [attr.y1]="wall.from.y"
+                    [attr.x2]="wall.to.x"
+                    [attr.y2]="wall.to.y"
+                    [attr.data-wall-id]="wall.id"
+                    [class.plan-canvas__wall--exterior]="wall.kind === 'exterior'"
+                    [class.plan-canvas__wall--selected]="
+                      selectedWallId() === wall.id && previewMode() === 'current'
+                    "
+                    class="plan-canvas__wall"
+                    tabindex="0"
+                    role="button"
+                    [attr.aria-label]="
+                      wall.kind === 'exterior'
+                        ? ('household.plan_wall_exterior' | t)
+                        : ('household.plan_wall_interior' | t)
+                    "
+                    (click)="selectedWallId.set(wall.id); selectedSpaceId.set(null)"
+                    (keydown.enter)="selectedWallId.set(wall.id); selectedSpaceId.set(null)"
+                    (keydown.space)="
+                      $event.preventDefault();
+                      selectedWallId.set(wall.id);
+                      selectedSpaceId.set(null)
+                    "
+                  />
+                </g>
+                <g *ngFor="let opening of shownFloor()?.openings">
+                  <ng-container *ngIf="openingLine(opening) as segment">
+                    <line
+                      [attr.x1]="segment.from.x"
+                      [attr.y1]="segment.from.y"
+                      [attr.x2]="segment.to.x"
+                      [attr.y2]="segment.to.y"
+                      class="plan-canvas__opening"
+                      [class.plan-canvas__opening--main]="opening.isMainEntrance"
+                    />
+                    <ng-container *ngIf="doorSwing(opening) as swing">
+                      <line
+                        [attr.x1]="swing.hinge.x"
+                        [attr.y1]="swing.hinge.y"
+                        [attr.x2]="swing.leafTip.x"
+                        [attr.y2]="swing.leafTip.y"
+                        class="plan-canvas__door-leaf"
+                        pointer-events="none"
+                      />
+                      <path
+                        [attr.d]="swing.arc"
+                        class="plan-canvas__door-swing"
+                        pointer-events="none"
+                      />
+                    </ng-container>
+                    <line
+                      *ngFor="let rail of openingRails(opening)"
+                      [attr.x1]="rail.from.x"
+                      [attr.y1]="rail.from.y"
+                      [attr.x2]="rail.to.x"
+                      [attr.y2]="rail.to.y"
+                      class="plan-canvas__window-rail"
+                      pointer-events="none"
+                    />
+                    <circle
+                      *ngIf="opening.isMainEntrance"
+                      [attr.cx]="segment.from.x"
+                      [attr.cy]="segment.from.y"
+                      r="150"
+                      class="plan-canvas__entrance-mark"
+                    />
+                  </ng-container>
+                </g>
+                <g *ngFor="let space of shownFloor()?.spaces">
+                  <polygon
+                    [attr.points]="spacePoints(space)"
+                    [attr.data-space-id]="space.id"
+                    [attr.data-kind]="space.kind"
+                    [ngClass]="spaceResponsibilityClass(space.id)"
+                    [class.plan-canvas__space--selected]="
+                      selectedSpaceId() === space.id && previewMode() === 'current'
+                    "
+                    [class.plan-canvas__space--proposal]="previewMode() === 'proposal'"
+                    class="plan-canvas__space"
+                    tabindex="0"
+                    role="button"
+                    [attr.aria-label]="space.label"
+                    (keydown.enter)="selectSpaceFromCanvas(space)"
+                    (keydown.space)="$event.preventDefault(); selectSpaceFromCanvas(space)"
+                    (click)="selectSpaceFromCanvas(space)"
+                  />
+                  <svg
+                    householdAreaGlyph
+                    [kind]="space.kind"
+                    [attr.x]="spaceCenter(space).x - spaceGlyphSize(space) / 2"
+                    [attr.y]="spaceGlyphTop(space)"
+                    [attr.width]="spaceGlyphSize(space)"
+                    [attr.height]="spaceGlyphSize(space)"
+                    viewBox="0 0 64 64"
+                    class="plan-canvas__space-icon"
+                    aria-hidden="true"
+                  ></svg>
+                  <text
+                    [attr.x]="spaceCenter(space).x"
+                    [attr.y]="spaceLabelTop(space)"
+                    [style.font-size.px]="spaceLabelFontSize(space)"
+                    class="plan-canvas__space-label"
+                    pointer-events="none"
+                  >
+                    <tspan
+                      *ngFor="let line of spaceLabelLines(space); let lineIndex = index"
+                      [attr.x]="spaceCenter(space).x"
+                      [attr.dy]="lineIndex === 0 ? 0 : spaceLabelFontSize(space)"
+                    >
+                      {{ line }}
+                    </tspan>
+                  </text>
+                  <g
+                    *ngFor="
+                      let memberId of displayedAssignmentMemberIds(space.id);
+                      let memberIndex = index
+                    "
+                    pointer-events="none"
+                  >
+                    <circle
+                      [attr.cx]="assignmentMemberX(space, memberIndex)"
+                      [attr.cy]="assignmentMemberY(space)"
+                      [attr.r]="assignmentMemberRadius(space)"
+                      [attr.data-owner-index]="memberIndexForId(memberId) % 4"
+                      class="plan-canvas__assignee-avatar"
+                    />
+                    <text
+                      [attr.x]="assignmentMemberX(space, memberIndex)"
+                      [attr.y]="assignmentMemberY(space)"
+                      [style.font-size.px]="assignmentMemberRadius(space) * 0.85"
+                      [attr.data-owner-index]="memberIndexForId(memberId) % 4"
+                      class="plan-canvas__assignee"
+                    >
+                      {{ memberInitials(memberId) }}
+                    </text>
+                  </g>
+                </g>
+                <rect
+                  *ngIf="drawingRect() as rect"
+                  [attr.x]="rect.x"
+                  [attr.y]="rect.y"
+                  [attr.width]="rect.width"
+                  [attr.height]="rect.height"
+                  class="plan-canvas__drawing-preview"
+                />
+                <polygon
+                  *ngIf="tool() === 'freeform' && freeformPoints().length >= 3"
+                  [attr.points]="drawingPolygonPoints()"
+                  class="plan-canvas__drawing-preview"
+                />
+                <polyline
+                  *ngIf="tool() === 'freeform' && freeformPoints().length < 3"
+                  [attr.points]="drawingPolygonPoints()"
+                  class="plan-canvas__drawing-outline"
+                />
+              </svg>
+            </div>
+          </div>
+          <div
+            *ngIf="tool() === 'freeform'"
+            class="plan-canvas__freeform-actions"
+            role="group"
+            [attr.aria-label]="'household.plan_draw_freeform' | t"
+            data-test="plan-freeform-actions"
+          >
+            <p role="status">
+              <span class="plan-freeform-hint--full">{{ 'household.plan_freeform_hint' | t }}</span>
+              <span class="plan-freeform-hint--compact">{{
+                'household.plan_freeform_hint_compact' | t
+              }}</span>
+            </p>
+            <button
+              type="button"
+              class="plan-button plan-button--quiet"
+              data-test="plan-freeform-undo-point"
+              [attr.aria-label]="'household.plan_freeform_undo_point' | t"
+              [disabled]="!freeformPoints().length"
+              (click)="removeLastFreeformPoint()"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M9 14 4 9l5-5M4 9h10a6 6 0 0 1 0 12h-2" />
+              </svg>
+              <span class="plan-freeform-label--full">{{
+                'household.plan_freeform_undo_point' | t
+              }}</span>
+              <span class="plan-freeform-label--compact">{{
+                'household.plan_freeform_undo_point_compact' | t
+              }}</span>
+            </button>
+            <button
+              type="button"
+              class="plan-button plan-button--primary"
+              data-test="plan-freeform-finish"
+              [attr.aria-label]="'household.plan_freeform_finish' | t"
+              [disabled]="freeformPoints().length < 3"
+              (click)="finishFreeformSpace()"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="m5 12 4 4L19 6" />
+              </svg>
+              <span class="plan-freeform-label--full">{{
+                'household.plan_freeform_finish' | t
+              }}</span>
+              <span class="plan-freeform-label--compact">{{
+                'household.plan_freeform_finish_compact' | t
+              }}</span>
+            </button>
+            <button
+              type="button"
+              class="plan-button plan-button--quiet"
+              data-test="plan-freeform-cancel"
+              [attr.aria-label]="'household.plan_freeform_cancel' | t"
+              (click)="cancelFreeformDrawing()"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M6 6l12 12M18 6 6 18" />
+              </svg>
+              <span class="plan-freeform-label--full">{{
+                'household.plan_freeform_cancel' | t
+              }}</span>
+              <span class="plan-freeform-label--compact">{{
+                'household.plan_freeform_cancel_compact' | t
+              }}</span>
+            </button>
+          </div>
+          <ng-container *ngIf="shownFloor() as floor">
+            <div
+              *ngIf="tool() === 'select' && !floor.spaces.length && !floor.walls.length"
+              class="plan-canvas__empty"
+              data-test="plan-canvas-empty"
+              role="status"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M3.5 4.5h17v15h-17zM12 4.5v7h8.5M3.5 11.5H12v8" />
+              </svg>
+              <span>{{ 'household.plan_canvas_empty' | t }}</span>
+            </div>
+          </ng-container>
+          <div
+            *ngIf="selectedWall() as wall"
+            class="plan-selection__wall"
+            data-test="plan-wall-details"
+          >
+            <strong>{{
+              wall.kind === 'exterior'
+                ? ('household.plan_wall_exterior' | t)
+                : ('household.plan_wall_interior' | t)
+            }}</strong>
+            <span>{{ 'household.plan_wall_length' | t: { length: wallLength(wall) } }}</span>
+            <button
+              type="button"
+              class="plan-button"
+              [disabled]="!canEdit || !!proposal()"
+              (click)="addOpening('door')"
+            >
+              {{ 'household.plan_add_door' | t }}
+            </button>
+            <button
+              type="button"
+              class="plan-button"
+              [disabled]="!canEdit || !!proposal()"
+              (click)="addOpening('window')"
+            >
+              {{ 'household.plan_add_window' | t }}
+            </button>
+            <button
+              type="button"
+              class="plan-button"
+              [disabled]="!canEdit || !!proposal()"
+              (click)="addOpening('garage_door')"
+            >
+              {{ 'household.plan_add_garage_door' | t }}
+            </button>
+            <button
+              type="button"
+              class="plan-link"
+              [disabled]="!canEdit || !!proposal()"
+              (click)="removeSelectedWall()"
+            >
+              {{ 'household.plan_delete_wall' | t }}
+            </button>
+          </div>
+        </main>
+
+        <div
+          class="plan-editor__header-actions"
+          *ngIf="!setupVisible() && !proposal() && (!selectedSpace() || isDirty())"
+        >
+          <button
+            type="button"
+            class="plan-button plan-button--primary plan-canvas__preview-action"
+            data-test="plan-save"
+            [disabled]="
+              !canEdit ||
+              !isDirty() ||
+              saving() ||
+              !!proposal() ||
+              (!!orphanedTaskIds().length && !confirmOrphanedTasks())
+            "
+            (click)="savePlan()"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+            {{ saving() ? ('household.plan_saving' | t) : ('household.plan_preview' | t) }}
+          </button>
+        </div>
+
+        <aside class="plan-details" [attr.aria-label]="'household.plan_area_list' | t">
+          <details class="plan-details__zones-disclosure">
+            <summary class="plan-details__zones-summary">
+              <span>{{ 'household.plan_area_list' | t }}</span>
+              <span class="plan-details__zones-count">{{
+                activeFloor()?.spaces?.length ?? 0
+              }}</span>
+            </summary>
+            <section class="plan-details__section plan-details__zones">
+              <h3 class="visually-hidden">{{ 'household.plan_area_list' | t }}</h3>
+              <ul *ngIf="activeFloor()?.spaces?.length; else noAreas">
+                <li *ngFor="let space of shownFloor()?.spaces">
+                  <button
+                    type="button"
+                    class="plan-details__area"
+                    [class.is-selected]="selectedSpaceId() === space.id"
+                    [attr.aria-pressed]="selectedSpaceId() === space.id"
+                    (click)="selectSpace(space)"
+                  >
+                    <span
+                      class="plan-details__area-swatch"
+                      [attr.data-kind]="space.kind"
+                      aria-hidden="true"
+                    ></span>
+                    <span>{{ space.label }}</span>
+                    <small>{{ areaLabel(space.kind) }}</small>
+                  </button>
+                </li>
+              </ul>
+              <ng-template #noAreas
+                ><p>{{ 'household.plan_no_areas' | t }}</p></ng-template
+              >
+              <div class="plan-details__quick-add">
+                <div class="plan-tools__field">
+                  <span>{{ 'household.plan_area_type' | t }}</span>
+                  <app-picker
+                    id="household-plan-area-type"
+                    [label]="'household.plan_area_type' | t"
+                    [options]="areaOptions()"
+                    [value]="selectedKind()"
+                    [disabled]="!canEdit || !!proposal()"
+                    [floatingPanel]="true"
+                    (valueChange)="setSelectedKindFromPicker($event)"
+                  />
+                </div>
+                <label *ngIf="selectedKind() === 'custom'"
+                  ><span>{{ 'household.plan_custom_name' | t }}</span
+                  ><input
+                    [ngModel]="selectedLabel()"
+                    [disabled]="!canEdit"
+                    (ngModelChange)="selectedLabel.set($event)"
+                /></label>
+                <button
+                  type="button"
+                  class="plan-button plan-button--primary plan-tools__full"
+                  data-test="plan-add-guided-space"
+                  [disabled]="!canEdit || (selectedKind() === 'custom' && !selectedLabel().trim())"
+                  (click)="addGuidedSpace()"
+                >
+                  {{ 'household.plan_add_guided' | t }}
+                </button>
+              </div>
+            </section>
+          </details>
+
+          <section
+            *ngIf="selectedSpace() as space"
+            class="plan-details__section plan-details__selected"
+            data-test="plan-selected-space"
+          >
+            <div class="plan-details__selected-heading">
+              <div>
+                <span class="plan-details__selected-label">{{
+                  'household.plan_selected_area' | t
+                }}</span>
+                <h3>{{ space.label }}</h3>
+                <span
+                  *ngIf="assignmentViewActive()"
+                  class="plan-details__selected-state"
+                  aria-live="polite"
+                >
+                  {{
+                    assignmentDraftMemberIds().length === 0
+                      ? ('household.plan_zone_unassigned' | t)
+                      : assignmentDraftMemberIds().length > 1
+                        ? ('household.plan_zone_shared' | t)
+                        : ('household.plan_zone_assigned' | t)
+                  }}
+                </span>
+              </div>
+              <details class="plan-details__selected-actions">
+                <summary>
+                  <span class="visually-hidden">{{ 'household.plan_more_actions' | t }}</span>
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <circle cx="5" cy="12" r="1.5" />
+                    <circle cx="12" cy="12" r="1.5" />
+                    <circle cx="19" cy="12" r="1.5" />
+                  </svg>
+                </summary>
+                <div>
+                  <details class="plan-details__rename">
+                    <summary>{{ 'household.plan_rename_area' | t }}</summary>
+                    <label
+                      ><span>{{ 'household.plan_area_name' | t }}</span
+                      ><input
+                        [ngModel]="selectedLabel()"
+                        [disabled]="!canEdit"
+                        (ngModelChange)="updateSelectedLabel($event)"
+                    /></label>
+                  </details>
+                  <button
+                    type="button"
+                    class="plan-link plan-link--danger"
+                    [disabled]="!canEdit"
+                    (click)="deleteSelectedSpace()"
+                  >
+                    {{ 'household.plan_delete_area' | t }}
+                  </button>
+                  <button type="button" class="plan-button" (click)="openTasksForSelectedSpace()">
+                    {{ 'household.plan_open_area_tasks' | t }}
+                  </button>
+                </div>
+              </details>
+              <button
+                type="button"
+                class="plan-details__close"
+                [attr.aria-label]="'household.plan_close_area_details' | t"
+                (click)="closeSpaceDetails()"
+              >
+                ×
+              </button>
+            </div>
+            <div class="plan-zone-assignment" data-test="plan-zone-assignment">
+              <div class="plan-zone-assignment__heading">
+                <div>
+                  <h4>{{ 'household.plan_zone_responsibility' | t }}</h4>
+                  <p>{{ 'household.plan_zone_shared_hint' | t }}</p>
+                </div>
+                <span
+                  class="plan-zone-assignment__state"
+                  [class.is-shared]="assignmentDraftMemberIds().length > 1"
+                  >{{
+                    assignmentDraftMemberIds().length === 0
+                      ? ('household.plan_zone_unassigned' | t)
+                      : assignmentDraftMemberIds().length > 1
+                        ? ('household.plan_zone_shared' | t)
+                        : ('household.plan_zone_assigned' | t)
+                  }}</span
+                >
+              </div>
+              <div class="plan-zone-assignment__members">
+                <button
+                  *ngFor="let member of activeMembers()"
+                  type="button"
+                  class="plan-zone-member"
+                  data-test="plan-zone-member"
+                  [class.is-selected]="
+                    !assignmentDraftIsShared() && assignmentDraftMemberIds().includes(member.userId)
+                  "
+                  [attr.aria-pressed]="
+                    !assignmentDraftIsShared() && assignmentDraftMemberIds().includes(member.userId)
+                  "
+                  [attr.aria-label]="member.name"
+                  [disabled]="!canEdit || assignmentSaving()"
+                  (click)="toggleAssignmentMember(member.userId)"
+                >
+                  <span class="plan-zone-member__avatar" aria-hidden="true">{{
+                    memberInitials(member.userId)
+                  }}</span
+                  ><span>{{ member.name }}</span
+                  ><span class="plan-zone-member__radio" aria-hidden="true"></span>
+                </button>
+                <button
+                  type="button"
+                  class="plan-zone-member plan-zone-member--shared"
+                  [class.is-selected]="assignmentDraftIsShared()"
+                  [attr.aria-pressed]="assignmentDraftIsShared()"
+                  [disabled]="!canEdit || activeMembers().length < 2 || assignmentSaving()"
+                  (click)="setZoneShared()"
+                >
+                  <span class="plan-zone-member__avatar" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" focusable="false">
+                      <circle cx="9" cy="7" r="3" />
+                      <circle cx="17" cy="8" r="2.5" />
+                      <path d="M3.5 19a5.5 5.5 0 0 1 11 0m-.5-4a4.5 4.5 0 0 1 7.5 3.5" />
+                    </svg> </span
+                  ><span>{{ 'household.plan_zone_shared' | t }}</span
+                  ><span class="plan-zone-member__radio" aria-hidden="true"></span>
+                </button>
+              </div>
+              <p
+                *ngIf="assignmentNoticeKey() as assignmentNotice"
+                class="plan-assignment-message"
+                [class.is-error]="assignmentNotice !== 'household.plan_assignment_saved'"
+                role="status"
+              >
+                {{ assignmentNotice | t }}
+              </p>
+              <button
+                type="button"
+                class="plan-button plan-button--primary plan-tools__full"
+                data-test="plan-zone-assignment-save"
+                [disabled]="!canEdit || !assignmentDirty() || assignmentSaving()"
+                (click)="saveZoneAssignment()"
+              >
+                {{
+                  assignmentSaving()
+                    ? ('household.plan_saving' | t)
+                    : ('household.plan_assignment_save' | t)
+                }}
+              </button>
+            </div>
+          </section>
+
+          <section class="plan-details__section plan-details__legend">
+            <h3>{{ 'household.plan_assignment_legend' | t }}</h3>
+            <p>
+              <span class="plan-legend-swatch plan-legend-swatch--assigned"></span
+              ><span>{{ 'household.plan_zone_assigned' | t }}</span
+              ><small>{{ 'household.plan_zone_assigned_hint' | t }}</small>
+            </p>
+            <p>
+              <span class="plan-legend-swatch plan-legend-swatch--shared"></span
+              ><span>{{ 'household.plan_zone_shared' | t }}</span
+              ><small>{{ 'household.plan_zone_shared_hint' | t }}</small>
+            </p>
+            <p>
+              <span class="plan-legend-swatch plan-legend-swatch--unassigned"></span
+              ><span>{{ 'household.plan_zone_unassigned' | t }}</span
+              ><small>{{ 'household.plan_zone_unassigned_hint' | t }}</small>
+            </p>
+          </section>
+
+          <section class="plan-details__section plan-details__ai">
+            <h3>{{ 'household.plan_adjust_with_ai' | t }}</h3>
+            <label class="plan-file">
+              <span>{{ 'household.plan_choose_file' | t }}</span>
+              <input
+                #planFile
+                type="file"
+                accept="image/jpeg,image/png,image/webp,application/pdf"
+                [disabled]="!canEdit || proposing()"
+                (change)="onAttachmentChange($event)"
+              />
+            </label>
+            <p *ngIf="attachment() as file" class="plan-file__selected">
+              <span>{{ file.name }}</span>
+              <button type="button" class="plan-link" (click)="clearAttachment(planFile)">
+                {{ 'household.plan_remove_file' | t }}
+              </button>
+            </p>
+            <label
+              ><span>{{ 'household.plan_chat_prompt' | t }}</span
+              ><textarea
+                rows="3"
+                [ngModel]="prompt()"
+                [disabled]="!canEdit || proposing()"
+                (ngModelChange)="prompt.set($event)"
+              ></textarea>
+            </label>
+            <button
+              type="button"
+              class="plan-button plan-button--primary plan-tools__full"
+              data-test="plan-request-proposal"
+              [disabled]="!canEdit || proposing() || (!prompt().trim() && !attachment())"
+              (click)="requestProposal()"
+            >
+              {{
+                proposing()
+                  ? ('household.plan_ai_working' | t)
+                  : ('household.plan_request_proposal' | t)
+              }}
+            </button>
+            <p class="plan-details__version">{{ 'household.plan_ai_uses_draft' | t }}</p>
+          </section>
+        </aside>
+      </div>
+    </ng-container>
+  </ng-container>
+</section>

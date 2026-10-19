@@ -34,6 +34,9 @@ class MemoryMonitor {
       clearInterval(this.intervalId);
       this.intervalId = null;
     }
+    // Reset de las stats para que el monitor (singleton compartido entre tests)
+    // vuelva a su estado inicial y `getStats()` devuelva null tras pararlo.
+    this.lastStats = null;
   }
 
   check(): MemoryStats {
