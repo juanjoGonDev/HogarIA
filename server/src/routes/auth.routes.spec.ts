@@ -239,6 +239,26 @@ describe('la cuenta de la persona', () => {
     expect(await profileAvatar(token)).toBeFalsy();
   });
 
+  it('guarda y restaura la preferencia de vista de recetas', async () => {
+    const { token } = await register('VistaRecetas');
+    const preferences = {
+      theme: 'dark',
+      language: 'en',
+      detailLevel: 'expert',
+      recipeViewMode: 'list'
+    };
+
+    const saved = await app.request(
+      '/api/auth/profile',
+      withAuth(token, { method: 'PATCH', body: JSON.stringify({ preferences }) })
+    );
+    expect(saved.status).toBe(200);
+    expect((await json(saved)).data.preferences).toMatchObject(preferences);
+
+    const reloaded = await json(await app.request('/api/auth/profile', withAuth(token)));
+    expect(reloaded.data.preferences).toMatchObject(preferences);
+  });
+
   it('cambiar la contrasena exige la anterior, y con la nueva se entra', async () => {
     const { token, email } = await register('Luis');
     const assertDefaultPasswordStillWorks = async () => {

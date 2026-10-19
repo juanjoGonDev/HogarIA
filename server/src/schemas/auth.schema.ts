@@ -65,6 +65,7 @@ export const updateProfileSchema = z.object({
       theme: formField(z.enum(['light', 'dark', 'system'])),
       language: formField(z.enum(['es', 'en'])),
       detailLevel: formField(z.enum(['basic', 'intermediate', 'expert'])),
+      recipeViewMode: formField(z.enum(['grid', 'list'])),
       notifications: z
         .object({
           expirationAlerts: formField(z.boolean()),
