@@ -10,7 +10,13 @@ const index = (platforms) =>
   });
 
 test('accepts a GHCR index containing the required Linux architectures', () => {
-  const result = checkImagePlatforms(index([['linux', 'amd64'], ['linux', 'arm64'], ['unknown', 'unknown']]));
+  const result = checkImagePlatforms(
+    index([
+      ['linux', 'amd64'],
+      ['linux', 'arm64'],
+      ['unknown', 'unknown']
+    ])
+  );
 
   assert.deepEqual(result, ['linux/amd64', 'linux/arm64']);
 });

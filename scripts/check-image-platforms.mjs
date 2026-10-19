@@ -23,7 +23,8 @@ export function checkImagePlatforms(rawManifest) {
       .filter(Boolean)
   );
   const missing = REQUIRED_PLATFORMS.filter((platform) => !available.has(platform));
-  if (missing.length) throw new Error(`Image manifest missing required platform: ${missing.join(', ')}`);
+  if (missing.length)
+    throw new Error(`Image manifest missing required platform: ${missing.join(', ')}`);
 
   return REQUIRED_PLATFORMS;
 }
@@ -36,9 +37,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const platforms = checkImagePlatforms(input);
     console.log(`Image manifest includes: ${platforms.join(', ')}`);
   } catch (error) {
-    console.error(`Image manifest check failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+    console.error(
+      `Image manifest check failed: ${error instanceof Error ? error.message : 'unknown error'}`
+    );
     process.exitCode = 1;
   }
 }
 import { pathToFileURL } from 'node:url';
-

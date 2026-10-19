@@ -3,7 +3,10 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
 const ci = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
-const publish = readFileSync(new URL('../.github/workflows/publish-ghcr.yml', import.meta.url), 'utf8');
+const publish = readFileSync(
+  new URL('../.github/workflows/publish-ghcr.yml', import.meta.url),
+  'utf8'
+);
 const dockerfile = readFileSync(new URL('../Dockerfile', import.meta.url), 'utf8');
 
 function block(source, startPattern, nextTopLevelPattern) {
@@ -18,7 +21,10 @@ test('runs the existing CI for PRs targeting any base and on base edits', () => 
   const trigger = block(ci, /^  pull_request:\s*$/m, /^  [A-Za-z0-9_-]+:\s*$/m);
 
   assert.doesNotMatch(trigger, /^\s+branches:/m);
-  assert.match(trigger, /types:\s*\[[^\]]*opened[^\]]*reopened[^\]]*synchronize[^\]]*ready_for_review[^\]]*edited/);
+  assert.match(
+    trigger,
+    /types:\s*\[[^\]]*opened[^\]]*reopened[^\]]*synchronize[^\]]*ready_for_review[^\]]*edited/
+  );
 });
 
 test('builds and smokes both PR image architectures without registry writes or secrets', () => {
@@ -39,7 +45,10 @@ test('builds and smokes both PR image architectures without registry writes or s
 test('compiles once natively and installs native production modules for the image target', () => {
   assert.match(dockerfile, /^FROM --platform=\$BUILDPLATFORM node:22-alpine AS build$/m);
   assert.match(dockerfile, /^FROM node:22-alpine AS runtime-deps$/m);
-  assert.match(dockerfile, /CI=true pnpm install --filter @hogaria\/server --prod --frozen-lockfile/);
+  assert.match(
+    dockerfile,
+    /CI=true pnpm install --filter @hogaria\/server --prod --frozen-lockfile/
+  );
   assert.match(dockerfile, /pnpm --filter @hogaria\/server --prod deploy --legacy/);
   assert.match(dockerfile, /COPY --from=runtime-deps \/prod\/server\/node_modules/);
   assert.match(dockerfile, /HEALTHCHECK[\s\S]*curl -f http:\/\/localhost:3000\/health/);

@@ -41,7 +41,10 @@ test('checks health, static frontend, and mounted assistant API without credenti
   });
 
   assert.deepEqual(result.checked, ['/health', '/api/health', '/', '/api/ai/assistant/proposals']);
-  assert.deepEqual(requests.map(({ path }) => path), result.checked);
+  assert.deepEqual(
+    requests.map(({ path }) => path),
+    result.checked
+  );
   assert.equal(requests[3].init.method, 'POST');
   assert.equal(requests[3].init.headers?.authorization, undefined);
   assert.equal(requests[3].init.body, '{}');
@@ -73,7 +76,7 @@ test('fails when the server never becomes healthy', async () => {
       timeoutMs: 2,
       pollIntervalMs: 0,
       sleep: async () => {}
-    }),
+    })
     //health did not become ready/
   );
 });
@@ -99,7 +102,8 @@ test('fails if the static app is missing or the assistant API is not mounted', a
     verifyContainerSmoke('http://127.0.0.1:3000', {
       fetcher: async (input, init = {}) => {
         const url = new URL(input);
-        if (url.pathname === '/api/ai/assistant/proposals') return new Response('', { status: 404 });
+        if (url.pathname === '/api/ai/assistant/proposals')
+          return new Response('', { status: 404 });
         return missingAssistant(input, init);
       },
       timeoutMs: 50,
@@ -111,5 +115,8 @@ test('fails if the static app is missing or the assistant API is not mounted', a
 
 test('rejects malformed or credential-bearing base URLs', async () => {
   await assert.rejects(verifyContainerSmoke('file:///tmp/container'), /HTTP or HTTPS URL/);
-  await assert.rejects(verifyContainerSmoke('http://user:secret@127.0.0.1:3000'), /must not contain credentials/);
+  await assert.rejects(
+    verifyContainerSmoke('http://user:secret@127.0.0.1:3000'),
+    /must not contain credentials/
+  );
 });

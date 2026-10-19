@@ -56,7 +56,9 @@ async function waitForHealth(origin, { fetcher, timeoutMs, pollIntervalMs, sleep
 
   while (true) {
     try {
-      const response = await request(fetcher, origin, '/health', { headers: { accept: 'application/json' } });
+      const response = await request(fetcher, origin, '/health', {
+        headers: { accept: 'application/json' }
+      });
       if (response.ok) {
         await assertHealthResponse(response, '/health');
         return;
@@ -69,7 +71,9 @@ async function waitForHealth(origin, { fetcher, timeoutMs, pollIntervalMs, sleep
 
     const remainingMs = deadline - Date.now();
     if (remainingMs <= 0) {
-      throw new Error(`Container /health did not become ready within ${timeoutMs} ms (${lastFailure})`);
+      throw new Error(
+        `Container /health did not become ready within ${timeoutMs} ms (${lastFailure})`
+      );
     }
     await sleep(Math.min(pollIntervalMs, remainingMs));
   }
@@ -134,10 +138,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       const result = await verifyContainerSmoke(baseUrl);
       console.log(`Container smoke passed: ${result.checked.join(', ')}`);
     } catch (error) {
-      console.error(`Container smoke failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+      console.error(
+        `Container smoke failed: ${error instanceof Error ? error.message : 'unknown error'}`
+      );
       process.exitCode = 1;
     }
   }
 }
 import { pathToFileURL } from 'node:url';
-
