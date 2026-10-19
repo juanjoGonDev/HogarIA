@@ -146,13 +146,13 @@ test.describe('Libro de recetas', () => {
           const icon = media.querySelector('svg')?.getBoundingClientRect();
           return {
             isPlaceholder: media.classList.contains('recipe-card__image--placeholder'),
-            height: rect.height,
+            imageRatio: rect.width / rect.height,
             iconWidth: icon?.width ?? 0,
             iconHeight: icon?.height ?? 0
           };
         });
       if (firstCardMediaGeometry.isPlaceholder) {
-        expect(firstCardMediaGeometry.height).toBeLessThanOrEqual(80);
+        expect(Math.abs(firstCardMediaGeometry.imageRatio - 1.6)).toBeLessThanOrEqual(0.02);
         expect(firstCardMediaGeometry.iconWidth).toBeLessThanOrEqual(80);
         expect(firstCardMediaGeometry.iconHeight).toBeLessThanOrEqual(80);
       }
