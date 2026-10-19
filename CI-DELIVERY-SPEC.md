@@ -29,15 +29,15 @@ La rama principal verificada del repositorio es `master`. El PR #47 estaba abier
 ## Checklist de aceptación
 
 - [x] Publicar este contrato (`6c313df`) y enlazarlo en el cuerpo del PR #47 Draft antes de implementar.
-- [x] Hacer que `pull_request` ejecute CI para cualquier base y ante `opened`, `reopened`, `synchronize`, `ready_for_review` y `edited`; se verificó el evento `edited` al retargetear a `master` y el run 807 quedó iniciado.
+- [x] Hacer que `pull_request` ejecute CI para cualquier base y ante `opened`, `reopened`, `synchronize`, `ready_for_review` y `edited`; se verificó el evento `edited` al retargetear a `master` y el run 807 completó verde.
 - [x] Añadir una prueba determinista del contrato del workflow: triggers sin filtro de base, build de PR sin push/credenciales, publisher solo en `master`, y permisos GHCR mínimos. `pnpm run test:config`: 104/104.
 - [x] Reemplazar `npm ci` por una instalación/build reproducible con workspace y lockfile pnpm; incluir `.dockerignore` y dependencias de compilación necesarias sin cargarlas a producción. Docker build `linux/amd64` y `linux/arm64` pasaron localmente.
-- [ ] Para cada PR, compilar y ejecutar smoke de la imagen en `linux/amd64` y `linux/arm64`; usar runtime efímero y validar health, API y app estática.
+- [x] Para cada PR, compilar y ejecutar smoke de la imagen en `linux/amd64` y `linux/arm64`; usar runtime efímero y validar health, API y app estática. Run #807 pasó ambas arquitecturas en el PR #47.
 - [ ] En push a `master`, publicar multi-arquitectura a `ghcr.io/<owner>/<repo>` con tags SHA y `latest`, y ejecutar smoke contra el digest publicado.
 - [x] Pasan `make ci-yaml`, `make ci-ui`, `make ci-e2e-types`, `pnpm run test:config` (104/104), `actionlint` y `git diff --check`.
 - [x] Docker build y runtime smoke local en `linux/amd64` y `linux/arm64`: `/health`, `/api/health`, HTML, ruta protegida del asistente (401 sin token) y `HEALTHCHECK=healthy`.
 - [x] Pre-push completo verde en `5ba77b4`: formato, UI, build, E2E typecheck, configuración, cliente y servidor.
-- [ ] El run real de CI del PR termina verde en la base `master`.
+- [x] El run real de CI del PR termina verde en la base `master`: run #807, 11/11 jobs verdes, incluidas 4 shards E2E y full-stack.
 - [x] Revisar el diff ampliado y retargetear el PR existente a `master`; conservar explícito el alcance adicional en el cuerpo del PR.
 - [ ] Fusionar el PR #47 existente a `master` solo después de los checks verdes; verificar SHA de merge, manifest/plataformas/tag GHCR y arranque de la imagen publicada.
 - [ ] Registrar resultados finales, limitaciones, commits y estado del working tree; preservar Draft si cualquier aceptación queda pendiente.
@@ -53,4 +53,4 @@ No habilitar IA real ni enviar prompts desde CI. No crear cuentas/secretos de pr
 - `make ci-yaml`, `make ci-ui` (266 ficheros, 21 reglas) y `make ci-e2e-types` pasan. El commit `05c8dd3` sustituyó targets no invocables con dos puntos (`ci:yaml`, `ci:ui`, `ci:e2e-types`) por targets con guion.
 - `docker build --platform linux/amd64 --tag hogaria-ci:pr47-final-amd64 .` y equivalente `linux/arm64` completan; ambas imágenes ejecutan el smoke anterior y llegan a `HEALTHCHECK=healthy`. DB está en tmpfs y JWT es aleatorio; ambos contenedores se eliminaron.
 - Pre-push completo en `5ba77b4`: `node scripts/check-push-format.mjs` (3 rutas), `pnpm run check:ui` (266/21), `pnpm run build` (éxito, advertencias existentes), `pnpm run typecheck:e2e`, y `pnpm run test` (config 104/104, cliente 1709/1709 con 90,62/80,96/91,73/93,18 % S/B/F/L; servidor 2082 pasados, 1 omitido). Duración del hook: 102 s.
-- Retarget y revisión del diff a `master` completados; ejecución #807 está pendiente. Falta CI verde sobre esa base, publicar/pullar GHCR y validar el artefacto publicado. `ing.json` es una respuesta de datos seed genéricos (20/69 ingredientes; un ID opaco de usuario/hogar, sin notas, imágenes, email ni credenciales) y no tiene referencias en el código. No se ha llamado a WebAPI ni a un proveedor IA en CI/local smoke.
+- Retarget y revisión del diff a `master` completados. Run #807 (`5ba77b4`) terminó verde con 11/11 jobs: instalación, amd64/arm64 build+smoke, typecheck, server coverage, producción, 4 shards E2E y full-stack. Falta publicar/pullar GHCR y validar el artefacto publicado. `ing.json` es una respuesta de datos seed genéricos (20/69 ingredientes; un ID opaco de usuario/hogar, sin notas, imágenes, email ni credenciales) y no tiene referencias en el código. No se ha llamado a WebAPI ni a un proveedor IA en CI/local smoke.
