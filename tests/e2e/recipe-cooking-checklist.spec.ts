@@ -186,8 +186,12 @@ test('modo cocina escala comensales sin consultar IA ni cambiar la receta guarda
         )
       )
       .toBe('recipe-cooking-title');
+    const servings = cookingView.getByRole('spinbutton', { name: 'Comensales' });
+    const decreaseServings = cookingView.getByRole('button', { name: 'Restar un comensal' });
     await page.keyboard.press('Tab');
-    await expect(cookingView.getByRole('button', { name: 'Restar un comensal' })).toBeFocused();
+    await expect(decreaseServings).toBeDisabled();
+    await expect(servings).toBeFocused();
+    await expect(servings).toHaveValue('1');
     const firstStepCheckbox = cookingView.locator('[data-test="cooking-step-check-1"] input');
     await firstStepCheckbox.focus();
     await expect(
@@ -221,7 +225,7 @@ test('modo cocina escala comensales sin consultar IA ni cambiar la receta guarda
     if (testInfo.project.name === 'mobile-chrome') {
       await cookingView.getByRole('button', { name: 'Mostrar ingredientes' }).click();
     }
-    const servings = cookingView.getByRole('spinbutton', { name: 'Comensales' });
+    await cookingView.getByRole('button', { name: 'Añadir un comensal' }).click();
     await expect(servings).toHaveValue('2');
     await cookingView.getByRole('button', { name: 'Añadir un comensal' }).click();
     await expect(servings).toHaveValue('3');
