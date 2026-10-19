@@ -54,24 +54,57 @@ test('compiles once natively and installs native production modules for the imag
   assert.match(dockerfile, /HEALTHCHECK[\s\S]*curl -f http:\/\/localhost:3000\/health/);
 });
 
-test('publishes multi-arch GHCR images only from the default branch with scoped write access', () => {
+test('publishes GHCR manifests from native architecture builds on the default branch', () => {
   const trigger = block(publish, /^on:\s*$/m, /^permissions:\s*$/m);
-  const job = block(publish, /^  publish:\s*$/m, /^  [A-Za-z0-9_-]+:\s*$/m);
+  const build = block(publish, /^  build:\s*$/m, /^  [A-Za-z0-9_-]+:\s*$/m);
+  const manifest = block(publish, /^  publish-manifest:\s*$/m, /^  [A-Za-z0-9_-]+:\s*$/m);
+  const smoke = block(publish, /^  smoke:\s*$/m, /^  [A-Za-z0-9_-]+:\s*$/m);
 
   assert.match(trigger, /push:\s*\n\s+branches:\s*\[master\]/);
   assert.doesNotMatch(trigger, /pull_request/);
   assert.match(publish, /^permissions:\s*\n\s+contents:\s*read\s*$/m);
-  assert.match(job, /packages:\s*write/);
-  assert.match(job, /github\.ref == 'refs\/heads\/master'/);
-  assert.match(job, /docker\/login-action@v4/);
-  assert.match(job, /docker\/build-push-action@v7/);
-  assert.match(job, /platforms:\s*linux\/amd64,linux\/arm64/);
-  assert.match(job, /push:\s*true/);
-  assert.match(job, /cache-to:.*ignore-error=true/);
-  assert.match(job, /github\.sha/);
-  assert.match(job, /:latest/);
-  assert.match(job, /scripts\/check-image-platforms\.mjs/);
-  assert.match(job, /scripts\/container-smoke\.mjs/);
-  assert.match(job, /docker inspect --format='\{\{\.State\.Health\.Status\}\}'/);
+  assert.match(
+    build,
+    /arch:\s*amd64\s+platform:\s*linux\/amd64\s+runner:\s*ubuntu-24\.04\s/
+  );
+  assert.match(
+    build,
+    /arch:\s*arm64\s+platform:\s*linux\/arm64\s+runner:\s*ubuntu-24\.04-arm\s/
+  );
+  assert.match(build, /runs-on:\s*\$\{\{ matrix\.runner \}\}/);
+  assert.match(build, /packages:\s*write/);
+  assert.match(build, /github\.ref == 'refs\/heads\/master'/);
+  assert.match(build, /docker\/login-action@v4/);
+  assert.match(build, /docker\/build-push-action@v7/);
+  assert.match(build, /platforms:\s*\$\{\{ matrix\.platform \}\}/);
+  assert.match(build, /:\$\{\{ github\.sha \}\}-\$\{\{ matrix\.arch \}\}/);
+  assert.match(build, /push:\s*true/);
+  assert.match(build, /cache-to:.*ignore-error=true/);
+  assert.doesNotMatch(publish, /setup-qemu-action/);
+  assert.doesNotMatch(publish, /^\s+GITHUB_SHA:/m);
+  assert.match(manifest, /needs:\s*\[build\]/);
+  assert.match(manifest, /packages:\s*write/);
+  assert.match(
+    manifest,
+    /docker buildx imagetools create[\s\S]*--tag "\$IMAGE:\$COMMIT_SHA"[\s\S]*--tag "\$IMAGE:latest"[\s\S]*"\$IMAGE:\$\{COMMIT_SHA\}-amd64"[\s\S]*"\$IMAGE:\$\{COMMIT_SHA\}-arm64"/
+  );
+  assert.match(manifest, /for tag in "\$COMMIT_SHA" latest; do[\s\S]*"\$actual_digest" != "\$EXPECTED_DIGEST"/);
+  assert.match(manifest, /scripts\/check-image-platforms\.mjs/);
+  assert.match(manifest, /imagetools inspect --raw "\$IMAGE:\$tag" \| node scripts\/check-image-platforms\.mjs/);
+  assert.match(manifest, /EXPECTED_DIGEST:\s*\$\{\{ steps\.manifest\.outputs\.digest \}\}/);
+  assert.match(smoke, /needs:\s*\[publish-manifest\]/);
+  assert.match(
+    smoke,
+    /arch:\s*amd64\s+platform:\s*linux\/amd64\s+runner:\s*ubuntu-24\.04\s/
+  );
+  assert.match(
+    smoke,
+    /arch:\s*arm64\s+platform:\s*linux\/arm64\s+runner:\s*ubuntu-24\.04-arm\s/
+  );
+  assert.match(smoke, /runs-on:\s*\$\{\{ matrix\.runner \}\}/);
+  assert.match(smoke, /packages:\s*read/);
+  assert.match(smoke, /docker pull --platform "\$PLATFORM"/);
+  assert.match(smoke, /scripts\/container-smoke\.mjs/);
+  assert.match(smoke, /docker inspect --format='\{\{\.State\.Health\.Status\}\}'/);
   assert.doesNotMatch(publish, /pull_request_target/);
 });

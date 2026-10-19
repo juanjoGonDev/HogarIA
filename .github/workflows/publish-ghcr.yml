@@ -12,25 +12,27 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  publish:
-    name: Publish and smoke multi-architecture image
+  build:
+    name: Build and publish ${{ matrix.arch }} image
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-    runs-on: ubuntu-latest
-    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -47,32 +49,80 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and publish image
-        id: build
+      - name: Build and publish platform image
         uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ matrix.platform }}
           push: true
-          tags: |
-            ${{ steps.image.outputs.name }}:${{ github.sha }}
-            ${{ steps.image.outputs.name }}:latest
+          tags: ${{ steps.image.outputs.name }}:${{ github.sha }}-${{ matrix.arch }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
-          cache-from: type=gha,scope=release-container
-          cache-to: type=gha,mode=max,scope=release-container,ignore-error=true
+          cache-from: type=gha,scope=release-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=release-${{ matrix.arch }},ignore-error=true
 
-      - name: Verify published tags and platform manifest
+  publish-manifest:
+    name: Publish and verify multi-architecture manifest
+    needs: [build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Resolve lowercase GHCR image name
+        id: image
         shell: bash
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Assemble SHA and latest manifest tags
+        id: manifest
         env:
           IMAGE: ${{ steps.image.outputs.name }}
-          EXPECTED_DIGEST: ${{ steps.build.outputs.digest }}
-          GITHUB_SHA: ${{ github.sha }}
+          COMMIT_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          for tag in "$GITHUB_SHA" latest; do
+          docker buildx imagetools create \
+            --tag "$IMAGE:$COMMIT_SHA" \
+            --tag "$IMAGE:latest" \
+            "$IMAGE:${COMMIT_SHA}-amd64" \
+            "$IMAGE:${COMMIT_SHA}-arm64"
+          digest="$(docker buildx imagetools inspect "$IMAGE:$COMMIT_SHA" | awk '$1 == "Digest:" { print $2; exit }')"
+          if [[ -z "$digest" ]]; then
+            echo "GHCR did not return a digest for the published manifest" >&2
+            exit 1
+          fi
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Verify published tags and platform manifest
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+          EXPECTED_DIGEST: ${{ steps.manifest.outputs.digest }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          for tag in "$COMMIT_SHA" latest; do
             actual_digest="$(docker buildx imagetools inspect "$IMAGE:$tag" | awk '$1 == "Digest:" { print $2; exit }')"
             if [[ "$actual_digest" != "$EXPECTED_DIGEST" ]]; then
               echo "GHCR tag $tag resolves to an unexpected digest" >&2
@@ -81,70 +131,82 @@ jobs:
             docker buildx imagetools inspect --raw "$IMAGE:$tag" | node scripts/check-image-platforms.mjs
           done
 
-      - name: Pull and smoke published amd64 image
+  smoke:
+    name: Smoke published ${{ matrix.arch }} image
+    needs: [publish-manifest]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Resolve lowercase GHCR image name
+        id: image
+        shell: bash
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull and smoke published image
         env:
           IMAGE: ${{ steps.image.outputs.name }}
-          GITHUB_SHA: ${{ github.sha }}
+          COMMIT_SHA: ${{ github.sha }}
+          ARCH: ${{ matrix.arch }}
+          PLATFORM: ${{ matrix.platform }}
         run: |
-          docker pull --platform linux/amd64 "$IMAGE:$GITHUB_SHA"
-          docker run --detach --platform linux/amd64 --name hogaria-ghcr-amd64 \
+          set -euo pipefail
+          container_name="hogaria-ghcr-$ARCH"
+          docker pull --platform "$PLATFORM" "$IMAGE:$COMMIT_SHA"
+          docker run --detach --platform "$PLATFORM" --name "$container_name" \
             --publish 127.0.0.1:3000:3000 \
             --tmpfs /app/data:rw,nosuid,nodev,size=64m \
             --env NODE_ENV=production \
             --env DATABASE_PATH=/app/data/hogaria.sqlite \
             --env JWT_SECRET="$(openssl rand -hex 32)" \
-            "$IMAGE:$GITHUB_SHA"
+            "$IMAGE:$COMMIT_SHA"
           node scripts/container-smoke.mjs http://127.0.0.1:3000
           for attempt in $(seq 1 40); do
-            status="$(docker inspect --format='{{.State.Health.Status}}' hogaria-ghcr-amd64 2>/dev/null || true)"
+            status="$(docker inspect --format='{{.State.Health.Status}}' "$container_name" 2>/dev/null || true)"
             if [[ "$status" == "healthy" ]]; then break; fi
             if [[ "$status" == "unhealthy" ]]; then
-              docker inspect --format='{{json .State.Health}}' hogaria-ghcr-amd64
+              docker inspect --format='{{json .State.Health}}' "$container_name"
               exit 1
             fi
             sleep 2
           done
-          health_status="$(docker inspect --format='{{.State.Health.Status}}' hogaria-ghcr-amd64)"
+          health_status="$(docker inspect --format='{{.State.Health.Status}}' "$container_name")"
           if [[ "$health_status" != "healthy" ]]; then
-            echo "amd64 Docker HEALTHCHECK failed after ${attempt} attempts: $health_status" >&2
-            docker inspect --format='{{json .State.Health}}' hogaria-ghcr-amd64
+            echo "$ARCH Docker HEALTHCHECK failed after ${attempt} attempts: $health_status" >&2
+            docker inspect --format='{{json .State.Health}}' "$container_name"
             exit 1
           fi
-          docker rm --force hogaria-ghcr-amd64
 
-      - name: Pull and smoke published arm64 image
-        env:
-          IMAGE: ${{ steps.image.outputs.name }}
-          GITHUB_SHA: ${{ github.sha }}
-        run: |
-          docker pull --platform linux/arm64 "$IMAGE:$GITHUB_SHA"
-          docker run --detach --platform linux/arm64 --name hogaria-ghcr-arm64 \
-            --publish 127.0.0.1:3000:3000 \
-            --tmpfs /app/data:rw,nosuid,nodev,size=64m \
-            --env NODE_ENV=production \
-            --env DATABASE_PATH=/app/data/hogaria.sqlite \
-            --env JWT_SECRET="$(openssl rand -hex 32)" \
-            "$IMAGE:$GITHUB_SHA"
-          node scripts/container-smoke.mjs http://127.0.0.1:3000
-          for attempt in $(seq 1 40); do
-            status="$(docker inspect --format='{{.State.Health.Status}}' hogaria-ghcr-arm64 2>/dev/null || true)"
-            if [[ "$status" == "healthy" ]]; then break; fi
-            if [[ "$status" == "unhealthy" ]]; then
-              docker inspect --format='{{json .State.Health}}' hogaria-ghcr-arm64
-              exit 1
-            fi
-            sleep 2
-          done
-          health_status="$(docker inspect --format='{{.State.Health.Status}}' hogaria-ghcr-arm64)"
-          if [[ "$health_status" != "healthy" ]]; then
-            echo "arm64 Docker HEALTHCHECK failed after ${attempt} attempts: $health_status" >&2
-            docker inspect --format='{{json .State.Health}}' hogaria-ghcr-arm64
-            exit 1
-          fi
-          docker rm --force hogaria-ghcr-arm64
-
-      - name: Clean up temporary containers
+      - name: Clean up temporary container
         if: always()
-        run: |
-          docker rm --force hogaria-ghcr-amd64 2>/dev/null || true
-          docker rm --force hogaria-ghcr-arm64 2>/dev/null || true
+        env:
+          CONTAINER_NAME: hogaria-ghcr-${{ matrix.arch }}
+        run: docker rm --force "$CONTAINER_NAME" 2>/dev/null || true
