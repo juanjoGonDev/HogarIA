@@ -31,6 +31,7 @@ test('builds and smokes both PR image architectures without registry writes or s
   assert.match(smoke, /platforms:\s*\$\{\{ matrix\.platform \}\}/);
   assert.match(smoke, /push:\s*false/);
   assert.match(smoke, /load:\s*true/);
+  assert.match(smoke, /cache-to:.*ignore-error=true/);
   assert.match(smoke, /scripts\/container-smoke\.mjs/);
   assert.match(smoke, /docker inspect --format='\{\{\.State\.Health\.Status\}\}'/);
 });
@@ -57,6 +58,7 @@ test('publishes multi-arch GHCR images only from the default branch with scoped 
   assert.match(job, /docker\/build-push-action@v7/);
   assert.match(job, /platforms:\s*linux\/amd64,linux\/arm64/);
   assert.match(job, /push:\s*true/);
+  assert.match(job, /cache-to:.*ignore-error=true/);
   assert.match(job, /github\.sha/);
   assert.match(job, /:latest/);
   assert.match(job, /scripts\/check-image-platforms\.mjs/);

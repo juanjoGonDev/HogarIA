@@ -62,7 +62,7 @@ jobs:
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha,scope=release-container
-          cache-to: type=gha,mode=max,scope=release-container
+          cache-to: type=gha,mode=max,scope=release-container,ignore-error=true
 
       - name: Verify published tags and platform manifest
         shell: bash

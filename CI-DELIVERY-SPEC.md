@@ -20,6 +20,7 @@ La rama principal verificada del repositorio es `master`. El PR #47 está actual
 ## Decisiones de seguridad y entrega
 
 - Para cada PR, incluidos forks y cualquier rama base, ejecutar los checks existentes y compilar la imagen sin publicar a ningún registry. Build y smoke no reciben permisos de escritura de packages, credenciales de WebAPI/proveedor IA ni tokens privados.
+- La exportación de cache BuildKit es best-effort: los builds no fallan si un evento de bajo privilegio no puede guardar cache. No ampliar permisos de cache para forks.
 - El smoke del contenedor usa solo datos sintéticos/DB efímera; comprueba arranque, health/API HTTP y contenido estático servido por la imagen. No llama proveedores externos.
 - La publicación se limita a un `push` en `master`, con permisos mínimos (`contents: read`, `packages: write` solo en el job publicador), y crea tags inmutables por SHA más `latest`. El nombre GHCR se normaliza a minúsculas.
 - Tras publicar, consultar el manifest y hacer pull/arranque/health smoke de la imagen GHCR real. Comprobar ambas plataformas declaradas; no afirmar una verificación que no se ejecutó.

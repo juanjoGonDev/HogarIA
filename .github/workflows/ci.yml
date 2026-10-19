@@ -73,7 +73,7 @@ jobs:
           push: false
           load: true
           cache-from: type=gha,scope=ci-container-${{ matrix.architecture }}
-          cache-to: type=gha,mode=max,scope=ci-container-${{ matrix.architecture }}
+          cache-to: type=gha,mode=max,scope=ci-container-${{ matrix.architecture }},ignore-error=true
 
       - name: Start the image with a temporary database
         run: >-
