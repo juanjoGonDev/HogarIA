@@ -7,7 +7,7 @@
 #
 # Ojo al editar este fichero: un `- name: Texto (con: dos puntos)` sin comillas
 # invalida el YAML y GitHub no crea NINGUN check en el PR (solo un run de 0s con
-# el path del workflow como nombre). Antes de subir: make ci:yaml
+# el path del workflow como nombre). Antes de subir: make ci-yaml
 # =============================================================================
 
 name: CI
@@ -17,8 +17,7 @@ on:
   push:
     branches: [master, main]
   pull_request:
-    branches: [master, main]
-    types: [opened, reopened, synchronize, ready_for_review]
+    types: [opened, reopened, synchronize, ready_for_review, edited]
 
 permissions: read-all
 
@@ -35,6 +34,80 @@ env:
   # donde si estan disponibles (y es la unica forma de que el hash del lockfile valga).
 
 jobs:
+  container-smoke:
+    name: 'Container image smoke (${{ matrix.architecture }})'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            architecture: amd64
+          - platform: linux/arm64
+            architecture: arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and load production image (no registry push)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: ${{ matrix.platform }}
+          tags: hogaria-ci:${{ matrix.architecture }}
+          push: false
+          load: true
+          cache-from: type=gha,scope=ci-container-${{ matrix.architecture }}
+          cache-to: type=gha,mode=max,scope=ci-container-${{ matrix.architecture }}
+
+      - name: Start the image with a temporary database
+        run: >-
+          docker run --detach
+          --name hogaria-ci-${{ matrix.architecture }}
+          --publish 127.0.0.1:3000:3000
+          --tmpfs /app/data:rw,nosuid,nodev,size=64m
+          --env NODE_ENV=production
+          --env DATABASE_PATH=/app/data/hogaria.sqlite
+          --env JWT_SECRET="$(openssl rand -hex 32)"
+          hogaria-ci:${{ matrix.architecture }}
+
+      - name: Smoke health, API routing, and bundled frontend
+        run: node scripts/container-smoke.mjs http://127.0.0.1:3000
+
+      - name: Verify the image HEALTHCHECK becomes healthy
+        run: |
+          for attempt in $(seq 1 40); do
+            status="$(docker inspect --format='{{.State.Health.Status}}' hogaria-ci-${{ matrix.architecture }} 2>/dev/null || true)"
+            if [[ "$status" == "healthy" ]]; then exit 0; fi
+            if [[ "$status" == "unhealthy" ]]; then
+              docker inspect --format='{{json .State.Health}}' hogaria-ci-${{ matrix.architecture }}
+              exit 1
+            fi
+            sleep 2
+          done
+          echo "Docker HEALTHCHECK did not become healthy after ${attempt} attempts" >&2
+          docker inspect --format='{{json .State.Health}}' hogaria-ci-${{ matrix.architecture }}
+          exit 1
+
+      - name: Remove smoke container
+        if: always()
+        run: docker rm --force hogaria-ci-${{ matrix.architecture }} 2>/dev/null || true
+
   # --- Un nodo instala; los demas consumen cache ---
   install:
     name: Install & warm caches

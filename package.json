@@ -13,7 +13,7 @@
     "build:server": "pnpm --filter @hogaria/server run build",
     "start": "pnpm --filter @hogaria/server run start",
     "test": "pnpm run test:config && pnpm run test:client && pnpm run test:server",
-    "test:config": "node --test --experimental-test-isolation=none scripts/karma-coverage-gate.test.mjs scripts/check-ui-button-geometry.test.mjs scripts/ci-e2e-timeout.test.mjs scripts/node-test-config.test.mjs scripts/ai-live-existing-webapi.test.mjs scripts/ai-live-smoke-safety.test.mjs scripts/ai-live-smoke-runner-control.test.mjs scripts/run-household-meal-real-smoke.test.mjs scripts/check-push-format.test.mjs scripts/check-ui-component-styles.test.mjs scripts/format-staged-files.test.mjs",
+    "test:config": "node --test --experimental-test-isolation=none scripts/karma-coverage-gate.test.mjs scripts/check-ui-button-geometry.test.mjs scripts/ci-e2e-timeout.test.mjs scripts/node-test-config.test.mjs scripts/ai-live-existing-webapi.test.mjs scripts/ai-live-smoke-safety.test.mjs scripts/ai-live-smoke-runner-control.test.mjs scripts/run-household-meal-real-smoke.test.mjs scripts/check-push-format.test.mjs scripts/check-ui-component-styles.test.mjs scripts/format-staged-files.test.mjs scripts/container-smoke.test.mjs scripts/ci-delivery-workflows.test.mjs scripts/check-image-platforms.test.mjs",
     "test:client": "pnpm --filter @hogaria/web run test",
     "test:server": "pnpm --filter @hogaria/server run test",
     "test:e2e": "node scripts/run-isolated-playwright.mjs",

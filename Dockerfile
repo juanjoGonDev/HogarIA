@@ -1,53 +1,58 @@
-# Stage 1: Build Frontend
-FROM node:22-alpine AS frontend-build
-WORKDIR /app
-COPY frontend/package*.json ./frontend/
-RUN cd frontend && npm ci --production=false
-COPY frontend/ ./frontend/
-RUN cd frontend && npm run build:prod
+# Compile TypeScript and Angular once on BuildKit's native architecture; neither
+# output contains platform-specific binaries.
+FROM --platform=$BUILDPLATFORM node:22-alpine AS build
+ENV PNPM_HOME="/pnpm"
+ENV PATH="${PNPM_HOME}:${PATH}"
+RUN apk add --no-cache python3 make g++ \
+  && corepack enable \
+  && corepack prepare pnpm@10.15.0 --activate
 
-# Stage 2: Build Backend
-FROM node:22-alpine AS backend-build
 WORKDIR /app
-COPY server/package*.json ./server/
-RUN cd server && npm ci --production
-COPY server/ ./server/
-RUN cd server && npm run build
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY frontend/package.json ./frontend/package.json
+COPY server/package.json ./server/package.json
+RUN CI=true pnpm install --frozen-lockfile
 
-# Stage 3: Production
+COPY . .
+RUN pnpm run build
+
+# Native server dependencies (notably better-sqlite3) must match the target image.
+FROM node:22-alpine AS runtime-deps
+ENV PNPM_HOME="/pnpm"
+ENV PATH="${PNPM_HOME}:${PATH}"
+RUN apk add --no-cache python3 make g++ \
+  && corepack enable \
+  && corepack prepare pnpm@10.15.0 --activate
+WORKDIR /app
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY frontend/package.json ./frontend/package.json
+COPY server/package.json ./server/package.json
+RUN CI=true pnpm install --filter @hogaria/server --prod --frozen-lockfile \
+  && pnpm --filter @hogaria/server --prod deploy --legacy /prod/server
+
+# Runtime contains compiled assets and only server production dependencies.
 FROM node:22-alpine AS production
 WORKDIR /app
 
-# Install minimal system dependencies
-RUN apk add --no-cache curl tini
+RUN apk add --no-cache curl tini libstdc++ \
+  && mkdir -p /app/data
 
-# Copy backend
-COPY --from=backend-build /app/server/dist ./server/dist
-COPY --from=backend-build /app/server/node_modules ./server/node_modules
-COPY --from=backend-build /app/server/package.json ./server/
+COPY --from=build /app/server/package.json ./server/package.json
+COPY --from=build /app/server/dist ./server/dist
+COPY --from=runtime-deps /prod/server/node_modules ./server/node_modules
 
-# Copy frontend build
-COPY --from=frontend-build /app/frontend/dist ./public
+COPY --from=build /app/frontend/dist ./public
 
-# Create data directory
-RUN mkdir -p /app/data
-
-# Set environment variables
 ENV NODE_ENV=production
 ENV DATABASE_PATH=/app/data/hogaria.sqlite
 ENV PORT=3000
 ENV NODE_OPTIONS=--max-old-space-size=256
 ENV UV_THREADPOOL_SIZE=2
 
-# Expose port
 EXPOSE 3000
 
-# Health check
 HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \
   CMD curl -f http://localhost:3000/health || exit 1
 
-# Use tini as init system
 ENTRYPOINT ["/sbin/tini", "--"]
-
-# Start server
 CMD ["node", "server/dist/index.js"]
