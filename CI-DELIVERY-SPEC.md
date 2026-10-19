@@ -27,6 +27,7 @@ La rama principal verificada del repositorio es `master`. El PR #47 estaba abier
 
 - El usuario autorizó una PR correctiva, no un push directo a `master`. Crear la PR en Draft con esta spec antes de publicar la implementación; usar base `master` y una rama dedicada sin cambiar la rama/worktree activa.
 - Mantener la PR en Draft y no fusionarla sin autorización explícita posterior. La autorización de merge anterior correspondía al PR #47, ya integrado.
+- Incidencia de entrega: el commit spec-only `ca93ca1` llegó a `master` porque la rama nueva heredó `origin/master` como upstream y el push sin refspec explícito resolvió ese destino. Ese commit modifica solo este archivo; el fix de workflow/código no se incluyó. No se reescribirá historia; el código restante se publicará únicamente en la PR correctiva.
 - Criterios de aceptación de esta corrección:
   - [ ] La compilación de cada arquitectura publicada corre en runner nativo, sin QEMU.
   - [ ] El manifest OCI SHA y `latest` incluye exactamente `linux/amd64` y `linux/arm64`, y el digest publicado se verifica.
