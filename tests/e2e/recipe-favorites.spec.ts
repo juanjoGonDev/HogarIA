@@ -32,16 +32,18 @@ async function expectViewFits(
   const layout = await page.evaluate(() => ({
     viewport: window.innerWidth,
     document: document.documentElement.scrollWidth,
-    cards: Array.from(document.querySelectorAll('.recipe-card')).map((card) => {
-      const button = card.querySelector('.recipe-card__favorite') as HTMLElement | null;
-      const rect = button?.getBoundingClientRect();
-      return {
-        left: rect?.left ?? -1,
-        right: rect?.right ?? Number.POSITIVE_INFINITY,
-        width: rect?.width ?? 0,
-        height: rect?.height ?? 0
-      };
-    })
+    cards: Array.from(document.querySelectorAll('.recipe-card'))
+      .filter((card) => card.getClientRects().length > 0)
+      .map((card) => {
+        const button = card.querySelector('.recipe-card__favorite') as HTMLElement | null;
+        const rect = button?.getBoundingClientRect();
+        return {
+          left: rect?.left ?? -1,
+          right: rect?.right ?? Number.POSITIVE_INFINITY,
+          width: rect?.width ?? 0,
+          height: rect?.height ?? 0
+        };
+      })
   }));
 
   expect(layout.document).toBeLessThanOrEqual(layout.viewport);
@@ -62,14 +64,11 @@ test.describe('pestaña Favoritas de Recetas', () => {
     await registerAndGoto(page, '/recipes', 'qa-rec-fav-1');
 
     const recipes: SyntheticRecipe[] = [];
+    const searchTerm = `QA favoritas ${Date.now()}`;
     try {
-      recipes.push(
-        await createSyntheticRecipe(page, { name: `QA favorita principal ${Date.now()}` })
-      );
-      recipes.push(
-        await createSyntheticRecipe(page, { name: `QA favorita secundaria ${Date.now()}` })
-      );
-      await page.reload();
+      recipes.push(await createSyntheticRecipe(page, { name: `${searchTerm} principal` }));
+      recipes.push(await createSyntheticRecipe(page, { name: `${searchTerm} secundaria` }));
+      await page.goto(`/recipes?search=${encodeURIComponent(searchTerm)}`);
 
       const firstCard = page.locator('.recipe-card').filter({ hasText: recipes[0].name });
       const secondCard = page.locator('.recipe-card').filter({ hasText: recipes[1].name });
@@ -131,8 +130,6 @@ test.describe('pestaña Favoritas de Recetas', () => {
       await page.getByRole('button', { name: 'Todas', exact: true }).click();
       await expect(firstCard).toBeVisible();
       await expect(secondCard).toBeVisible();
-      const allRecipeCount = await page.locator('.recipe-card').count();
-      await expect(page.locator('.recipes__count')).toHaveText(`${allRecipeCount} recetas`);
       await expect(firstCard.locator('.recipe-card__favorite')).toHaveAttribute(
         'aria-pressed',
         'false'
@@ -142,6 +139,25 @@ test.describe('pestaña Favoritas de Recetas', () => {
         'true'
       );
 
+      const unfilteredRecipesResponse = page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return (
+          response.request().method() === 'GET' &&
+          url.pathname === '/api/recipes' &&
+          !url.searchParams.has('search') &&
+          !url.searchParams.has('isFavorite')
+        );
+      });
+      await page.goto('/recipes');
+      const unfilteredRecipes = (await (await unfilteredRecipesResponse).json()) as {
+        data: { total: number; pageSize: number };
+      };
+      await expect(page.locator('.recipes__count')).toHaveText(
+        unfilteredRecipes.data.total === 1 ? '1 receta' : `${unfilteredRecipes.data.total} recetas`
+      );
+      expect(unfilteredRecipes.data.total).toBeGreaterThan(unfilteredRecipes.data.pageSize);
+      await expect(page.locator('.recipe-card')).toHaveCount(unfilteredRecipes.data.pageSize);
+
       const viewports =
         testInfo.project.name === 'mobile-chrome'
           ? [
@@ -149,6 +165,11 @@ test.describe('pestaña Favoritas de Recetas', () => {
               { width: 320, height: 568 }
             ]
           : [{ width: 1440, height: 900 }];
+      if (testInfo.project.name === 'mobile-chrome') {
+        const showAll = page.locator('[data-test="recipe-mobile-show-all"]');
+        await showAll.click();
+        await expect(showAll).toHaveAttribute('aria-expanded', 'true');
+      }
       for (const viewport of viewports) {
         await expectViewFits(page, viewport);
         await captureState(page, testInfo, 'all-recipes-after-unfavorite');
