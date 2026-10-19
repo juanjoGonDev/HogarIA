@@ -3,7 +3,7 @@
 # =============================================================================
 # Usage: make <command>
 
-.PHONY: help install dev build test lint clean docker docker-down docker-clean
+.PHONY: help install dev build test lint clean docker docker-down docker-clean ci-yaml ci-ui ci-e2e-types
 
 # Default target
 help: ## Show this help message
@@ -75,13 +75,13 @@ test-coverage: ## Run tests with coverage
 # Linting & Formatting
 # =============================================================================
 
-ci:yaml: ## Revisa los YAML de Actions: comillas, tabs y contextos que GitHub no tiene
+ci-yaml: ## Revisa los YAML de Actions: comillas, tabs y contextos que GitHub no tiene
 	@node scripts/check-workflows.mjs
 
-ci:ui: ## Guarda de UI: sin emoji, sin select nativo, sin data-test inventados
+ci-ui: ## Guarda de UI: sin emoji, sin select nativo, sin data-test inventados
 	@node scripts/check-ui.mjs
 
-ci:e2e-types: ## Type-check de la suite e2e (Playwright no lo hace por su cuenta)
+ci-e2e-types: ## Type-check de la suite e2e (Playwright no lo hace por su cuenta)
 	pnpm run typecheck:e2e
 
 lint: ## Run all linters
