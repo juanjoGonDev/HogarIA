@@ -300,7 +300,7 @@ test.describe('edición de nota de línea del ticket', () => {
       await page.goto(`/receipts/${reviewId}`);
       const note = page.getByLabel(scenario.noteLabel, { exact: true });
       await expect(note).toHaveValue('Nota reconocida');
-      await expect(note).toHaveAttribute('maxlength', '280');
+      await expect(note).not.toHaveAttribute('maxlength');
       await expect(note).toHaveAttribute('placeholder', scenario.notePlaceholder);
       await expectReadableNote(note);
       await note.focus();
@@ -346,6 +346,11 @@ test.describe('edición de nota de línea del ticket', () => {
         await expectNoHorizontalOverflow(page, 320, 740);
         await expectMobileTouchTargets(page);
       }
+
+      const longNote = 'Nota sintética de revisión. '.repeat(100).trimEnd();
+      expect(longNote.length).toBeGreaterThan(2500);
+      await saveNote(longNote, longNote);
+      await expect(note).toHaveValue(longNote);
 
       await saveNote('', null);
       await page.reload();
