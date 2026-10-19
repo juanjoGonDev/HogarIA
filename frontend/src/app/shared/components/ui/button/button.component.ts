@@ -65,6 +65,11 @@ export type ButtonSize = 'sm' | 'md' | 'lg' | 'icon';
         white-space: nowrap;
       }
 
+      .btn--full-width {
+        box-sizing: border-box;
+        width: 100%;
+      }
+
       .btn--icon {
         padding: var(--space-2);
         aspect-ratio: 1;

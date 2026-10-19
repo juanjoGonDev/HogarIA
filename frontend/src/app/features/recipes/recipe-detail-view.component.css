@@ -823,6 +823,10 @@
     margin: 0;
     padding: var(--space-3) var(--container-padding)
       calc(var(--space-3) + env(safe-area-inset-bottom, 0px));
+    padding-right: calc(
+      var(--container-padding) + 52px + var(--space-3) +
+        max(var(--space-3), env(safe-area-inset-right, 0px))
+    );
     border-top: 1px solid var(--border-default);
     background: var(--bg-primary);
   }

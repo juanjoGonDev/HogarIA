@@ -331,6 +331,21 @@ test('la ficha completa presenta detalle, ajusta raciones solo en pantalla y no 
       expect(stickyButton).not.toBeNull();
       expect(stickyBox).not.toBeNull();
       expect(stickyButton!.width).toBeCloseTo(stickyBox!.width, 0);
+      if (testInfo.project.name === 'mobile-chrome') {
+        const assistantButton = page.locator('[data-test="ai-assistant-open"]');
+        for (const responsiveViewport of [viewport, { width: 320, height: 640 }]) {
+          await page.setViewportSize(responsiveViewport);
+          const actionBox = await responsiveCook.boundingBox();
+          const assistantBox = await assistantButton.boundingBox();
+          expect(actionBox).not.toBeNull();
+          expect(assistantBox).not.toBeNull();
+          expect(
+            actionBox!.x + actionBox!.width,
+            `el CTA fijo no invade el FAB a ${responsiveViewport.width}px`
+          ).toBeLessThanOrEqual(assistantBox!.x);
+        }
+        await page.setViewportSize(viewport);
+      }
     }
     await expect(
       detail.locator('[data-test="recipe-preparation"] [data-test="recipe-step-photo"]'),
@@ -568,7 +583,11 @@ test('la ficha completa presenta detalle, ajusta raciones solo en pantalla y no 
       const cardPlaceholder = recipeCard.locator('.recipe-card__image--placeholder');
       await expect(cardPlaceholder).toHaveCount(1);
       const cardPlaceholderBox = await cardPlaceholder.boundingBox();
-      expect(cardPlaceholderBox?.height).toBeLessThanOrEqual(80);
+      expect(cardPlaceholderBox).not.toBeNull();
+      expect(
+        Math.abs(cardPlaceholderBox!.width / cardPlaceholderBox!.height - 1.6),
+        'el fallback de catálogo conserva la proporción compartida 16:10'
+      ).toBeLessThanOrEqual(0.02);
       await page.screenshot({
         path: resolve(screenshotDirectory, `no-cover-library-${testInfo.project.name}.png`),
         fullPage: false,
