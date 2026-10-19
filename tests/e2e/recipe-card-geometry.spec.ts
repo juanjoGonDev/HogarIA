@@ -196,7 +196,11 @@ test('las tarjetas de receta comparten geometría entre Dashboard y catálogo', 
       await expectNoDocumentOverflow(page, 'dashboard', viewport);
       await captureCard(page, dashboardCard, 'dashboard', viewport, testInfo);
 
-      await page.goto('/recipes');
+      await page.goto(`/recipes?search=${encodeURIComponent(recipe.name)}`);
+      await expect(page.locator('[data-test="recipe-search"]')).toHaveValue(recipe.name);
+      const gridMode = page.getByRole('button', { name: 'Vista de cuadrícula' });
+      if ((await gridMode.getAttribute('aria-pressed')) !== 'true') await gridMode.click();
+      await expect(gridMode).toHaveAttribute('aria-pressed', 'true');
       const recipesCard = page
         .locator('.recipes__grid [data-test="recipe-card"]')
         .filter({ hasText: recipe.name });

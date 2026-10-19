@@ -915,6 +915,20 @@ interface DashboardAiQueueRow {
         font-size: var(--text-xs);
       }
 
+      @media (max-width: 760px) {
+        .recipe-card__content {
+          padding: var(--space-2);
+        }
+
+        .recipe-card__name {
+          margin-bottom: 0;
+        }
+
+        .recipe-card__meta {
+          gap: var(--space-2);
+        }
+      }
+
       .recipe-card__time {
         font-size: var(--text-xs);
         color: var(--text-secondary);

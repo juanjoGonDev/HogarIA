@@ -325,7 +325,6 @@
 
 .recipe-card__image--placeholder {
   min-height: 72px;
-  aspect-ratio: auto;
 }
 
 .recipe-card__favorite {
@@ -536,9 +535,7 @@
     overflow: hidden;
   }
   .recipe-card__image--placeholder {
-    height: 72px;
     min-height: 72px;
-    aspect-ratio: auto;
   }
   .recipe-card__image img {
     width: 100%;
