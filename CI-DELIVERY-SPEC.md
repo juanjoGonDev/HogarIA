@@ -1,12 +1,12 @@
 # CI para PR y entrega GHCR
 
-**Estado:** activo; publicar primero este contrato en el PR #47 antes de cambiar workflows o empaquetado.
-**Rama:** `feat/household-floorplan`; trabajar en la rama existente. No abrir otro PR ni cambiar de rama.
+**Estado:** remediación correctiva autorizada; PR #47 se fusionó en `master` el 2026-10-19 y se requiere una PR nueva para el fallo de publicación GHCR.
+**Rama:** nueva PR correctiva Draft contra `master`; conservar sin cambios la rama/worktree local existente.
 **Idioma:** español (España).
 
 ## Objetivo y autorización
 
-El usuario autorizó el 2026-10-19 que cada PR ejecute CI y construya/pruebe la imagen de contenedor, que la imagen se publique en GHCR al integrar en la rama principal y que se fusione el PR #47 existente cuando las comprobaciones sean satisfactorias. No se autoriza crear otra PR.
+El usuario autorizó el 2026-10-19 que cada PR ejecute CI y construya/pruebe la imagen de contenedor, que la imagen se publique en GHCR al integrar en la rama principal y que se fusione el PR #47 existente cuando las comprobaciones sean satisfactorias. Tras fallar la publicación GHCR del merge, el usuario autorizó explícitamente abrir una PR correctiva. No hay autorización de merge para esta PR correctiva.
 
 La rama principal verificada del repositorio es `master`. El PR #47 estaba abierto y Draft contra `arena/01a0a6c2-micocinai`; el 2026-10-19 se retargeteó el PR existente a `master`, sin crear rama ni PR. En ese momento, la comparación pasó de 473 archivos (133.178 altas / 6.461 bajas) a 995 (323.183 / 7.430), por 976 commits existentes desde `master` hasta `arena` más 418 commits del PR. El diff ampliado se revisó en rutas, alcance y patrones de credenciales antes del cambio; no ocultar ni descartar ese alcance.
 
@@ -16,6 +16,23 @@ La rama principal verificada del repositorio es `master`. El PR #47 estaba abier
 - La raíz declara `pnpm@10.15.0`, `pnpm-lock.yaml` y dos paquetes workspace (`frontend`, `server`); el Dockerfile actual usa `npm ci` con `package*.json` y no hay lockfiles npm.
 - La imagen ejecuta el servidor Node y SQLite (`better-sqlite3`), sirve `frontend/dist`, y define `/health` como healthcheck.
 - El repositorio es público y su imagen debe incluir `linux/amd64` y `linux/arm64`; validar ambas arquitecturas antes de publicar.
+
+## Hallazgo posterior a la integración — 2026-10-19
+
+- El PR #47 se fusionó por squash en `master` como `184784b170698f06e047bd8ff985c6f562b69700`. CI de `push` terminó verde: run `39249240520`, 11/11 jobs, incluidos los smokes de imagen amd64 y arm64.
+- El publicador GHCR (`39249240518`) expiró y fue cancelado al límite de 50 minutos. El log reproducible muestra `qemu: uncaught target signal 4 (Illegal instruction)` en `linux/arm64 runtime-deps`, durante `pnpm install ... better-sqlite3`; la imagen/tag SHA no llegó a publicarse. Los builds separados amd64/arm64 del CI sí pasan.
+- Remediación elegida: construir/publicar cada arquitectura en su runner nativo (`ubuntu-24.04` y `ubuntu-24.04-arm`), sin QEMU; después ensamblar el índice OCI SHA/`latest`, comprobar plataformas/digest y hacer pull + smoke de cada miembro en su runner nativo. Así se elimina la emulación arm64 donde se observó el `SIGILL`. El workflow usa `COMMIT_SHA` en vez de redefinir el entorno reservado `GITHUB_SHA`.
+
+## Remediación correctiva autorizada
+
+- El usuario autorizó una PR correctiva, no un push directo a `master`. Crear la PR en Draft con esta spec antes de publicar la implementación; usar base `master` y una rama dedicada sin cambiar la rama/worktree activa.
+- Mantener la PR en Draft y no fusionarla sin autorización explícita posterior. La autorización de merge anterior correspondía al PR #47, ya integrado.
+- Criterios de aceptación de esta corrección:
+  - [ ] La compilación de cada arquitectura publicada corre en runner nativo, sin QEMU.
+  - [ ] El manifest OCI SHA y `latest` incluye exactamente `linux/amd64` y `linux/arm64`, y el digest publicado se verifica.
+  - [ ] Se ejecuta smoke de pull, arranque y health/API en cada runner nativo contra la imagen publicada.
+  - [ ] Las pruebas deterministas cubren runners, montaje/verificación del manifest, tags y smokes; no se publica desde pull requests.
+  - [ ] CI de la PR correctiva pasa todos los jobs requeridos; image publish en `master` se verifica tras un merge futuro autorizado.
 
 ## Decisiones de seguridad y entrega
 
@@ -33,23 +50,25 @@ La rama principal verificada del repositorio es `master`. El PR #47 estaba abier
 - [x] Añadir una prueba determinista del contrato del workflow: triggers sin filtro de base, build de PR sin push/credenciales, publisher solo en `master`, y permisos GHCR mínimos. `pnpm run test:config`: 104/104.
 - [x] Reemplazar `npm ci` por una instalación/build reproducible con workspace y lockfile pnpm; incluir `.dockerignore` y dependencias de compilación necesarias sin cargarlas a producción. Docker build `linux/amd64` y `linux/arm64` pasaron localmente.
 - [x] Para cada PR, compilar y ejecutar smoke de la imagen en `linux/amd64` y `linux/arm64`; usar runtime efímero y validar health, API y app estática. Run #807 pasó ambas arquitecturas en el PR #47.
-- [ ] En push a `master`, publicar multi-arquitectura a `ghcr.io/<owner>/<repo>` con tags SHA y `latest`, y ejecutar smoke contra el digest publicado.
+- [ ] Publicar cada plataforma en un runner nativo, ensamblar los tags GHCR SHA y `latest`, comprobar el índice OCI y ejecutar smoke contra la imagen publicada en ambas arquitecturas nativas.
 - [x] Pasan `make ci-yaml`, `make ci-ui`, `make ci-e2e-types`, `pnpm run test:config` (104/104), `actionlint` y `git diff --check`.
 - [x] Docker build y runtime smoke local en `linux/amd64` y `linux/arm64`: `/health`, `/api/health`, HTML, ruta protegida del asistente (401 sin token) y `HEALTHCHECK=healthy`.
 - [x] Pre-push completo verde en `5ba77b4`: formato, UI, build, E2E typecheck, configuración, cliente y servidor.
 - [x] El run real de CI del PR termina verde en la base `master`: run #807, 11/11 jobs verdes, incluidas 4 shards E2E y full-stack.
 - [x] Revisar el diff ampliado y retargetear el PR existente a `master`; conservar explícito el alcance adicional en el cuerpo del PR.
-- [ ] Fusionar el PR #47 existente a `master` solo después de los checks verdes; verificar SHA de merge, manifest/plataformas/tag GHCR y arranque de la imagen publicada.
-- [ ] Registrar resultados finales, limitaciones, commits y estado del working tree; preservar Draft si cualquier aceptación queda pendiente.
+- [x] Fusionar el PR #47 existente a `master` tras CI verde: merge `184784b170698f06e047bd8ff985c6f562b69700`; CI de push `39249240520`, 11/11 jobs.
+- [ ] Verificar en vivo el manifest, tags, digest y arranque de la imagen GHCR publicada; el primer intento falló antes de publicar.
+- [ ] Registrar resultados finales, limitaciones, commits y estado del working tree.
 
 ## Fuera de alcance
 
-No habilitar IA real ni enviar prompts desde CI. No crear cuentas/secretos de proveedores. No tocar bases de datos habituales, cambiar dependencias de la app, crear una PR/branch, forzar pushes ni modificar gates funcionales ajenos.
+No habilitar IA real ni enviar prompts desde CI. No crear cuentas/secretos de proveedores. No tocar bases de datos habituales, cambiar dependencias de la app, crear PR/branches adicionales a la PR correctiva autorizada, forzar pushes ni modificar gates funcionales ajenos.
 
 ## Evidencia local — 2026-10-19
 
 - `node scripts/check-workflows.mjs` valida los 6 workflows; `actionlint` valida `.github/workflows/ci.yml` y `.github/workflows/publish-ghcr.yml` sin incidencias.
 - `pnpm run test:config`: 104/104. Incluye 12 pruebas de smoke/plataformas/contrato de entrega.
+- Remediación del publicador validada localmente: `node --test scripts/ci-delivery-workflows.test.mjs` (4/4), `pnpm run test:config` (104/104), `node scripts/check-workflows.mjs` (6 workflows) y `go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 .github/workflows/ci.yml .github/workflows/publish-ghcr.yml` pasan. El nuevo flujo aún requiere verificación real de GHCR tras push.
 - `make ci-yaml`, `make ci-ui` (266 ficheros, 21 reglas) y `make ci-e2e-types` pasan. El commit `05c8dd3` sustituyó targets no invocables con dos puntos (`ci:yaml`, `ci:ui`, `ci:e2e-types`) por targets con guion.
 - `docker build --platform linux/amd64 --tag hogaria-ci:pr47-final-amd64 .` y equivalente `linux/arm64` completan; ambas imágenes ejecutan el smoke anterior y llegan a `HEALTHCHECK=healthy`. DB está en tmpfs y JWT es aleatorio; ambos contenedores se eliminaron.
 - Pre-push completo en `5ba77b4`: `node scripts/check-push-format.mjs` (3 rutas), `pnpm run check:ui` (266/21), `pnpm run build` (éxito, advertencias existentes), `pnpm run typecheck:e2e`, y `pnpm run test` (config 104/104, cliente 1709/1709 con 90,62/80,96/91,73/93,18 % S/B/F/L; servidor 2082 pasados, 1 omitido). Duración del hook: 102 s.
