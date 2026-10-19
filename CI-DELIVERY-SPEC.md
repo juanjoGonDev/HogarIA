@@ -27,12 +27,13 @@ La rama principal verificada del repositorio es `master`. El PR #47 estaba abier
 
 - El usuario autorizó una PR correctiva, no un push directo a `master`. Crear la PR en Draft con esta spec antes de publicar la implementación; usar base `master` y una rama dedicada sin cambiar la rama/worktree activa.
 - Mantener la PR en Draft y no fusionarla sin autorización explícita posterior. La autorización de merge anterior correspondía al PR #47, ya integrado.
+- PR correctiva #55 está en Draft contra `master`; la implementación aún no se ha publicado en la rama.
 - Incidencia de entrega: el commit spec-only `ca93ca1` llegó a `master` porque la rama nueva heredó `origin/master` como upstream y el push sin refspec explícito resolvió ese destino. Ese commit modifica solo este archivo; el fix de workflow/código no se incluyó. No se reescribirá historia; el código restante se publicará únicamente en la PR correctiva.
 - Criterios de aceptación de esta corrección:
   - [ ] La compilación de cada arquitectura publicada corre en runner nativo, sin QEMU.
-  - [ ] El manifest OCI SHA y `latest` incluye exactamente `linux/amd64` y `linux/arm64`, y el digest publicado se verifica.
+  - [ ] El manifest OCI SHA y `latest` incluyen `linux/amd64` y `linux/arm64`, comparten digest verificado y pasan la comprobación de plataformas.
   - [ ] Se ejecuta smoke de pull, arranque y health/API en cada runner nativo contra la imagen publicada.
-  - [ ] Las pruebas deterministas cubren runners, montaje/verificación del manifest, tags y smokes; no se publica desde pull requests.
+  - [x] Las pruebas deterministas cubren runners, montaje/verificación del manifest, tags y smokes; no se publica desde pull requests. `node --test scripts/ci-delivery-workflows.test.mjs` (4/4) y `pnpm run test:config` (104/104).
   - [ ] CI de la PR correctiva pasa todos los jobs requeridos; image publish en `master` se verifica tras un merge futuro autorizado.
 
 ## Decisiones de seguridad y entrega
@@ -69,6 +70,7 @@ No habilitar IA real ni enviar prompts desde CI. No crear cuentas/secretos de pr
 
 - `node scripts/check-workflows.mjs` valida los 6 workflows; `actionlint` valida `.github/workflows/ci.yml` y `.github/workflows/publish-ghcr.yml` sin incidencias.
 - `pnpm run test:config`: 104/104. Incluye 12 pruebas de smoke/plataformas/contrato de entrega.
+- PR #55: `node --test scripts/ci-delivery-workflows.test.mjs` (4/4), `pnpm run test:config` (104/104), `node scripts/check-workflows.mjs` (6 workflows), `actionlint` para CI/publicación y `git diff --check` pasan. Publicación nativa y smoke contra GHCR siguen pendientes de un push autorizado a `master`.
 - Remediación del publicador validada localmente: `node --test scripts/ci-delivery-workflows.test.mjs` (4/4), `pnpm run test:config` (104/104), `node scripts/check-workflows.mjs` (6 workflows) y `go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 .github/workflows/ci.yml .github/workflows/publish-ghcr.yml` pasan. El nuevo flujo aún requiere verificación real de GHCR tras push.
 - `make ci-yaml`, `make ci-ui` (266 ficheros, 21 reglas) y `make ci-e2e-types` pasan. El commit `05c8dd3` sustituyó targets no invocables con dos puntos (`ci:yaml`, `ci:ui`, `ci:e2e-types`) por targets con guion.
 - `docker build --platform linux/amd64 --tag hogaria-ci:pr47-final-amd64 .` y equivalente `linux/arm64` completan; ambas imágenes ejecutan el smoke anterior y llegan a `HEALTHCHECK=healthy`. DB está en tmpfs y JWT es aleatorio; ambos contenedores se eliminaron.
