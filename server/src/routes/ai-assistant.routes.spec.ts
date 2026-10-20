@@ -472,7 +472,10 @@ beforeEach(async () => {
   alice = await makeUser();
 });
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 afterAll(() => closeDatabase?.());
 
 describe('POST /api/ai/assistant/proposals', () => {
@@ -2416,6 +2419,8 @@ describe('POST /api/ai/assistant/meal-proposals', () => {
   });
 
   it('previews shopping from an unconfirmed meal proposal without writing or calling AI', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-19T12:00:00.000Z'));
     prepareMealHousehold();
     db.prepare(
       `INSERT INTO ingredients (id, user_id, household_id, name, category, quantity, unit)
