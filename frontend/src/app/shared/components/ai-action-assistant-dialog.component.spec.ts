@@ -44,6 +44,7 @@ describe('AiActionAssistantDialogComponent', () => {
   let bodyOverflowBeforeFixture = '';
   let speechRecognitionDescriptor: PropertyDescriptor | undefined;
   let webkitSpeechRecognitionDescriptor: PropertyDescriptor | undefined;
+  let fakeClockInstalled = false;
 
   beforeEach(async () => {
     bodyOverflowBeforeFixture = document.body.style.overflow;
@@ -137,6 +138,10 @@ describe('AiActionAssistantDialogComponent', () => {
   });
 
   afterEach(() => {
+    if (fakeClockInstalled) {
+      jasmine.clock().uninstall();
+      fakeClockInstalled = false;
+    }
     fixture.destroy();
     document.body.style.overflow = bodyOverflowBeforeFixture;
     restoreWindowProperty('SpeechRecognition', speechRecognitionDescriptor);
@@ -471,6 +476,9 @@ describe('AiActionAssistantDialogComponent', () => {
   });
 
   it('derives a separate shopping approval only from a confirmed meal plan and verifiable shortages', async () => {
+    jasmine.clock().install();
+    jasmine.clock().mockDate(new Date('2026-10-19T12:00:00.000Z'));
+    fakeClockInstalled = true;
     householdContext.activeHouseholdId.set('home-meals');
     householdContext.household.set(syntheticMealHousehold());
     const action = mealPlanAction();
