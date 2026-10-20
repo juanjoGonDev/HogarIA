@@ -6090,3 +6090,11 @@ sintéticas en `.e2e-screenshots/preferences-unbounded-text ` (el directorio con
 final por el runner). Un nuevo intento de repetición no llegó a abrir tests: el Chromium headless faltaba en el
 directorio temporal de ese sandbox; no es un fallo de la aplicación. No hubo llamada real a IA. La evidencia
 confirma que HogarIA ya no rechaza ni trunca ese texto; no demuestra que el límite fuera la causa del error WebAPI.
+
+**Revalidación de CI (2026-10-20):** el primer run completo detectó dos expectativas obsoletas y una regresión
+real. Confirmar una comida persistía las raciones recalculadas por el plan en vez de las editadas por la persona;
+la ruta vuelve a persistir las raciones enviadas y `household-meal-proposals.routes.spec.ts` fija el contrato.
+El E2E de preferencias ahora valida persistencia de opciones sintéticas de 2.501 caracteres en preferencias y
+onboarding, conforme a esta decisión. El E2E full-stack calcula una semana futura para no pedir una vista de
+compra que deliberadamente omite días pasados. Focales locales: ruta servidor **36/36**; preferencias desktop+móvil
+**4/4**; confirmación del asistente desktop+móvil **2/2**; `typecheck:e2e` aprobado. Reejecución de CI pendiente.
