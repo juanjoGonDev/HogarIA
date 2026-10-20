@@ -1,7 +1,7 @@
 # CI para PR y entrega GHCR
 
-**Estado:** remediación correctiva autorizada; PR #47 se fusionó en `master` el 2026-10-19 y se requiere una PR nueva para el fallo de publicación GHCR.
-**Rama:** nueva PR correctiva Draft contra `master`; conservar sin cambios la rama/worktree local existente.
+**Estado:** remediación correctiva GHCR en curso; PR #57 se fusionó en `master` el 2026-10-20 y falló el paso de verificación del manifest (run `39440320698`).
+**Rama:** PR correctiva Draft nueva contra `master`; preservar sin cambios la rama/worktree local existente.
 **Idioma:** español (España).
 
 ## Objetivo y autorización
@@ -22,6 +22,22 @@ La rama principal verificada del repositorio es `master`. El PR #47 estaba abier
 - El PR #47 se fusionó por squash en `master` como `184784b170698f06e047bd8ff985c6f562b69700`. CI de `push` terminó verde: run `39249240520`, 11/11 jobs, incluidos los smokes de imagen amd64 y arm64.
 - El publicador GHCR (`39249240518`) expiró y fue cancelado al límite de 50 minutos. El log reproducible muestra `qemu: uncaught target signal 4 (Illegal instruction)` en `linux/arm64 runtime-deps`, durante `pnpm install ... better-sqlite3`; la imagen/tag SHA no llegó a publicarse. Los builds separados amd64/arm64 del CI sí pasan.
 - Remediación elegida: construir/publicar cada arquitectura en su runner nativo (`ubuntu-24.04` y `ubuntu-24.04-arm`), sin QEMU; después ensamblar el índice OCI SHA/`latest`, comprobar plataformas/digest y hacer pull + smoke de cada miembro en su runner nativo. Así se elimina la emulación arm64 donde se observó el `SIGILL`. El workflow usa `COMMIT_SHA` en vez de redefinir el entorno reservado `GITHUB_SHA`.
+
+## Hallazgo tras integrar PR #57 — 2026-10-20
+
+- El push de merge `a260abde75f7c09acd690f2b9511bb2256db078d` construyó y publicó correctamente ambos manifests nativos; `imagetools create` terminó con éxito y publicó el índice `sha256:ac7e1c9f032cbb42ef74591757f5dab60e588064df964618e2d27b1d150d0ad9` para tags SHA y `latest`.
+- Run `39440320698`, job `118689249438`, falló inmediatamente después con exit 255 en la captura `docker buildx imagetools inspect ... | awk ... { print $2; exit }`, mientras `set -o pipefail` estaba activo. La inspección local del tag confirma que el índice OCI sí contiene digest y plataformas amd64/arm64. El patrón de salida temprana de `awk` puede cerrar el pipe antes de que Buildx termine; la corrección debe consumir y parsear la salida estructurada completa para evitar SIGPIPE y validar el digest explícitamente.
+- El usuario autorizó corregir, hacer push y fusionar esta remediación solo tras CI verde. No omitir reglas de branch protection ni usar bypass; si un gate requerido no está disponible, dejar el PR sin fusionar e informar el bloqueo.
+
+### Checklist de esta remediación
+
+- [ ] Abrir PR correctiva Draft contra `master` con esta spec antes de implementar.
+- [ ] Añadir pruebas deterministas para extraer un digest OCI válido y rechazar JSON/digest inválido.
+- [ ] Cambiar la extracción y comparación de digests del workflow a JSON estructurado consumido por completo; quitar el pipe `awk` con salida temprana.
+- [ ] Verificar pruebas del helper, contrato del workflow, validación YAML/actionlint y gates locales requeridos.
+- [ ] CI de la PR pasa; publicar la PR como ready y fusionarla por squash sin bypass.
+- [ ] Observar el run post-merge de publicación GHCR: tags SHA/`latest` con digest común, plataformas amd64/arm64 y smokes nativos verdes.
+- [ ] Dejar limpios los cambios locales propios y retirar solo el worktree temporal de esta remediación.
 
 ## Remediación correctiva autorizada
 
@@ -65,7 +81,7 @@ La rama principal verificada del repositorio es `master`. El PR #47 estaba abier
 
 ## Fuera de alcance
 
-No habilitar IA real ni enviar prompts desde CI. No crear cuentas/secretos de proveedores. No tocar bases de datos habituales, cambiar dependencias de la app, crear PR/branches adicionales a la PR correctiva autorizada, forzar pushes ni modificar gates funcionales ajenos.
+No habilitar IA real ni enviar prompts desde CI. No crear cuentas/secretos de proveedores. No tocar bases de datos habituales, cambiar dependencias de la app, hacer push directo a `master`, omitir branch protection, forzar pushes ni modificar gates funcionales ajenos.
 
 ## Evidencia local — 2026-10-19
 
