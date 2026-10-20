@@ -157,8 +157,9 @@ function isHouseholdSelectionRoute(c: Context): boolean {
 }
 
 function isHouseholdSetupRoute(c: Context): boolean {
-  if (c.req.method !== 'POST') return false;
   const path = new URL(c.req.url).pathname.replace(/\/+$/, '') || '/';
+  if (c.req.method === 'GET') return path === '/api/ai/availability';
+  if (c.req.method !== 'POST') return false;
   return (
     path === '/api/household' ||
     path === '/api/household/join' ||
