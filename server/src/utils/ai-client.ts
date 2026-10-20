@@ -16,6 +16,7 @@ import {
   hasActiveHouseholdMemberships,
   readActiveHouseholdId
 } from './household-context.js';
+import { resolveAiFunctionProvider, type AiFunctionKey } from './ai-function-providers.js';
 import type { AiCallResponseFormat, AiResponseFormat } from '../schemas/ai-response-format.js';
 
 export type AiMessagePart =
@@ -36,6 +37,7 @@ export type AiJobKind =
   | 'shopping_photo'
   | 'expiry_estimate'
   | 'household_plan'
+  | 'product_image_search'
   | 'connection_test';
 
 export type AiProviderRequestOptions = { reasoning_effort?: 'none' };
@@ -96,6 +98,39 @@ export function readOnlyActiveAiConfig(db: SqlDb, userId: string) {
   const householdId = readActiveHouseholdId(db, userId);
   if (!householdId && hasActiveHouseholdMemberships(db, userId)) return undefined;
   return activeAiConfigForScope(db, userId, householdId);
+}
+
+/** Resolve one function's provider using the user's currently selected household, read-only. */
+export function readOnlyAiConfigForFunction(db: SqlDb, userId: string, functionKey: AiFunctionKey) {
+  const householdId = readActiveHouseholdId(db, userId);
+  if (!householdId && hasActiveHouseholdMemberships(db, userId)) return undefined;
+  return resolveAiFunctionProvider(db, userId, householdId, functionKey);
+}
+
+/** Resolve one function for an already captured scope; never infer another household. */
+export function aiConfigForFunctionInScope(
+  db: SqlDb,
+  userId: string,
+  householdId: string | null,
+  functionKey: AiFunctionKey
+) {
+  return resolveAiFunctionProvider(db, userId, householdId, functionKey);
+}
+
+/** Resolve a function using the currently active scope, without personal-config fallback. */
+export function activeAiConfigForFunction(db: SqlDb, userId: string, functionKey: AiFunctionKey) {
+  const householdId = activeHouseholdId(db, userId);
+  if (!householdId && hasActiveHouseholdMemberships(db, userId)) return undefined;
+  return resolveAiFunctionProvider(db, userId, householdId, functionKey);
+}
+
+export function activeAiConfigForFunctionInScope(
+  db: SqlDb,
+  userId: string,
+  householdId: string | null,
+  functionKey: AiFunctionKey
+) {
+  return resolveAiFunctionProvider(db, userId, householdId, functionKey);
 }
 
 export function activeAiConfigForScope(db: SqlDb, userId: string, householdId: string | null) {

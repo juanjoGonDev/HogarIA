@@ -3,6 +3,9 @@ import { formDefault, formField, formPartial } from './form.js';
 import { tasteGoalEnum } from '../utils/taste-profile.js';
 
 const aiProviderEnum = z.enum(['openai', 'custom']);
+export const aiFunctionProviderAssignmentSchema = z
+  .object({ configId: z.string().trim().min(1).nullable() })
+  .strict();
 const detailLevelEnum = z.enum(['basic', 'intermediate', 'expert']);
 const guestPreferenceList = z.array(z.string().trim().min(1).max(60)).max(20).default([]);
 

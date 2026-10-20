@@ -546,6 +546,29 @@ describe('POST /api/ai/assistant/proposals', () => {
     expect(persistedSnapshot()).toEqual(before);
   });
 
+  it('uses the provider assigned to the assistant function', async () => {
+    addConfig(alice);
+    db.prepare(
+      `INSERT INTO ai_configs
+        (id, user_id, name, provider, base_url, api_key, model, temperature, max_tokens, timeout, is_active, created_at)
+       VALUES ('assistant-selected', ?, 'Selected', 'custom', 'http://assistant-selected.test/v1', 'synthetic', 'test-model', 0, 500, 1000, 1, '2026-10-21')`
+    ).run(alice.id);
+    db.prepare(
+      `INSERT INTO ai_function_providers (user_id, household_id, function_key, config_id)
+       VALUES (?, NULL, 'assistant', 'assistant-selected')`
+    ).run(alice.id);
+    const fetchMock = stubProvider(JSON.stringify(assistantCandidate()));
+
+    const response = await call('POST', '/proposals', {
+      prompt: 'Añade lentejas a la despensa'
+    });
+
+    expect(response.status).toBe(200);
+    expect(String(fetchMock.mock.calls[0][0])).toBe(
+      'http://assistant-selected.test/v1/chat/completions'
+    );
+  });
+
   it('rejects invalid provider payload JSON without writing app data', async () => {
     addConfig(alice);
     const before = persistedSnapshot();

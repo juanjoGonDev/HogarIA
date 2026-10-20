@@ -34,7 +34,7 @@ import {
   comparableRecipeName
 } from '../schemas/ai-assistant-recipe-update.schema.js';
 import type { AppEnv } from '../types/hono-env.js';
-import { AiCallError, extractJsonObject, readOnlyActiveAiConfig } from '../utils/ai-client.js';
+import { AiCallError, extractJsonObject, readOnlyAiConfigForFunction } from '../utils/ai-client.js';
 import { aiOutputLanguageInstruction } from '../utils/ai-output-language.js';
 import { callAssistantAITransient } from '../utils/ai-assistant-runtime.js';
 import {
@@ -916,7 +916,7 @@ aiAssistantRoutes.post(
 
     const userId = c.get('userId');
     const db = getDatabase();
-    const config = readOnlyActiveAiConfig(db, userId);
+    const config = readOnlyAiConfigForFunction(db, userId, 'assistant');
     if (!config) {
       return c.json({ success: false, code: 'AI_NOT_CONFIGURED' }, 503);
     }
@@ -1020,7 +1020,7 @@ async function generateAssistantMealProposal(
     return c.json({ success: false, code: 'HOUSEHOLD_CALENDAR_EDIT_REQUIRED' }, 403);
   }
 
-  const config = readOnlyActiveAiConfig(db, userId);
+  const config = readOnlyAiConfigForFunction(db, userId, 'assistant');
   if (!config) return c.json({ success: false, code: 'AI_NOT_CONFIGURED' }, 503);
 
   try {
@@ -1331,7 +1331,7 @@ aiAssistantRoutes.post(
 
     const userId = c.get('userId');
     const db = getDatabase();
-    const config = readOnlyActiveAiConfig(db, userId);
+    const config = readOnlyAiConfigForFunction(db, userId, 'assistant');
     if (!config) {
       return c.json({ success: false, code: 'AI_NOT_CONFIGURED' }, 503);
     }
@@ -1478,7 +1478,7 @@ aiAssistantRoutes.post(
 
     const userId = c.get('userId');
     const db = getDatabase();
-    const config = readOnlyActiveAiConfig(db, userId);
+    const config = readOnlyAiConfigForFunction(db, userId, 'assistant');
     if (!config) {
       return c.json({ success: false, code: 'AI_NOT_CONFIGURED' }, 503);
     }

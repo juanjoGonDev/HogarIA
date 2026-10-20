@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import { nanoid } from 'nanoid';
-import { activeAiConfigForScope } from './ai-client.js';
+import { activeAiConfigForFunctionInScope } from './ai-client.js';
 import { activeHouseholdId } from './household-context.js';
 import { submitAiTask, cancelarTrabajo } from './ticket-queue.js';
 import {
@@ -175,7 +175,12 @@ export function queueProductImageSearch(
     options.householdId === undefined
       ? (activeHouseholdId(db, userId) ?? ingredient.household_id)
       : options.householdId;
-  const config = activeAiConfigForScope(db, userId, providerHouseholdId);
+  const config = activeAiConfigForFunctionInScope(
+    db,
+    userId,
+    providerHouseholdId,
+    'shopping_pantry'
+  );
   db.prepare(
     `INSERT INTO product_image_searches
       (ingredient_id, user_id, household_id, job_id, candidates_json, status, error_code, updated_at)

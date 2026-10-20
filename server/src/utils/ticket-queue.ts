@@ -32,13 +32,15 @@ import {
 } from './ai-config-scope.js';
 import {
   activeAiConfig,
-  activeAiConfigForScope,
+  activeAiConfigForFunction,
+  activeAiConfigForFunctionInScope,
   AiCallError,
   callAIWithConfig,
   callAIStreamingWithConfig,
   extractJsonObject,
   pingDeConexionTransport
 } from './ai-client.js';
+import { aiFunctionForJobKind } from './ai-function-providers.js';
 import type { AiConfigRow, AiJobKind, AiMessage, AiMessagePart } from './ai-client.js';
 import type { AiResponseFormat } from '../schemas/ai-response-format.js';
 import {
@@ -239,10 +241,12 @@ export function dispatchAI(
 ): Promise<string> {
   // Callers with a captured household scope must never resolve configuration from a later
   // `users.household_id` selection; otherwise a switch while building the prompt can cross homes.
-  const config =
-    householdId === undefined
-      ? activeAiConfig(db, userId)
-      : activeAiConfigForScope(db, userId, householdId);
+  const functionKey = aiFunctionForJobKind(kind);
+  const config = functionKey
+    ? householdId === undefined
+      ? activeAiConfigForFunction(db, userId, functionKey)
+      : activeAiConfigForFunctionInScope(db, userId, householdId, functionKey)
+    : undefined;
   if (!config)
     return Promise.reject(new AiCallError('NO_CONFIG', 'No active AI configuration found'));
   const payloadBytes = Buffer.byteLength(
@@ -269,7 +273,7 @@ export function dispatchAIStreaming(
   responseFormat: AiResponseFormat,
   externalSignal: AbortSignal
 ): Promise<string> {
-  const config = activeAiConfig(db, userId);
+  const config = activeAiConfigForFunction(db, userId, 'shopping_pantry');
   if (!config)
     return Promise.reject(new AiCallError('NO_CONFIG', 'No active AI configuration found'));
   return submitAiTask({
@@ -311,7 +315,8 @@ export function encolarTicket(db: SqlDb, userId: string, receiptId: string): str
     .get(receiptId, userId) as { household_id: string | null } | undefined;
   if (!receipt) throw new AiCallError('PROVIDER', 'Receipt not found', 'RECEIPT_NOT_FOUND');
   const householdId = receipt.household_id;
-  const config = activeAiConfigForScope(db, userId, householdId) ?? null;
+  const config =
+    activeAiConfigForFunctionInScope(db, userId, householdId, 'shopping_pantry') ?? null;
   const id = nanoid();
   const configId = config?.id ?? null;
   db.prepare(

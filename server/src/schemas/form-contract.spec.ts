@@ -105,6 +105,7 @@ import {
   updateReceiptSchema
 } from './receipts.schema.js';
 import {
+  aiFunctionProviderAssignmentSchema,
   createAiConfigSchema,
   generateRecipeSchema,
   generateWeeklyPlanSchema,
@@ -957,6 +958,12 @@ const ROWS: Row[] = [
       ],
       questions: []
     }
+  },
+  {
+    name: 'aiFunctionProviderAssignmentSchema',
+    schema: aiFunctionProviderAssignmentSchema,
+    required: { configId: 'provider-1' },
+    note: 'Se asigna un proveedor del mismo scope; `null` desasigna explícitamente la función.'
   },
   {
     name: 'createAiConfigSchema',
