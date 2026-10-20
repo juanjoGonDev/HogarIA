@@ -3,7 +3,11 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { TestBed } from '@angular/core/testing';
 import { SILENT_TOAST } from '../interceptors/error.interceptor';
 import { AiService } from './ai.service';
-import type { AIProviderConfig, AIRecipeResponse } from '../../shared/models/ai-config.model';
+import type {
+  AIProviderConfig,
+  AiFunctionProviderAssignment,
+  AIRecipeResponse
+} from '../../shared/models/ai-config.model';
 
 const CONFIG: AIProviderConfig = {
   id: 'synthetic-config',
@@ -67,6 +71,74 @@ describe('AiService', () => {
     expect(service.configsError()).toBeTrue();
     // A transient refresh error does not destroy already-loaded records.
     expect(service.configs()).toEqual([CONFIG]);
+  });
+
+  it('loads function assignments and syncs an assignment update into provider summaries', () => {
+    const second = { ...CONFIG, id: 'synthetic-config-2', name: 'Second provider' };
+    service.loadConfigs();
+    http.expectOne('/api/ai/configs').flush({ data: [CONFIG, second] });
+
+    const assignments: AiFunctionProviderAssignment[] = [
+      { functionKey: 'assistant', configId: CONFIG.id, providerName: CONFIG.name },
+      { functionKey: 'recipes', configId: CONFIG.id, providerName: CONFIG.name }
+    ];
+    service
+      .loadFunctionProvidersSnapshot()
+      .subscribe((value) => expect(value).toEqual(assignments));
+    const load = http.expectOne('/api/ai/function-providers');
+    expect(load.request.method).toBe('GET');
+    expect(load.request.context.get(SILENT_TOAST)).toBeTrue();
+    load.flush({ data: assignments });
+    expect(service.functionProviders()).toEqual(assignments);
+    expect(service.configs()[0].assignedFunctions).toEqual(['assistant', 'recipes']);
+
+    let result: AiFunctionProviderAssignment | null | undefined;
+    service.assignFunctionProvider('recipes', second.id).subscribe((value) => (result = value));
+    const update = http.expectOne('/api/ai/function-providers/recipes');
+    expect(update.request.method).toBe('PUT');
+    expect(update.request.body).toEqual({ configId: second.id });
+    expect(update.request.context.get(SILENT_TOAST)).toBeTrue();
+    const updated = {
+      functionKey: 'recipes' as const,
+      configId: second.id,
+      providerName: second.name
+    };
+    update.flush({ data: updated });
+
+    expect(result).toEqual(updated);
+    expect(service.functionProviders()).toContain(updated);
+    expect(service.configs()[0].assignedFunctions).toEqual(['assistant']);
+    expect(service.configs()[1].assignedFunctions).toEqual(['recipes']);
+  });
+
+  it('ignores late responses from superseded assignments for the same function', () => {
+    service.assignFunctionProvider('assistant', 'first-provider').subscribe();
+    const first = http.expectOne('/api/ai/function-providers/assistant');
+    service.assignFunctionProvider('assistant', 'second-provider').subscribe();
+    const second = http.expectOne('/api/ai/function-providers/assistant');
+
+    second.flush({
+      data: {
+        functionKey: 'assistant',
+        configId: 'second-provider',
+        providerName: 'Second provider'
+      }
+    });
+    first.flush({
+      data: {
+        functionKey: 'assistant',
+        configId: 'first-provider',
+        providerName: 'First provider'
+      }
+    });
+
+    expect(service.functionProviders()).toEqual([
+      {
+        functionKey: 'assistant',
+        configId: 'second-provider',
+        providerName: 'Second provider'
+      }
+    ]);
   });
 
   it('returns the scoped config snapshot and uses null only when its request fails', async () => {

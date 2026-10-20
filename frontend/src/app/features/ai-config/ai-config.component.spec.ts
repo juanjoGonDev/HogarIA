@@ -7,7 +7,12 @@ import { AiService } from '../../core/services/ai.service';
 import { ConfirmService } from '../../core/services/confirm.service';
 import { I18nService } from '../../core/services/i18n.service';
 import { ToastService } from '../../core/services/toast.service';
+import { AiProviderAvailabilityService } from '../../core/services/ai-provider-availability.service';
 import type { AIProviderConfig } from '../../shared/models/ai-config.model';
+import type {
+  AiFunctionKey,
+  AiFunctionProviderAssignment
+} from '../../shared/models/ai-config.model';
 import { aiConfigEn, aiConfigEs } from '../../core/i18n/dict/ai_config';
 
 const CONFIG: AIProviderConfig = {
@@ -39,10 +44,21 @@ describe('AiConfigComponent', () => {
       configs: signal<AIProviderConfig[]>([]),
       configsLoading: signal(false),
       configsError: signal(false),
+      functionProviders: signal<AiFunctionProviderAssignment[]>([]),
       loadConfigs: jasmine.createSpy('loadConfigs'),
+      loadFunctionProviders: jasmine.createSpy('loadFunctionProviders'),
       createConfig: jasmine.createSpy('createConfig').and.returnValue(of(CONFIG)),
       updateConfig: jasmine.createSpy('updateConfig').and.returnValue(of(CONFIG)),
       deleteConfig: jasmine.createSpy('deleteConfig').and.returnValue(of(true)),
+      assignFunctionProvider: jasmine
+        .createSpy('assignFunctionProvider')
+        .and.callFake((functionKey: AiFunctionKey, configId: string) =>
+          of({
+            functionKey,
+            configId,
+            providerName: configId === CONFIG.id ? CONFIG.name : 'Other'
+          })
+        ),
       testConnection: jasmine
         .createSpy('testConnection')
         .and.returnValue(of({ success: true, model: 'gpt-test', latency: 12 }))
@@ -67,6 +83,10 @@ describe('AiConfigComponent', () => {
         { provide: AiService, useValue: service },
         { provide: ToastService, useValue: toast },
         { provide: ConfirmService, useValue: confirm },
+        {
+          provide: AiProviderAvailabilityService,
+          useValue: { load: jasmine.createSpy('load').and.returnValue(of(null)) }
+        },
         { provide: I18nService, useValue: i18n },
         provideRouter([])
       ]
@@ -79,6 +99,7 @@ describe('AiConfigComponent', () => {
 
   it('loads configurations on entry and pluralizes the counter', () => {
     expect(service.loadConfigs).toHaveBeenCalledTimes(1);
+    expect(service.loadFunctionProviders).toHaveBeenCalledTimes(1);
     expect(component.configuracionesLabel()).toBe('ai_config.n_configuraciones_varios');
     service.configs.set([CONFIG]);
     expect(component.configuracionesLabel()).toBe('ai_config.n_configuraciones_uno');
@@ -86,6 +107,65 @@ describe('AiConfigComponent', () => {
     expect(fixture.nativeElement.querySelector('.config-card__name')?.textContent).toContain(
       CONFIG.name
     );
+  });
+
+  it('keeps the unconfigured state focused on one add action', () => {
+    expect(fixture.nativeElement.querySelector('.ai-config__count')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.ai-config__info')).toBeNull();
+    expect(fixture.nativeElement.querySelector('[data-test="ai-function-providers"]')).toBeNull();
+    expect(fixture.nativeElement.querySelectorAll('.ai-config__header app-button').length).toBe(0);
+    expect(fixture.nativeElement.querySelectorAll('.empty-state app-button').length).toBe(1);
+  });
+
+  it('shows the only active provider as fixed text instead of a redundant selector', () => {
+    service.configs.set([CONFIG]);
+    fixture.detectChanges();
+
+    expect(
+      fixture.nativeElement.querySelectorAll('[data-test^="ai-function-provider-"]').length
+    ).toBe(0);
+    expect(fixture.nativeElement.querySelectorAll('.function-provider-row__value').length).toBe(5);
+    expect(
+      fixture.nativeElement.querySelector('[data-test="ai-function-providers"]')
+    ).not.toBeNull();
+  });
+
+  it('uses a lower-level heading and removes standalone spacing when embedded in Hogar', () => {
+    fixture.componentRef.setInput('embedded', true);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('.ai-config--embedded')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('h1.ai-config__title')).toBeNull();
+    expect(fixture.nativeElement.querySelector('h2.ai-config__title')).not.toBeNull();
+  });
+
+  it('shows function-specific selectors only when several providers are active', () => {
+    const second = { ...CONFIG, id: 'synthetic-config-2', name: 'Second provider' };
+    service.configs.set([CONFIG, second]);
+    service.functionProviders.set([
+      { functionKey: 'assistant', configId: CONFIG.id, providerName: CONFIG.name },
+      { functionKey: 'recipes', configId: CONFIG.id, providerName: CONFIG.name },
+      { functionKey: 'planning', configId: CONFIG.id, providerName: CONFIG.name },
+      { functionKey: 'shopping_pantry', configId: CONFIG.id, providerName: CONFIG.name },
+      { functionKey: 'household_automation', configId: CONFIG.id, providerName: CONFIG.name }
+    ]);
+    fixture.detectChanges();
+
+    expect(
+      fixture.nativeElement.querySelectorAll('[data-test^="ai-function-provider-"]').length
+    ).toBe(5);
+    component.assignProvider('recipes', second.id);
+    expect(service.assignFunctionProvider).toHaveBeenCalledOnceWith('recipes', second.id);
+  });
+
+  it('does not show fake selectors when every provider is inactive', () => {
+    service.configs.set([{ ...CONFIG, isActive: false }]);
+    fixture.detectChanges();
+
+    expect(
+      fixture.nativeElement.querySelectorAll('[data-test^="ai-function-provider-"]').length
+    ).toBe(0);
+    expect(fixture.nativeElement.textContent).toContain('ai_config.no_active_provider');
   });
 
   it('starts new provider configs with enough output budget for all recipe detail levels', () => {
@@ -325,6 +405,22 @@ describe('AiConfigComponent', () => {
     expect(toast.error).toHaveBeenCalled();
   });
 
+  it('names assigned functions before deactivation and preserves the provider when confirmation is declined', async () => {
+    const assigned = { ...CONFIG, assignedFunctions: ['assistant', 'recipes'] as AiFunctionKey[] };
+    confirm.confirm.and.resolveTo(false);
+
+    await component.toggleActive(assigned);
+
+    expect(confirm.confirm).toHaveBeenCalledWith(
+      jasmine.objectContaining({
+        title: 'ai_config.provider_in_use_title',
+        message: 'ai_config.provider_in_use_message',
+        confirmText: 'ai_config.desactivar'
+      })
+    );
+    expect(service.updateConfig).not.toHaveBeenCalled();
+  });
+
   it('requires explicit confirmation before deletion and reports a failed delete', async () => {
     confirm.confirm.and.resolveTo(false);
     await component.deleteConfig(CONFIG);
@@ -338,6 +434,19 @@ describe('AiConfigComponent', () => {
     service.deleteConfig.and.returnValue(of(false));
     await component.deleteConfig(CONFIG);
     expect(toast.error).toHaveBeenCalled();
+  });
+
+  it('names assigned functions in the explicit deletion confirmation', async () => {
+    const assigned = { ...CONFIG, assignedFunctions: ['planning'] as AiFunctionKey[] };
+
+    await component.deleteConfig(assigned);
+
+    expect(confirm.confirm).toHaveBeenCalledWith(
+      jasmine.objectContaining({
+        message: 'ai_config.delete_in_use_message',
+        confirmText: 'common.delete'
+      })
+    );
   });
 
   it('maps every saved test status to a stable label and badge variant', () => {

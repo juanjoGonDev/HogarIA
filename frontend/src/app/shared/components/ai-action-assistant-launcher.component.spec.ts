@@ -1,9 +1,10 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { signal } from '@angular/core';
 import { NavigationEnd, NavigationStart, Router } from '@angular/router';
-import { Subject } from 'rxjs';
+import { of, Subject } from 'rxjs';
 import { I18nService } from '../../core/services/i18n.service';
 import { ToastService } from '../../core/services/toast.service';
+import { AiProviderAvailabilityService } from '../../core/services/ai-provider-availability.service';
 import { AiActionAssistantLauncherComponent } from './ai-action-assistant-launcher.component';
 
 describe('AiActionAssistantLauncherComponent', () => {
@@ -21,6 +22,8 @@ describe('AiActionAssistantLauncherComponent', () => {
   let viewport: VisualViewport;
   let resizeListener: EventListenerOrEventListenerObject | undefined;
   let mediaMatches: boolean;
+  let assistantConfigured: boolean;
+  let availability: { isConfigured: jasmine.Spy; load: jasmine.Spy };
 
   beforeEach(async () => {
     fixture = null;
@@ -40,6 +43,13 @@ describe('AiActionAssistantLauncherComponent', () => {
     };
     toast = jasmine.createSpyObj<ToastService>('ToastService', ['error']);
     mediaMatches = false;
+    assistantConfigured = true;
+    availability = {
+      isConfigured: jasmine
+        .createSpy('isConfigured')
+        .and.callFake((key: string) => (key === 'assistant' ? assistantConfigured : false)),
+      load: jasmine.createSpy('load').and.returnValue(of(null))
+    };
     viewportHeight = window.innerHeight;
     resizeListener = undefined;
     viewport = {
@@ -65,7 +75,8 @@ describe('AiActionAssistantLauncherComponent', () => {
       providers: [
         { provide: Router, useValue: router },
         { provide: I18nService, useValue: i18n },
-        { provide: ToastService, useValue: toast }
+        { provide: ToastService, useValue: toast },
+        { provide: AiProviderAvailabilityService, useValue: availability }
       ]
     }).compileComponents();
 
@@ -105,6 +116,14 @@ describe('AiActionAssistantLauncherComponent', () => {
 
     navigationEvents.next(new NavigationEnd(10, '/unsupported/path', '/unsupported/path'));
     expect(component.routeHint()).toBe('dashboard');
+  });
+
+  it('hides the assistant launcher when another AI function exists but assistant is unassigned', () => {
+    assistantConfigured = false;
+    fixture!.detectChanges();
+
+    expect(availability.isConfigured).toHaveBeenCalledWith('assistant');
+    expect(fixture!.nativeElement.querySelector('[data-test="ai-assistant-open"]')).toBeNull();
   });
 
   it('loads assistant translations before opening and closes on request', async () => {

@@ -17,6 +17,9 @@ import { HouseholdMealProposalService } from '../../core/services/household-meal
 import { HouseholdMealShoppingService } from '../../core/services/household-meal-shopping.service';
 import { HouseholdPlanningAutomationService } from '../../core/services/household-planning-automation.service';
 import { HouseholdPlanningAutomationComponent } from './household-planning-automation.component';
+import { AiConfigComponent } from '../ai-config/ai-config.component';
+import { AiService } from '../../core/services/ai.service';
+import { AiProviderAvailabilityService } from '../../core/services/ai-provider-availability.service';
 import type { Household } from '../../shared/models/household.model';
 import { householdEn, householdEs } from '../../core/i18n/dict/household';
 
@@ -56,6 +59,19 @@ describe('HouseholdComponent', () => {
   let mealPlanning: jasmine.SpyObj<HouseholdMealPlanningService>;
   let mealShopping: jasmine.SpyObj<HouseholdMealShoppingService>;
   let planningAutomation: jasmine.SpyObj<HouseholdPlanningAutomationService>;
+  let aiService: ReturnType<typeof createAiService>;
+
+  function createAiService() {
+    return {
+      configs: signal<any[]>([]),
+      configsLoading: signal(false),
+      configsError: signal(false),
+      functionProviders: signal<any[]>([]),
+      loadConfigs: jasmine.createSpy('loadConfigs'),
+      loadFunctionProviders: jasmine.createSpy('loadFunctionProviders'),
+      assignFunctionProvider: jasmine.createSpy('assignFunctionProvider').and.returnValue(of(null))
+    };
+  }
 
   function createHouseholdService() {
     const householdState = signal<Household | null>(null);
@@ -184,6 +200,7 @@ describe('HouseholdComponent', () => {
     toast = jasmine.createSpyObj<ToastService>('ToastService', ['success', 'error']);
     confirm = jasmine.createSpyObj<ConfirmService>('ConfirmService', ['confirm']);
     confirm.confirm.and.resolveTo(true);
+    aiService = createAiService();
 
     await TestBed.configureTestingModule({
       imports: [HouseholdComponent],
@@ -201,6 +218,11 @@ describe('HouseholdComponent', () => {
           )
         },
         { provide: ConfirmService, useValue: confirm },
+        { provide: AiService, useValue: aiService },
+        {
+          provide: AiProviderAvailabilityService,
+          useValue: { load: jasmine.createSpy('load').and.returnValue(of(null)) }
+        },
         { provide: AuthService, useValue: { currentUser: () => ({ id: 'synthetic-admin' }) } },
         { provide: I18nService, useValue: i18n },
         {
@@ -374,6 +396,30 @@ describe('HouseholdComponent', () => {
 
     component.toggleSetting('shareRecipes', false);
     expect(toast.success).toHaveBeenCalledTimes(1);
+  });
+
+  it('mounts the shared AI provider manager only for members with household settings permission', () => {
+    const permittedHome = {
+      ...HOUSEHOLD,
+      myRole: 'member',
+      myPermissions: { settings: true }
+    } as Household;
+    service.household.set(permittedHome);
+    component.selectTab('settings');
+    fixture.detectChanges();
+
+    const manager = fixture.debugElement.query(By.directive(AiConfigComponent));
+    expect(manager).not.toBeNull();
+    expect(manager.componentInstance.embedded).toBeTrue();
+    expect(aiService.loadConfigs).toHaveBeenCalled();
+    expect(aiService.loadFunctionProviders).toHaveBeenCalled();
+
+    service.household.set({
+      ...permittedHome,
+      myPermissions: { settings: false }
+    } as Household);
+    fixture.detectChanges();
+    expect(fixture.debugElement.query(By.directive(AiConfigComponent))).toBeNull();
   });
 
   it('synchronizes direct URL changes and tab selection without discarding unrelated query params', () => {
