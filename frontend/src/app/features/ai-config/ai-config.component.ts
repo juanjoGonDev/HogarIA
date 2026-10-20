@@ -1,4 +1,4 @@
-import { Component, inject, OnInit, signal } from '@angular/core';
+import { Component, DestroyRef, inject, OnInit, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { AiService } from '../../core/services/ai.service';
@@ -14,6 +14,8 @@ import { TranslatePipe } from '../../core/pipes/translate.pipe';
 import { I18nService } from '../../core/services/i18n.service';
 import { IconComponent } from '../../shared/components/ui/icon/icon.component';
 import { RouterLink } from '@angular/router';
+import { interval } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 @Component({
   selector: 'app-ai-config',
@@ -138,12 +140,18 @@ import { RouterLink } from '@angular/router';
               size="sm"
               type="button"
               [touchTarget]="true"
-              [loading]="probandoId() === config.id"
+              [loading]="probandoId() === config.id || config.testStatus === 'testing'"
+              [disabled]="config.testStatus === 'testing' && probandoId() !== config.id"
               (onClick)="testConfig(config)"
               [attr.data-test]="'probar-' + config.name"
             >
               <app-icon name="link" [size]="16" [label]="null" />
-              {{ (probandoId() === config.id ? 'ai_config.comprobando' : 'ai_config.probar') | t }}
+              {{
+                (probandoId() === config.id || config.testStatus === 'testing'
+                  ? 'ai_config.comprobando'
+                  : 'ai_config.probar'
+                ) | t
+              }}
             </app-button>
             <app-button
               variant="ghost"
@@ -300,6 +308,8 @@ import { RouterLink } from '@angular/router';
               type="number"
               [label]="'ai_config.timeout_ms' | t"
               placeholder="30000"
+              [max]="600000"
+              [helper]="'ai_config.timeout_helper' | t"
               [(ngModel)]="formData.timeout"
             ></app-input>
 
@@ -712,6 +722,7 @@ import { RouterLink } from '@angular/router';
 })
 export class AiConfigComponent implements OnInit {
   private readonly i18n = inject(I18nService);
+  private readonly destroyRef = inject(DestroyRef);
 
   /** «3 configuraciones» / «1 configuración»: el numero y el sustantivo se eligen a la vez. */
   configuracionesLabel(): string {
@@ -753,6 +764,13 @@ export class AiConfigComponent implements OnInit {
 
   ngOnInit(): void {
     this.aiService.loadConfigs();
+    interval(2000)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        if (this.aiService.configs().some((config) => config.testStatus === 'testing')) {
+          this.aiService.loadConfigs();
+        }
+      });
   }
 
   openAddModal(): void {
@@ -825,7 +843,7 @@ export class AiConfigComponent implements OnInit {
   }
 
   testConfig(config: AIProviderConfig): void {
-    if (this.probandoId() || this.probandoForm()) return;
+    if (this.probandoId() || this.probandoForm() || config.testStatus === 'testing') return;
     this.probandoId.set(config.id);
 
     this.aiService.testConnection({ configId: config.id }).subscribe({

@@ -91,8 +91,8 @@ export const mealReplacementResponseSchema = z
     servings: z.number().int().nullable()
   })
   .strict();
-// The worker lease is five minutes; cap provider work below it so cancellation completes first.
-export const AI_CONFIG_MAX_TIMEOUT_MS = 240_000;
+// Provider requests cap at ten minutes; the AI worker lease adds a one-minute safety margin.
+export const AI_CONFIG_MAX_TIMEOUT_MS = 600_000;
 export const AI_CONFIG_MAX_TOKENS = 4096;
 export const AI_CONFIG_DEFAULT_MAX_TOKENS = AI_CONFIG_MAX_TOKENS;
 
@@ -134,7 +134,7 @@ export const testConnectionSchema = z
     baseUrl: formField(z.string().url()),
     apiKey: formField(z.string().min(1)),
     model: formField(z.string().min(1)),
-    timeout: formField(z.number().int().positive())
+    timeout: formField(z.number().int().positive().max(AI_CONFIG_MAX_TIMEOUT_MS))
   })
   .refine(
     (valor) => Boolean(valor.configId) || Boolean(valor.baseUrl && valor.apiKey && valor.model),

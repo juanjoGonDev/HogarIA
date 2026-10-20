@@ -5,7 +5,8 @@ import {
   mealReplacementCandidateSchema,
   replaceMealSchema,
   AI_CONFIG_DEFAULT_MAX_TOKENS,
-  AI_CONFIG_MAX_TIMEOUT_MS
+  AI_CONFIG_MAX_TIMEOUT_MS,
+  testConnectionSchema
 } from './ai.schema.js';
 
 const config = (timeout: number) => ({
@@ -17,12 +18,27 @@ const config = (timeout: number) => ({
 });
 
 describe('createAiConfigSchema timeout', () => {
-  it('allows the four-minute ceiling while staying below the worker lease', () => {
-    expect(AI_CONFIG_MAX_TIMEOUT_MS).toBe(240_000);
+  it('shares the ten-minute ceiling between saved configs and connection tests', () => {
+    expect(AI_CONFIG_MAX_TIMEOUT_MS).toBe(600_000);
     expect(createAiConfigSchema.safeParse(config(AI_CONFIG_MAX_TIMEOUT_MS)).success).toBe(true);
     expect(createAiConfigSchema.safeParse(config(AI_CONFIG_MAX_TIMEOUT_MS + 1)).success).toBe(
       false
     );
+    expect(
+      testConnectionSchema.safeParse({ configId: 'synthetic-config', timeout: 600_000 }).success
+    ).toBe(true);
+    expect(
+      testConnectionSchema.safeParse({ configId: 'synthetic-config', timeout: 600_001 }).success
+    ).toBe(false);
+  });
+
+  it('requires a positive integer when supplied and defaults omitted config timeouts to 30 seconds', () => {
+    for (const timeout of [0, -1, 1.5]) {
+      expect(createAiConfigSchema.safeParse(config(timeout)).success).toBe(false);
+    }
+
+    const { timeout: _timeout, ...withoutTimeout } = config(30_000);
+    expect(createAiConfigSchema.parse(withoutTimeout).timeout).toBe(30_000);
   });
 });
 

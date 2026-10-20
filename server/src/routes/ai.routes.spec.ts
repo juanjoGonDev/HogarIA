@@ -287,6 +287,142 @@ describe('permisos de configuración IA por hogar', () => {
 });
 
 describe('POST /test-connection', () => {
+  it('acepta timeout hasta 600000 ms en alta, edición y prueba; rechaza valores fuera del contrato', async () => {
+    const defaultConfig = await crearConfig(alice, 'Default provider');
+    expect(defaultConfig.timeout).toBe(30000);
+
+    const create = await call(alice, 'POST', '/configs', {
+      name: 'Slow provider',
+      provider: 'custom',
+      baseUrl: 'http://localhost:9/v1',
+      apiKey: 'sk-x',
+      model: 'gpt-5',
+      timeout: 600000
+    });
+    expect(create.status).toBe(201);
+    const config = await data(create);
+    expect(config.timeout).toBe(600000);
+
+    const invalidCreate = await call(alice, 'POST', '/configs', {
+      name: 'Too slow',
+      provider: 'custom',
+      baseUrl: 'http://localhost:9/v1',
+      apiKey: 'sk-x',
+      model: 'gpt-5',
+      timeout: 600001
+    });
+    expect(invalidCreate.status).toBe(400);
+
+    expect((await call(alice, 'PATCH', `/configs/${config.id}`, { timeout: 600000 })).status).toBe(
+      200
+    );
+    expect((await call(alice, 'PATCH', `/configs/${config.id}`, { timeout: 600001 })).status).toBe(
+      400
+    );
+
+    stubDelProveedor('{"status":"ok","message":"conexión establecida"}');
+    const validTest = await call(alice, 'POST', '/test-connection', {
+      baseUrl: 'http://localhost:9',
+      apiKey: 'sk-x',
+      model: 'gpt-5',
+      timeout: 600000
+    });
+    expect(validTest.status).toBe(200);
+
+    const invalidTest = await call(alice, 'POST', '/test-connection', {
+      baseUrl: 'http://localhost:9',
+      apiKey: 'sk-x',
+      model: 'gpt-5',
+      timeout: 600001
+    });
+    expect(invalidTest.status).toBe(400);
+    for (const timeout of [0, -1, 1.5]) {
+      const invalidTimeout = await call(alice, 'POST', '/test-connection', {
+        baseUrl: 'http://localhost:9',
+        apiKey: 'sk-x',
+        model: 'gpt-5',
+        timeout
+      });
+      expect(invalidTimeout.status).toBe(400);
+    }
+
+    const oneMillisecondTest = await call(alice, 'POST', '/test-connection', {
+      baseUrl: 'http://localhost:9',
+      apiKey: 'sk-x',
+      model: 'gpt-5',
+      timeout: 1
+    });
+    expect(oneMillisecondTest.status).toBe(200);
+  });
+
+  it('persiste testing antes del proveedor y rechaza duplicado mientras sigue en curso', async () => {
+    const config = await crearConfig(alice, 'Slow provider');
+    let releaseProvider!: (response: Response) => void;
+    let markProviderStarted!: () => void;
+    let providerCalls = 0;
+    const started = new Promise<void>((resolve) => (markProviderStarted = resolve));
+    const providerResponse = new Promise<Response>((resolve) => (releaseProvider = resolve));
+    vi.stubGlobal('fetch', (async () => {
+      providerCalls += 1;
+      markProviderStarted();
+      return providerResponse;
+    }) as unknown as typeof fetch);
+
+    const firstRequest = call(alice, 'POST', '/test-connection', { configId: config.id });
+    await started;
+    try {
+      expect(
+        (db.prepare('SELECT test_status FROM ai_configs WHERE id = ?').get(config.id) as any)
+          .test_status
+      ).toBe('testing');
+      const refreshedConfig = (await data(await call(alice, 'GET', '/configs')))[0];
+      expect(refreshedConfig.testStatus).toBe('testing');
+      expect(refreshedConfig).not.toHaveProperty('apiKey');
+      expect(refreshedConfig).not.toHaveProperty('api_key');
+
+      const duplicate = await call(alice, 'POST', '/test-connection', { configId: config.id });
+      expect(duplicate.status).toBe(409);
+      expect(providerCalls).toBe(1);
+      expect(
+        (
+          db.prepare("SELECT COUNT(*) AS n FROM ai_jobs WHERE kind = 'connection_test'").get() as {
+            n: number;
+          }
+        ).n
+      ).toBe(1);
+    } finally {
+      releaseProvider(
+        new Response(
+          JSON.stringify({ choices: [{ message: { content: '{"status":"ok","message":"ok"}' } }] }),
+          {
+            status: 200
+          }
+        )
+      );
+      await firstRequest;
+    }
+    expect(
+      (db.prepare('SELECT test_status FROM ai_configs WHERE id = ?').get(config.id) as any)
+        .test_status
+    ).toBe('success');
+  });
+
+  it('recupera estado testing interrumpido al reconstruir la cola tras un reinicio', async () => {
+    const config = await crearConfig(alice, 'Interrupted provider');
+    db.prepare("UPDATE ai_configs SET test_status = 'testing', test_error = NULL WHERE id = ?").run(
+      config.id
+    );
+
+    const { barrerArranque } = await import('../utils/ticket-queue.js');
+    barrerArranque(db);
+
+    const estado = db
+      .prepare('SELECT test_status, test_error FROM ai_configs WHERE id = ?')
+      .get(config.id) as { test_status: string; test_error: string };
+    expect(estado.test_status).toBe('failed');
+    expect(estado.test_error).toMatch(/interrump/i);
+  });
+
   it('la config guardada se prueba con el JSON dado, y el estado queda en la fila', async () => {
     const config = await crearConfig(alice, 'Local');
     stubDelProveedor('{"status":"ok","message":"conexión establecida"}');

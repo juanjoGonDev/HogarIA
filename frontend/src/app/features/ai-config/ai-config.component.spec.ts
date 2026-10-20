@@ -1,4 +1,4 @@
-import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
 import { signal } from '@angular/core';
 import { provideRouter } from '@angular/router';
 import { of, Subject, throwError } from 'rxjs';
@@ -107,6 +107,15 @@ describe('AiConfigComponent', () => {
     expect(service.createConfig).toHaveBeenCalledWith(
       jasmine.objectContaining({ maxTokens: 4096 })
     );
+  });
+
+  it('exposes the shared ten-minute timeout cap without an artificial minimum', () => {
+    component.openAddModal();
+    fixture.detectChanges();
+
+    const timeout = fixture.nativeElement.querySelector('input#timeout') as HTMLInputElement;
+    expect(timeout.max).toBe('600000');
+    expect(timeout.min).toBe('');
   });
 
   it('keeps queue panels out of the provider list and links only positive caps to their own view', () => {
@@ -283,6 +292,26 @@ describe('AiConfigComponent', () => {
     expect(component.testResult()?.success).toBeFalse();
     expect(component.isTestResultOpen()).toBeTrue();
   });
+
+  it('polls a persisted test after reload and blocks a duplicate test action', fakeAsync(() => {
+    const testingConfig = { ...CONFIG, testStatus: 'testing' as const };
+    service.configs.set([testingConfig]);
+    fixture.destroy();
+    service.loadConfigs.calls.reset();
+    fixture = TestBed.createComponent(AiConfigComponent);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+
+    component.testConfig(testingConfig);
+    expect(service.testConnection).not.toHaveBeenCalled();
+    expect(
+      (fixture.nativeElement.querySelector(`[data-test="probar-${CONFIG.name}"]`) as HTMLElement)
+        .textContent
+    ).toContain('ai_config.comprobando');
+
+    tick(2000);
+    expect(service.loadConfigs).toHaveBeenCalledTimes(2);
+  }));
 
   it('handles active toggle and failed update without a false success toast', () => {
     service.updateConfig.and.returnValue(of({ ...CONFIG, isActive: false }));

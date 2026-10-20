@@ -95,6 +95,31 @@ beforeEach(async () => {
 });
 
 describe('AI provider queue dispatcher', () => {
+  it('keeps a 60-second lease margin above the maximum provider timeout', async () => {
+    const { AI_JOB_LEASE_SECONDS, submitAiTask } = await import('./ticket-queue.js');
+    const response = deferred<string>();
+    const job = submitAiTask({
+      db,
+      userId,
+      config,
+      kind: 'lease-boundary-test',
+      run: () => response.promise
+    });
+    await waitFor(() => jobRow(job.id).status === 'running');
+
+    const lease = db
+      .prepare(
+        'SELECT ROUND((julianday(lease_until) - julianday(started_at)) * 86400) AS seconds FROM ai_jobs WHERE id = ?'
+      )
+      .get(job.id) as { seconds: number };
+    expect(AI_JOB_LEASE_SECONDS).toBe(660);
+    expect(AI_JOB_LEASE_SECONDS - 600).toBe(60);
+    expect(lease.seconds).toBe(AI_JOB_LEASE_SECONDS);
+
+    response.resolve('done');
+    await expect(job.result).resolves.toBe('done');
+  });
+
   it('does not poll the idle database more than once in a short interval', async () => {
     const { ensureWorker, stopWorker } = await import('./ticket-queue.js');
     const prepare = vi.spyOn(db, 'prepare');

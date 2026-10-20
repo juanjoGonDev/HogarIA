@@ -21,7 +21,7 @@
 - `HOGARIA-SPEC.md` §12ap y `QA-HOUSEHOLD.AI.HOME-CONFIG-AND-PINNED-JOBS.1` mantienen el scope, ACL y pinning por hogar.
 - `SPEC.md` del asistente global no gestiona credenciales ni proveedores; esta spec cubre la configuración que consume.
 - El log adjunto `Texto pegado.txt` solo registra health/readiness/receipts con 200 y no contiene solicitudes al conector ni timeouts. No basta para atribuir la causa exacta del fallo; validar el comportamiento con el harness aislado y guardar el límite como incertidumbre si persiste.
-- En el estado actual, `createAiConfigSchema` limita timeout a 240000 ms, `testConnectionSchema` no comparte ese tope y `ticket-queue.ts` usa una concesión fija de 300 s. El test de conexión guarda resultado final pero no estado previo duradero. Registro tiene password único y el backend solo espera ese campo.
+- En la base de esta rama, `createAiConfigSchema` limitaba timeout a 240000 ms, `testConnectionSchema` no compartía ese tope y `ticket-queue.ts` usaba una concesión fija de 300 s. La primera unidad ya elevó el límite compartido de API a 600000 ms, la concesión a 660 s, el estado guardado a `testing` antes de la llamada, bloqueo atómico de duplicados y recuperación a fallo seguro al reiniciar. Falta aún validar con Playwright contra la app/API real.
 - El pre-push detectó dos pruebas del asistente con semana fija `2026-10-19` y reloj real; se reprodujeron en `2026-10-20`, cuando la lógica excluye el lunes pasado. Ambas fijan el reloj en el test, sin cambiar comportamiento de producto. Verificado: spec frontend, 55/55; test server focal, 1/1.
 
 ## Checklist de aceptación
@@ -60,6 +60,8 @@
 ### Evidencia reproducible
 
 - Registro: `pnpm --filter @hogaria/web exec ng test --no-watch --include=src/app/features/auth/register/*.spec.ts --browsers=ChromeHeadless` — 15/15. Cubre label visible, requerido, discrepancia, corrección y llamada a `AuthService.register` solo con `{name,email,password}`.
+- Timeout/estado de proveedor: `pnpm --filter @hogaria/server exec vitest run src/routes/ai.routes.spec.ts src/utils/ai-queue.spec.ts` — 105/105. Cubre 600000/600001, mínimo positivo, estado `testing` visible por `GET /configs`, rechazo de segunda petición mientras el proveedor está bloqueado, resultado final, recuperación tras reinicio y concesión 660 s (margen 60 s). Solo usa `fetch` sintético.
+- UI del timeout/estado: `pnpm --filter @hogaria/web exec ng test --no-watch --include=src/app/features/ai-config/ai-config.component.spec.ts --browsers=ChromeHeadless` — 17/17. Cubre tope sin mínimo HTML artificial, polling tras carga con estado `testing` y bloqueo del botón. Playwright real y capturas PC/móvil siguen pendientes.
 
 ## Unidades de entrega
 

@@ -67,7 +67,8 @@ import {
 } from '../utils/recipe-replacement.js';
 import {
   cancelarColaDeConfiguracion,
-  cerrarVentanasReintentoConfiguracion
+  cerrarVentanasReintentoConfiguracion,
+  ensureWorker
 } from '../utils/ticket-queue.js';
 import { aiOutputLanguageInstruction, type AiOutputLanguage } from '../utils/ai-output-language.js';
 const aiRoutes = new Hono<AppEnv>();
@@ -352,46 +353,80 @@ aiRoutes.post('/test-connection', async (c) => {
     return c.json({ success: false, message: 'No AI config found' }, 404);
   }
 
+  // Run queue recovery before taking the durable test lock. At production startup this worker is
+  // already initialized; this also keeps in-memory route tests equivalent to a server boot.
+  ensureWorker();
+  if (input.configId) {
+    const claim = db
+      .prepare(
+        `UPDATE ai_configs SET test_status = 'testing', test_error = NULL
+         WHERE id = ? AND ${aiConfigScopeWhere(scope)} AND COALESCE(test_status, '') != 'testing'`
+      )
+      .run(config.id, aiConfigScopeValue(scope));
+    if (claim.changes !== 1) {
+      return c.json(
+        {
+          success: false,
+          code: 'AI_TEST_ALREADY_RUNNING',
+          message: 'Ya hay una prueba en curso para este proveedor.'
+        },
+        409
+      );
+    }
+  }
+
   // La prueba ya no es un «Hello» a ver que contesta: se le pide al modelo un JSON DADO con
   // `response_format` de esquema estricto —el mismo contrato que exige el resto de la app, que
   // parsea JSON en todas sus funciones de IA— y se valida la contestacion. Un proveedor que no
   // sabe responder esto no sirve para la casa, y es mejor saberlo en Ajustes que en un ticket.
-  const veredicto = await pingDeConexion(
-    {
-      base_url: config.base_url,
-      api_key: config.api_key,
-      model: config.model,
-      timeout: config.timeout
-    },
-    {
-      db,
-      userId,
-      config: {
-        id: config.id ?? `ephemeral-${userId}`,
-        name: String(config.name ?? 'Connection test'),
-        provider: String(config.provider ?? 'custom'),
+  let veredicto: Awaited<ReturnType<typeof pingDeConexion>>;
+  try {
+    veredicto = await pingDeConexion(
+      {
         base_url: config.base_url,
         api_key: config.api_key,
         model: config.model,
-        temperature: (config.temperature as number | null) ?? null,
-        max_tokens: (config.max_tokens as number | null) ?? null,
-        top_p: (config.top_p as number | null) ?? null,
-        frequency_penalty: (config.frequency_penalty as number | null) ?? null,
-        presence_penalty: (config.presence_penalty as number | null) ?? null,
-        timeout: (config.timeout as number | null) ?? null,
-        retry_attempts: (config.retry_attempts as number | null) ?? 0,
-        concurrency: (config.concurrency as number | null) ?? 0
-      } satisfies AiConfigRow,
-      configId: input.configId ? String(config.id) : null
-    }
-  );
+        timeout: config.timeout
+      },
+      {
+        db,
+        userId,
+        config: {
+          id: config.id ?? `ephemeral-${userId}`,
+          name: String(config.name ?? 'Connection test'),
+          provider: String(config.provider ?? 'custom'),
+          base_url: config.base_url,
+          api_key: config.api_key,
+          model: config.model,
+          temperature: (config.temperature as number | null) ?? null,
+          max_tokens: (config.max_tokens as number | null) ?? null,
+          top_p: (config.top_p as number | null) ?? null,
+          frequency_penalty: (config.frequency_penalty as number | null) ?? null,
+          presence_penalty: (config.presence_penalty as number | null) ?? null,
+          timeout: (config.timeout as number | null) ?? null,
+          retry_attempts: (config.retry_attempts as number | null) ?? 0,
+          concurrency: (config.concurrency as number | null) ?? 0
+        } satisfies AiConfigRow,
+        configId: input.configId ? String(config.id) : null
+      }
+    );
+  } catch {
+    // Persist only a safe, generic diagnostic; never expose provider credentials or raw errors.
+    veredicto = { ok: false, latency: 0, error: 'No se pudo completar la prueba de conexión.' };
+  }
 
   // El estado de la prueba solo se persiste cuando se prueba una config GUARDADA; la del
   // formulario se ensena y ya.
   if (input.configId) {
     db.prepare(
-      'UPDATE ai_configs SET test_status = ?, test_error = ?, last_tested = CURRENT_TIMESTAMP WHERE id = ?'
-    ).run(veredicto.ok ? 'success' : 'failed', veredicto.ok ? null : veredicto.error, config.id);
+      `UPDATE ai_configs SET test_status = ?, test_error = ?, last_tested = CURRENT_TIMESTAMP
+       WHERE id = ? AND ${aiConfigScopeWhere(scope)} AND test_status = 'testing'`
+    ).run(
+      veredicto.ok ? 'success' : 'failed',
+      veredicto.ok ? null : veredicto.error,
+      config.id,
+      aiConfigScopeValue(scope)
+    );
   }
 
   if (!veredicto.ok) {
