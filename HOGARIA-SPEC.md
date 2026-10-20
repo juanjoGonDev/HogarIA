@@ -6097,4 +6097,31 @@ la ruta vuelve a persistir las raciones enviadas y `household-meal-proposals.rou
 El E2E de preferencias ahora valida persistencia de opciones sintéticas de 2.501 caracteres en preferencias y
 onboarding, conforme a esta decisión. El E2E full-stack calcula una semana futura para no pedir una vista de
 compra que deliberadamente omite días pasados. Focales locales: ruta servidor **36/36**; preferencias desktop+móvil
-**4/4**; confirmación del asistente desktop+móvil **2/2**; `typecheck:e2e` aprobado. Reejecución de CI pendiente.
+**4/4**; confirmación del asistente desktop+móvil **2/2**; `typecheck:e2e` aprobado. El run completo de CI
+`39415564366` pasó todos los jobs (typecheck, suites, cuatro shards E2E, full-stack y smoke de imagen amd64/arm64).
+El PR sigue bloqueado por requisitos de análisis del ruleset, no por CI.
+
+## CI-ANALYSIS-GATES.1 — desbloquear CodeQL y Code Quality sin bypass
+
+**Objetivo (2026-10-20):** satisfacer el ruleset `main` que exige CodeQL (errores y alertas high+) y GitHub
+Code Quality (errores), sin desactivar ni saltar esas reglas. La configuración debe analizar TypeScript/JavaScript,
+ser reproducible y dejar la PR #57 lista únicamente cuando el CI completo y ambos análisis hayan terminado bien.
+
+**Auditoría inicial:** PR #57 está abierta, no Draft, con auto-merge en espera y CI `39415564366` verde. El
+repositorio es público. El ruleset activo `main` exige CodeQL y Code Quality. No existe workflow CodeQL en el
+repositorio y `code-scanning/default-setup` informa `not-configured`. El endpoint de GitHub Code Quality devuelve
+404 `Code quality is not available for this repository`; no se desactiva el gate ni se incurre en cambios de plan
+o facturación para sortearlo.
+
+- [x] Verificar reglas activas, elegibilidad pública, estado de CodeQL y disponibilidad de Code Quality; no usar
+      bypass ni editar el ruleset para reducir sus requisitos.
+- [ ] Configurar CodeQL default setup para `javascript-typescript` con runner estándar y query suite `default`;
+      comprobar análisis real en PR #57 y que el gate CodeQL quede satisfecho.
+- [ ] Habilitar GitHub Code Quality solo cuando GitHub lo ofrezca para este repositorio; elegir `javascript-typescript`
+      y severidad `errors`; verificar su check/análisis real en la PR.
+- [ ] Confirmar CI completo y ambos gates verdes; entonces reactivar auto-merge squash y verificar la fusión
+      automática sin bypass.
+
+**Bloqueo externo registrado:** Code Quality no está disponible para el repositorio por la configuración/plan
+actual de GitHub. Si sigue sin estar disponible tras configurar CodeQL, hace falta habilitar la prestación o
+decidir explícitamente otra política; no se simula el resultado con un check propio ni se baja el gate.
