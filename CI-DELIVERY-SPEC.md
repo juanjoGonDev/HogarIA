@@ -1,12 +1,12 @@
 # CI para PR y entrega GHCR
 
-**Estado:** remediación correctiva autorizada; PR #47 se fusionó en `master` el 2026-10-19 y se requiere una PR nueva para el fallo de publicación GHCR.
-**Rama:** nueva PR correctiva Draft contra `master`; conservar sin cambios la rama/worktree local existente.
+**Estado:** remediación correctiva GHCR en curso; PR #57 se fusionó en `master` el 2026-10-20 y falló el paso de verificación del manifest (run `39440320698`).
+**Rama:** PR #58 correctiva Draft contra `master`; preservar sin cambios la rama/worktree local existente.
 **Idioma:** español (España).
 
 ## Objetivo y autorización
 
-El usuario autorizó el 2026-10-19 que cada PR ejecute CI y construya/pruebe la imagen de contenedor, que la imagen se publique en GHCR al integrar en la rama principal y que se fusione el PR #47 existente cuando las comprobaciones sean satisfactorias. Tras fallar la publicación GHCR del merge, el usuario autorizó explícitamente abrir una PR correctiva. No hay autorización de merge para esta PR correctiva.
+El usuario autorizó el 2026-10-19 que cada PR ejecute CI y construya/pruebe la imagen de contenedor, que la imagen se publique en GHCR al integrar en la rama principal y que se fusione el PR #47 existente cuando las comprobaciones sean satisfactorias. Tras el fallo original, se abrió la PR #55 para quitar QEMU y usar runners nativos. El 2026-10-20, tras fallar la verificación del manifest en el push del PR #57, el usuario autorizó una PR correctiva nueva, push y merge solo tras CI verde. No saltar branch protection ni usar bypass; si un gate requerido no está disponible, no fusionar.
 
 La rama principal verificada del repositorio es `master`. El PR #47 estaba abierto y Draft contra `arena/01a0a6c2-micocinai`; el 2026-10-19 se retargeteó el PR existente a `master`, sin crear rama ni PR. En ese momento, la comparación pasó de 473 archivos (133.178 altas / 6.461 bajas) a 995 (323.183 / 7.430), por 976 commits existentes desde `master` hasta `arena` más 418 commits del PR. El diff ampliado se revisó en rutas, alcance y patrones de credenciales antes del cambio; no ocultar ni descartar ese alcance.
 
@@ -23,11 +23,26 @@ La rama principal verificada del repositorio es `master`. El PR #47 estaba abier
 - El publicador GHCR (`39249240518`) expiró y fue cancelado al límite de 50 minutos. El log reproducible muestra `qemu: uncaught target signal 4 (Illegal instruction)` en `linux/arm64 runtime-deps`, durante `pnpm install ... better-sqlite3`; la imagen/tag SHA no llegó a publicarse. Los builds separados amd64/arm64 del CI sí pasan.
 - Remediación elegida: construir/publicar cada arquitectura en su runner nativo (`ubuntu-24.04` y `ubuntu-24.04-arm`), sin QEMU; después ensamblar el índice OCI SHA/`latest`, comprobar plataformas/digest y hacer pull + smoke de cada miembro en su runner nativo. Así se elimina la emulación arm64 donde se observó el `SIGILL`. El workflow usa `COMMIT_SHA` en vez de redefinir el entorno reservado `GITHUB_SHA`.
 
+## Hallazgo tras integrar PR #57 — 2026-10-20
+
+- El push de merge `a260abde75f7c09acd690f2b9511bb2256db078d` construyó y publicó correctamente ambos manifests nativos; `imagetools create` terminó con éxito y publicó el índice `sha256:ac7e1c9f032cbb42ef74591757f5dab60e588064df964618e2d27b1d150d0ad9` para tags SHA y `latest`.
+- Run `39440320698`, job `118689249438`, falló inmediatamente después con exit 255 en la captura `docker buildx imagetools inspect ... | awk ... { print $2; exit }`, mientras `set -o pipefail` estaba activo. La inspección local del tag confirma que el índice OCI sí contiene digest y plataformas amd64/arm64. El patrón de salida temprana de `awk` puede cerrar el pipe antes de que Buildx termine; la corrección debe consumir y parsear la salida estructurada completa para evitar SIGPIPE y validar el digest explícitamente.
+- El usuario autorizó corregir, hacer push y fusionar esta remediación solo tras CI verde. No omitir reglas de branch protection ni usar bypass; si un gate requerido no está disponible, dejar el PR sin fusionar e informar el bloqueo.
+
+### Checklist de esta remediación
+
+- [x] Abrir PR #58 correctiva Draft contra `master` con esta spec antes de implementar.
+- [x] Añadir pruebas deterministas para extraer un digest OCI válido y rechazar JSON/digest inválido.
+- [x] Cambiar la extracción y comparación de digests del workflow a JSON estructurado consumido por completo; quitar el pipe `awk` con salida temprana.
+- [x] Verificar pruebas del helper y contrato del workflow (9/9), `pnpm run test:config` (109/109), `node scripts/check-workflows.mjs` (6 workflows), `actionlint` en CI/publicación, parser contra el tag público de GHCR y `git diff --check`.
+- [x] CI de la PR #58 verde (run `39443692279`, 11/11 jobs); CodeQL y sus dos análisis pasan; PR lista y `mergeStateStatus=CLEAN`.
+- [ ] Fusionar por squash normal, sin bypass.
+- [ ] Observar el run post-merge de publicación GHCR: tags SHA/`latest` con digest común, plataformas amd64/arm64 y smokes nativos verdes.
+- [ ] Dejar limpios los cambios locales propios y retirar solo el worktree temporal de esta remediación.
+
 ## Remediación correctiva autorizada
 
-- El usuario autorizó una PR correctiva, no un push directo a `master`. Crear la PR en Draft con esta spec antes de publicar la implementación; usar base `master` y una rama dedicada sin cambiar la rama/worktree activa.
-- Mantener la PR en Draft y no fusionarla sin autorización explícita posterior. La autorización de merge anterior correspondía al PR #47, ya integrado.
-- PR correctiva #55 está en Draft contra `master`; implementación publicada como `2908b1a`. CI de implementación pasó 11/11 en el run #838 (`b0631f8`); publicación GHCR real sigue pendiente.
+- (Histórico, supersedido por la autorización del 2026-10-20 arriba) La PR correctiva #55 se abrió en Draft contra `master`; implementación publicada como `2908b1a`. Se fusionó el 2026-10-19; CI de implementación pasó 11/11 en el run #838 (`b0631f8`).
 - Incidencia de entrega: el commit spec-only `ca93ca1` llegó a `master` porque la rama nueva heredó `origin/master` como upstream y el push sin refspec explícito resolvió ese destino. Ese commit modifica solo este archivo; el fix de workflow/código no se incluyó. No se reescribirá historia; el código restante se publicará únicamente en la PR correctiva.
 - Criterios de aceptación de esta corrección:
   - [ ] La compilación de cada arquitectura publicada corre en runner nativo, sin QEMU.
@@ -65,7 +80,7 @@ La rama principal verificada del repositorio es `master`. El PR #47 estaba abier
 
 ## Fuera de alcance
 
-No habilitar IA real ni enviar prompts desde CI. No crear cuentas/secretos de proveedores. No tocar bases de datos habituales, cambiar dependencias de la app, crear PR/branches adicionales a la PR correctiva autorizada, forzar pushes ni modificar gates funcionales ajenos.
+No habilitar IA real ni enviar prompts desde CI. No crear cuentas/secretos de proveedores. No tocar bases de datos habituales, cambiar dependencias de la app, hacer push directo a `master`, omitir branch protection, forzar pushes ni modificar gates funcionales ajenos.
 
 ## Evidencia local — 2026-10-19
 
