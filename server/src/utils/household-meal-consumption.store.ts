@@ -15,9 +15,9 @@ const storedSnapshotSchema = z.object({
   baseServings: z.literal(1),
   ingredients: z.array(
     z.object({
-      name: z.string().trim().min(1).max(200),
+      name: z.string().trim().min(1),
       quantity: z.number().finite().positive(),
-      unit: z.string().trim().min(1).max(40),
+      unit: z.string().trim().min(1),
       isOptional: z.boolean().optional()
     })
   )

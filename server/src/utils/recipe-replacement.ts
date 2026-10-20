@@ -231,6 +231,5 @@ export function safeGuestNote(value: string): string {
     .replace(/\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b/g, '[dato omitido]')
     .replace(/https?:\/\/\S+/gi, '[dato omitido]')
     .replace(/\+?\d[\d\s().-]{6,}\d/g, '[dato omitido]')
-    .replace(/[\r\n\t]+/g, ' ')
-    .slice(0, 300);
+    .replace(/[\r\n\t]+/g, ' ');
 }

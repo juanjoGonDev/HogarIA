@@ -107,6 +107,28 @@ describe('read-only household meal shopping preview', () => {
     ).run(householdId);
   });
 
+  it('reads full-length ingredient names and units from generated recipe snapshots', () => {
+    const name = `Ingrediente ${'x'.repeat(2_501)}`;
+    const unit = `unidad ${'u'.repeat(2_501)}`;
+    addMeal({
+      id: 'meal-long-generated-ingredient',
+      date: '2026-10-14',
+      snapshot: { baseServings: 1, ingredients: [{ name, quantity: 1, unit }] }
+    });
+
+    const preview = readPreview(
+      db,
+      householdId,
+      { startDate: '2026-10-14', endDate: '2026-10-14' },
+      '2026-10-13'
+    );
+
+    expect(preview.warnings).toEqual([]);
+    expect(preview.requiredIngredients).toContainEqual(
+      expect.objectContaining({ name, unit, quantity: 1 })
+    );
+  });
+
   it('scales and consolidates exact household needs, classifies stock safely, and ignores private/past/personal rows', () => {
     addMeal({ id: 'meal-double', date: '2026-10-14', servings: 2 });
     addMeal({

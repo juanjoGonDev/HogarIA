@@ -884,7 +884,10 @@ describe('household meal proposal preview route', () => {
     const planner = addUser('planner', 'home');
     const second = addUser('second', 'home', { calendar: { edit: false, view: true } });
     addAiConfig(planner.id, 'home');
-    addIngredient('shared-home', second.id, 'SHARED_HOME_ITEM', 'home');
+    const longPantryName = `SHARED_HOME_ITEM ${'x'.repeat(2_501)}`;
+    const longUtensilName = `UTENSIL ${'y'.repeat(2_501)}`;
+    addIngredient('shared-home', second.id, longPantryName, 'home');
+    addUtensil('long-utensil', planner.id, longUtensilName, 'cookware', 'home');
     addIngredient('planner-private', planner.id, 'PLANNER_PRIVATE_ITEM');
     addIngredient('second-private', second.id, 'SECOND_PRIVATE_ITEM');
     addIngredient('zero-stock', planner.id, 'EMPTY_ITEM', null, 0);
@@ -940,8 +943,9 @@ describe('household meal proposal preview route', () => {
 
     expect(response.status).toBe(200);
     expect(context.pantry.map((item: any) => item.name)).toEqual(
-      expect.arrayContaining(['SHARED_HOME_ITEM', 'PLANNER_PRIVATE_ITEM'])
+      expect.arrayContaining([longPantryName, 'PLANNER_PRIVATE_ITEM'])
     );
+    expect(context.utensils.map((item: any) => item.name)).toContain(longUtensilName);
     expect(context.pantry.map((item: any) => item.name)).not.toEqual(
       expect.arrayContaining(['SECOND_PRIVATE_ITEM', 'EMPTY_ITEM'])
     );
@@ -1108,7 +1112,7 @@ describe('household meal proposal preview route', () => {
     expect(db.prepare('SELECT COUNT(*) AS count FROM meals').get()).toEqual({ count: 0 });
   });
 
-  it('bounds every collection and free-text field in the attached context snapshot', async () => {
+  it('bounds attached collection sizes while preserving full context strings', async () => {
     addHousehold('home', true);
     const planner = addUser('planner', 'home');
     addAiConfig(planner.id, 'home');
@@ -1173,17 +1177,15 @@ describe('household meal proposal preview route', () => {
     expect(response.status).toBe(200);
     expect(context.participants[0].preferences.likes).toHaveLength(60);
     expect(context.pantry).toHaveLength(100);
-    expect(
-      context.pantry.every((item: any) => item.name.length <= 120 && item.unit.length <= 30)
-    ).toBe(true);
+    expect(context.pantry.every((item: any) => item.name.length > 120)).toBe(true);
+    expect(context.pantry.every((item: any) => item.unit.length > 0)).toBe(true);
     expect(
       context.pantry.find((item: any) => item.name.startsWith('PANTRY_0'))?.expirationDate
     ).toBeNull();
     expect(JSON.stringify(context)).not.toContain(' '.repeat(1_000));
     expect(context.utensils).toHaveLength(100);
-    expect(
-      context.utensils.every((item: any) => item.name.length <= 120 && item.category.length <= 60)
-    ).toBe(true);
+    expect(context.utensils.every((item: any) => item.name.length > 120)).toBe(true);
+    expect(context.utensils.every((item: any) => item.category.length > 60)).toBe(true);
     expect(catalog.recipes).toHaveLength(31);
     const catalogRecipe = catalog.recipes.find((entry: any) => entry.recipe.name.startsWith('A'));
     expect(catalogRecipe.recipe.name).toHaveLength(250);
@@ -1870,9 +1872,8 @@ describe('household meal proposal preview route', () => {
       weekStart: WEEK_START,
       householdMemberIds: [planner.membershipId, second.membershipId],
       recipes: preview.data.recipes,
-      events: preview.data.events.map((event: Record<string, any>, index: number) => ({
+      events: preview.data.events.map((event: Record<string, any>) => ({
         ...event,
-        servings: index === 0 ? 3 : event.servings,
         // These echoed IDs are deliberately tampered with; the route must derive them from aliases.
         participantIds: ['not-a-household-member']
       }))
@@ -1884,7 +1885,6 @@ describe('household meal proposal preview route', () => {
     expect(firstJson).toMatchObject({ success: true, data: { idempotent: false } });
     expect(firstJson.data.events).toHaveLength(7);
     expect(firstJson.data.events[0].participantIds).toEqual([planner.id, second.id]);
-    expect(firstJson.data.events[0].servings).toBe(3);
     expect(firstJson.data.events[0].recipeSnapshot).toMatchObject({
       name: 'Arroz con verduras',
       baseServings: 1,

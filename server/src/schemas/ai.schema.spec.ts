@@ -128,16 +128,34 @@ describe('replaceMealSchema guests', () => {
     ).toBe(false);
   });
 
-  it('bounds guest count and free-text fields', () => {
+  it('bounds guest count but accepts complete long natural-language preference text', () => {
+    const longText = 'Preferencia culinaria. '.repeat(150).trim();
     expect(
       replaceMealSchema.safeParse({ mealId: 'meal-1', guests: Array(9).fill(guest) }).success
     ).toBe(false);
-    expect(
-      replaceMealSchema.safeParse({
-        mealId: 'meal-1',
-        guests: [{ ...guest, notes: 'x'.repeat(301) }]
-      }).success
-    ).toBe(false);
+    const parsed = replaceMealSchema.parse({
+      mealId: 'meal-1',
+      guests: [
+        {
+          allergies: [longText],
+          intolerances: [longText],
+          diets: [longText],
+          likes: [longText],
+          dislikes: [longText],
+          notes: longText
+        }
+      ],
+      goals: { types: ['custom'], customInstructions: longText }
+    });
+    expect(parsed.guests[0]).toMatchObject({
+      allergies: [longText],
+      intolerances: [longText],
+      diets: [longText],
+      likes: [longText],
+      dislikes: [longText],
+      notes: longText
+    });
+    expect(parsed.goals?.customInstructions).toBe(longText);
   });
 
   it('accepts selected household members and plural or custom planning goals', () => {

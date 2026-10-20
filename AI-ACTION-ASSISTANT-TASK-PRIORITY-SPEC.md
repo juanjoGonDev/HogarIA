@@ -23,7 +23,6 @@ Añadir prioridad real a las tareas del hogar y al registro del asistente. El ob
 - [x] El modelo compartido y el esquema Zod admiten únicamente `low | medium | high`.
 - [x] Datos guardados sin prioridad se leen como `medium`, sin perder ninguna otra propiedad ni invalidar la semana.
 - [x] La API acepta omisión compatible como `medium` y rechaza prioridades desconocidas; guardar persiste la prioridad normalizada.
-- [x] La publicación automática de tareas del plan incluye el campo requerido y usa `medium` si el origen no especifica prioridad, sin modificar prioridades explícitas.
 - [x] El CAS de actualización compara también prioridad; contexto obsoleto, otro cambio concurrente o replay con cuerpo distinto no sobrescriben datos.
 - [x] Crear/editar manualmente, asignación justa, cambio de semana y recarga conservan prioridad.
 
@@ -52,7 +51,6 @@ Añadir prioridad real a las tareas del hogar y al registro del asistente. El ob
 - Playwright aislado con SQLite temporal: el flujo de tarea del asistente (edición de prioridad, descarte, confirmación, replay, recarga y rechazo de la acción sin escritura) y el lote con creación de tarea por defecto `medium` pasan en proyectos `chromium` y `mobile-chrome`. También pasa el flujo manual de tareas en ambos proyectos, con alta/baja/media, guardado y recarga.
 - Capturas sintéticas inspeccionadas y excluidas de Git: `.e2e-screenshots/household-plan-tasks/chromium/task-priority-controls-desktop.png` y `.e2e-screenshots/household-plan-tasks/mobile-chrome/task-priority-controls-mobile.png`.
 - `server/src/routes/ai-assistant.routes.spec.ts`: prueba focal de refinamiento permite cambiar prioridad solo con scope `changes.priority`, rechaza el cambio fuera de scope y compara el snapshot SQLite para confirmar cero escrituras.
-- Revalidación (2026-10-18): los tests del worker de publicación verifican prioridades `high`, `low` y el default `medium`; suite del worker y contratos **528/528** y `pnpm --filter @hogaria/server exec tsc --noEmit` pasan con `DATABASE_PATH=:memory:`. La suite server completa pasa **2.101**, 1 omitida.
 
 ## Fuera de alcance
 

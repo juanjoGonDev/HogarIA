@@ -239,6 +239,14 @@ describe('el stepper de la fila puede bajar a 0 (## 12aa)', () => {
 });
 
 describe('utensilios', () => {
+  it('accepts full-length utensil names used in AI context', async () => {
+    const name = `Utensilio detallado ${'x'.repeat(2_501)}`;
+    const response = await call('POST', '/utensils', { name, category: 'cookware' });
+
+    expect(response.status).toBe(201);
+    expect((await data(response)).name).toBe(name);
+  });
+
   it('crea, filtra, actualiza y borra utensilios de la casa', async () => {
     const ollaResponse = await call('POST', '/utensils', {
       name: 'Olla sintética',
@@ -311,6 +319,14 @@ describe('utensilios', () => {
       )
     ).toEqual([]);
     expect((await call('DELETE', `/utensils/${olla.id}`)).status).toBe(404);
+  });
+});
+
+describe('texto de ingredientes usado por IA', () => {
+  it('accepts and persists full-length ingredient names', async () => {
+    const name = `Ingrediente detallado ${'y'.repeat(2_501)}`;
+    const created = await addIngredient(name, null);
+    expect(created.name).toBe(name);
   });
 });
 

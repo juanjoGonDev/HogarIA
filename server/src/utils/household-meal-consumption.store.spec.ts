@@ -120,6 +120,24 @@ describe('shared meal consumption persistence', () => {
     member('carol', 'view');
   });
 
+  it('reads full-length generated ingredient names and units without losing the recipe snapshot', () => {
+    const name = `Ingrediente ${'x'.repeat(2_501)}`;
+    const unit = `unidad ${'u'.repeat(2_501)}`;
+    const mealId = addSharedMeal({
+      ...snapshot,
+      ingredients: [{ name, quantity: 1, unit, isOptional: false }]
+    });
+
+    const result = record(db, 'alice', request(mealId));
+
+    expect(result.warnings).not.toContainEqual(
+      expect.objectContaining({ code: 'RECIPE_SNAPSHOT_UNAVAILABLE' })
+    );
+    expect(result.warnings).toContainEqual(
+      expect.objectContaining({ code: 'INGREDIENT_UNMATCHED', ingredientName: name, unit })
+    );
+  });
+
   it('deducts actual servings once, returns the persisted result on retry, and does not use planned servings', () => {
     const mealId = addSharedMeal();
     addIngredient('rice', 'arroz', 'g', 500);

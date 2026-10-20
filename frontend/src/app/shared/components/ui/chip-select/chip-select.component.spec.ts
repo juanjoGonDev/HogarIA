@@ -75,29 +75,19 @@ describe('ChipSelectComponent', () => {
     expect(emit).toHaveBeenCalledOnceWith(['X']);
   });
 
-  it('accepts a trimmed 60-character custom value and rejects longer values without losing input', () => {
-    const valid = 'A '.repeat(29) + 'A!';
-    expect(valid.trim().length).toBe(60);
-    const tooLong = 'B'.repeat(61);
+  it('accepts long custom preference text without a character cap', () => {
+    const longValue = 'B'.repeat(2_501);
     const emit = spyOn(component.valueChange, 'emit');
 
-    component.customText = `  ${valid}  `;
+    component.customText = `  ${longValue}  `;
     component.addCustom();
-    expect(component.value).toEqual([valid.trim()]);
+    expect(component.value).toEqual([longValue]);
     expect(component.customText).toBe('');
-
-    component.customText = tooLong;
-    component.addCustom();
     fixture.detectChanges();
-
-    expect(component.value).toEqual([valid.trim()]);
-    expect(component.customText).toBe(tooLong);
-    expect(emit).toHaveBeenCalledTimes(1);
-    const alert: HTMLElement = fixture.nativeElement.querySelector('[role="alert"]');
+    expect(component.validationError).toBeNull();
     const input: HTMLInputElement = fixture.nativeElement.querySelector('.chip-select__input');
-    expect(alert).not.toBeNull();
-    expect(input.getAttribute('aria-invalid')).toBe('true');
-    expect(input.getAttribute('aria-describedby')).toContain(alert.id);
+    expect(input.hasAttribute('maxlength')).toBeFalse();
+    expect(emit).toHaveBeenCalledTimes(1);
   });
 
   it('caps a selection at 60 and still allows removing a selected option', () => {

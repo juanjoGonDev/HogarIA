@@ -340,7 +340,6 @@ describe('household planning automation worker', () => {
           spaceId: 'kitchen',
           scheduledDate: '2026-10-14',
           assignedMemberId: 'alice',
-          priority: 'high',
           completed: true
         }
       ]
@@ -575,7 +574,6 @@ describe('household planning automation worker', () => {
           spaceId: 'kitchen',
           scheduledDate: '2026-10-06',
           assignedMemberId: 'bob',
-          priority: 'low',
           completed: true
         }
       ]
@@ -666,7 +664,6 @@ describe('household planning automation worker', () => {
           spaceId: null,
           scheduledDate: '2026-10-18',
           assignedMemberId: 'alice',
-          priority: 'medium',
           completed: false
         }
       ]

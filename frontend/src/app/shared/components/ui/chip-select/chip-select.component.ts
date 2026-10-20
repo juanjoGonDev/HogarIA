@@ -9,7 +9,6 @@ import { I18nService } from '../../../../core/services/i18n.service';
 import { IconComponent } from '../icon/icon.component';
 
 const MAX_SELECTIONS = 60;
-const MAX_VALUE_LENGTH = 60;
 
 /**
  * Lista de opciones en formato chip, de una o varias selecciones, con hueco
@@ -22,9 +21,7 @@ const MAX_VALUE_LENGTH = 60;
 @Component({
   selector: 'app-chip-select',
   standalone: true,
-  imports: [
-    TranslatePipe,
-    CommonModule, FormsModule, ButtonComponent, IconComponent],
+  imports: [TranslatePipe, CommonModule, FormsModule, ButtonComponent, IconComponent],
   template: `
     <div class="chip-select" role="group" [attr.aria-label]="label">
       <div class="chip-select__list">
@@ -36,7 +33,11 @@ const MAX_VALUE_LENGTH = 60;
           [attr.aria-pressed]="isSelected(option.value)"
           (click)="toggle(option.value)"
         >
-          <span class="chip-select__icon" *ngIf="option.icon && !isCustom(option.value)" aria-hidden="true">
+          <span
+            class="chip-select__icon"
+            *ngIf="option.icon && !isCustom(option.value)"
+            aria-hidden="true"
+          >
             {{ option.icon }}
           </span>
           <span class="chip-select__icon" *ngIf="isCustom(option.value)" aria-hidden="true">
@@ -55,16 +56,18 @@ const MAX_VALUE_LENGTH = 60;
           [placeholder]="placeholderText"
           [attr.aria-label]="labelText"
           [ngModel]="customText"
-          (ngModelChange)="customText = $event; onCustomTextChange()"
+          (ngModelChange)="customText = $event"
           [attr.aria-describedby]="describedBy"
-          [attr.aria-invalid]="validationError === 'max_length' ? 'true' : null"
+          [attr.aria-invalid]="validationError ? 'true' : null"
           (keyup.enter)="$event.preventDefault(); addCustom()"
         />
-        <app-button variant="ghost" size="sm" (onClick)="addCustom()">{{ 'ui.anadir' | t }}</app-button>
+        <app-button variant="ghost" size="sm" (onClick)="addCustom()">{{
+          'ui.anadir' | t
+        }}</app-button>
       </div>
 
       <p *ngIf="validationError" class="chip-select__error" [id]="errorId" role="alert">
-        {{ (validationError === 'max_length' ? 'ui.custom_option_max_length' : 'ui.custom_options_max_selected') | t }}
+        {{ 'ui.custom_options_max_selected' | t }}
       </p>
       <p class="chip-select__hint" *ngIf="hint" [id]="hintId">{{ hint }}</p>
     </div>
@@ -162,7 +165,6 @@ export class ChipSelectComponent {
     return clave ? this.i18n.t(clave) : option.value;
   }
 
-
   /** Opciones propuestas (las ya elegidas se muestran aunque no estén aquí). */
   @Input() options: ChipOption[] = [];
   @Input() value: string[] = [];
@@ -188,19 +190,13 @@ export class ChipSelectComponent {
   }
 
   customText = '';
-  validationError: 'max_length' | 'max_selected' | null = null;
+  validationError: 'max_selected' | null = null;
 
   get describedBy(): string | null {
     const ids = [this.hint ? this.hintId : null, this.validationError ? this.errorId : null].filter(
       (id): id is string => id !== null
     );
     return ids.length ? ids.join(' ') : null;
-  }
-
-  onCustomTextChange(): void {
-    if (this.validationError === 'max_length' && this.customText.trim().length <= MAX_VALUE_LENGTH) {
-      this.validationError = null;
-    }
   }
 
   /** Predefinidas + las que haya escrito el usuario. */
@@ -220,7 +216,11 @@ export class ChipSelectComponent {
     // longitud no vale —quitar una opcion y anadir otra deja el mismo numero, y las chips serian un
     // recuerdo de lo que habia.
     const values = this.value.join('|');
-    if (this.choicesCache && this.choicesOptions === this.options && this.choicesValues === values) {
+    if (
+      this.choicesCache &&
+      this.choicesOptions === this.options &&
+      this.choicesValues === values
+    ) {
       return this.choicesCache;
     }
     const base = this.options.filter(
@@ -272,11 +272,6 @@ export class ChipSelectComponent {
   addCustom(): void {
     const text = this.customText.trim();
     if (!text) return;
-
-    if (text.length > MAX_VALUE_LENGTH) {
-      this.validationError = 'max_length';
-      return;
-    }
 
     if (!this.value.some((item) => item.toLowerCase() === text.toLowerCase())) {
       if (this.value.length >= MAX_SELECTIONS) {

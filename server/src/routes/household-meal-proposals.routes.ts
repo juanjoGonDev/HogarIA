@@ -480,7 +480,7 @@ householdMealProposalRoutes.post(
           time: event.time,
           recipeId,
           customMeal: typeof recipeSnapshot.name === 'string' ? recipeSnapshot.name : 'Receta',
-          servings: source.servings,
+          servings: event.servings,
           participantIds: participantIds as string[],
           recipeSnapshot
         });
@@ -697,9 +697,9 @@ function readAccessibleIngredients(
     .map((row) => {
       const item = row as PantryPromptRow;
       return {
-        name: item.name.slice(0, 120),
+        name: item.name,
         quantity: item.quantity,
-        unit: item.unit.slice(0, 30),
+        unit: item.unit,
         expirationDate: normalizeContextDate(item.expirationDate)
       };
     });
@@ -753,8 +753,8 @@ function readAvailableUtensils(
     .map((row) => {
       const utensil = row as UtensilPromptRow;
       return {
-        name: utensil.name.slice(0, 120),
-        category: utensil.category?.slice(0, 60) ?? null
+        name: utensil.name,
+        category: utensil.category ?? null
       };
     });
 }
@@ -927,8 +927,8 @@ function readPreviousMealName(
   }
   const name =
     typeof snapshot.name === 'string' && snapshot.name.trim()
-      ? snapshot.name.trim().slice(0, 200)
-      : customMeal?.trim().slice(0, 200);
+      ? snapshot.name.trim()
+      : customMeal?.trim();
   return name ?? null;
 }
 

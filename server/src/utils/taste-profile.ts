@@ -193,7 +193,7 @@ export function toHomeProfile(stored: unknown, cookingLevel: unknown): HomeProfi
 }
 
 /** Listas cortas y sin vacíos: son cadenas que se envían tal cual a la IA. */
-const stringList = z.array(z.string().trim().min(1).max(60)).max(60).optional();
+const stringList = z.array(z.string().trim().min(1)).max(60).optional();
 
 export const tasteProfileSchema = z.object({
   /**
@@ -202,11 +202,11 @@ export const tasteProfileSchema = z.object({
    */
   goals: z.array(tasteGoalEnum).max(7).optional(),
   goal: tasteGoalEnum.optional(),
-  goalNotes: z.string().trim().max(500).optional(),
+  goalNotes: z.string().trim().optional(),
   allergies: stringList,
   likes: stringList,
   dislikes: stringList,
-  notes: z.string().trim().max(1000).optional()
+  notes: z.string().trim().optional()
 });
 
 export const updateTasteSchema = z.object({
@@ -283,9 +283,7 @@ function normalizeList(value: unknown): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const item of value) {
-    const text = String(item ?? '')
-      .trim()
-      .slice(0, 60);
+    const text = String(item ?? '').trim();
     if (!text) continue;
     const key = text.toLowerCase();
     if (seen.has(key)) continue;
@@ -295,10 +293,8 @@ function normalizeList(value: unknown): string[] {
   return out;
 }
 
-function normalizeText(value: unknown, max: number): string {
-  return String(value ?? '')
-    .trim()
-    .slice(0, max);
+function normalizeText(value: unknown): string {
+  return String(value ?? '').trim();
 }
 
 /** Une el perfil guardado con los valores por defecto (nunca undefined). */
@@ -317,11 +313,11 @@ export function toTasteProfile(stored: unknown): TasteProfile {
 
   return {
     goals: rawGoals.length > 0 && goals.length === 0 ? [...DEFAULT_TASTE_GOALS] : goals,
-    goalNotes: normalizeText(raw.goalNotes, 500),
+    goalNotes: normalizeText(raw.goalNotes),
     allergies: normalizeList(raw.allergies),
     likes: normalizeList(raw.likes),
     dislikes: normalizeList(raw.dislikes),
-    notes: normalizeText(raw.notes, 1000)
+    notes: normalizeText(raw.notes)
   };
 }
 
@@ -387,12 +383,11 @@ export function saveTasteProfile(
           : previous.goals;
     prefs.taste = {
       goals,
-      goalNotes:
-        next.goalNotes !== undefined ? normalizeText(next.goalNotes, 500) : previous.goalNotes,
+      goalNotes: next.goalNotes !== undefined ? normalizeText(next.goalNotes) : previous.goalNotes,
       allergies: next.allergies !== undefined ? normalizeList(next.allergies) : previous.allergies,
       likes: next.likes !== undefined ? normalizeList(next.likes) : previous.likes,
       dislikes: next.dislikes !== undefined ? normalizeList(next.dislikes) : previous.dislikes,
-      notes: next.notes !== undefined ? normalizeText(next.notes, 1000) : previous.notes
+      notes: next.notes !== undefined ? normalizeText(next.notes) : previous.notes
     };
   }
 

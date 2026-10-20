@@ -1094,6 +1094,40 @@ describe('CalendarComponent meal deletion feedback', () => {
     expect(component.isMealModalOpen()).toBeFalse();
   });
 
+  it('sends full-length guest allergy details and notes to meal replacement', () => {
+    const longText = 'A'.repeat(2_501);
+    const meal = {
+      id: 'meal-long-guest-text',
+      date: '2026-10-05',
+      mealType: 'dinner' as const,
+      title: 'Pasta actual',
+      recipeId: 'recipe-1',
+      servings: 4,
+      completed: false
+    };
+    const guest = {
+      allergies: [longText],
+      intolerances: [],
+      diets: [],
+      likes: [],
+      dislikes: [],
+      notes: longText
+    };
+    aiService.replaceMeal.and.returnValue(of(null));
+    component.openEditModal(meal);
+    component.toggleReplacementForm();
+    component.replacementMemberIds.set(['member-1']);
+    component.updateReplacementGuests([guest]);
+
+    component.requestMealReplacement();
+
+    expect(aiService.replaceMeal).toHaveBeenCalledOnceWith({
+      mealId: meal.id,
+      householdMemberIds: ['member-1'],
+      guests: [guest]
+    });
+  });
+
   it('does not persist a failed proposal and allows a retry to be confirmed', () => {
     const meal = {
       id: 'meal-retry',

@@ -79,22 +79,17 @@ export interface PersistWeeklyPlanResult {
   calendarId: string;
 }
 
-function clamp(text: string, max: number): string {
-  const clean = text.trim();
-  return clean.length <= max ? clean : `${clean.slice(0, max - 1)}…`;
-}
-
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
 }
 
 function mealName(value: unknown): string | null {
   // La IA a veces devuelve un string suelto en lugar del objeto {name, ingredients}.
-  if (typeof value === 'string') return value.trim() ? clamp(value, 200) : null;
+  if (typeof value === 'string') return value.trim() || null;
   const record = asRecord(value);
   if (!record || typeof record.name !== 'string') return null;
   const name = record.name.trim();
-  return name ? clamp(name, 200) : null;
+  return name || null;
 }
 
 function mealNotes(value: unknown): string | null {
@@ -104,7 +99,7 @@ function mealNotes(value: unknown): string | null {
     .map((item) => (typeof item === 'string' ? item : ((asRecord(item)?.name as string) ?? '')))
     .map((item) => item.trim())
     .filter(Boolean);
-  return names.length ? clamp(`Ingredientes: ${names.join(', ')}`, 500) : null;
+  return names.length ? `Ingredientes: ${names.join(', ')}` : null;
 }
 
 export function persistWeeklyPlan(
@@ -132,9 +127,7 @@ export function persistWeeklyPlan(
       ? [input.goals.type]
       : [];
   const goalTypes = [...new Set(rawTypes.map((type) => String(type ?? '').trim()).filter(Boolean))];
-  const customInstructions = String(input.goals?.customInstructions ?? '')
-    .trim()
-    .slice(0, 2000);
+  const customInstructions = String(input.goals?.customInstructions ?? '').trim();
   const primaryType = goalTypes[0] ?? (customInstructions ? 'custom' : 'balanced');
 
   // Semana de la IA => calendario semanal, creando el que falte (misma regla que

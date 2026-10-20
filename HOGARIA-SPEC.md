@@ -6073,10 +6073,20 @@ de datos identificativos antes de enviar notas al proveedor, límites de bytes d
 tokens del proveedor. El smoke WebAPI anterior falló en composer/renderizador; esta decisión elimina topes
 locales comprobables, pero no atribuye causalidad ni afirma reparar ese fallo remoto.
 
-- [ ] Auditar rutas, schemas, normalizadores, persistencia y UI de todo texto natural incluido en prompts IA;
+- [x] Auditar rutas, schemas, normalizadores, persistencia y UI de todo texto natural incluido en prompts IA;
       eliminar `.max(n)`, `maxlength` y truncamientos de caracteres que lo rechazan, recortan o alteran.
-- [ ] Conservar redacción de datos personales, límites de request por bytes y topes estructurales; confirmar
+- [x] Conservar redacción de datos personales, límites de request por bytes y topes estructurales; confirmar
       que textos mayores que cada máximo anterior pasan completos hasta prompt, persistencia y vuelta a leer.
-- [ ] TDD focal con texto sintético >2.500 caracteres, verificar campos de preferencias, metas de hogar,
+- [x] TDD focal con texto sintético >2.500 caracteres, verificar campos de preferencias, metas de hogar,
       instrucciones de planificación, invitado, y recetas creadas desde propuesta; no llamar proveedor real.
-- [ ] Comprobar typecheck, suites focales y coverage ≥70 % S/B/F/L en el alcance; registrar límites y evidencia.
+- [x] Comprobar typecheck, suites focales y coverage ≥70 % S/B/F/L en el alcance; registrar límites y evidencia.
+
+**Evidencia (2026-10-15):** servidor: `vitest run --coverage --silent --reporter=dot`, 107 archivos / 1.851
+pruebas aprobadas, 1 omitida; cobertura global 89,98 % statements, 82,50 % branches, 95,96 % funciones y
+93,17 % líneas (umbral local 70 % por fichero). Frontend: Karma/ChromeHeadlessLocal, 1.573 pruebas aprobadas;
+93,13 % / 83,94 % / 93,81 % / 95,43 % (S/B/F/L; gate 80 %). Typecheck servidor y E2E aprobados;
+`check-ui`: 250 ficheros, 21 reglas, sin incidencias. Playwright aislado PC+móvil: 4/4 aprobadas y capturas
+sintéticas en `.e2e-screenshots/preferences-unbounded-text ` (el directorio conserva accidentalmente un espacio
+final por el runner). Un nuevo intento de repetición no llegó a abrir tests: el Chromium headless faltaba en el
+directorio temporal de ese sandbox; no es un fallo de la aplicación. No hubo llamada real a IA. La evidencia
+confirma que HogarIA ya no rechaza ni trunca ese texto; no demuestra que el límite fuera la causa del error WebAPI.
