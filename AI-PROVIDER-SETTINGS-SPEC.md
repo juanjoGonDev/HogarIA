@@ -1,6 +1,6 @@
 # Hogar: proveedores de IA y registro
 
-**Estado:** Draft — implementación, gates locales y comparación geométrica verificados; CI remoto pendiente.
+**Estado:** Draft — implementación, gates locales, comparación geométrica y CI remoto verificados; PR sigue Draft.
 **Base revalidada:** `origin/master` en `536c2e0ea509d05e3f2131f7e6272cc138539fdf` (commit documental de esta spec, publicado por separado y conservado por decisión del usuario).
 
 ## Objetivo y decisiones
@@ -59,7 +59,7 @@
 - [x] Playwright app/API real con datos sintéticos: escritorio y móvil, selector/fallback, recarga de test sin duplicado, estado sin proveedor, registro, teclado y breakpoints 320–1440 px. Capturas comparables guardadas e inspeccionadas bajo `.e2e-screenshots/` (ignorado por Git).
 - [x] i18n ES/EN, nombres accesibles y navegación/teclado cubiertos por pruebas y build. Coverage completa: frontend >70 % en statements, ramas, funciones y líneas; servidor >70 % en las cuatro métricas.
 - [x] Comparar geometría calculada entre `/ai-config` y Hogar → Ajustes con tolerancia máxima de 1 CSS px en Chromium de escritorio y móvil: el botón de alta iguala ancho/alto y los 5 selectores igualan altura. La captura específica del panel quedó guardada e inspeccionada.
-- [x] CI de PR conserva los cuatro shards E2E amplios y smoke de imagen `amd64`/`arm64`; el job full-stack de 30 min se limita a flujos críticos de build servido, proveedor por función, registro, rate limit y logs/SSE. No duplica las 178 pruebas full-stack dentro de ese job. El resultado remoto del commit final sigue pendiente.
+- [x] CI de PR conserva los cuatro shards E2E amplios y smoke de imagen `amd64`/`arm64`; el job full-stack de 30 min se limita a flujos críticos de build servido, proveedor por función, registro, rate limit y logs/SSE. No duplica las 178 pruebas full-stack dentro de ese job. En `9ace07e`, todos los checks terminaron verdes; el smoke construye y prueba ambas imágenes sin publicar al registry.
 - [x] Mantener esta checklist ligada a evidencia reproducible. Rama y PR permanecen Draft; no mergear.
 
 ### Evidencia reproducible
@@ -74,6 +74,7 @@
 - Flujos de recibos: `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/receipt-queue-actions.spec.ts tests/e2e/receipt-queue-panel-layout.spec.ts tests/e2e/receipts.spec.ts` — 38/38; cobertura sintética de bloqueo sin proveedor, colas y procesamiento local.
 - Generación/recetas: `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/recipe-book-filter-modal.spec.ts tests/e2e/recipe-book.spec.ts tests/e2e/recipe-full-detail.spec.ts tests/e2e/recipe-edit.spec.ts tests/e2e/recipe-cooking-checklist.spec.ts tests/e2e/calendar-replan.spec.ts --grep 'combina los seis filtros|una receta del libro abre el detalle completo|la ficha completa presenta detalle|la vista dedicada edita todos los campos|revisa una mejora canónica|modo cocina escala comensales|Replanificación parcial'` — 18/18 en PC y móvil.
 - Validación de utilidades: `pnpm run typecheck:e2e` y test middleware — pasan; `pnpm run test:config` — 104/104; `pnpm run check:ui` — 269 ficheros, 21 reglas, sin incidencias.
+- CI remoto del PR #56, commit `9ace07e`: [run 39388851904](https://github.com/juanjoGonDev/MiCocinAI/actions/runs/39388851904) — Type Check, Server Tests, Production Build, Full-stack E2E, 4 shards E2E y smoke de imagen `amd64`/`arm64` todos `success`.
 - E2E registro actualizado: `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/auth.spec.ts --grep 'should show login form|should show the register form without the profile questions'` — 4/4; registro/login muestran confirmación solo donde corresponde.
 - E2E límite de contraseña: `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/auth-password-byte-limit.spec.ts --grep 'registro rechaza 73 bytes'` — 2/2; password y confirmación coinciden antes de enviar.
 - E2E enfocado (empty state + fallback multi-provider): `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/ai-config.spec.ts --grep 'keeps the unconfigured state focused|permite varios proveedores activos'` — 4/4; Chromium escritorio y móvil.
@@ -89,4 +90,4 @@
 3. Multi-proveedor: migración, asignaciones, routing y guards.
 4. Hogar/UI: mover gestor, selectores, avisos, flujo sin configuración y E2E.
 
-Cada unidad incluye pruebas y evidencia en el Draft PR #56. La comparación geométrica numérica está completada; registrar aquí el resultado CI del último commit y conservar el PR en Draft, sin mergear.
+Cada unidad incluye pruebas y evidencia en el Draft PR #56. Comparación geométrica y CI remoto del commit `9ace07e` están completados. Mantener el PR en Draft; no mergear.
