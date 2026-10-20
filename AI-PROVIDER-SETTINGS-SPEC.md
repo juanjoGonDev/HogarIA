@@ -1,7 +1,7 @@
 # Hogar: proveedores de IA y registro
 
 **Estado:** Draft — contrato activo para esta rama, pendiente de implementación y evidencia.
-**Base revalidada:** `origin/master` en `ad2b1dce8e57fc83dbcd7948464bd2a57634b051`.
+**Base revalidada:** `origin/master` en `536c2e0ea509d05e3f2131f7e6272cc138539fdf` (commit documental de esta spec, publicado por separado y conservado por decisión del usuario).
 
 ## Objetivo y decisiones
 
@@ -13,6 +13,7 @@
 - El límite de timeout actual de 240 s se eleva a **600 s** para probar proveedores lentos. UI, API y transporte comparten ese límite; la concesión del worker debe superarlo con margen. El campo puede omitirse para usar el default actual de 30 s; no se introduce un mínimo de producto adicional, aunque un valor explícito debe ser un entero positivo.
 - Un test de conexión persistido muestra estado `testing` antes de iniciar la petición, impide duplicados y permite reanudar la consulta de estado tras recargar. El estado/resultado puede persistirse; claves y credenciales efímeras nunca se escriben en tablas de jobs, estado de test, logs ni navegador persistente.
 - El registro pide repetir la contraseña y valida igualdad en cliente. Solo se envía la contraseña original al servidor.
+- La entrega será **un único PR**, por decisión explícita del usuario aunque el diff supere 400 líneas; documentar esa excepción con la etiqueta `size:exception` y mantener el PR en Draft durante el trabajo.
 
 ## Fuente de verdad y discrepancias
 
