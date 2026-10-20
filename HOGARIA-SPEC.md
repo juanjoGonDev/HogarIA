@@ -6117,7 +6117,7 @@ o facturación para sortearlo.
       bypass ni editar el ruleset para reducir sus requisitos.
 - [x] Configurar CodeQL default setup con runner estándar y query suite `default`; el análisis inicial de
       JavaScript/TypeScript y Actions termina correctamente.
-- [ ] Ejecutar y verificar el análisis del head de PR #57; confirmar que el gate CodeQL queda satisfecho y que
+- [x] Ejecutar y verificar el análisis del head de PR #57; confirmar que el gate CodeQL queda satisfecho y que
       la PR no introduce alertas con severidad bloqueante.
 - [ ] Habilitar GitHub Code Quality solo cuando GitHub lo ofrezca para este repositorio; elegir `javascript-typescript`
       y severidad `errors`; verificar su check/análisis real en la PR.
@@ -6132,5 +6132,6 @@ decidir explícitamente otra política; no se simula el resultado con un check p
 `configured`, query suite `default`, runner `standard`; ejecución `39418485145` completada con éxito sobre `master`.
 GitHub detectó Actions y TypeScript/JavaScript. La primera línea base encontró seis alertas ya presentes en
 `master` (incluye dos `error/high` en `scripts/i18n-extract.mjs`); ninguna de esas rutas está en el diff de PR #57.
-El análisis de la rama de PR sigue pendiente. `GET code-quality/setup` devuelve 404 “Code quality is not available
-for this repository”, por lo que no se toca la regla ni la facturación.
+El análisis de `refs/pull/57/head` (`39419769097`, commit `01181e6d44f89882879c8aea5c3c1b3114a6aced`) pasó ambos
+jobs (`javascript-typescript`, `actions`) y devolvió cero resultados para la PR. `GET code-quality/setup` devuelve
+404 “Code quality is not available for this repository”, por lo que no se toca la regla ni la facturación.
