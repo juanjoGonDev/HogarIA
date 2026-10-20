@@ -35,7 +35,8 @@ La rama principal verificada del repositorio es `master`. El PR #47 estaba abier
 - [x] Añadir pruebas deterministas para extraer un digest OCI válido y rechazar JSON/digest inválido.
 - [x] Cambiar la extracción y comparación de digests del workflow a JSON estructurado consumido por completo; quitar el pipe `awk` con salida temprana.
 - [x] Verificar pruebas del helper y contrato del workflow (9/9), `pnpm run test:config` (109/109), `node scripts/check-workflows.mjs` (6 workflows), `actionlint` en CI/publicación, parser contra el tag público de GHCR y `git diff --check`.
-- [ ] CI de la PR pasa; publicar la PR como ready y fusionarla por squash sin bypass.
+- [x] CI de la PR #58 verde (run `39443692279`, 11/11 jobs); CodeQL y sus dos análisis pasan; PR lista y `mergeStateStatus=CLEAN`.
+- [ ] Fusionar por squash normal, sin bypass.
 - [ ] Observar el run post-merge de publicación GHCR: tags SHA/`latest` con digest común, plataformas amd64/arm64 y smokes nativos verdes.
 - [ ] Dejar limpios los cambios locales propios y retirar solo el worktree temporal de esta remediación.
 
