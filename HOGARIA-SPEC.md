@@ -6107,11 +6107,10 @@ El PR sigue bloqueado por requisitos de análisis del ruleset, no por CI.
 Code Quality (errores), sin desactivar ni saltar esas reglas. La configuración debe analizar TypeScript/JavaScript,
 ser reproducible y dejar la PR #57 lista únicamente cuando el CI completo y ambos análisis hayan terminado bien.
 
-**Auditoría inicial:** PR #57 está abierta, no Draft, con auto-merge en espera y CI `39415564366` verde. El
-repositorio es público. El ruleset activo `main` exige CodeQL y Code Quality. No existe workflow CodeQL en el
-repositorio y `code-scanning/default-setup` informa `not-configured`. El endpoint de GitHub Code Quality devuelve
-404 `Code quality is not available for this repository`; no se desactiva el gate ni se incurre en cambios de plan
-o facturación para sortearlo.
+**Auditoría inicial:** PR #57 está abierta, lista para revisión, sin auto-merge, y CI `39422568445` está verde. El
+repositorio es público y pertenece a una cuenta personal. El ruleset activo `main` exige CodeQL y Code Quality.
+CodeQL default setup ya está configurado. El endpoint de GitHub Code Quality devuelve 404 `Code quality is not
+available for this repository`.
 
 - [x] Verificar reglas activas, elegibilidad pública, estado de CodeQL y disponibilidad de Code Quality; no usar
       bypass ni editar el ruleset para reducir sus requisitos.
@@ -6124,14 +6123,19 @@ o facturación para sortearlo.
 - [ ] Confirmar CI completo y ambos gates verdes; entonces reactivar auto-merge squash y verificar la fusión
       automática sin bypass.
 
-**Bloqueo externo registrado:** Code Quality no está disponible para el repositorio por la configuración/plan
-actual de GitHub. Si sigue sin estar disponible tras configurar CodeQL, hace falta habilitar la prestación o
-decidir explícitamente otra política; no se simula el resultado con un check propio ni se baja el gate.
+**Bloqueo externo registrado (actualizado 2026-10-20):** el usuario eligió seguir intentando habilitar Code Quality,
+tras informarse de que podría requerir plan y coste; no autorizó expresamente transferir el repo ni aceptar cargos
+concretos. La documentación de GitHub limita la función a Team/Enterprise Cloud y advierte cargos por licencias de
+committer activo, minutos de Actions y créditos de IA. Este repo pertenece a una cuenta personal. La única org Team
+visible es `TwenixPlatform`, donde el usuario figura como `member`, no owner. La hipótesis de trabajo es que habilitar
+Code Quality aquí requeriría pasar el repo a una org elegible y que su owner permita la función; verificarlo con dicho
+owner antes de cualquier transferencia. No se simula el check ni se modifica el ruleset.
 
 **Evidencia de configuración CodeQL (2026-10-20):** `PATCH code-scanning/default-setup` aceptado; configuración
 `configured`, query suite `default`, runner `standard`; ejecución `39418485145` completada con éxito sobre `master`.
 GitHub detectó Actions y TypeScript/JavaScript. La primera línea base encontró seis alertas ya presentes en
 `master` (incluye dos `error/high` en `scripts/i18n-extract.mjs`); ninguna de esas rutas está en el diff de PR #57.
 El análisis de `refs/pull/57/head` (`39419769097`, commit `01181e6d44f89882879c8aea5c3c1b3114a6aced`) pasó ambos
-jobs (`javascript-typescript`, `actions`) y devolvió cero resultados para la PR. `GET code-quality/setup` devuelve
-404 “Code quality is not available for this repository”, por lo que no se toca la regla ni la facturación.
+jobs (`javascript-typescript`, `actions`) y devolvió cero resultados para la PR; el head actual `1bdd0869752b10ef1952e42fdf941b4fbfa1661a`
+también tiene CodeQL correcto y CI verde. Verificado de nuevo con `GET code-quality/setup`: 404 “Code quality is not
+available for this repository”. El ruleset no se ha alterado y no se ha fusionado la PR.
