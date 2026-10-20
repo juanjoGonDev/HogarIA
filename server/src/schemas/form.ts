@@ -34,6 +34,11 @@ export function formText(max: number, label = 'campo') {
   );
 }
 
+/** Cadena natural de formulario: conserva el texto completo y normaliza vacios como null. */
+export function formNaturalText() {
+  return z.preprocess(blankToNull, z.string().trim().nullish());
+}
+
 /** Cadena obligatoria de formulario: vacio NO es «sin valor», es un error que hay que decir. */
 export function requiredText(max: number, label: string) {
   return z
@@ -47,7 +52,11 @@ export function requiredText(max: number, label: string) {
 export function formTime(label = 'hora') {
   return z.preprocess(
     blankToNull,
-    z.string().trim().regex(/^([01]\d|2[0-3]):[0-5]\d$/, `${label}: usa HH:MM`).nullish()
+    z
+      .string()
+      .trim()
+      .regex(/^([01]\d|2[0-3]):[0-5]\d$/, `${label}: usa HH:MM`)
+      .nullish()
   );
 }
 
@@ -59,14 +68,21 @@ export function formDate(label = 'fecha') {
 
 /** Fecha de formulario: la puede decidir el servidor (hoy), asi que admite el hueco. */
 export function optionalDate(label = 'fecha') {
-  return z.preprocess(blankToNull, z.string().trim().regex(DATE_PATTERN, `${label}: usa AAAA-MM-DD`).nullish());
+  return z.preprocess(
+    blankToNull,
+    z.string().trim().regex(DATE_PATTERN, `${label}: usa AAAA-MM-DD`).nullish()
+  );
 }
 
 /** `#rrggbb`, y `null` para «el color de mi capa», que es el caso normal. */
 export function formColor() {
   return z.preprocess(
     blankToNull,
-    z.string().trim().regex(/^#[0-9a-fA-F]{6}$/, 'Color: usa #rrggbb').nullish()
+    z
+      .string()
+      .trim()
+      .regex(/^#[0-9a-fA-F]{6}$/, 'Color: usa #rrggbb')
+      .nullish()
   );
 }
 
@@ -80,7 +96,9 @@ export function formUrl(label = 'URL') {
  * `'7'`. `z.coerce.number()` con `''` habia dado `0`, y `0` en calorias no es «sin valor»: es un
  * día de cero calorias, que es peor que un error.
  */
-export function formNumber(input: { int?: boolean; positive?: boolean; min?: number; max?: number } = {}) {
+export function formNumber(
+  input: { int?: boolean; positive?: boolean; min?: number; max?: number } = {}
+) {
   let inner: z.ZodNumber = z.coerce.number();
   if (input.int) inner = inner.int('Numero entero');
   if (input.positive) inner = inner.positive('Tiene que ser mayor que cero');
@@ -107,7 +125,9 @@ export function formField<T extends z.ZodTypeAny>(inner: T) {
 export function formDefault<T extends z.ZodTypeAny>(inner: T, fallback: unknown) {
   return z.preprocess(
     (value: unknown) =>
-      value === undefined || value === null || (typeof value === 'string' && !value.trim()) ? fallback : value,
+      value === undefined || value === null || (typeof value === 'string' && !value.trim())
+        ? fallback
+        : value,
     inner
   );
 }
@@ -149,7 +169,13 @@ export function formBool() {
  * `null` persistido seria una bomba de relojeria en el primer `.map()` del frontend.
  */
 export function formArray<T extends z.ZodTypeAny>(item: T) {
-  return z.preprocess(blankToNull, z.array(item).nullish().transform((value) => value ?? []));
+  return z.preprocess(
+    blankToNull,
+    z
+      .array(item)
+      .nullish()
+      .transform((value) => value ?? [])
+  );
 }
 
 /**
@@ -164,7 +190,10 @@ export function formList<T extends z.ZodTypeAny>(item: T) {
  * Los motivos de zod, en una frase para una persona. Sin esto el 400 decia «Invalid input» o el
  * primer mensaje en ingles del issue, y quien rellena el formulario no sabe a que campo volver.
  */
-export function describeIssues(error: z.ZodError): { message: string; issues: { field: string; message: string }[] } {
+export function describeIssues(error: z.ZodError): {
+  message: string;
+  issues: { field: string; message: string }[];
+} {
   const issues = error.issues.map((issue) => ({
     field: issue.path.length ? issue.path.join('.') : '',
     // Los mensajes de los helpers de arriba ya estan en espanol; solo se traducen los que zod
@@ -173,7 +202,11 @@ export function describeIssues(error: z.ZodError): { message: string; issues: { 
   }));
   const first = issues[0];
   return {
-    message: first ? (first.field ? `${first.field}: ${first.message}` : first.message) : 'Datos invalidos',
+    message: first
+      ? first.field
+        ? `${first.field}: ${first.message}`
+        : first.message
+      : 'Datos invalidos',
     issues
   };
 }

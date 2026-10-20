@@ -36,7 +36,7 @@ const mealTimesPatchSchema = z
 const objectivePatchSchema = z
   .object({
     goals: z.array(tasteGoalEnum).min(1).max(7).optional(),
-    notes: z.string().trim().max(500).optional()
+    notes: z.string().trim().optional()
   })
   .strict()
   .refine((value) => Object.keys(value).length > 0, 'Indica al menos un campo del objetivo.');

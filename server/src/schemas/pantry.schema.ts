@@ -1,8 +1,27 @@
 import { z } from 'zod';
-import { formColor, formDefault, formField, formNumber, formPartial, formText, optionalDate, requiredText } from './form.js';
+import {
+  formColor,
+  formDefault,
+  formField,
+  formNumber,
+  formPartial,
+  formText,
+  optionalDate,
+  requiredText
+} from './form.js';
 
 const measurementUnitEnum = z.enum([
-  'g', 'kg', 'ml', 'l', 'cup', 'tbsp', 'tsp', 'unit', 'bunch', 'slice', 'piece'
+  'g',
+  'kg',
+  'ml',
+  'l',
+  'cup',
+  'tbsp',
+  'tsp',
+  'unit',
+  'bunch',
+  'slice',
+  'piece'
 ]);
 
 // La categoria de un articulo dejo de ser un enum cerrado en la ## 12x: es la `key` de una fila de
@@ -15,13 +34,21 @@ const pantryCategoryKeySchema = z.string().trim().min(1).max(64);
 const storageLocationEnum = z.enum(['fridge', 'freezer', 'pantry', 'counter']);
 
 const utensilCategoryEnum = z.enum([
-  'oven', 'microwave', 'airfryer', 'stovetop', 'blender', 'mixer',
-  'food-processor', 'cookware', 'bakeware', 'tools'
+  'oven',
+  'microwave',
+  'airfryer',
+  'stovetop',
+  'blender',
+  'mixer',
+  'food-processor',
+  'cookware',
+  'bakeware',
+  'tools'
 ]);
 
 // Ingredient schemas
 export const createIngredientSchema = z.object({
-  name: z.string().min(1, 'Name is required').max(100),
+  name: z.string().min(1, 'Name is required'),
   // Clave del catalogo de la casa, no enum: ver el bloque de arriba. Sin categoria = la reserva.
   category: formDefault(pantryCategoryKeySchema, 'other'),
   quantity: z.number().positive('Quantity must be positive'),
@@ -107,7 +134,10 @@ export const pantryCategoryFilterSchema = z.object({
 export const createProductSchema = z.object({
   name: requiredText(120, 'nombre'),
   category: formDefault(pantryCategoryKeySchema, 'other'),
-  unit: formDefault(z.enum(['g', 'kg', 'ml', 'l', 'cup', 'tbsp', 'tsp', 'unit', 'bunch', 'slice', 'piece']), 'unit'),
+  unit: formDefault(
+    z.enum(['g', 'kg', 'ml', 'l', 'cup', 'tbsp', 'tsp', 'unit', 'bunch', 'slice', 'piece']),
+    'unit'
+  ),
   quantity: formDefault(formNumber({ min: 0, max: 100000 }), 0),
   expirationDate: optionalDate('caducidad'),
   notes: formText(500, 'nota'),
@@ -132,7 +162,10 @@ export const productFilterSchema = z.object({
 });
 
 export const bulkProductIdsSchema = z.object({
-  ids: z.array(z.string().trim().min(1).max(64)).min(1, 'Marca al menos un producto').max(100, 'Son demasiados de una vez (100)')
+  ids: z
+    .array(z.string().trim().min(1).max(64))
+    .min(1, 'Marca al menos un producto')
+    .max(100, 'Son demasiados de una vez (100)')
 });
 
 // ── El catalogo pre-registrado del super (HOGARIA-SPEC ## 12aa) ──
@@ -146,20 +179,27 @@ export const catalogFilterSchema = z.object({
 });
 
 export const catalogAddSchema = z.object({
-  ids: z.array(z.string().trim().min(1).max(64)).min(1, 'Marca al menos un producto').max(100, 'Son demasiados de una vez (100)')
+  ids: z
+    .array(z.string().trim().min(1).max(64))
+    .min(1, 'Marca al menos un producto')
+    .max(100, 'Son demasiados de una vez (100)')
 });
 
-export const selectProductImageSchema = z.object({
-  photoId: z.string().regex(/^[a-f0-9]{24}$/)
-}).strict();
+export const selectProductImageSchema = z
+  .object({
+    photoId: z.string().regex(/^[a-f0-9]{24}$/)
+  })
+  .strict();
 
-export const uploadProductImageSchema = z.object({
-  dataUrl: z.string().max(2_900_000)
-}).strict();
+export const uploadProductImageSchema = z
+  .object({
+    dataUrl: z.string().max(2_900_000)
+  })
+  .strict();
 
 // Utensil schemas
 export const createUtensilSchema = z.object({
-  name: z.string().min(1, 'Name is required').max(100),
+  name: z.string().min(1, 'Name is required'),
   category: utensilCategoryEnum,
   available: formDefault(z.boolean(), true),
   notes: formField(z.string().max(500))

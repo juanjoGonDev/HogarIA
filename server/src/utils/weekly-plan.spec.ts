@@ -238,6 +238,7 @@ describe('persistWeeklyPlan', () => {
 
   it('persiste objetivos plurales y texto libre junto a las metas nutricionales', () => {
     const user = createUser('multiple-goals@test');
+    const longInstructions = 'Prioriza legumbres y verduras. '.repeat(100).trim();
 
     persistWeeklyPlan(db, {
       userId: user,
@@ -245,7 +246,7 @@ describe('persistWeeklyPlan', () => {
       endDate: '2026-09-20',
       goals: {
         types: ['weight-loss', 'variety'],
-        customInstructions: 'Prioriza legumbres',
+        customInstructions: longInstructions,
         caloriesTarget: 1850,
         restrictions: ['sin fritos']
       },
@@ -256,9 +257,30 @@ describe('persistWeeklyPlan', () => {
     expect(stored).toMatchObject({
       type: 'weight-loss',
       types: ['weight-loss', 'variety'],
-      customInstructions: 'Prioriza legumbres',
+      customInstructions: longInstructions,
       dailyCalories: 1850,
       restrictions: ['sin fritos']
+    });
+  });
+
+  it('persists complete AI meal names and ingredient notes without character truncation', () => {
+    const user = createUser('long-meal-content@test');
+    const longText = 'Detalle culinario generado. '.repeat(100).trim();
+
+    persistWeeklyPlan(db, {
+      userId: user,
+      startDate: '2026-09-14',
+      endDate: '2026-09-20',
+      plan: {
+        days: [
+          { date: '2026-09-14', meals: { lunch: { name: longText, ingredients: [longText] } } }
+        ]
+      }
+    });
+
+    expect(mealsOf(user)[0]).toMatchObject({
+      custom_meal: longText,
+      notes: `Ingredientes: ${longText}`
     });
   });
 });

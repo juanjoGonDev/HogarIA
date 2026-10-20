@@ -1,33 +1,55 @@
 import { z } from 'zod';
 import { dayFromISO, RECURRENCES, RECURRENCE_FREQUENCIES } from '../utils/calendar-recurrence.js';
-import { DATE_PATTERN, formArray, formBool, formColor, formDate, formDefault, formField, formList, formNumber, formPartial, formText, formTime, optionalDate, requiredText } from './form.js';
+import {
+  DATE_PATTERN,
+  formArray,
+  formBool,
+  formColor,
+  formDate,
+  formDefault,
+  formField,
+  formList,
+  formNaturalText,
+  formNumber,
+  formPartial,
+  formText,
+  formTime,
+  optionalDate,
+  requiredText
+} from './form.js';
 
 /** Orden del dia en Espana: la merienda va antes que la cena (HOGARIA-SPEC 12o). */
 const mealTypeEnum = z.enum(['breakfast', 'lunch', 'snack', 'dinner']);
 const goalTypeEnum = z.enum([
-  'balanced', 'weight-loss', 'weight-gain', 'muscle-gain', 'maintenance', 'variety', 'custom'
+  'balanced',
+  'weight-loss',
+  'weight-gain',
+  'muscle-gain',
+  'maintenance',
+  'variety',
+  'custom'
 ]);
 const goalFrequencyEnum = z.enum(['daily', 'weekly']);
 
 const customGoalSchema = z.object({
-  name: requiredText(100, 'Objetivo'),
+  name: z.string().trim().min(1, 'Objetivo'),
   target: formNumber({ positive: true }),
-  unit: formText(20, 'Unidad'),
+  unit: formNaturalText(),
   frequency: formDefault(goalFrequencyEnum, 'daily')
 });
 
 const nutritionalGoalsSchema = z
   .object({
-  /** `types` is canonical; `type` accepts calendars saved by the previous single-choice UI. */
-  types: formArray(goalTypeEnum).optional(),
-  type: formField(goalTypeEnum),
-  customInstructions: formText(2000),
-  dailyCalories: formNumber({ positive: true }),
-  dailyProtein: formNumber({ positive: true }),
-  dailyCarbs: formNumber({ positive: true }),
-  dailyFat: formNumber({ positive: true }),
-  restrictions: formArray(z.string()),
-  customGoals: formArray(customGoalSchema)
+    /** `types` is canonical; `type` accepts calendars saved by the previous single-choice UI. */
+    types: formArray(goalTypeEnum).optional(),
+    type: formField(goalTypeEnum),
+    customInstructions: formNaturalText(),
+    dailyCalories: formNumber({ positive: true }),
+    dailyProtein: formNumber({ positive: true }),
+    dailyCarbs: formNumber({ positive: true }),
+    dailyFat: formNumber({ positive: true }),
+    restrictions: formArray(z.string()),
+    customGoals: formArray(customGoalSchema)
   })
   .superRefine((goals, context) => {
     const selected = goals.types?.length ? goals.types : goals.type ? [goals.type] : ['balanced'];
@@ -49,10 +71,10 @@ const mealSchema = z.object({
   date: formDate('Fecha'),
   mealType: mealTypeEnum,
   recipeId: formText(40, 'Receta'),
-  customMeal: formText(200, 'Plato'),
+  customMeal: formNaturalText(),
   time: formTime('Hora'),
   servings: formNumber({ int: true, positive: true }),
-  notes: formText(500, 'Notas')
+  notes: formNaturalText()
 });
 
 // Calendar schemas
@@ -73,26 +95,33 @@ export const addMealSchema = mealSchema;
  */
 export const updateMealSchema = z.object({
   recipeId: formText(40, 'Receta'),
-  customMeal: formText(200, 'Plato'),
+  customMeal: formNaturalText(),
   time: formTime('Hora'),
   servings: formNumber({ int: true, positive: true }),
-  notes: formText(500, 'Notas'),
+  notes: formNaturalText(),
   completed: formBool()
 });
 
 /** Sustituciones de comidas de una sola vez: el servidor aplica todas o ninguna. */
-export const replaceSelectedMealsSchema = z.object({
-  replacements: z
-    .array(
-      z.object({
-        id: z.string().trim().min(1, 'Comida'),
-        customMeal: requiredText(200, 'Plato nuevo')
-      }).strict()
-    )
-    .min(1, 'Selecciona al menos un plato')
-    .max(28, 'No se pueden sustituir más de 28 platos a la vez')
-    .refine((items) => new Set(items.map((item) => item.id)).size === items.length, 'No repitas platos')
-}).strict();
+export const replaceSelectedMealsSchema = z
+  .object({
+    replacements: z
+      .array(
+        z
+          .object({
+            id: z.string().trim().min(1, 'Comida'),
+            customMeal: z.string().trim().min(1, 'Plato nuevo')
+          })
+          .strict()
+      )
+      .min(1, 'Selecciona al menos un plato')
+      .max(28, 'No se pueden sustituir más de 28 platos a la vez')
+      .refine(
+        (items) => new Set(items.map((item) => item.id)).size === items.length,
+        'No repitas platos'
+      )
+  })
+  .strict();
 
 export const completeMealSchema = z.object({
   completed: z.boolean({ error: 'completed: true o false' })
@@ -118,7 +147,14 @@ export type UpdateGoalsInput = z.infer<typeof updateGoalsSchema>;
  * puede crear por aqui: la comida la manda el plan semanal, y si existiera una fila suelta por plato
  * habria dos verdades que se desincronizan en cuanto alguien cambie la cena.
  */
-export const CALENDAR_EVENT_KINDS = ['meal', 'shopping', 'home', 'appointment', 'personal', 'other'] as const;
+export const CALENDAR_EVENT_KINDS = [
+  'meal',
+  'shopping',
+  'home',
+  'appointment',
+  'personal',
+  'other'
+] as const;
 export type CalendarEventKind = (typeof CALENDAR_EVENT_KINDS)[number];
 const eventKindEnum = z.enum(CALENDAR_EVENT_KINDS);
 // Cada cuanto se repite una suelta (HOGARIA-SPEC 12t-R). La lista vive en el modulo que la expande,
@@ -128,7 +164,10 @@ const recurrenceRuleEndSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('never') }),
   z.object({
     type: z.literal('date'),
-    date: formDate('Fecha final').refine((date) => dayFromISO(date) !== null, 'Fecha final: el día no existe')
+    date: formDate('Fecha final').refine(
+      (date) => dayFromISO(date) !== null,
+      'Fecha final: el día no existe'
+    )
   }),
   z.object({ type: z.literal('count'), count: z.number().int().min(1).max(999) })
 ]);
@@ -146,7 +185,11 @@ const recurrenceRuleSchema = z
   })
   .superRefine((rule, ctx) => {
     if (rule.frequency !== 'weekly' && rule.weekdays !== undefined) {
-      ctx.addIssue({ code: 'custom', message: 'Los días de la semana solo se aplican a una repetición semanal', path: ['weekdays'] });
+      ctx.addIssue({
+        code: 'custom',
+        message: 'Los días de la semana solo se aplican a una repetición semanal',
+        path: ['weekdays']
+      });
     }
   });
 type StructuredRecurrenceRule = z.infer<typeof recurrenceRuleSchema>;
@@ -211,31 +254,48 @@ function compareEventTimes(value: { startTime?: string | null; endTime?: string 
 
 export const createCalendarEventSchema = calendarEventFields.superRefine((value, ctx) => {
   if (!compareEventTimes(value)) {
-    ctx.addIssue({ code: 'custom', message: 'endTime no puede ser anterior a startTime', path: ['endTime'] });
+    ctx.addIssue({
+      code: 'custom',
+      message: 'endTime no puede ser anterior a startTime',
+      path: ['endTime']
+    });
   }
   if (value.recurrenceRule?.end.type === 'date' && value.recurrenceRule.end.date < value.date) {
-    ctx.addIssue({ code: 'custom', message: 'La fecha final no puede ser anterior al inicio de la serie', path: ['recurrenceRule', 'end', 'date'] });
+    ctx.addIssue({
+      code: 'custom',
+      message: 'La fecha final no puede ser anterior al inicio de la serie',
+      path: ['recurrenceRule', 'end', 'date']
+    });
   }
 });
 
-export const updateCalendarEventSchema = formPartial(calendarEventFields.omit({ sharedWithHousehold: true }))
-  .superRefine((value, ctx) => {
-    if (Object.keys(value).length === 0) {
-      ctx.addIssue({ code: 'custom', message: 'Nada que actualizar' });
-    }
-    if (!compareEventTimes(value)) {
-      ctx.addIssue({ code: 'custom', message: 'endTime no puede ser anterior a startTime', path: ['endTime'] });
-    }
-    const recurrenceRule = value.recurrenceRule as StructuredRecurrenceRule | null | undefined;
-    if (
-      recurrenceRule &&
-      recurrenceRule.end.type === 'date' &&
-      typeof value.date === 'string' &&
-      recurrenceRule.end.date < value.date
-    ) {
-      ctx.addIssue({ code: 'custom', message: 'La fecha final no puede ser anterior al inicio de la serie', path: ['recurrenceRule', 'end', 'date'] });
-    }
-  });
+export const updateCalendarEventSchema = formPartial(
+  calendarEventFields.omit({ sharedWithHousehold: true })
+).superRefine((value, ctx) => {
+  if (Object.keys(value).length === 0) {
+    ctx.addIssue({ code: 'custom', message: 'Nada que actualizar' });
+  }
+  if (!compareEventTimes(value)) {
+    ctx.addIssue({
+      code: 'custom',
+      message: 'endTime no puede ser anterior a startTime',
+      path: ['endTime']
+    });
+  }
+  const recurrenceRule = value.recurrenceRule as StructuredRecurrenceRule | null | undefined;
+  if (
+    recurrenceRule &&
+    recurrenceRule.end.type === 'date' &&
+    typeof value.date === 'string' &&
+    recurrenceRule.end.date < value.date
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      message: 'La fecha final no puede ser anterior al inicio de la serie',
+      path: ['recurrenceRule', 'end', 'date']
+    });
+  }
+});
 
 export type CalendarEventFilter = z.infer<typeof calendarEventFilterSchema>;
 export type CreateCalendarEvent = z.infer<typeof createCalendarEventSchema>;

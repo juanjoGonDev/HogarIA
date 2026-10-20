@@ -154,6 +154,31 @@ describe('saveTasteProfile', () => {
     expect(readPreferencesColumn(user).taste.goal).toBeUndefined();
   });
 
+  it('accepts and round-trips AI-bound preference text beyond former character caps', () => {
+    const user = createUser();
+    const longText = 'Preferencia detallada. '.repeat(140).trim();
+    const patch = taste.updateTasteSchema.parse({
+      taste: {
+        goalNotes: longText,
+        allergies: [longText],
+        likes: [longText],
+        dislikes: [longText],
+        notes: longText
+      }
+    });
+
+    const saved = taste.saveTasteProfile(db, user, patch);
+
+    expect(saved.taste).toMatchObject({
+      goalNotes: longText,
+      allergies: [longText],
+      likes: [longText],
+      dislikes: [longText],
+      notes: longText
+    });
+    expect(taste.readTasteResponse(db, user).taste).toMatchObject(saved.taste);
+  });
+
   it('una preferencia con JSON roto no rompe la lectura', () => {
     const user = createUser('{esto no es json');
 

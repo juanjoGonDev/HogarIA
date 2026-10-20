@@ -6073,10 +6073,69 @@ de datos identificativos antes de enviar notas al proveedor, límites de bytes d
 tokens del proveedor. El smoke WebAPI anterior falló en composer/renderizador; esta decisión elimina topes
 locales comprobables, pero no atribuye causalidad ni afirma reparar ese fallo remoto.
 
-- [ ] Auditar rutas, schemas, normalizadores, persistencia y UI de todo texto natural incluido en prompts IA;
+- [x] Auditar rutas, schemas, normalizadores, persistencia y UI de todo texto natural incluido en prompts IA;
       eliminar `.max(n)`, `maxlength` y truncamientos de caracteres que lo rechazan, recortan o alteran.
-- [ ] Conservar redacción de datos personales, límites de request por bytes y topes estructurales; confirmar
+- [x] Conservar redacción de datos personales, límites de request por bytes y topes estructurales; confirmar
       que textos mayores que cada máximo anterior pasan completos hasta prompt, persistencia y vuelta a leer.
-- [ ] TDD focal con texto sintético >2.500 caracteres, verificar campos de preferencias, metas de hogar,
+- [x] TDD focal con texto sintético >2.500 caracteres, verificar campos de preferencias, metas de hogar,
       instrucciones de planificación, invitado, y recetas creadas desde propuesta; no llamar proveedor real.
-- [ ] Comprobar typecheck, suites focales y coverage ≥70 % S/B/F/L en el alcance; registrar límites y evidencia.
+- [x] Comprobar typecheck, suites focales y coverage ≥70 % S/B/F/L en el alcance; registrar límites y evidencia.
+
+**Evidencia (2026-10-15):** servidor: `vitest run --coverage --silent --reporter=dot`, 107 archivos / 1.851
+pruebas aprobadas, 1 omitida; cobertura global 89,98 % statements, 82,50 % branches, 95,96 % funciones y
+93,17 % líneas (umbral local 70 % por fichero). Frontend: Karma/ChromeHeadlessLocal, 1.573 pruebas aprobadas;
+93,13 % / 83,94 % / 93,81 % / 95,43 % (S/B/F/L; gate 80 %). Typecheck servidor y E2E aprobados;
+`check-ui`: 250 ficheros, 21 reglas, sin incidencias. Playwright aislado PC+móvil: 4/4 aprobadas y capturas
+sintéticas en `.e2e-screenshots/preferences-unbounded-text ` (el directorio conserva accidentalmente un espacio
+final por el runner). Un nuevo intento de repetición no llegó a abrir tests: el Chromium headless faltaba en el
+directorio temporal de ese sandbox; no es un fallo de la aplicación. No hubo llamada real a IA. La evidencia
+confirma que HogarIA ya no rechaza ni trunca ese texto; no demuestra que el límite fuera la causa del error WebAPI.
+
+**Revalidación de CI (2026-10-20):** el primer run completo detectó dos expectativas obsoletas y una regresión
+real. Confirmar una comida persistía las raciones recalculadas por el plan en vez de las editadas por la persona;
+la ruta vuelve a persistir las raciones enviadas y `household-meal-proposals.routes.spec.ts` fija el contrato.
+El E2E de preferencias ahora valida persistencia de opciones sintéticas de 2.501 caracteres en preferencias y
+onboarding, conforme a esta decisión. El E2E full-stack calcula una semana futura para no pedir una vista de
+compra que deliberadamente omite días pasados. Focales locales: ruta servidor **36/36**; preferencias desktop+móvil
+**4/4**; confirmación del asistente desktop+móvil **2/2**; `typecheck:e2e` aprobado. El run completo de CI
+`39415564366` pasó todos los jobs (typecheck, suites, cuatro shards E2E, full-stack y smoke de imagen amd64/arm64).
+El PR sigue bloqueado por requisitos de análisis del ruleset, no por CI.
+
+## CI-ANALYSIS-GATES.1 — desbloquear CodeQL y Code Quality sin bypass
+
+**Objetivo (2026-10-20):** satisfacer el ruleset `main` que exige CodeQL (errores y alertas high+) y GitHub
+Code Quality (errores), sin desactivar ni saltar esas reglas. La configuración debe analizar TypeScript/JavaScript,
+ser reproducible y dejar la PR #57 lista únicamente cuando el CI completo y ambos análisis hayan terminado bien.
+
+**Auditoría inicial:** PR #57 está abierta, lista para revisión, sin auto-merge, y CI `39422568445` está verde. El
+repositorio es público y pertenece a una cuenta personal. El ruleset activo `main` exige CodeQL y Code Quality.
+CodeQL default setup ya está configurado. El endpoint de GitHub Code Quality devuelve 404 `Code quality is not
+available for this repository`.
+
+- [x] Verificar reglas activas, elegibilidad pública, estado de CodeQL y disponibilidad de Code Quality; no usar
+      bypass ni editar el ruleset para reducir sus requisitos.
+- [x] Configurar CodeQL default setup con runner estándar y query suite `default`; el análisis inicial de
+      JavaScript/TypeScript y Actions termina correctamente.
+- [x] Ejecutar y verificar el análisis del head de PR #57; confirmar que el gate CodeQL queda satisfecho y que
+      la PR no introduce alertas con severidad bloqueante.
+- [ ] Habilitar GitHub Code Quality solo cuando GitHub lo ofrezca para este repositorio; elegir `javascript-typescript`
+      y severidad `errors`; verificar su check/análisis real en la PR.
+- [ ] Confirmar CI completo y ambos gates verdes; entonces reactivar auto-merge squash y verificar la fusión
+      automática sin bypass.
+
+**Bloqueo externo registrado (actualizado 2026-10-20):** el usuario eligió seguir intentando habilitar Code Quality,
+tras informarse de que podría requerir plan y coste; no autorizó expresamente transferir el repo ni aceptar cargos
+concretos. La documentación de GitHub limita la función a Team/Enterprise Cloud y advierte cargos por licencias de
+committer activo, minutos de Actions y créditos de IA. Este repo pertenece a una cuenta personal. La única org Team
+visible es `TwenixPlatform`, donde el usuario figura como `member`, no owner. La hipótesis de trabajo es que habilitar
+Code Quality aquí requeriría pasar el repo a una org elegible y que su owner permita la función; verificarlo con dicho
+owner antes de cualquier transferencia. No se simula el check ni se modifica el ruleset.
+
+**Evidencia de configuración CodeQL (2026-10-20):** `PATCH code-scanning/default-setup` aceptado; configuración
+`configured`, query suite `default`, runner `standard`; ejecución `39418485145` completada con éxito sobre `master`.
+GitHub detectó Actions y TypeScript/JavaScript. La primera línea base encontró seis alertas ya presentes en
+`master` (incluye dos `error/high` en `scripts/i18n-extract.mjs`); ninguna de esas rutas está en el diff de PR #57.
+El análisis de `refs/pull/57/head` (`39419769097`, commit `01181e6d44f89882879c8aea5c3c1b3114a6aced`) pasó ambos
+jobs (`javascript-typescript`, `actions`) y devolvió cero resultados para la PR; el head actual `1bdd0869752b10ef1952e42fdf941b4fbfa1661a`
+también tiene CodeQL correcto y CI verde. Verificado de nuevo con `GET code-quality/setup`: 404 “Code quality is not
+available for this repository”. El ruleset no se ha alterado y no se ha fusionado la PR.

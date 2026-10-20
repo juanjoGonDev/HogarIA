@@ -939,7 +939,6 @@ const emptyDraft = (date: string, mealType: MealType): MealDraft => ({
             <input
               id="meal-custom"
               type="text"
-              maxlength="200"
               [(ngModel)]="draft.customMeal"
               [placeholder]="'calendar.ej_pasta_con_tomate' | t"
               class="cal-input"
@@ -1139,7 +1138,6 @@ const emptyDraft = (date: string, mealType: MealType): MealDraft => ({
               id="goals-custom"
               name="weeklyCustomInstructions"
               rows="3"
-              maxlength="2000"
               [(ngModel)]="goalsDraft.customInstructions"
               [placeholder]="'calendar.ej_cenas_ligeras_y' | t"
               [disabled]="isSavingGoals()"
@@ -2113,7 +2111,7 @@ export class CalendarComponent implements OnInit {
         diets: [...guest.diets],
         likes: [...guest.likes],
         dislikes: [...guest.dislikes],
-        notes: guest.notes.slice(0, 300)
+        notes: guest.notes
       }))
     );
   }
@@ -2135,7 +2133,7 @@ export class CalendarComponent implements OnInit {
       diets: this.normalizeGuestValues(guest.diets),
       likes: this.normalizeGuestValues(guest.likes),
       dislikes: this.normalizeGuestValues(guest.dislikes),
-      notes: guest.notes.replace(/\s+/g, ' ').trim().slice(0, 300)
+      notes: guest.notes.replace(/\s+/g, ' ').trim()
     }));
     this.replacementSubscription?.unsubscribe();
     this.replacementFailed.set(false);
@@ -2215,7 +2213,7 @@ export class CalendarComponent implements OnInit {
   private normalizeGuestValues(values: string[]): string[] {
     const unique = new Map<string, string>();
     for (const raw of values) {
-      const value = raw.replace(/\s+/g, ' ').trim().slice(0, 60);
+      const value = raw.replace(/\s+/g, ' ').trim();
       const key = value.toLocaleLowerCase();
       if (value && !unique.has(key)) unique.set(key, value);
     }

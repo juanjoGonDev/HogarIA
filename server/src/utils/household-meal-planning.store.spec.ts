@@ -56,6 +56,21 @@ beforeEach(() => {
 });
 
 describe('household meal-planning settings storage', () => {
+  it('preserves long household objective notes in effective AI context', () => {
+    addHousehold('home');
+    const memberId = addMember('home', 'person');
+    const notes = 'Objetivo doméstico. '.repeat(150).trim();
+    db.prepare('UPDATE households SET meal_planning_preferences = ? WHERE id = ?').run(
+      JSON.stringify({ objective: { goals: ['balanced'], notes } }),
+      'home'
+    );
+
+    const context = store.readHouseholdMealPlanningForMembers(db, 'home', 'person', [memberId]);
+
+    expect(context.household.objective.notes).toBe(notes);
+    expect(context.members[0].goal.notes).toBe(notes);
+  });
+
   it('seeds new household defaults once from the creator without changing personal preferences', () => {
     addHousehold('home');
     addMember('home', 'creator');

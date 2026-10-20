@@ -180,6 +180,45 @@ describe('persistSharedMeal', () => {
     makeMember('carol');
   });
 
+  it('persists complete long text in a legacy recipe snapshot', () => {
+    const longText = 'Preparación culinaria detallada. '.repeat(100).trim();
+    const longSnapshot = {
+      ...recipeSnapshot,
+      name: longText,
+      description: longText,
+      ingredients: [
+        {
+          name: longText,
+          quantity: 1,
+          unit: longText,
+          preparation: longText,
+          notes: longText,
+          substitutes: [longText]
+        }
+      ],
+      instructions: [longText]
+    };
+
+    const result = persistSharedMeal(db, 'alice', { ...input, recipeSnapshot: longSnapshot });
+
+    const persisted = JSON.parse(result.meal.recipe_snapshot!);
+    expect(persisted).toMatchObject({
+      name: longText,
+      description: longText,
+      ingredients: [
+        expect.objectContaining({
+          name: longText,
+          unit: longText,
+          preparation: longText,
+          notes: longText,
+          substitutes: [longText]
+        })
+      ],
+      instructions: [longText]
+    });
+    expect(persisted).not.toHaveProperty('privatePrompt');
+  });
+
   it('confirma una comida compartida una vez y reintentos del mismo proposalId no duplican evento ni participantes', () => {
     const first = persistSharedMeal(db, 'alice', input);
     const retry = persistSharedMeal(db, 'alice', input);

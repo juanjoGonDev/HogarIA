@@ -475,6 +475,8 @@ describe('AiActionAssistantDialogComponent', () => {
     householdContext.household.set(syntheticMealHousehold());
     const action = mealPlanAction();
     const weekStart = '2026-10-19';
+    const today = new Date().toISOString().slice(0, 10);
+    const shoppingStartDate = weekStart < today ? today : weekStart;
     const plan: AssistantActionPlan = {
       id: 'meal-shopping-plan',
       summary: 'Planifica y revisa faltantes.',
@@ -486,7 +488,7 @@ describe('AiActionAssistantDialogComponent', () => {
       of(householdMealProposal('shopping-proposal', 2))
     );
     const preview: HouseholdMealShoppingPreview = {
-      startDate: weekStart,
+      startDate: shoppingStartDate,
       endDate: '2026-10-25',
       previewId: 'a'.repeat(64),
       sharedPantry: true,
@@ -569,7 +571,11 @@ describe('AiActionAssistantDialogComponent', () => {
     click('[data-test="ai-assistant-meals-shopping-open"]');
     await fixture.whenStable();
     fixture.detectChanges();
-    expect(mealShopping.loadPreview).toHaveBeenCalledWith('home-meals', '2026-10-19', '2026-10-25');
+    expect(mealShopping.loadPreview).toHaveBeenCalledWith(
+      'home-meals',
+      shoppingStartDate,
+      '2026-10-25'
+    );
     expect(mealShopping.approve).not.toHaveBeenCalled();
 
     const lines = Array.from(
@@ -594,7 +600,7 @@ describe('AiActionAssistantDialogComponent', () => {
     fixture.detectChanges();
 
     expect(mealShopping.approve).toHaveBeenCalledWith('home-meals', {
-      startDate: '2026-10-19',
+      startDate: shoppingStartDate,
       endDate: '2026-10-25',
       previewId: 'a'.repeat(64),
       items: [

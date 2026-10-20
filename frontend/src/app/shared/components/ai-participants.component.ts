@@ -221,7 +221,6 @@ const EMPTY_GUEST: AIGuestPreferences = {
               <div class="preference__custom">
                 <input
                   type="text"
-                  maxlength="60"
                   [ngModel]="customDraft(index, field)"
                   [ngModelOptions]="{ standalone: true }"
                   [attr.aria-label]="'ai_participants.custom_placeholder' | t"
@@ -248,7 +247,6 @@ const EMPTY_GUEST: AIGuestPreferences = {
             <span>{{ 'ai_participants.notes' | t }}</span>
             <textarea
               rows="2"
-              maxlength="300"
               [ngModel]="guest.notes"
               [ngModelOptions]="{ standalone: true }"
               [attr.aria-label]="'ai_participants.notes' | t"
@@ -587,7 +585,7 @@ export class AiParticipantsComponent {
   }
 
   setCustomDraft(index: number, field: GuestListField, value: string): void {
-    this.customDrafts.set(this.preferenceKey(index, field), value.slice(0, 60));
+    this.customDrafts.set(this.preferenceKey(index, field), value);
   }
 
   togglePreference(index: number, field: GuestListField, value: string): void {
@@ -608,10 +606,7 @@ export class AiParticipantsComponent {
 
   addCustomPreference(index: number, field: GuestListField, draft?: string): void {
     const key = this.preferenceKey(index, field);
-    const value = (draft ?? this.customDrafts.get(key) ?? '')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .slice(0, 60);
+    const value = (draft ?? this.customDrafts.get(key) ?? '').replace(/\s+/g, ' ').trim();
     if (!value) return;
     const current = this.guests[index]?.[field] ?? [];
     if (current.length >= 20) return;
@@ -650,7 +645,7 @@ export class AiParticipantsComponent {
   }
 
   updateNotes(index: number, notes: string): void {
-    this.updateGuest(index, { notes: notes.slice(0, 300) });
+    this.updateGuest(index, { notes });
   }
 
   private updateGuest(index: number, patch: Partial<AIGuestPreferences>): void {

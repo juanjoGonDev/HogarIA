@@ -146,8 +146,48 @@ describe('AiParticipantsComponent', () => {
     ];
     component.addCustomPreference(0, 'allergies', 'nueva');
     expect(component.guests[0].allergies.length).toBe(20);
-    component.updateNotes(0, 'x'.repeat(400));
-    expect(emitted[0].notes.length).toBe(300);
+    component.updateNotes(0, 'x'.repeat(2_501));
+    expect(emitted[0].notes.length).toBe(2_501);
+  });
+
+  it('preserves full-length custom guest preferences and renders no maxlength on text fields', () => {
+    const component = new AiParticipantsComponent();
+    component.guests = [
+      { allergies: [], intolerances: [], diets: [], likes: [], dislikes: [], notes: '' }
+    ];
+    let emitted: typeof component.guests = [];
+    component.guestsChange.subscribe((guests) => (emitted = guests));
+    const longValue = 'A'.repeat(2_501);
+    component.setCustomDraft(0, 'allergies', longValue);
+    component.addCustomPreference(0, 'allergies');
+    component.guests = emitted;
+    component.updateNotes(0, longValue);
+
+    expect(emitted[0].allergies).toEqual([longValue]);
+    expect(emitted[0].notes).toBe(longValue);
+  });
+
+  it('renders guest preference and note fields without a browser character cap', async () => {
+    await TestBed.configureTestingModule({
+      imports: [AiParticipantsComponent]
+    }).compileComponents();
+    const fixture = TestBed.createComponent(AiParticipantsComponent);
+    fixture.componentInstance.guests = [
+      { allergies: [], intolerances: [], diets: [], likes: [], dislikes: [], notes: '' }
+    ];
+    fixture.componentInstance.togglePicker(0, 'allergies');
+    fixture.detectChanges();
+
+    const host = fixture.nativeElement as HTMLElement;
+    expect(
+      host
+        .querySelector('[data-test="ai-guest-0-allergies-custom-input"]')
+        ?.hasAttribute('maxlength')
+    ).toBe(false);
+    expect(host.querySelector('[data-test="ai-guest-0-notes"]')?.hasAttribute('maxlength')).toBe(
+      false
+    );
+    fixture.destroy();
   });
 
   it('closes an open picker and safely ignores blank, duplicate and missing-guest edits', () => {

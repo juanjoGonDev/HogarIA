@@ -7,8 +7,8 @@ export const aiActionAssistantEs = {
     'Pídele a la IA qué hacer.\nEj.: añade leche o crea una tarea.',
   'ai_assistant.send': 'Preparar propuestas',
   'ai_assistant.cancel': 'Cancelar',
-  'ai_assistant.voice_warning': 'El audio puede salir del dispositivo.',
   'ai_assistant.privacy_title': 'Ver más',
+  'ai_assistant.voice_warning': 'El audio puede salir del dispositivo.',
   'ai_assistant.privacy_copy':
     'El reconocimiento de voz de este navegador puede procesar el audio fuera de tu dispositivo. La transcripción se puede revisar antes de enviarla al proveedor de IA configurado.',
   'ai_assistant.voice_start': 'Dictar petición',
@@ -291,8 +291,8 @@ export const aiActionAssistantEn: Record<keyof typeof aiActionAssistantEs, strin
   'ai_assistant.prompt_placeholder': 'Tell the AI what to do.\nE.g. add milk or create a task.',
   'ai_assistant.send': 'Prepare proposals',
   'ai_assistant.cancel': 'Cancel',
-  'ai_assistant.voice_warning': 'Audio may leave your device.',
   'ai_assistant.privacy_title': 'Learn more',
+  'ai_assistant.voice_warning': 'Audio may leave your device.',
   'ai_assistant.privacy_copy':
     'This browser’s speech recognition may process audio outside your device. You can review the transcript before sending it to your configured AI provider.',
   'ai_assistant.voice_start': 'Dictate request',

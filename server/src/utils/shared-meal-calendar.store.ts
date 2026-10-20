@@ -13,8 +13,8 @@ const MAX_RECIPE_DEFINITIONS = MEAL_PROPOSAL_LIMITS.maxEvents;
 const TIME_RE = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 const snapshotMinuteSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const legacySharedRecipeSnapshotSchema = z.object({
-  name: z.string().trim().min(1).max(200),
-  description: z.string().trim().min(1).max(1000),
+  name: z.string().trim().min(1),
+  description: z.string().trim().min(1),
   baseServings: z.literal(1),
   times: z.object({
     prepTimeMinutes: snapshotMinuteSchema,
@@ -25,18 +25,18 @@ const legacySharedRecipeSnapshotSchema = z.object({
   ingredients: z
     .array(
       z.object({
-        name: z.string().trim().min(1).max(200),
+        name: z.string().trim().min(1),
         quantity: z.number().positive(),
-        unit: z.string().trim().min(1).max(40),
-        preparation: z.string().max(500).nullable().optional(),
+        unit: z.string().trim().min(1),
+        preparation: z.string().nullable().optional(),
         isOptional: z.boolean().optional(),
-        substitutes: z.array(z.string().trim().min(1).max(200)).optional(),
-        notes: z.string().max(500).nullable().optional()
+        substitutes: z.array(z.string().trim().min(1)).optional(),
+        notes: z.string().nullable().optional()
       })
     )
     .min(1)
     .max(100),
-  instructions: z.array(z.string().trim().min(1).max(2000)).min(1).max(100)
+  instructions: z.array(z.string().trim().min(1)).min(1).max(100)
 });
 /** Accept the legacy calendar snapshot during rollout and keep canonical details losslessly. */
 const sharedRecipeSnapshotSchema = z.union([
@@ -260,7 +260,7 @@ function normalizeEvent(
   if (recipeId !== null && (!recipeId || recipeId.length > 40)) {
     return invalidInput('recipeId inválido');
   }
-  if (customMeal !== null && (!customMeal || customMeal.length > 200)) {
+  if (customMeal !== null && !customMeal) {
     return invalidInput('customMeal inválido');
   }
   if (!recipeId && !customMeal) return invalidInput('La comida necesita receta o nombre');

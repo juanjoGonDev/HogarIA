@@ -5,7 +5,7 @@ import { createHousehold, registerAndGoto, registerToOnboarding } from './helper
 
 const SCREENSHOTS =
   process.env.E2E_SCREENSHOT_DIR ??
-  join(process.cwd(), '.e2e-screenshots', 'preferences-custom-limits');
+  join(process.cwd(), '.e2e-screenshots', 'preferences-unbounded-text');
 
 async function activate(locator: Locator, isMobile: boolean): Promise<void> {
   if (isMobile) await locator.tap();
@@ -21,12 +21,10 @@ async function capture(
   await page.screenshot({ path: join(SCREENSHOTS, name), fullPage, animations: 'disabled' });
 }
 
-test.describe('límites de opciones personalizadas en Preferencias', () => {
+test.describe('texto largo en Preferencias', () => {
   test.use({ serviceWorkers: 'block' });
 
-  test('persiste el límite válido y no permite añadir un valor que la API rechazaría', async ({
-    page
-  }, testInfo) => {
+  test('persiste opciones sintéticas de más de 2500 caracteres', async ({ page }, testInfo) => {
     const isMobile = testInfo.project.name === 'mobile-chrome';
     await registerAndGoto(page, '/preferences?tab=allergies', 'preferences-custom-limits');
 
@@ -62,14 +60,15 @@ test.describe('límites de opciones personalizadas en Preferencias', () => {
     const control = page.locator('app-chip-select');
     const input = control.locator('.chip-select__input');
     const add = control.getByRole('button', { name: 'Añadir' });
-    const validValue = `${'A '.repeat(29)}A!`;
-    const invalidValue = 'B'.repeat(61);
-    expect(validValue.trim().length).toBe(60);
+    const longValue = `${'A '.repeat(1250)}A`;
+    expect(longValue.length).toBe(2501);
 
-    await input.fill(`  ${validValue}  `);
+    await expect(input).not.toHaveAttribute('maxlength');
+    await input.fill(`  ${longValue}  `);
     await activate(add, isMobile);
-    const validChip = control.locator('.chip-select__chip', { hasText: validValue.trim() });
-    await expect(validChip).toHaveAttribute('aria-pressed', 'true');
+    const longChip = control.locator('.chip-select__chip', { hasText: longValue });
+    await expect(longChip).toHaveAttribute('aria-pressed', 'true');
+    await expect(control.locator('[role="alert"]')).toHaveCount(0);
 
     const saveResponse = page.waitForResponse(
       (response) =>
@@ -81,56 +80,33 @@ test.describe('límites de opciones personalizadas en Preferencias', () => {
     await expect(page.locator('.toast--success').filter({ hasText: 'Guardado' })).toBeVisible();
     await page.reload();
     await expect(
-      page.locator('app-chip-select .chip-select__chip--on', { hasText: validValue.trim() })
+      page.locator('app-chip-select .chip-select__chip--on', { hasText: longValue })
     ).toHaveCount(1);
 
     const persistedChip = page.locator('app-chip-select .chip-select__chip', {
-      hasText: validValue.trim()
+      hasText: longValue
     });
     await activate(persistedChip, isMobile);
     await expect(persistedChip).toHaveCount(0);
     await activate(page.getByRole('button', { name: 'Descartar cambios' }), isMobile);
     await expect(
-      page.locator('app-chip-select .chip-select__chip--on', { hasText: validValue.trim() })
+      page.locator('app-chip-select .chip-select__chip--on', { hasText: longValue })
     ).toHaveCount(1);
-
-    await input.fill(invalidValue);
-    await activate(add, isMobile);
-    await expect(control.locator('.chip-select__chip', { hasText: invalidValue })).toHaveCount(0);
-    await expect(input).toHaveValue(invalidValue);
-    await expect(control.locator('[role="alert"]')).toContainText('60');
-    await expect(input).toHaveAttribute('aria-invalid', 'true');
-    await input.evaluate((element) => (element as HTMLInputElement).blur());
-    const dismissToast = page.locator('.toast__close').last();
-    if (await dismissToast.isVisible()) await activate(dismissToast, isMobile);
-    const errorScreenshot = isMobile
-      ? 'preferences-custom-limit-mobile-error.png'
-      : 'preferences-custom-limit-desktop-error.png';
-    if (isMobile) await input.scrollIntoViewIfNeeded();
-    await capture(page, errorScreenshot, !isMobile);
-
-    const finalSave = page.waitForResponse(
-      (response) =>
-        new URL(response.url()).pathname === '/api/auth/taste' &&
-        response.request().method() === 'PATCH'
-    );
-    await activate(page.getByRole('button', { name: 'Guardar preferencias' }), isMobile);
-    expect((await finalSave).status()).toBe(200);
-    await expect(page.locator('.toast--success').filter({ hasText: 'Guardado' })).toBeVisible();
 
     await page.evaluate(() => localStorage.setItem('hogar:v1:language', 'en'));
     await page.reload();
     const englishControl = page.locator('app-chip-select');
     const englishInput = englishControl.locator('.chip-select__input');
-    await englishInput.fill(invalidValue);
+    await expect(englishInput).not.toHaveAttribute('maxlength');
+    await englishInput.fill(longValue);
     await activate(englishControl.getByRole('button', { name: 'Add' }), isMobile);
-    await expect(englishControl.locator('[role="alert"]')).toHaveText(
-      'Options must be 1 to 60 characters long.'
+    await expect(englishControl.locator('.chip-select__chip', { hasText: longValue })).toHaveCount(
+      1
     );
-    await expect(englishInput).toHaveAttribute('aria-invalid', 'true');
+    await expect(englishControl.locator('[role="alert"]')).toHaveCount(0);
   });
 
-  test('aplica los mismos límites a alergias y gustos durante el onboarding', async ({
+  test('acepta texto largo en alergias y gustos durante el onboarding', async ({
     page
   }, testInfo) => {
     const isMobile = testInfo.project.name === 'mobile-chrome';
@@ -140,16 +116,17 @@ test.describe('límites de opciones personalizadas en Preferencias', () => {
     await expect(page).toHaveURL(/\/onboarding$/);
     await activate(page.getByRole('button', { name: 'Siguiente' }), isMobile);
 
-    const invalidValue = 'O'.repeat(61);
+    const longValue = `${'O '.repeat(1250)}O`;
+    expect(longValue.length).toBe(2501);
     const allergyControl = page.locator('app-chip-select').first();
     const allergyInput = allergyControl.locator('.chip-select__input');
-    await allergyInput.fill(invalidValue);
+    await expect(allergyInput).not.toHaveAttribute('maxlength');
+    await allergyInput.fill(longValue);
     await activate(allergyControl.getByRole('button', { name: 'Añadir' }), isMobile);
-    await expect(
-      allergyControl.locator('.chip-select__chip', { hasText: invalidValue })
-    ).toHaveCount(0);
-    await expect(allergyControl.locator('[role="alert"]')).toContainText('60');
-    await expect(allergyInput).toHaveAttribute('aria-invalid', 'true');
+    await expect(allergyControl.locator('.chip-select__chip', { hasText: longValue })).toHaveCount(
+      1
+    );
+    await expect(allergyControl.locator('[role="alert"]')).toHaveCount(0);
 
     await activate(page.getByRole('button', { name: 'Siguiente' }), isMobile);
     const tasteControls = page.locator('app-chip-select');
@@ -157,11 +134,11 @@ test.describe('límites de opciones personalizadas en Preferencias', () => {
     for (let index = 0; index < 2; index++) {
       const control = tasteControls.nth(index);
       const input = control.locator('.chip-select__input');
-      await input.fill(invalidValue);
+      await expect(input).not.toHaveAttribute('maxlength');
+      await input.fill(longValue);
       await activate(control.getByRole('button', { name: 'Añadir' }), isMobile);
-      await expect(control.locator('.chip-select__chip', { hasText: invalidValue })).toHaveCount(0);
-      await expect(control.locator('[role="alert"]')).toContainText('60');
-      await expect(input).toHaveAttribute('aria-invalid', 'true');
+      await expect(control.locator('.chip-select__chip', { hasText: longValue })).toHaveCount(1);
+      await expect(control.locator('[role="alert"]')).toHaveCount(0);
     }
   });
 });
