@@ -16,6 +16,7 @@ test.describe('Authentication', () => {
     await expect(page.locator('h2')).toContainText('Iniciar sesión');
     await expect(page.locator('input#email')).toBeVisible();
     await expect(page.locator('input#password')).toBeVisible();
+    await expect(page.locator('input#confirm-password')).toBeVisible();
     await expect(page.locator('button[type="submit"]')).toBeVisible();
   });
 

@@ -87,6 +87,7 @@ async function registerAndCreateSyntheticHousehold(page: import('@playwright/tes
   await page.locator('input#name').fill('Aprobación sintética');
   await page.locator('input#email').fill(`meal-shopping-${randomUUID()}@example.test`);
   await page.locator('input#password').fill('Test1234');
+  await page.locator('input#confirm-password').fill('Test1234');
   const responsePromise = page.waitForResponse((response) =>
     response.url().includes('/api/auth/register')
   );

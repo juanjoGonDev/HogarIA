@@ -782,6 +782,7 @@ test.describe('Calendario — invitar a la casa', () => {
     await memberPage.fill('input#name', 'Bea');
     await memberPage.fill('input#email', `bea-${Date.now()}@example.com`);
     await memberPage.fill('input#password', 'Test1234');
+    await memberPage.fill('input#confirm-password', 'Test1234');
     await memberPage.click('button[type="submit"]');
     await skipOnboarding(memberPage);
     await memberPage.goto('/household');
