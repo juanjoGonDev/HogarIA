@@ -22,7 +22,7 @@
 - `SPEC.md` del asistente global no gestiona credenciales ni proveedores; esta spec cubre la configuración que consume.
 - El log adjunto `Texto pegado.txt` solo registra health/readiness/receipts con 200 y no contiene solicitudes al conector ni timeouts. No basta para atribuir la causa exacta del fallo; validar el comportamiento con el harness aislado y guardar el límite como incertidumbre si persiste.
 - En el estado actual, `createAiConfigSchema` limita timeout a 240000 ms, `testConnectionSchema` no comparte ese tope y `ticket-queue.ts` usa una concesión fija de 300 s. El test de conexión guarda resultado final pero no estado previo duradero. Registro tiene password único y el backend solo espera ese campo.
-- El pre-push detectó una prueba existente del asistente con semana fija `2026-10-19` y reloj real; se reprodujo en `2026-10-20`. Se fijó su reloj en el test (sin cambiar comportamiento de producto) y el spec focal volvió a pasar, 55/55.
+- El pre-push detectó dos pruebas del asistente con semana fija `2026-10-19` y reloj real; se reprodujeron en `2026-10-20`, cuando la lógica excluye el lunes pasado. Ambas fijan el reloj en el test, sin cambiar comportamiento de producto. Verificado: spec frontend, 55/55; test server focal, 1/1.
 
 ## Checklist de aceptación
 
