@@ -38,6 +38,7 @@
 - [x] Reutilizar el gestor en Hogar → Ajustes y redirigir enlaces guardados a la ubicación nueva sin cambiar la ACL del servidor.
 - [x] Con un proveedor activo, mostrarlo fijo; con varios, mostrar selectores por función solo con opciones activas. Con cero activos, no mostrar selector falso.
 - [x] Ocultar el acceso global a IA cuando no haya proveedor activo. Los puntos de generación cubiertos muestran un modal accesible con enlace directo a Hogar → Ajustes; las pruebas verifican que no se dispara la petición. El backend conserva sus guards.
+- [x] El estado de disponibilidad, sin credenciales, se puede leer antes de crear un hogar tras autenticar y responde 200 con estado no configurado; no debe provocar 409 de setup ni solicitudes de generación. Probado por el middleware de setup sobre `createApp`.
 
 ### Timeout y estado del test de conexión
 
@@ -58,6 +59,7 @@
 - [x] Playwright app/API real con datos sintéticos: escritorio y móvil, selector/fallback, recarga de test sin duplicado, estado sin proveedor, registro, teclado y breakpoints 320–1440 px. Capturas comparables guardadas e inspeccionadas bajo `.e2e-screenshots/` (ignorado por Git).
 - [x] i18n ES/EN, nombres accesibles y navegación/teclado cubiertos por pruebas y build. Coverage completa: frontend >70 % en statements, ramas, funciones y líneas; servidor >70 % en las cuatro métricas.
 - [x] Comparar geometría calculada entre `/ai-config` y Hogar → Ajustes con tolerancia máxima de 1 CSS px en Chromium de escritorio y móvil: el botón de alta iguala ancho/alto y los 5 selectores igualan altura. La captura específica del panel quedó guardada e inspeccionada.
+- [x] CI de PR conserva los cuatro shards E2E amplios y smoke de imagen `amd64`/`arm64`; el job full-stack de 30 min se limita a flujos críticos de build servido, proveedor por función, registro, rate limit y logs/SSE. No duplica las 178 pruebas full-stack dentro de ese job. El resultado remoto del commit final sigue pendiente.
 - [x] Mantener esta checklist ligada a evidencia reproducible. Rama y PR permanecen Draft; no mergear.
 
 ### Evidencia reproducible
@@ -66,6 +68,14 @@
 - Registro: `pnpm --filter @hogaria/web exec ng test --no-watch --include=src/app/features/auth/register/*.spec.ts --browsers=ChromeHeadless` — 15/15. Cubre label visible, requerido, discrepancia, corrección y llamada a `AuthService.register` solo con `{name,email,password}`.
 - Frontend completo: `pnpm run test:client:coverage` — 1,740/1,740 tests; coverage 90.64 % statements, 81.04 % ramas, 91.76 % funciones, 93.20 % líneas.
 - E2E local aislado: `node scripts/run-isolated-playwright.mjs --config=playwright.full-stack.config.ts tests/e2e/full-stack/ai-provider-settings.spec.ts` — 6/6 en Chromium escritorio y móvil; usa endpoint HTTP local sintético, persiste estado `testing` entre reload y comprueba que solo se hace un POST.
+- Disponibilidad durante alta: `pnpm --filter @hogaria/server exec vitest run src/middleware/household-required.middleware.spec.ts` — 5/5; `GET /api/ai/availability` devuelve estado 200 sin hogar mientras se mantienen los guards de datos.
+- Full-stack servido: `pnpm run test:e2e:full-stack` — 40 pasaron, 2 skips esperados; build de producción y proceso aislado con SQLite temporal.
+- Regresiones de CI: `node scripts/run-isolated-playwright.mjs --project=chromium tests/e2e/household-action-ack.spec.ts tests/e2e/auth-onboarding-icons.spec.ts tests/e2e/settings-tabs-geometry.spec.ts tests/e2e/receipt-drag-drop.spec.ts tests/e2e/calendar-number-locale.spec.ts tests/e2e/calendar-all-day-gutter.spec.ts tests/e2e/calendar-mobile-header-layout.spec.ts tests/e2e/calendar-early-hours.spec.ts tests/e2e/calendar-range-order.spec.ts tests/e2e/calendar-replan.spec.ts tests/e2e/pantry-caducidades.spec.ts` — 25/25 tras ajustar el gate de disponibilidad y sus fixtures.
+- Flujos de recibos: `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/receipt-queue-actions.spec.ts tests/e2e/receipt-queue-panel-layout.spec.ts tests/e2e/receipts.spec.ts` — 38/38; cobertura sintética de bloqueo sin proveedor, colas y procesamiento local.
+- Generación/recetas: `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/recipe-book-filter-modal.spec.ts tests/e2e/recipe-book.spec.ts tests/e2e/recipe-full-detail.spec.ts tests/e2e/recipe-edit.spec.ts tests/e2e/recipe-cooking-checklist.spec.ts tests/e2e/calendar-replan.spec.ts --grep 'combina los seis filtros|una receta del libro abre el detalle completo|la ficha completa presenta detalle|la vista dedicada edita todos los campos|revisa una mejora canónica|modo cocina escala comensales|Replanificación parcial'` — 18/18 en PC y móvil.
+- Validación de utilidades: `pnpm run typecheck:e2e` y test middleware — pasan; `pnpm run test:config` — 104/104; `pnpm run check:ui` — 269 ficheros, 21 reglas, sin incidencias.
+- E2E registro actualizado: `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/auth.spec.ts --grep 'should show login form|should show the register form without the profile questions'` — 4/4; registro/login muestran confirmación solo donde corresponde.
+- E2E límite de contraseña: `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/auth-password-byte-limit.spec.ts --grep 'registro rechaza 73 bytes'` — 2/2; password y confirmación coinciden antes de enviar.
 - E2E enfocado (empty state + fallback multi-provider): `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/ai-config.spec.ts --grep 'keeps the unconfigured state focused|permite varios proveedores activos'` — 4/4; Chromium escritorio y móvil.
 - E2E de permisos y geometría: `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/ai-household-settings-permission.spec.ts` — 2/2; comprueba dimensiones equivalentes y guarda las capturas del estado vacío PC/móvil.
 - Registro: en el E2E enfocado anterior al último cambio solo visual, `... tests/e2e/auth-flow.spec.ts --grep 'register redirects'` pasó en Chromium escritorio y móvil. El registro también queda cubierto por las 1,740 pruebas frontend.
@@ -79,4 +89,4 @@
 3. Multi-proveedor: migración, asignaciones, routing y guards.
 4. Hogar/UI: mover gestor, selectores, avisos, flujo sin configuración y E2E.
 
-Cada unidad incluye pruebas y evidencia en el Draft PR #56. Falta la comparación geométrica numérica y el resultado final del CI remoto; conservar el PR en Draft y no mergear.
+Cada unidad incluye pruebas y evidencia en el Draft PR #56. La comparación geométrica numérica está completada; registrar aquí el resultado CI del último commit y conservar el PR en Draft, sin mergear.
