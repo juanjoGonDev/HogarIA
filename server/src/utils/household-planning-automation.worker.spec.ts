@@ -340,6 +340,7 @@ describe('household planning automation worker', () => {
           spaceId: 'kitchen',
           scheduledDate: '2026-10-14',
           assignedMemberId: 'alice',
+          priority: 'medium',
           completed: true
         }
       ]
@@ -391,6 +392,7 @@ describe('household planning automation worker', () => {
       id: string;
       assignedMemberId: string | null;
       completed: boolean;
+      priority: 'low' | 'medium' | 'high';
       scheduledDate: string;
     }>;
     expect(taskWeek.version).toBe(1);
@@ -399,6 +401,7 @@ describe('household planning automation worker', () => {
       true
     );
     expect(new Set(tasks.map((task) => task.assignedMemberId)).size).toBe(2);
+    expect(tasks.every((task) => task.priority === 'medium')).toBe(true);
     expect(tasks.every((task) => !task.completed && task.scheduledDate >= TARGET_WEEK)).toBe(true);
     expect(
       db
@@ -574,6 +577,7 @@ describe('household planning automation worker', () => {
           spaceId: 'kitchen',
           scheduledDate: '2026-10-06',
           assignedMemberId: 'bob',
+          priority: 'medium',
           completed: true
         }
       ]
@@ -664,6 +668,7 @@ describe('household planning automation worker', () => {
           spaceId: null,
           scheduledDate: '2026-10-18',
           assignedMemberId: 'alice',
+          priority: 'medium',
           completed: false
         }
       ]
