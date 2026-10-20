@@ -393,10 +393,14 @@ test.describe('AI Config', () => {
       configReads += 1;
       const response = await route.fetch();
       if (configReads === 1) {
-        const staleSnapshot = await response.json();
+        const staleSnapshot = await response.text();
         signalStaleRead();
         await staleReadGate;
-        await route.fulfill({ response, json: staleSnapshot });
+        await route.fulfill({
+          status: response.status(),
+          contentType: 'application/json',
+          body: staleSnapshot
+        });
         signalStaleReadFinished();
         return;
       }
@@ -486,10 +490,14 @@ test.describe('AI Config', () => {
     await page.route('**/api/ai/configs', async (route) => {
       if (route.request().method() !== 'GET') return route.continue();
       const response = await route.fetch();
-      const staleSnapshot = await response.json();
+      const staleSnapshot = await response.text();
       signalStaleRead();
       await staleReadGate;
-      await route.fulfill({ response, json: staleSnapshot });
+      await route.fulfill({
+        status: response.status(),
+        contentType: 'application/json',
+        body: staleSnapshot
+      });
       signalStaleReadFinished();
     });
 
@@ -658,6 +666,10 @@ test.describe('AI Config', () => {
     });
 
     await card.getByRole('button', { name: /Desactivar/ }).click();
+    const deactivateConfirmation = page.locator('app-confirm-dialog .modal-overlay');
+    await expect(deactivateConfirmation).toBeVisible();
+    await expect(deactivateConfirmation).toContainText('Proveedor sintético');
+    await deactivateConfirmation.getByRole('button', { name: 'Desactivar' }).click();
     await expect(card.locator('app-badge').first()).toContainText('Activo');
     await expect(
       page.locator('.toast--error').filter({ hasText: 'No se pudo actualizar la configuración' })

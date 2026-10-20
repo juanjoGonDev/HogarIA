@@ -181,7 +181,7 @@ test.describe('gestor de cola de IA por proveedor', () => {
     await provider?.close();
   });
 
-  test('muestra solo límites positivos, reordena con ratón/teclado y cancela espera/en curso en mobile y desktop', async ({
+  test('muestra límites positivos, deduplica una prueba activa y permite cancelarla', async ({
     page
   }) => {
     await createConfig(page, provider, 2, 'Synthetic queue 2');
@@ -219,22 +219,26 @@ test.describe('gestor de cola de IA por proveedor', () => {
     await expect(manager).toBeVisible();
 
     provider.setNextBehaviors('hold', 'success');
-    const calls = [
-      await startConnectionTest(page, configId),
-      await startConnectionTest(page, configId),
-      await startConnectionTest(page, configId)
-    ];
+    const firstCall = await startConnectionTest(page, configId);
 
     await waitForProviderRequest(provider, 1);
     await expect(page.locator('[data-test="ai-queue-job-running"]')).toHaveCount(1);
-    await expect(page.locator('[data-test="ai-queue-job-queued"]')).toHaveCount(2);
+    await expect(page.locator('[data-test="ai-queue-job-queued"]')).toHaveCount(0);
 
-    const initial = await queueJobs(page, configId);
-    const initialOrder = initial
-      .filter((job) => job.status === 'queued')
-      .sort((a, b) => a.queueOrder - b.queueOrder)
-      .map((job) => job.id);
-    expect(initialOrder).toHaveLength(2);
+    const duplicates = await Promise.all([
+      startConnectionTest(page, configId),
+      startConnectionTest(page, configId)
+    ]);
+    const duplicateReplies = await Promise.all(duplicates.map(({ result }) => result));
+    expect(duplicateReplies.map(({ status }) => status)).toEqual([409, 409]);
+    expect(duplicateReplies.map(({ body }) => body.code)).toEqual([
+      'AI_TEST_ALREADY_RUNNING',
+      'AI_TEST_ALREADY_RUNNING'
+    ]);
+    expect(provider.requestCount).toBe(1);
+    const active = await queueJobs(page, configId);
+    expect(active).toHaveLength(1);
+    expect(active[0]).toMatchObject({ status: 'running', retryable: false });
 
     for (const size of [
       { width: 320, height: 568 },
@@ -295,54 +299,16 @@ test.describe('gestor de cola de IA por proveedor', () => {
     }
 
     await page.setViewportSize({ width: 1440, height: 900 });
-    const firstId = initialOrder[0];
-    const secondId = initialOrder[1];
-    const firstRow = page.locator(`.ai-queue__job[data-job-id="${firstId}"]`);
-    const secondRow = page.locator(`.ai-queue__job[data-job-id="${secondId}"]`);
-    await firstRow.locator('.ai-queue__drag-handle').dragTo(secondRow, {
-      targetPosition: { x: 8, y: 8 }
-    });
-    await expect
-      .poll(async () =>
-        (await queueJobs(page, configId))
-          .filter((job) => job.status === 'queued')
-          .sort((a, b) => a.queueOrder - b.queueOrder)
-          .map((job) => job.id)
-      )
-      .toEqual([secondId, firstId]);
-
-    const rowMovedToSecond = page.locator(`.ai-queue__job[data-job-id="${firstId}"]`);
-    const moveUp = rowMovedToSecond.locator('button[data-action="move-up"]');
-    await moveUp.focus();
-    await page.keyboard.press('Enter');
-    await expect
-      .poll(async () =>
-        (await queueJobs(page, configId))
-          .filter((job) => job.status === 'queued')
-          .sort((a, b) => a.queueOrder - b.queueOrder)
-          .map((job) => job.id)
-      )
-      .toEqual(initialOrder);
-    await expect(page.locator(':focus')).toHaveAttribute('data-job-id', firstId);
-
-    const queuedToCancel = page.locator(`.ai-queue__job[data-job-id="${secondId}"]`);
-    await queuedToCancel.getByRole('button', { name: /Cancelar/ }).click();
-    await expect(page.locator('[data-test="ai-queue-job-queued"]')).toHaveCount(1);
-
-    const runningId = (await queueJobs(page, configId)).find((job) => job.status === 'running')?.id;
+    const runningId = active[0]?.id;
     expect(runningId).toBeTruthy();
     const runningRow = page.locator(`.ai-queue__job[data-job-id="${runningId}"]`);
     await runningRow.getByRole('button', { name: /Cancelar/ }).click();
     await expect.poll(() => provider.abortCount, { timeout: 10000 }).toBeGreaterThan(0);
     await expect(page.locator('[data-test="ai-queue-job-queued"]')).toHaveCount(0);
     await expect(page.locator('[data-test="ai-queue-job-running"]')).toHaveCount(0);
-    await waitForProviderRequest(provider, 2);
     expect((await queueJobs(page, configId)).some((job) => job.status === 'failed')).toBe(false);
 
-    const first = await calls[0].result;
-    expect(first.status).toBeGreaterThanOrEqual(400);
-    await calls[1].result;
-    await calls[2].result;
+    await firstCall.result;
   });
 
   test('permite reintentar manualmente un fallo terminal sin exponer payloads ni claves', async ({

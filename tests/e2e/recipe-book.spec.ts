@@ -384,7 +384,9 @@ test.describe('Libro de recetas', () => {
     await page.goto('/recipes?collection=book&pageSize=20');
     const aiRequests: string[] = [];
     page.on('request', (request) => {
-      if (request.url().includes('/api/ai/')) aiRequests.push(request.url());
+      if (request.method() === 'POST' && request.url().includes('/api/ai/')) {
+        aiRequests.push(request.url());
+      }
     });
 
     const tortilla = page.locator('[data-test="recipe-card"]').filter({

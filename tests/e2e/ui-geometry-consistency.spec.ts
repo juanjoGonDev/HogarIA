@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { expect, test } from './fixtures';
+import { mockAiFunctionAvailable } from './helpers/ai';
 import { registerAndGoto } from './helpers/auth';
 
 const VIEWPORTS = [
@@ -433,6 +434,7 @@ test('Planificar IA comparte la geometría del botón primario de Recetas', asyn
 test('la CTA de planificación conserva su geometría mientras carga y está deshabilitada', async ({
   page
 }, testInfo) => {
+  await mockAiFunctionAvailable(page, 'planning');
   await registerAndGoto(page, '/calendar', 'UI geometry loading state');
   const mobile = testInfo.project.name === 'mobile-chrome';
   const viewport = mobile ? { width: 393, height: 851 } : { width: 1440, height: 900 };

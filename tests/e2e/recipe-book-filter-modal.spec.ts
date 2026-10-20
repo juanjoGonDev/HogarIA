@@ -22,7 +22,9 @@ test.describe('Filtros avanzados del libro de recetas', () => {
     const aiRequests: string[] = [];
     const pageErrors: string[] = [];
     page.on('request', (request) => {
-      if (request.url().includes('/api/ai/')) aiRequests.push(request.url());
+      if (request.method() === 'POST' && request.url().includes('/api/ai/')) {
+        aiRequests.push(request.url());
+      }
     });
     page.on('pageerror', (error) => pageErrors.push(error.message));
 

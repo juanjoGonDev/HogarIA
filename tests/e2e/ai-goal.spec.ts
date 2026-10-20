@@ -1,10 +1,12 @@
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { test, expect } from './fixtures';
+import { mockAiFunctionAvailable } from './helpers/ai';
 import { registerAndGoto } from './helpers/auth';
 
 test.describe('Planificación IA — objetivos múltiples y personalizados', () => {
   test.beforeEach(async ({ page }) => {
+    await mockAiFunctionAvailable(page, 'planning');
     await registerAndGoto(page, '/calendar');
     await expect(page.locator('h1.calendar__title')).toBeVisible();
   });

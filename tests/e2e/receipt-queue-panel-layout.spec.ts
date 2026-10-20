@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from './fixtures';
 import { registerAndGoto } from './helpers/auth';
+import { mockAiFunctionAvailable } from './helpers/ai';
 import { waitForStableView } from './helpers/recipe-fixtures';
 
 test('el panel de cola queda fuera del lateral y dentro del viewport', async ({ page }) => {
@@ -177,6 +178,7 @@ test('el panel de cola queda fuera del lateral y dentro del viewport', async ({ 
 });
 
 test('la cola desplaza varios tickets sin salirse de la pantalla estrecha', async ({ page }) => {
+  await mockAiFunctionAvailable(page, 'shopping_pantry');
   await registerAndGoto(page, '/receipts', 'receipt-queue-scroll');
   const ticketInput = page.locator('input[name="ticketFile"]');
   const ticketRows = page.locator('[data-test="ticket-history-item"]');
