@@ -2,6 +2,7 @@ import {
   registerNameIssue,
   registerEmailIssue,
   registerPasswordIssue,
+  registerConfirmPasswordIssue,
   type RegisterPasswordIssue
 } from './register-form.validation';
 
@@ -49,5 +50,11 @@ describe('register form validation', () => {
     expect(at73Bytes.length).toBeLessThan(72);
     expect(registerPasswordIssue(at72Bytes)).toBeNull();
     expect(registerPasswordIssue(at73Bytes)).toBe('tooLongBytes');
+  });
+
+  it('requires an exact password confirmation before registration', () => {
+    expect(registerConfirmPasswordIssue('', 'Abc123')).toBe('required');
+    expect(registerConfirmPasswordIssue('Abc124', 'Abc123')).toBe('mismatch');
+    expect(registerConfirmPasswordIssue('Abc123', 'Abc123')).toBeNull();
   });
 });

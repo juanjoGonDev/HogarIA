@@ -47,8 +47,8 @@
 
 ### Registro
 
-- [ ] Añadir campo accesible e internacionalizado para repetir contraseña; detectar vacío y discrepancia antes de solicitar registro.
-- [ ] Probar igualdad, error corregible y reintento; el POST conserva exactamente `{name,email,password}` y nunca incluye el campo repetido.
+- [x] Añadir campo accesible e internacionalizado para repetir contraseña; detectar vacío y discrepancia antes de solicitar registro.
+- [x] Probar igualdad, error corregible y reintento; el POST conserva exactamente `{name,email,password}` y nunca incluye el campo repetido.
 
 ### Verificación y entrega
 
@@ -56,6 +56,10 @@
 - [ ] Playwright real app/API con datos sintéticos: escritorio y móvil, enlace de configuración, selector y fallback, recarga de test sin duplicado, estados sin proveedor, registro, teclado/foco, modal/scroll y breakpoints afectados. Guardar e inspeccionar capturas comparables PC/móvil ignoradas por Git.
 - [ ] Comprobar i18n ES/EN, nombres accesibles, controles táctiles y geometría equivalente con tolerancia máxima de 1 CSS px. Cobertura del código nuevo/modificado ≥70 % en statements, ramas, funciones y líneas, sin rebajar gates existentes; registrar límites y comandos/resultados reales.
 - [ ] Mantener esta checklist actualizada; marcar cada casilla solo con evidencia reproducible. La rama y cada PR permanecen Draft; no mergear.
+
+### Evidencia reproducible
+
+- Registro: `pnpm --filter @hogaria/web exec ng test --no-watch --include=src/app/features/auth/register/*.spec.ts --browsers=ChromeHeadless` — 15/15. Cubre label visible, requerido, discrepancia, corrección y llamada a `AuthService.register` solo con `{name,email,password}`.
 
 ## Unidades de entrega
 
