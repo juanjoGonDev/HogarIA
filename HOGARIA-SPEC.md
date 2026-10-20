@@ -6115,8 +6115,10 @@ o facturación para sortearlo.
 
 - [x] Verificar reglas activas, elegibilidad pública, estado de CodeQL y disponibilidad de Code Quality; no usar
       bypass ni editar el ruleset para reducir sus requisitos.
-- [ ] Configurar CodeQL default setup para `javascript-typescript` con runner estándar y query suite `default`;
-      comprobar análisis real en PR #57 y que el gate CodeQL quede satisfecho.
+- [x] Configurar CodeQL default setup con runner estándar y query suite `default`; el análisis inicial de
+      JavaScript/TypeScript y Actions termina correctamente.
+- [ ] Ejecutar y verificar el análisis del head de PR #57; confirmar que el gate CodeQL queda satisfecho y que
+      la PR no introduce alertas con severidad bloqueante.
 - [ ] Habilitar GitHub Code Quality solo cuando GitHub lo ofrezca para este repositorio; elegir `javascript-typescript`
       y severidad `errors`; verificar su check/análisis real en la PR.
 - [ ] Confirmar CI completo y ambos gates verdes; entonces reactivar auto-merge squash y verificar la fusión
@@ -6125,3 +6127,10 @@ o facturación para sortearlo.
 **Bloqueo externo registrado:** Code Quality no está disponible para el repositorio por la configuración/plan
 actual de GitHub. Si sigue sin estar disponible tras configurar CodeQL, hace falta habilitar la prestación o
 decidir explícitamente otra política; no se simula el resultado con un check propio ni se baja el gate.
+
+**Evidencia de configuración CodeQL (2026-10-20):** `PATCH code-scanning/default-setup` aceptado; configuración
+`configured`, query suite `default`, runner `standard`; ejecución `39418485145` completada con éxito sobre `master`.
+GitHub detectó Actions y TypeScript/JavaScript. La primera línea base encontró seis alertas ya presentes en
+`master` (incluye dos `error/high` en `scripts/i18n-extract.mjs`); ninguna de esas rutas está en el diff de PR #57.
+El análisis de la rama de PR sigue pendiente. `GET code-quality/setup` devuelve 404 “Code quality is not available
+for this repository”, por lo que no se toca la regla ni la facturación.
