@@ -1,6 +1,6 @@
 # Compile TypeScript and Angular once on BuildKit's native architecture; neither
 # output contains platform-specific binaries.
-FROM --platform=$BUILDPLATFORM node:22-alpine AS build
+FROM --platform=$BUILDPLATFORM node:25-alpine AS build
 ENV PNPM_HOME="/pnpm"
 ENV PATH="${PNPM_HOME}:${PATH}"
 RUN apk add --no-cache python3 make g++ \
@@ -17,7 +17,7 @@ COPY . .
 RUN pnpm run build
 
 # Native server dependencies (notably better-sqlite3) must match the target image.
-FROM node:22-alpine AS runtime-deps
+FROM node:25-alpine AS runtime-deps
 ENV PNPM_HOME="/pnpm"
 ENV PATH="${PNPM_HOME}:${PATH}"
 RUN apk add --no-cache python3 make g++ \
@@ -31,7 +31,7 @@ RUN CI=true pnpm install --filter @hogaria/server --prod --frozen-lockfile \
   && pnpm --filter @hogaria/server --prod deploy --legacy /prod/server
 
 # Runtime contains compiled assets and only server production dependencies.
-FROM node:22-alpine AS production
+FROM node:25-alpine AS production
 WORKDIR /app
 
 RUN apk add --no-cache curl tini libstdc++ \
