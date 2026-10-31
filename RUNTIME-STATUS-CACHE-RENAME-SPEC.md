@@ -1,26 +1,26 @@
 # HogarIA — prueba de IA en segundo plano, runtime y actualización web
 
-**Estado:** implementación y verificación funcional local completas; lint limitado por configuración/dependencias existentes y CI del HEAD final pendiente.
-**Base:** `origin/master` en `b4bc0c8` (rama predeterminada real: `master`).
+**Estado:** #56 integrado; reconciliación de #63 con `master` y verificación final pendientes.
+**Base vigente:** `origin/master` en `b2e3de8` (squash de #56; rama predeterminada: `master`).
 **Rama:** `feat/runtime-operations-ui`.
-**PR funcional:** [#63](https://github.com/juanjoGonDev/HogarIA/pull/63), Draft; se abrió antes de implementar. El PR #62 solo revirtió el push accidental y ya está mergeado.
+**PR funcional:** [#63](https://github.com/juanjoGonDev/HogarIA/pull/63), Ready por decisión del usuario. El usuario autorizó integrar/mergear #56 y después #63; conservar Ready y no mergear hasta que la rama esté reconciliada y CI esté verde. #56 ya está mergeado.
 
 ## Objetivo y alcance
 
 Atender la solicitud del producto sobre la prueba guardada del proveedor de IA, los metadatos del servidor en Logs, la frescura de la web tras una actualización y los enlaces activos al repositorio renombrado.
 
-La fuente de verdad para la prueba guardada es `AI-PROVIDER-SETTINGS-SPEC.md`, apartado «Timeout y estado del test de conexión». Esta unidad implementa **solo** el estado duradero, deduplicación y reanudación visual del test guardado. No implementa el resto del trabajo multi-proveedor, el cambio de timeout ni el registro.
+La fuente de verdad para la prueba guardada es `AI-PROVIDER-SETTINGS-SPEC.md`, apartado «Timeout y estado del test de conexión». #56 ya integró en `master` los proveedores/asignaciones, claves opcionales al editar, mensajes de validación, timeout de producto sin máximo y metadatos Logs/GHCR/caché/enlace. #63 conserva su alcance de prueba guardada duradera y actualización web explícita; no debe revertir ni duplicar el trabajo ya integrado.
 
 ## Evidencia revalidada en `master`
 
-- `server/src/routes/ai.routes.ts`: `POST /api/ai/test-connection` espera `pingDeConexion()` y actualiza `test_status`, `test_error` y `last_tested` solo al acabar.
-- `server/src/config/database.ts`: `ai_configs` ya persiste esos tres campos; la API puede exponer estado sin incluir `api_key`.
-- `frontend/src/app/features/ai-config/ai-config.component.ts`: `probandoId` vive en la instancia del componente; el botón no recupera `testing` tras navegar/recargar. La tarjeta ya presenta `testStatus` cuando el servidor lo devuelve.
-- `server/src/routes/health.routes.ts`: `/health` informa `process.uptime()` y una versión literal `1.0.0`; `/health/detailed` expone la versión de Node, no la revisión de la imagen.
-- `.github/workflows/publish-ghcr.yml`: la imagen ya tiene la etiqueta OCI `org.opencontainers.image.revision=${github.sha}`, pero `Dockerfile` no la inyecta al proceso.
-- `frontend/src/app/features/logs/logs.component.ts` no consulta metadatos del runtime.
-- `server/src/app.ts` evita caché para `index.html` y usa caché larga para chunks con hash; `nginx/nginx.conf` aplica `immutable` por siete días a todos los `.js`/`.css`. Angular registra el service worker, pero no ofrece un flujo explícito al usuario al detectar una versión nueva.
-- URLs activas antiguas aparecen en `frontend/src/environments/environment.ts`, `environment.prod.ts`, los User-Agent de fotos/vídeos y el contrato `HOGARIA-SPEC.md`. Se actualizan esas referencias activas; los enlaces a PRs y ejecuciones históricas quedan intactos.
+- En `master` post-#56, `server/src/routes/ai.routes.ts` conserva el routing multi-proveedor, pero el test guardado aún espera `pingDeConexion()` dentro de la petición y solo persiste el resultado final.
+- `ai_configs` en `master` ya contiene `test_status`, `test_error`, `last_tested` y los campos de configuración de #56; `test_started_at` y `test_latency_ms` pertenecen al cambio aún pendiente de #63.
+- `frontend/src/app/features/ai-config/ai-config.component.ts` conserva `probandoId` en la instancia; el polling no sobrevive a recarga/navegación. Adaptar la UI sin perder las mejoras #56 de proveedor/token opcional ni las asignaciones por función.
+- `server/src/routes/health.routes.ts` en `master` ya devuelve `uptime` e `imageRef` desde `APP_IMAGE_REF`, con `Cache-Control: no-store`; Logs de #56 muestra ambos. Mantener `imageRef` como contrato canónico.
+- La imagen GHCR de #56 ya inyecta `APP_IMAGE_REF` y la metadata OCI `org.opencontainers.image.revision`.
+- #56 ya incorpora `AppUpdateService`, que activa y recarga automáticamente en `VERSION_READY`; #63 propone una UX de aviso y actualización explícita. Consolidar en un solo flujo explícito para no descartar formularios y retirar el auto-reload duplicado.
+- Node/Nginx de #56 revalidan shell, manifiestos y service worker; solo recursos con hash son inmutables. Mantener esos encabezados `no-store`/`no-cache` y adaptar el smoke HTTP de #63 al contrato existente.
+- Las referencias activas del repo en `master` ya usan HogarIA. Conservar intactos los enlaces históricos y evitar duplicar cambios de #56.
 
 ## Decisiones
 
@@ -32,7 +32,17 @@ La fuente de verdad para la prueba guardada es `AI-PROVIDER-SETTINGS-SPEC.md`, a
 - Las reglas de caché por `location` en Nginx deben conservar `X-Frame-Options` y `X-Content-Type-Options` que antes se declaraban en `server`; añadir `Cache-Control` puede impedir que se hereden.
 - Cambiar solo enlaces activos de soporte/diagnóstico al remoto nuevo `https://github.com/juanjoGonDev/HogarIA.git`; conservar IDs/nombres heredados y evidencia histórica.
 
+### Integración con #56 (nueva base)
+
+- [ ] Integrar `origin/master` (`b2e3de8`) mediante merge commit regular; no rebase/force-push. Resolver conflictos sin perder proveedores/asignaciones, token opcional, validación de mensajes, timeout ilimitado de producto, `imageRef`, Logs, headers no-cache ni cambios de soporte ya mergeados.
+- [ ] Mantener exactamente un flujo de actualización web: aviso accesible y acción explícita; no recargar automáticamente con formularios sin guardar. Preservar `/health` y `APP_IMAGE_REF` como contrato de runtime.
+- [ ] Portar/ajustar el test guardado desacoplado a la API multi-proveedor de #56: respuesta `202`, claim único por config/hogar, consulta de estado autorizada, prueba efímera sin persistir secretos, timeout/reintentos coherentes y recuperación segura tras reinicio.
+- [ ] Revisar migraciones/DB de `test_started_at` y `test_latency_ms`, `Dockerfile`, workflow, `app.ts`, logs y el smoke de Nginx/contenedor con los contratos ya presentes en `master`.
+- [ ] Repetir pruebas enfocadas, suites aisladas, Playwright desktop/móvil, smoke HTTP real y todos los gates remotos sobre el merge commit final; el CI del HEAD anterior dejó de ser evidencia suficiente tras mergear #56.
+
 ## Criterios de aceptación
+
+> Las casillas de la ejecución anterior documentan resultados del HEAD pre-#56. No son evidencia del merge actualizado: las casillas nuevas de «Integración con #56» quedan abiertas hasta repetir los gates pertinentes sobre el HEAD final.
 
 ### Test de IA guardado — único y en segundo plano
 
@@ -61,7 +71,7 @@ La fuente de verdad para la prueba guardada es `AI-PROVIDER-SETTINGS-SPEC.md`, a
 - [x] TDD con DB temporal (`DATABASE_PATH=:memory:` en Vitest/E2E aislado) y proveedor sintético; suites afectadas, tipos y build pasan. Coverage cliente: 90.61/80.99/91.71/93.20 % (S/B/F/L); servidor: 89.55/81.70/95.68/92.50 %.
 - [ ] Lint no ejecutable en este checkout: Angular no encuentra `@angular-eslint/builder`; lint del servidor invoca `eslint --ext` incompatible con ESLint 9 y no hay config de servidor; ejecución directa de Angular ESLint no encuentra `@angular-eslint/eslint-plugin`. No añadí dependencias ni cambié gates.
 - [x] Playwright real contra frontend/backend con datos sintéticos: escritorio/móvil, refresh/cierre durante prueba, oferta de actualización, teclado/foco y breakpoints (320 px, móvil apaisado 852×393, escritorio 1024/1440). Capturas PC/móvil ignoradas por Git guardadas y revisadas en `.e2e-screenshots/ai-test-running-*`, `.e2e-screenshots/logs-runtime-*` y `.e2e-screenshots/app-update-*`.
-- [x] Registrar comandos, resultados y limitaciones aquí. Mantener Draft; no mergear.
+- [ ] Registrar comandos, resultados y limitaciones de la revisión integrada aquí. Conservar Ready tal como pidió el usuario; mergear #63 solo después de review final y CI verde (autorización explícita ya concedida).
 
 ## Unidades revisables
 
