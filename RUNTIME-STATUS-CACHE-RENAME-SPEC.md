@@ -1,6 +1,6 @@
 # HogarIA — prueba de IA en segundo plano, runtime y actualización web
 
-**Estado:** #56 integrado; merge commit local de #63 `a2d9d78`; gates locales verdes; CI remoto del nuevo HEAD pendiente de push. PR #63 sigue Ready por decisión del usuario.
+**Estado:** #56 integrado; merge commit local de #63 `a2d9d78`; gates locales verdes; CI remoto del HEAD publicado pendiente. PR #63 sigue Ready por decisión del usuario.
 **Base vigente:** `origin/master` en `b2e3de8` (squash de #56; rama predeterminada: `master`).
 **Rama:** `feat/runtime-operations-ui`.
 **PR funcional:** [#63](https://github.com/juanjoGonDev/HogarIA/pull/63), Ready por decisión del usuario. El usuario autorizó integrar/mergear #56 y después #63; conservar Ready y no mergear hasta que la rama esté reconciliada y CI esté verde. #56 ya está mergeado.
@@ -113,9 +113,9 @@ El tamaño total supera 400 líneas revisadas. El usuario eligió explícitament
 - `pnpm run check:ui`: **271 ficheros, 21 reglas**; pasó con la etiqueta traducida `interrupted` ya conectada a la UI.
 - `pnpm run typecheck:e2e`: pasó.
 - `pnpm run test:config`: **118/118**.
-- `pnpm run test:client:coverage`: **1776/1776**; coverage S/B/F/L **90.53/80.96/91.83/93.14 %**.
+- `pnpm run test:client:coverage`: **1776/1776**; coverage S/B/F/L **90.53/80.95/91.83/93.14 %**.
 - `pnpm run test:server:coverage`: **2131 pasan, 1 omitido**; coverage S/B/F/L **89.70/81.90/95.56/92.67 %**. El entorno Vitest configura SQLite en memoria.
-- `pnpm run check:ui`: **271 ficheros, 21 reglas**, sin incidencias; `pnpm run typecheck:e2e`: pasa; `pnpm run test:config`: **118/118**.
+- `pnpm run typecheck:e2e`: pasa; `pnpm run test:config`: **118/118**.
 - `pnpm run build`: pasa; conserva warnings Angular/SCSS preexistentes.
 - Revisión independiente detectó la carrera de borrado desde una pestaña desactualizada. Añadí el `409 AI_CONFIG_TEST_RUNNING` atómico, el mensaje/actualización del cliente y la liberación local al desaparecer la config. Suite focal componente/servicio **52/52** y Playwright full-stack de producción **6/6**, incluyendo borrado desde pestaña desactualizada, recuperación del estado y ejecución única. Capturas PC/móvil sintéticas revisadas: `.e2e-screenshots/ai-provider-settings/chromium-running-test-delete-disabled.png` y `mobile-chrome-running-test-delete-disabled.png` (ignoradas por Git).
 - Playwright aislado: prueba guardada tras cerrar/reabrir **2/2** (desktop/móvil); Logs uptime/imageRef **2/2**; aviso service worker **2/2**; cola de receta **3/3**; geometría/settings IA hogar **8/8**.
