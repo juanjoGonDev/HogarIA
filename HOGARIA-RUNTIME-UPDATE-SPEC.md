@@ -1,6 +1,6 @@
 # HogarIA: test de conexión, diagnóstico y actualización de la web
 
-**Estado:** Implementación y gates locales verificados; CI remoto del HEAD final pendiente.
+**Estado:** Implementación y gates locales verificados; CI remoto verde en `eca1c81`. Este commit solo actualiza evidencia/estado y vuelve a disparar CI.
 **Rama/PR:** `feat/ai-provider-settings` / PR #56. El usuario controla el estado; no mergear sin permiso.
 **Base:** `origin/master` integrado en `6280148`.
 
@@ -23,7 +23,7 @@ Completar el flujo de prueba de conexión de IA independiente del navegador, mos
 - [x] `index.html`, `manifest.json` y el manifiesto/workers del service worker se revalidan; al detectar una versión nueva, Angular activa la versión y recarga. Los chunks con hash siguen siendo `immutable`; `/api/health` queda fuera del caché de datos del service worker.
 - [x] Actualizar a `https://github.com/juanjoGonDev/HogarIA` los enlaces activos del producto, configuración y agentes HTTP; conservar URLs históricas de runs/PRs.
 - [x] Añadir pruebas unitarias/integración y Playwright con datos sintéticos para los casos anteriores; comprobar escritorio y móvil y guardar capturas ignoradas por Git.
-- [ ] Verificar cobertura, build, typecheck, suite full-stack aislada y **CI remota en el HEAD final**. Respetar el estado del PR elegido por el usuario y no mergear sin permiso. Los gates locales pasan; solo falta CI remoto final.
+- [x] Verificar cobertura, build, typecheck, suite full-stack aislada y CI remota: run [41242323842](https://github.com/juanjoGonDev/HogarIA/actions/runs/41242323842) — build, typecheck, server, full-stack, los cuatro shards E2E y smokes amd64/arm64 pasaron en `eca1c81`. Solo cambió documentación desde ese HEAD; el nuevo push vuelve a correr CI.
 
 ## Evidencia local reproducible
 
@@ -34,6 +34,7 @@ Completar el flujo de prueba de conexión de IA independiente del navegador, mos
 - Logs real app/API, tag sintético y escritorio/móvil: `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/logs.spec.ts --grep 'shows server uptime'` — **2/2**. Capturas revisadas: `.e2e-screenshots/logs-runtime/chromium-runtime-info.png` y `mobile-chrome-runtime-info.png` (ignoradas por Git).
 - App servida full-stack aislada, cierre de pestaña del test de IA, rate limit por proyecto y headers no-cache: `CI=true node scripts/run-isolated-playwright.mjs --config=playwright.full-stack.config.ts --project=chromium --project=mobile-chrome tests/e2e/full-stack/rate-limit.spec.ts tests/e2e/full-stack/ai-provider-settings.spec.ts tests/e2e/full-stack/served-app.spec.ts` — **22 passed, 2 skips esperados**. SQLite y artefactos quedan en temp y se limpian.
 - Nginx conserva X-Frame-Options/X-Content-Type-Options y sus ubicaciones no-cache se validan por contrato de configuración; no se ejecutó un contenedor Nginx real.
+- CI GitHub de la rama, con cambios de código completos: [run 41242323842](https://github.com/juanjoGonDev/HogarIA/actions/runs/41242323842) — **success**; el run comprueba `eca1c81`.
 
 ## Seguridad y aislamiento
 

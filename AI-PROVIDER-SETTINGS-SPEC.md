@@ -1,6 +1,6 @@
 # Hogar: proveedores de IA y registro
 
-**Estado:** Implementación, gates locales y comparación geométrica verificados; CI del HEAD final pendiente. El estado del PR lo controla el usuario.
+**Estado:** Implementación, gates locales y comparación geométrica verificados; CI del código en `eca1c81` verde (run [41242323842](https://github.com/juanjoGonDev/HogarIA/actions/runs/41242323842)). El estado del PR lo controla el usuario.
 **Base revalidada:** `origin/master` en `b4bc0c8277ff7090cf709946433932a25e2b49c4` (incluye la reversión solicitada en PR #62; integrada sin reescribir la rama).
 
 ## Objetivo y decisiones
