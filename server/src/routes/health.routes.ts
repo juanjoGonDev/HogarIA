@@ -4,6 +4,11 @@ import os from 'os';
 
 const healthRoutes = new Hono();
 
+function imageRevision(): string {
+  const revision = process.env.HOGARIA_IMAGE_REVISION?.trim();
+  return revision || 'dev';
+}
+
 healthRoutes.get('/', (c) => {
   const memUsage = process.memoryUsage();
   const freeMem = os.freemem();
@@ -24,7 +29,8 @@ healthRoutes.get('/', (c) => {
       systemTotal: Math.round(totalMem / 1024 / 1024) + 'MB',
       systemUsage: usagePercent + '%'
     },
-    version: '1.0.0'
+    version: '1.0.0',
+    imageRevision: imageRevision()
   });
 });
 
@@ -47,7 +53,8 @@ healthRoutes.get('/detailed', (c) => {
       version: process.version,
       platform: process.platform,
       arch: process.arch
-    }
+    },
+    imageRevision: imageRevision()
   });
 });
 

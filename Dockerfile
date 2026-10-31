@@ -32,6 +32,7 @@ RUN CI=true pnpm install --filter @hogaria/server --prod --frozen-lockfile \
 
 # Runtime contains compiled assets and only server production dependencies.
 FROM node:22-alpine AS production
+ARG HOGARIA_IMAGE_REVISION=dev
 WORKDIR /app
 
 RUN apk add --no-cache curl tini libstdc++ \
@@ -44,6 +45,7 @@ COPY --from=runtime-deps /prod/server/node_modules ./server/node_modules
 COPY --from=build /app/frontend/dist ./public
 
 ENV NODE_ENV=production
+ENV HOGARIA_IMAGE_REVISION=$HOGARIA_IMAGE_REVISION
 ENV DATABASE_PATH=/app/data/hogaria.sqlite
 ENV PORT=3000
 ENV NODE_OPTIONS=--max-old-space-size=256

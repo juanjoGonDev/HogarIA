@@ -51,6 +51,8 @@ test('compiles once natively and installs native production modules for the imag
   );
   assert.match(dockerfile, /pnpm --filter @hogaria\/server --prod deploy --legacy/);
   assert.match(dockerfile, /COPY --from=runtime-deps \/prod\/server\/node_modules/);
+  assert.match(dockerfile, /ARG HOGARIA_IMAGE_REVISION=dev/);
+  assert.match(dockerfile, /ENV HOGARIA_IMAGE_REVISION=\$HOGARIA_IMAGE_REVISION/);
   assert.match(dockerfile, /HEALTHCHECK[\s\S]*curl -f http:\/\/localhost:3000\/health/);
 });
 
@@ -71,7 +73,9 @@ test('publishes GHCR manifests from native architecture builds on the default br
   assert.match(build, /docker\/login-action@v4/);
   assert.match(build, /docker\/build-push-action@v7/);
   assert.match(build, /platforms:\s*\$\{\{ matrix\.platform \}\}/);
+  assert.match(build, /HOGARIA_IMAGE_REVISION=\$\{\{ github\.sha \}\}/);
   assert.match(build, /:\$\{\{ github\.sha \}\}-\$\{\{ matrix\.arch \}\}/);
+  assert.match(build, /org\.opencontainers\.image\.revision=\$\{\{ github\.sha \}\}/);
   assert.match(build, /push:\s*true/);
   assert.match(build, /cache-to:.*ignore-error=true/);
   assert.doesNotMatch(publish, /setup-qemu-action/);
@@ -108,6 +112,7 @@ test('publishes GHCR manifests from native architecture builds on the default br
   assert.match(smoke, /runs-on:\s*\$\{\{ matrix\.runner \}\}/);
   assert.match(smoke, /packages:\s*read/);
   assert.match(smoke, /docker pull --platform "\$PLATFORM"/);
+  assert.match(smoke, /EXPECTED_IMAGE_REVISION:\s*\$\{\{ github\.sha \}\}/);
   assert.match(smoke, /scripts\/container-smoke\.mjs/);
   assert.match(smoke, /docker inspect --format='\{\{\.State\.Health\.Status\}\}'/);
   assert.doesNotMatch(publish, /pull_request_target/);

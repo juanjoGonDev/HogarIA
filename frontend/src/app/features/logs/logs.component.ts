@@ -9,8 +9,10 @@ import {
   ViewChild,
   computed
 } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { catchError, finalize, map, of } from 'rxjs';
 import { clientTimeZone, formatTimePrecise, timeZoneLabel } from '../../core/time';
 import { ClipboardService } from '../../core/services/clipboard.service';
 import { LogService, LogEntry, LogLevel, LogSource } from '../../core/services/log.service';
@@ -26,6 +28,11 @@ interface FilterOption<T extends string> {
   value: T;
   /** Clave del diccionario: lo que se pinta depende del idioma, y el catalogo no lo puede saber. */
   labelKey: TranslationKey;
+}
+
+interface RuntimeMetadata {
+  uptime: number;
+  imageRevision: string;
 }
 
 @Component({
@@ -141,6 +148,38 @@ interface FilterOption<T extends string> {
         </div>
       </div>
 
+      <section class="logs-runtime" [attr.aria-busy]="runtimeLoading()" data-test="logs-runtime">
+        @if (runtimeLoading()) {
+          <p role="status" data-test="logs-runtime-loading">{{ 'logs.runtime_loading' | t }}</p>
+        }
+        @if (runtimeError()) {
+          <div class="logs-runtime__error" role="alert">
+            <span>{{ 'logs.runtime_unavailable' | t }}</span>
+            <app-button
+              variant="ghost"
+              size="sm"
+              type="button"
+              (onClick)="loadRuntimeMetadata()"
+              data-test="logs-runtime-retry"
+            >
+              {{ 'logs.runtime_retry' | t }}
+            </app-button>
+          </div>
+        }
+        @if (runtimeInfo(); as runtime) {
+          <dl class="logs-runtime__items">
+            <div class="logs-runtime__item">
+              <dt>{{ 'logs.runtime_uptime_label' | t }}</dt>
+              <dd data-test="logs-runtime-uptime">{{ formatUptime(runtime.uptime) }}</dd>
+            </div>
+            <div class="logs-runtime__item">
+              <dt>{{ 'logs.runtime_image_revision_label' | t }}</dt>
+              <dd data-test="logs-runtime-revision"><code [title]="runtime.imageRevision">{{ runtime.imageRevision }}</code></dd>
+            </div>
+          </dl>
+        }
+      </section>
+
       <!-- Terminal -->
       <div class="terminal" #terminalEl>
         <div class="terminal__header">
@@ -241,6 +280,48 @@ interface FilterOption<T extends string> {
       gap: var(--space-2);
       flex-wrap: wrap;
       align-items: center;
+    }
+
+    .logs-runtime {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: var(--space-3);
+      padding: var(--space-2) var(--space-3);
+      border: 1px solid var(--border-default);
+      border-radius: var(--radius-md);
+      background: var(--bg-secondary);
+      color: var(--text-secondary);
+      font-size: var(--text-sm);
+    }
+
+    .logs-runtime p { margin: 0; }
+
+    .logs-runtime__items {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--space-4);
+      margin: 0;
+    }
+
+    .logs-runtime__item {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: var(--space-2);
+      min-width: 0;
+    }
+
+    .logs-runtime__item dt { color: var(--text-tertiary); }
+    .logs-runtime__item dd { margin: 0; color: var(--text-primary); }
+    .logs-runtime__item code { overflow-wrap: anywhere; }
+
+    .logs-runtime__error {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: var(--space-2);
+      color: var(--error);
     }
 
     .logs-only-errors {
@@ -486,9 +567,15 @@ interface FilterOption<T extends string> {
 export class LogsComponent implements OnInit, OnDestroy, AfterViewChecked {
   private readonly i18n = inject(I18nService);
   private readonly clipboardService = inject(ClipboardService);
+  private readonly http = inject(HttpClient);
   logService = inject(LogService);
   private toastService = inject(ToastService);
   private confirmService = inject(ConfirmService);
+
+  runtimeInfo = signal<RuntimeMetadata | null>(null);
+  runtimeLoading = signal(false);
+  runtimeError = signal(false);
+  private runtimeRefreshTimer: ReturnType<typeof setInterval> | null = null;
 
   @ViewChild('bodyEl') bodyEl!: ElementRef<HTMLDivElement>;
 
@@ -651,12 +738,66 @@ export class LogsComponent implements OnInit, OnDestroy, AfterViewChecked {
     this.logService.connect();
   }
 
+  loadRuntimeMetadata(): void {
+    if (this.runtimeLoading()) return;
+    this.runtimeLoading.set(true);
+    this.runtimeError.set(false);
+
+    this.http
+      .get<unknown>('/health')
+      .pipe(
+        map((payload): RuntimeMetadata => {
+          if (
+            !payload ||
+            typeof payload !== 'object' ||
+            !Number.isFinite((payload as { uptime?: unknown }).uptime) ||
+            typeof (payload as { imageRevision?: unknown }).imageRevision !== 'string' ||
+            !(payload as { imageRevision: string }).imageRevision.trim()
+          ) {
+            throw new Error('Invalid health metadata');
+          }
+          return {
+            uptime: Math.max(0, Math.floor((payload as { uptime: number }).uptime)),
+            imageRevision: (payload as { imageRevision: string }).imageRevision.trim()
+          };
+        }),
+        catchError(() => {
+          this.runtimeError.set(true);
+          return of(null);
+        }),
+        finalize(() => this.runtimeLoading.set(false))
+      )
+      .subscribe((runtime) => {
+        if (runtime) this.runtimeInfo.set(runtime);
+      });
+  }
+
+  formatUptime(seconds: number): string {
+    let remaining = Math.max(0, Math.floor(Number.isFinite(seconds) ? seconds : 0));
+    const days = Math.floor(remaining / 86_400);
+    remaining %= 86_400;
+    const hours = Math.floor(remaining / 3_600);
+    remaining %= 3_600;
+    const minutes = Math.floor(remaining / 60);
+    const secondsPart = remaining % 60;
+    const parts = [
+      days > 0 ? `${days}d` : '',
+      hours > 0 ? `${hours}h` : '',
+      minutes > 0 ? `${minutes}m` : '',
+      secondsPart > 0 ? `${secondsPart}s` : ''
+    ].filter(Boolean);
+    return parts.length ? parts.join(' ') : '0s';
+  }
+
   ngOnInit(): void {
     this.logService.connect();
+    this.loadRuntimeMetadata();
+    this.runtimeRefreshTimer = setInterval(() => this.loadRuntimeMetadata(), 60_000);
   }
 
   ngOnDestroy(): void {
     this.logService.disconnect();
+    if (this.runtimeRefreshTimer) clearInterval(this.runtimeRefreshTimer);
   }
 
   ngAfterViewChecked(): void {

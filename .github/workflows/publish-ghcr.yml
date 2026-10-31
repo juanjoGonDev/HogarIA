@@ -55,6 +55,8 @@ jobs:
           context: .
           file: ./Dockerfile
           platforms: ${{ matrix.platform }}
+          build-args: |
+            HOGARIA_IMAGE_REVISION=${{ github.sha }}
           push: true
           tags: ${{ steps.image.outputs.name }}:${{ github.sha }}-${{ matrix.arch }}
           labels: |
@@ -181,6 +183,7 @@ jobs:
         env:
           IMAGE: ${{ steps.image.outputs.name }}
           COMMIT_SHA: ${{ github.sha }}
+          EXPECTED_IMAGE_REVISION: ${{ github.sha }}
           ARCH: ${{ matrix.arch }}
           PLATFORM: ${{ matrix.platform }}
         run: |

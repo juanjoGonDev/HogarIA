@@ -1,4 +1,6 @@
 import { signal } from '@angular/core';
+import { provideHttpClient } from '@angular/common/http';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { Observable, of, throwError } from 'rxjs';
 import { I18nService } from '../../core/services/i18n.service';
@@ -39,6 +41,7 @@ describe('LogsComponent', () => {
   let toastService: jasmine.SpyObj<ToastService>;
   let confirmService: jasmine.SpyObj<ConfirmService>;
   let i18n: { changeTick: ReturnType<typeof signal<number>>; t: jasmine.Spy };
+  let http: HttpTestingController;
 
   beforeEach(async () => {
     logService = {
@@ -74,13 +77,85 @@ describe('LogsComponent', () => {
         { provide: LogService, useValue: logService },
         { provide: ToastService, useValue: toastService },
         { provide: ConfirmService, useValue: confirmService },
-        { provide: I18nService, useValue: i18n }
+        { provide: I18nService, useValue: i18n },
+        provideHttpClient(),
+        provideHttpClientTesting()
       ]
     }).compileComponents();
 
     fixture = TestBed.createComponent(LogsComponent);
     component = fixture.componentInstance;
+    http = TestBed.inject(HttpTestingController);
     fixture.detectChanges();
+    http.expectOne('/health').flush({
+      status: 'ok',
+      uptime: 93784,
+      version: '1.0.0',
+      imageRevision: '0123456789abcdef0123456789abcdef01234567'
+    });
+    fixture.detectChanges();
+  });
+
+  afterEach(() => http.verify({ ignoreCancelled: true }));
+
+  it('shows server uptime and GHCR revision from the health endpoint', () => {
+    const runtime = fixture.nativeElement.querySelector('[data-test="logs-runtime"]');
+    expect(runtime.textContent).toContain('logs.runtime_uptime_label');
+    expect(runtime.textContent).toContain('1d 2h 3m 4s');
+    expect(runtime.textContent).toContain('logs.runtime_image_revision_label');
+    expect(runtime.textContent).toContain('0123456789abcdef0123456789abcdef01234567');
+  });
+
+  it('announces loading and exposes a retry when runtime metadata cannot load', () => {
+    component.loadRuntimeMetadata();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('[data-test="logs-runtime-loading"]')).toBeTruthy();
+
+    http
+      .expectOne('/health')
+      .flush({ message: 'synthetic failure' }, { status: 503, statusText: 'Unavailable' });
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('[role="alert"]')?.textContent).toContain(
+      'logs.runtime_unavailable'
+    );
+
+    const retry = fixture.nativeElement.querySelector(
+      '[data-test="logs-runtime-retry"]'
+    ) as HTMLButtonElement;
+    expect(retry).toBeTruthy();
+    retry.querySelector('button')?.click();
+    fixture.detectChanges();
+    http.expectOne('/health').flush({
+      status: 'ok',
+      uptime: 60,
+      version: '1.0.0',
+      imageRevision: 'dev'
+    });
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('[role="alert"]')).toBeNull();
+    expect(
+      fixture.nativeElement.querySelector('[data-test="logs-runtime"]')?.textContent
+    ).toContain('dev');
+  });
+
+  it('does not overlap health requests and rejects malformed metadata', () => {
+    component.loadRuntimeMetadata();
+    component.loadRuntimeMetadata();
+    expect(component.runtimeLoading()).toBeTrue();
+
+    http.expectOne('/health').flush({ uptime: 'not-a-number', imageRevision: '' });
+    fixture.detectChanges();
+
+    expect(component.runtimeLoading()).toBeFalse();
+    expect(component.runtimeError()).toBeTrue();
+    expect(component.runtimeInfo()?.imageRevision).toBe('0123456789abcdef0123456789abcdef01234567');
+  });
+
+  it('formats non-negative uptime into readable day/hour/minute/second units', () => {
+    expect(component.formatUptime(93784)).toBe('1d 2h 3m 4s');
+    expect(component.formatUptime(3661)).toBe('1h 1m 1s');
+    expect(component.formatUptime(-2)).toBe('0s');
+    expect(component.formatUptime(Number.NaN)).toBe('0s');
   });
 
   it('connects, exposes localized filter names, forwards selections, and reconnects on request', () => {

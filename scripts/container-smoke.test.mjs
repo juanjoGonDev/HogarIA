@@ -3,8 +3,8 @@ import { test } from 'node:test';
 
 import { verifyContainerSmoke } from './container-smoke.mjs';
 
-const health = () =>
-  new Response(JSON.stringify({ status: 'ok', uptime: 1, version: '1.0.0' }), {
+const health = (imageRevision = '0123456789abcdef0123456789abcdef01234567') =>
+  new Response(JSON.stringify({ status: 'ok', uptime: 1, version: '1.0.0', imageRevision }), {
     status: 200,
     headers: { 'content-type': 'application/json' }
   });
@@ -78,6 +78,45 @@ test('fails when the server never becomes healthy', async () => {
       sleep: async () => {}
     })
     //health did not become ready/
+  );
+});
+
+test('fails closed when health does not include the image revision', async () => {
+  const fetcher = async (input, init = {}) => {
+    const url = new URL(input);
+    if (url.pathname === '/health' || url.pathname === '/api/health') return health('');
+    return healthyFetcher()(input, init);
+  };
+
+  await assert.rejects(
+    verifyContainerSmoke('http://127.0.0.1:3000', {
+      fetcher,
+      timeoutMs: 50,
+      pollIntervalMs: 0
+    }),
+    /did not become ready.*invalid health payload/
+  );
+});
+
+test('rejects a runtime revision that differs from the expected image build revision', async () => {
+  await assert.rejects(
+    verifyContainerSmoke('http://127.0.0.1:3000', {
+      fetcher: healthyFetcher(),
+      timeoutMs: 50,
+      pollIntervalMs: 0,
+      expectedImageRevision: 'deadbeef'
+    }),
+    /did not become ready.*does not match the expected build revision/
+  );
+});
+
+test('rejects a blank expected image revision', async () => {
+  await assert.rejects(
+    verifyContainerSmoke('http://127.0.0.1:3000', {
+      fetcher: healthyFetcher(),
+      expectedImageRevision: '   '
+    }),
+    /expectedImageRevision must not be blank/
   );
 });
 
