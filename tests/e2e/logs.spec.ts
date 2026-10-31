@@ -1,5 +1,7 @@
 import { test, expect } from './fixtures';
 import { registerAndGoto } from './helpers/auth';
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 
 test.describe('Logs page', () => {
   test.beforeEach(async ({ page }) => {
@@ -12,13 +14,63 @@ test.describe('Logs page', () => {
     // El indicador dice en que estado esta el stream, y ahora hay cuatro estados: un
     // booleano «conectado/no» esconda el «reintentando en 5 s», que es el unico que
     // permite distinguir un servidor reiniciandose de uno que no contesta.
-    await expect(page.locator('[data-test="logs-status"]')).toContainText(/En vivo|Conectando|Reintentando|Sin conexion/);
+    await expect(page.locator('[data-test="logs-status"]')).toContainText(
+      /En vivo|Conectando|Reintentando|Sin conexion/
+    );
     // Source/level filters
     await expect(page.locator('select.logs-select').first()).toBeVisible();
     // Pause / autoscroll / clear buttons exist
     await expect(page.getByRole('button', { name: /Pausar|Pause/ })).toBeVisible();
     await expect(page.getByRole('button', { name: /Auto-scroll/ })).toBeVisible();
     await expect(page.getByRole('button', { name: /Limpiar|Clear/ })).toBeVisible();
+  });
+
+  test('shows synthetic server uptime and GHCR image revision accessibly', async ({
+    page
+  }, testInfo) => {
+    await page.route('**/health', (route) =>
+      route.fulfill({
+        json: {
+          status: 'ok',
+          timestamp: '2026-10-31T12:00:00.000Z',
+          uptime: 93_784,
+          version: '1.1.0',
+          imageRevision: '0123456789abcdef0123456789abcdef01234567'
+        }
+      })
+    );
+    await page.reload();
+
+    await expect(page.locator('[data-test="logs-runtime-uptime"]')).toHaveText('1d 2h 3m 4s');
+    await expect(page.locator('[data-test="logs-runtime-revision"]')).toContainText(
+      '0123456789abcdef0123456789abcdef01234567'
+    );
+    await expect(page.locator('[data-test="logs-runtime"]')).toHaveAttribute('aria-busy', 'false');
+
+    const screenshotDirectory = process.env.E2E_SCREENSHOT_DIR;
+    if (screenshotDirectory) {
+      const isMobile = testInfo.project.name === 'mobile-chrome';
+      mkdirSync(screenshotDirectory, { recursive: true });
+      await page.setViewportSize(
+        isMobile ? { width: 393, height: 852 } : { width: 1440, height: 900 }
+      );
+      await page.screenshot({
+        path: join(screenshotDirectory, `logs-runtime-${isMobile ? 'mobile' : 'desktop'}.png`),
+        animations: 'disabled'
+      });
+    }
+
+    if (testInfo.project.name === 'mobile-chrome') {
+      for (const viewport of [
+        { width: 320, height: 568 },
+        { width: 852, height: 393 }
+      ]) {
+        await page.setViewportSize(viewport);
+        const documentWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+        expect(documentWidth).toBeLessThanOrEqual(viewport.width + 1);
+        await expect(page.locator('[data-test="logs-runtime-revision"]')).toBeVisible();
+      }
+    }
   });
 
   test('should toggle pause and resume', async ({ page }) => {
@@ -65,8 +117,9 @@ test.describe('Logs page', () => {
 
     await page.reload();
     await expect(page.locator('.terminal__body')).toBeVisible();
-    await expect(page.locator('.terminal__line', { hasText: `${tag} gamma` }))
-      .toBeVisible({ timeout: 20000 });
+    await expect(page.locator('.terminal__line', { hasText: `${tag} gamma` })).toBeVisible({
+      timeout: 20000
+    });
   }
 
   test('copies all the visible lines when nothing is selected', async ({ page, context }) => {
@@ -87,7 +140,10 @@ test.describe('Logs page', () => {
     expect(clipboard).toContain(`${tag} gamma`);
   });
 
-  test('selects lines with click, ctrl and shift and copies just those', async ({ page, context }) => {
+  test('selects lines with click, ctrl and shift and copies just those', async ({
+    page,
+    context
+  }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     const tag = `e2e-${Date.now()}`;
     await pushLogs(page, tag);
