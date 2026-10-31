@@ -1,13 +1,16 @@
-import { Component, inject, OnInit } from '@angular/core';
+import { Component, OnInit } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
+import { AppUpdateNoticeComponent } from './shared/components/app-update-notice.component';
 import { STORAGE_KEYS } from './core/services/storage.service';
-import { AppUpdateService } from './core/services/app-update.service';
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet],
-  template: ` <router-outlet></router-outlet> `,
+  imports: [RouterOutlet, AppUpdateNoticeComponent],
+  template: `
+    <app-update-notice />
+    <router-outlet></router-outlet>
+  `,
   styles: [
     `
       :host {
@@ -18,10 +21,7 @@ import { AppUpdateService } from './core/services/app-update.service';
   ]
 })
 export class AppComponent implements OnInit {
-  private readonly appUpdate = inject(AppUpdateService);
-
   ngOnInit(): void {
-    this.appUpdate.initialize();
     // Initialize theme from localStorage
     const theme = localStorage.getItem(STORAGE_KEYS.theme) || 'light';
     document.documentElement.setAttribute('data-theme', theme);

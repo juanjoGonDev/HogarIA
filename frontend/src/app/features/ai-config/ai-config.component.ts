@@ -1,13 +1,4 @@
-import {
-  Component,
-  computed,
-  DestroyRef,
-  inject,
-  Input,
-  NgZone,
-  OnInit,
-  signal
-} from '@angular/core';
+import { Component, computed, DestroyRef, inject, Input, OnInit, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { AiService } from '../../core/services/ai.service';
@@ -23,7 +14,7 @@ import { TranslatePipe } from '../../core/pipes/translate.pipe';
 import { I18nService } from '../../core/services/i18n.service';
 import { IconComponent } from '../../shared/components/ui/icon/icon.component';
 import { RouterLink } from '@angular/router';
-import { interval } from 'rxjs';
+import { EMPTY, Subject, exhaustMap, interval, merge } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { AiProviderAvailabilityService } from '../../core/services/ai-provider-availability.service';
 import type { TranslationKey } from '../../core/i18n';
@@ -216,7 +207,7 @@ const FUNCTION_LABELS: Record<AiFunctionKey, TranslationKey> = {
               type="button"
               [touchTarget]="true"
               [loading]="probandoId() === config.id || config.testStatus === 'testing'"
-              [disabled]="config.testStatus === 'testing' && probandoId() !== config.id"
+              [disabled]="isTestActionDisabled(config)"
               (onClick)="testConfig(config)"
               [attr.data-test]="'probar-' + config.name"
             >
@@ -254,6 +245,7 @@ const FUNCTION_LABELS: Record<AiFunctionKey, TranslationKey> = {
               variant="ghost"
               size="sm"
               [touchTarget]="true"
+              [disabled]="isDeleteActionDisabled(config)"
               (onClick)="deleteConfig(config)"
             >
               <app-icon name="delete" [size]="16" [label]="null" />
@@ -886,7 +878,7 @@ export class AiConfigComponent implements OnInit {
   @Input() embedded = false;
   private readonly i18n = inject(I18nService);
   private readonly destroyRef = inject(DestroyRef);
-  private readonly ngZone = inject(NgZone);
+  private readonly testStatusRefresh$ = new Subject<void>();
 
   /** «3 configuraciones» / «1 configuración»: el numero y el sustantivo se eligen a la vez. */
   configuracionesLabel(): string {
@@ -940,15 +932,16 @@ export class AiConfigComponent implements OnInit {
   ngOnInit(): void {
     this.aiService.loadConfigs();
     this.aiService.loadFunctionProviders();
-    this.ngZone.runOutsideAngular(() => {
-      interval(2000)
-        .pipe(takeUntilDestroyed(this.destroyRef))
-        .subscribe(() => {
-          if (this.aiService.configs().some((config) => config.testStatus === 'testing')) {
-            this.ngZone.run(() => this.aiService.loadConfigs());
-          }
-        });
-    });
+    merge(interval(2000), this.testStatusRefresh$)
+      .pipe(
+        exhaustMap(() =>
+          this.shouldPollTestStatus() ? this.aiService.loadConfigsSnapshot() : EMPTY
+        ),
+        takeUntilDestroyed(this.destroyRef)
+      )
+      .subscribe((configs) => {
+        if (configs) this.handleTestStatusSnapshot(configs);
+      });
   }
 
   openAddModal(): void {
@@ -1022,11 +1015,16 @@ export class AiConfigComponent implements OnInit {
   }
 
   testConfig(config: AIProviderConfig): void {
-    if (this.probandoId() || this.probandoForm() || config.testStatus === 'testing') return;
+    if (this.hasRunningTest() || config.testStatus === 'testing') return;
     this.probandoId.set(config.id);
 
     this.aiService.testConnection({ configId: config.id }).subscribe({
       next: (result) => {
+        if (this.isAcceptedTest(result)) {
+          this.probandoId.set(result.configId);
+          this.testStatusRefresh$.next();
+          return;
+        }
         this.probandoId.set(null);
         if (result) this.aiService.loadConfigs();
         this.testResult.set(
@@ -1053,9 +1051,11 @@ export class AiConfigComponent implements OnInit {
    * era un stub que soltaba un «Configuración válida» sin haber llamado a nada.)
    */
   testFromForm(): void {
-    if (this.probandoForm() || this.probandoId()) return;
+    if (this.hasRunningTest()) return;
     const { baseUrl, apiKey, model, timeout } = this.formData;
-    if (!baseUrl.trim() || !apiKey.trim() || !model.trim()) {
+    const savedConfig = this.editingConfig();
+    const useSavedConfig = !!savedConfig && !apiKey.trim();
+    if (!baseUrl.trim() || !model.trim() || (!apiKey.trim() && !useSavedConfig)) {
       this.toastService.warning(
         this.i18n.t('ai_config.test'),
         this.i18n.t('ai_config.faltan_datos_para_probar')
@@ -1066,13 +1066,22 @@ export class AiConfigComponent implements OnInit {
     this.probandoForm.set(true);
     this.aiService
       .testConnection({
-        baseUrl: baseUrl.trim(),
-        apiKey: apiKey.trim(),
-        model: model.trim(),
-        timeout
+        ...(useSavedConfig
+          ? { configId: savedConfig!.id }
+          : {
+              baseUrl: baseUrl.trim(),
+              apiKey: apiKey.trim(),
+              model: model.trim(),
+              timeout
+            })
       })
       .subscribe({
         next: (result) => {
+          if (this.isAcceptedTest(result)) {
+            this.probandoId.set(result.configId);
+            this.testStatusRefresh$.next();
+            return;
+          }
           this.probandoForm.set(false);
           this.testResult.set(
             result ?? { success: false, error: this.i18n.t('ai_config.no_se_pudo_conectar') }
@@ -1137,6 +1146,8 @@ export class AiConfigComponent implements OnInit {
   }
 
   async deleteConfig(config: AIProviderConfig): Promise<void> {
+    if (this.isDeleteActionDisabled(config)) return;
+
     const accepted = await this.confirmService.confirm({
       title: this.i18n.t('ai_config.eliminar_configuracion'),
       message:
@@ -1151,11 +1162,16 @@ export class AiConfigComponent implements OnInit {
     if (!accepted) return;
 
     this.aiService.deleteConfig(config.id).subscribe({
-      next: (deleted) => {
-        if (!deleted) {
+      next: (result) => {
+        if (!result.deleted) {
+          if (result.reason === 'test_running') this.aiService.loadConfigs();
           this.toastService.error(
             this.i18n.t('ui.error'),
-            this.i18n.t('ai_config.no_se_pudo_eliminar')
+            this.i18n.t(
+              result.reason === 'test_running'
+                ? 'ai_config.test_running_delete'
+                : 'ai_config.no_se_pudo_eliminar'
+            )
           );
           return;
         }
@@ -1201,6 +1217,73 @@ export class AiConfigComponent implements OnInit {
       .join(', ');
   }
 
+  isTestActionDisabled(config: AIProviderConfig): boolean {
+    if (config.testStatus === 'testing') return this.probandoId() !== config.id;
+    return this.hasRunningTest();
+  }
+
+  isDeleteActionDisabled(config: AIProviderConfig): boolean {
+    return config.testStatus === 'testing' || this.probandoId() === config.id;
+  }
+
+  private hasRunningTest(): boolean {
+    return (
+      this.probandoId() !== null ||
+      this.probandoForm() ||
+      this.aiService.configs().some((config) => config.testStatus === 'testing')
+    );
+  }
+
+  private shouldPollTestStatus(): boolean {
+    return (
+      this.probandoId() !== null ||
+      this.aiService.configs().some((config) => config.testStatus === 'testing')
+    );
+  }
+
+  private isAcceptedTest(result: unknown): result is { status: 'testing'; configId: string } {
+    return (
+      result !== null &&
+      typeof result === 'object' &&
+      (result as { status?: unknown }).status === 'testing' &&
+      typeof (result as { configId?: unknown }).configId === 'string'
+    );
+  }
+
+  private handleTestStatusSnapshot(configs: AIProviderConfig[]): void {
+    const pendingId = this.probandoId();
+    if (!pendingId) return;
+    const config = configs.find((candidate) => candidate.id === pendingId);
+    if (!config) {
+      this.probandoId.set(null);
+      this.probandoForm.set(false);
+      return;
+    }
+    if (
+      config.testStatus !== 'success' &&
+      config.testStatus !== 'failed' &&
+      config.testStatus !== 'interrupted'
+    ) {
+      return;
+    }
+
+    const latency = (config as AIProviderConfig & { testLatencyMs?: number }).testLatencyMs;
+    this.probandoId.set(null);
+    this.probandoForm.set(false);
+    this.testResult.set({
+      success: config.testStatus === 'success',
+      model: config.model,
+      latency,
+      error:
+        config.testStatus === 'interrupted'
+          ? this.i18n.t('ai_config.test_interrupted')
+          : config.testStatus === 'failed'
+            ? config.testError || this.i18n.t('ai_config.no_se_pudo_conectar')
+            : undefined
+    });
+    this.isTestResultOpen.set(true);
+  }
+
   getTestStatusVariant(status: string): 'success' | 'error' | 'warning' {
     switch (status) {
       case 'success':
@@ -1220,6 +1303,8 @@ export class AiConfigComponent implements OnInit {
         return this.i18n.t('ui.error');
       case 'testing':
         return this.i18n.t('ai_config.probando');
+      case 'interrupted':
+        return this.i18n.t('ai_config.test_interrupted');
       default:
         return this.i18n.t('ai_config.pendiente');
     }

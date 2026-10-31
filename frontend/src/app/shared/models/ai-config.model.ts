@@ -22,6 +22,8 @@ export interface AIProviderConfig {
   lastTested?: Date;
   testStatus?: TestStatus;
   testError?: string;
+  testStartedAt?: Date;
+  testLatencyMs?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -37,7 +39,7 @@ export interface AiFunctionProviderAssignment {
 
 export type AIProvider = 'openai' | 'custom';
 
-export type TestStatus = 'idle' | 'testing' | 'success' | 'failed';
+export type TestStatus = 'idle' | 'testing' | 'success' | 'failed' | 'interrupted';
 
 export interface AIRequestConfig {
   recipeGeneration: RecipeGenerationConfig;
@@ -284,6 +286,14 @@ export interface AITestConnectionResponse {
   /** Lo que el modelo contesto cuando la prueba pasa (el JSON pedido, validado en el server). */
   message?: string;
 }
+
+/** Immediate acknowledgement for a persisted test that continues on the server. */
+export interface AITestConnectionStarted {
+  status: 'testing';
+  configId: string;
+}
+
+export type AITestConnectionOutcome = AITestConnectionResponse | AITestConnectionStarted;
 
 export const AI_PROVIDER_LABELS: Record<AIProvider, string> = {
   openai: 'OpenAI',

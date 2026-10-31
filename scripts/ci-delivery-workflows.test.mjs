@@ -42,6 +42,7 @@ test('builds and smokes both PR image architectures without registry writes or s
   assert.match(smoke, /load:\s*true/);
   assert.match(smoke, /cache-to:.*ignore-error=true/);
   assert.match(smoke, /scripts\/container-smoke\.mjs/);
+  assert.match(smoke, /Smoke Nginx cache and security headers[\s\S]*scripts\/nginx-static-headers-smoke\.mjs/);
   assert.match(smoke, /docker inspect --format='\{\{\.State\.Health\.Status\}\}'/);
 });
 
@@ -80,6 +81,7 @@ test('publishes GHCR manifests from native architecture builds on the default br
   );
   assert.match(build, /org\.opencontainers\.image\.version=\$\{\{ github\.sha \}\}/);
   assert.match(build, /:\$\{\{ github\.sha \}\}-\$\{\{ matrix\.arch \}\}/);
+  assert.match(build, /org\.opencontainers\.image\.revision=\$\{\{ github\.sha \}\}/);
   assert.match(build, /push:\s*true/);
   assert.match(build, /cache-to:.*ignore-error=true/);
   assert.doesNotMatch(publish, /setup-qemu-action/);
@@ -116,6 +118,10 @@ test('publishes GHCR manifests from native architecture builds on the default br
   assert.match(smoke, /runs-on:\s*\$\{\{ matrix\.runner \}\}/);
   assert.match(smoke, /packages:\s*read/);
   assert.match(smoke, /docker pull --platform "\$PLATFORM"/);
+  assert.match(
+    smoke,
+    /EXPECTED_IMAGE_REF:\s*\$\{\{ steps\.image\.outputs\.name \}\}:\$\{\{ github\.sha \}\}/
+  );
   assert.match(smoke, /scripts\/container-smoke\.mjs/);
   assert.match(smoke, /docker inspect --format='\{\{\.State\.Health\.Status\}\}'/);
   assert.doesNotMatch(publish, /pull_request_target/);

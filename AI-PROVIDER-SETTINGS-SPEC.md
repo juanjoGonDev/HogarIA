@@ -56,6 +56,7 @@
 - [x] UI y esquemas de alta/edición/test aceptan timeout positivo hasta el máximo técnico de Node.js (`2_147_483_647` ms), sin cap de producto visible, con default de 30000 ms al omitirlo.
 - [x] El lease normal de job supera el timeout efectivo de la configuración fijada en 60 s; recibos cubren hasta dos ventanas de timeout más 60 s por el fallback stream→llamada completa. Probado en límites, config guardada/no guardada y lease persistida.
 - [x] Persistir `testing` de config guardada antes de lanzar el test. Una petición concurrente o posterior a recarga no inicia otra ejecución; la UI recupera/polleará el estado y libera el control al terminar.
+- [x] Mientras la prueba guardada está activa, impedir borrarla desde la UI y rechazar atómicamente el DELETE en servidor (incluidas pestañas desactualizadas); informar del conflicto y actualizar estado. Si un snapshot autoritativo ya no la contiene, limpiar el estado pendiente.
 - [x] Cubrir éxito, respuesta fallida/error de proveedor, abort/timeout del dispatcher, recarga, concurrencia, caída/reinicio y recuperación de `testing` obsoleto. Los datos sensibles no se devuelven ni escriben en jobs; el lock recupera estado terminal.
 - [x] Mantener la prueba de formulario sin guardar y probar validación/resultado/error. No se almacena su payload ni API key en storage persistente; recargar cierra el formulario y no reenvía la ejecución.
 

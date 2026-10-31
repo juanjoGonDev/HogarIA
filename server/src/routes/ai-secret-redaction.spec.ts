@@ -90,17 +90,25 @@ describe('redacción de secretos en la configuración IA', () => {
 
     const tested = await request('POST', '/test-connection', { configId });
     const testedText = await tested.text();
-    const stored = db
-      .prepare('SELECT test_status, test_error FROM ai_configs WHERE id = ? AND user_id = ?')
-      .get(configId, user.id) as { test_status: string; test_error: string | null };
+    const result = JSON.parse(testedText) as { data?: { status?: string; configId?: string } };
+    let stored: { test_status: string; test_error: string | null } | undefined;
+    await vi.waitFor(() => {
+      stored = db
+        .prepare('SELECT test_status, test_error FROM ai_configs WHERE id = ? AND user_id = ?')
+        .get(configId, user.id) as { test_status: string; test_error: string | null } | undefined;
+      expect(stored?.test_status).toBe('failed');
+    });
     const listed = await request('GET', '/configs');
     const listedText = await listed.text();
 
-    expect(tested.status).toBe(200);
-    expect(stored.test_status).toBe('failed');
-    expect(stored.test_error).toBe('HTTP 401');
-    expect(`${testedText}\n${stored.test_error}\n${listedText}`).not.toContain(SECRET);
-    expect(testedText).toContain('HTTP 401');
+    expect(tested.status).toBe(202);
+    expect(result.data).toEqual({ status: 'testing', configId });
+    expect(stored?.test_status).toBe('failed');
+    expect(stored?.test_error).toBe(
+      'No se pudo completar la prueba de conexión. Revisa URL, modelo y credenciales.'
+    );
+    expect(`${testedText}\n${stored?.test_error}\n${listedText}`).not.toContain(SECRET);
+    expect(testedText).toContain('testing');
     expect(listedText).not.toContain('api_key');
   });
 

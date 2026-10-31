@@ -40,16 +40,19 @@ describe('AiConfigComponent', () => {
   let confirm: jasmine.SpyObj<ConfirmService>;
 
   function createAiService() {
-    return {
+    const mock = {
       configs: signal<AIProviderConfig[]>([]),
       configsLoading: signal(false),
       configsError: signal(false),
       functionProviders: signal<AiFunctionProviderAssignment[]>([]),
       loadConfigs: jasmine.createSpy('loadConfigs'),
+      loadConfigsSnapshot: jasmine
+        .createSpy('loadConfigsSnapshot')
+        .and.callFake(() => of(mock.configs())),
       loadFunctionProviders: jasmine.createSpy('loadFunctionProviders'),
       createConfig: jasmine.createSpy('createConfig').and.returnValue(of(CONFIG)),
       updateConfig: jasmine.createSpy('updateConfig').and.returnValue(of(CONFIG)),
-      deleteConfig: jasmine.createSpy('deleteConfig').and.returnValue(of(true)),
+      deleteConfig: jasmine.createSpy('deleteConfig').and.returnValue(of({ deleted: true })),
       assignFunctionProvider: jasmine
         .createSpy('assignFunctionProvider')
         .and.callFake((functionKey: AiFunctionKey, configId: string) =>
@@ -63,6 +66,8 @@ describe('AiConfigComponent', () => {
         .createSpy('testConnection')
         .and.returnValue(of({ success: true, model: 'gpt-test', latency: 12 }))
     };
+    mock.loadConfigs.and.callFake(() => mock.loadConfigsSnapshot().subscribe());
+    return mock;
   }
 
   const i18n = {
@@ -411,6 +416,90 @@ describe('AiConfigComponent', () => {
     expect(component.probandoForm()).toBeFalse();
   });
 
+  it('reuses a saved config for form tests when its API key is left blank', () => {
+    component.editConfig(CONFIG);
+    component.testFromForm();
+
+    expect(service.testConnection).toHaveBeenCalledWith({ configId: CONFIG.id });
+    expect(toast.warning).not.toHaveBeenCalled();
+  });
+
+  it('uses a newly supplied API key for a form test while editing', () => {
+    component.editConfig(CONFIG);
+    component.formData.apiKey = 'sk-rotated-synthetic';
+    component.testFromForm();
+
+    expect(service.testConnection).toHaveBeenCalledWith({
+      baseUrl: CONFIG.baseUrl,
+      apiKey: 'sk-rotated-synthetic',
+      model: CONFIG.model,
+      timeout: CONFIG.timeout
+    });
+  });
+
+  it('keeps a 202 accepted saved test pending and polls persisted completion', fakeAsync(() => {
+    const running = { ...CONFIG, testStatus: 'testing' as const };
+    const completed = {
+      ...CONFIG,
+      testStatus: 'success' as const,
+      testLatencyMs: 10
+    } as AIProviderConfig & { testLatencyMs: number };
+    const snapshots = [[running], [completed]];
+    service.loadConfigsSnapshot.and.callFake(() => {
+      const next = snapshots.shift() ?? [completed];
+      service.configs.set(next);
+      return of(next);
+    });
+    service.testConnection.and.returnValue(of({ status: 'testing', configId: CONFIG.id } as never));
+
+    fixture.destroy();
+    service.loadConfigs.and.stub();
+    service.loadConfigsSnapshot.calls.reset();
+    fixture = TestBed.createComponent(AiConfigComponent);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    component.testConfig(CONFIG);
+    fixture.detectChanges();
+
+    expect(component.probandoId()).toBe(CONFIG.id);
+    expect(component.isTestResultOpen()).toBeFalse();
+    expect(service.testConnection).toHaveBeenCalledTimes(1);
+    expect(service.loadConfigsSnapshot).toHaveBeenCalledTimes(1);
+
+    tick(2000);
+    fixture.detectChanges();
+
+    expect(component.probandoId()).toBeNull();
+    expect(component.testResult()).toEqual({
+      success: true,
+      model: CONFIG.model,
+      latency: 10,
+      error: undefined
+    });
+    expect(component.isTestResultOpen()).toBeTrue();
+    expect(service.testConnection).toHaveBeenCalledTimes(1);
+  }));
+
+  it('stops component polling on destroy without cancelling or restarting the server test', fakeAsync(() => {
+    const running = { ...CONFIG, testStatus: 'testing' as const };
+    service.loadConfigsSnapshot.and.returnValue(of([running]));
+    service.testConnection.and.returnValue(of({ status: 'testing', configId: CONFIG.id } as never));
+
+    fixture.destroy();
+    service.loadConfigs.and.stub();
+    service.loadConfigsSnapshot.calls.reset();
+    fixture = TestBed.createComponent(AiConfigComponent);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    component.testConfig(CONFIG);
+    const pollCountOnDestroy = service.loadConfigsSnapshot.calls.count();
+    fixture.destroy();
+    tick(6000);
+
+    expect(service.testConnection).toHaveBeenCalledTimes(1);
+    expect(service.loadConfigsSnapshot).toHaveBeenCalledTimes(pollCountOnDestroy);
+  }));
+
   it('serializes saved tests and refreshes the persisted status after a response', () => {
     const pending = new Subject<{ success: boolean; model: string; latency: number }>();
     service.testConnection.and.returnValue(pending);
@@ -431,11 +520,25 @@ describe('AiConfigComponent', () => {
     expect(component.isTestResultOpen()).toBeTrue();
   });
 
+  it('prevents starting another saved or form test while any persisted test is running', () => {
+    service.configs.set([
+      { ...CONFIG, testStatus: 'testing' as const },
+      { ...CONFIG, id: 'other-provider', name: 'Other provider' }
+    ]);
+
+    component.testConfig({ ...CONFIG, id: 'other-provider', testStatus: 'idle' });
+    component.testFromForm();
+
+    expect(service.testConnection).not.toHaveBeenCalled();
+    expect(toast.warning).not.toHaveBeenCalled();
+  });
+
   it('polls a persisted test after reload and blocks a duplicate test action', fakeAsync(() => {
     const testingConfig = { ...CONFIG, testStatus: 'testing' as const };
     service.configs.set([testingConfig]);
     fixture.destroy();
     service.loadConfigs.calls.reset();
+    service.loadConfigsSnapshot.calls.reset();
     fixture = TestBed.createComponent(AiConfigComponent);
     component = fixture.componentInstance;
     fixture.detectChanges();
@@ -446,9 +549,70 @@ describe('AiConfigComponent', () => {
       (fixture.nativeElement.querySelector(`[data-test="probar-${CONFIG.name}"]`) as HTMLElement)
         .textContent
     ).toContain('ai_config.comprobando');
+    expect(
+      (
+        fixture.nativeElement.querySelector(
+          `[data-test="probar-${CONFIG.name}"] button`
+        ) as HTMLButtonElement
+      ).disabled
+    ).toBeTrue();
 
     tick(2000);
-    expect(service.loadConfigs).toHaveBeenCalledTimes(2);
+    expect(service.loadConfigsSnapshot).toHaveBeenCalledTimes(2);
+  }));
+
+  it('shows a saved test interrupted by server restart as a terminal result', fakeAsync(() => {
+    const testingConfig = { ...CONFIG, testStatus: 'testing' as const };
+    const interruptedConfig = {
+      ...CONFIG,
+      testStatus: 'interrupted' as const,
+      testError: 'Connection test interrupted after server restart'
+    };
+    service.testConnection.and.returnValue(of({ status: 'testing', configId: CONFIG.id } as never));
+    service.loadConfigsSnapshot.and.returnValue(of([testingConfig]));
+
+    fixture.destroy();
+    service.loadConfigs.and.stub();
+    service.loadConfigsSnapshot.calls.reset();
+    fixture = TestBed.createComponent(AiConfigComponent);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    component.testConfig(CONFIG);
+
+    service.loadConfigsSnapshot.and.returnValue(of([interruptedConfig]));
+    tick(2000);
+
+    expect(component.probandoId()).toBeNull();
+    expect(component.testResult()).toEqual({
+      success: false,
+      model: CONFIG.model,
+      latency: undefined,
+      error: 'ai_config.test_interrupted'
+    });
+    expect(component.isTestResultOpen()).toBeTrue();
+    expect(component.getTestStatusLabel('interrupted')).toBe('ai_config.test_interrupted');
+  }));
+
+  it('releases the pending state when another tab deletes the tested config', fakeAsync(() => {
+    const runningConfig = { ...CONFIG, testStatus: 'testing' as const };
+    service.testConnection.and.returnValue(of({ status: 'testing', configId: CONFIG.id } as never));
+    service.loadConfigsSnapshot.and.returnValue(of([runningConfig]));
+
+    fixture.destroy();
+    service.loadConfigs.and.stub();
+    service.loadConfigsSnapshot.calls.reset();
+    fixture = TestBed.createComponent(AiConfigComponent);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    component.testConfig(CONFIG);
+
+    expect(component.isDeleteActionDisabled(runningConfig)).toBeTrue();
+    service.loadConfigsSnapshot.and.returnValue(of([]));
+    tick(2000);
+
+    expect(component.probandoId()).toBeNull();
+    expect(component.probandoForm()).toBeFalse();
+    expect(component.isTestResultOpen()).toBeFalse();
   }));
 
   it('handles active toggle and failed update without a false success toast', () => {
@@ -489,9 +653,18 @@ describe('AiConfigComponent', () => {
     expect(service.deleteConfig).toHaveBeenCalledWith(CONFIG.id);
     expect(toast.success).toHaveBeenCalled();
 
-    service.deleteConfig.and.returnValue(of(false));
+    service.deleteConfig.and.returnValue(of({ deleted: false, reason: 'unknown' } as never));
     await component.deleteConfig(CONFIG);
     expect(toast.error).toHaveBeenCalled();
+  });
+
+  it('explains when the server refuses deletion because another tab is testing the config', async () => {
+    service.deleteConfig.and.returnValue(of({ deleted: false, reason: 'test_running' } as never));
+
+    await component.deleteConfig(CONFIG);
+
+    expect(toast.error).toHaveBeenCalledWith('ui.error', 'ai_config.test_running_delete');
+    expect(service.loadConfigs).toHaveBeenCalledTimes(2);
   });
 
   it('names assigned functions in the explicit deletion confirmation', async () => {

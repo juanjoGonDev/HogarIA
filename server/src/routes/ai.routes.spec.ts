@@ -298,6 +298,28 @@ describe('proveedores de IA por función', () => {
       )
     ).toMatchObject({ configId: oldest.id, providerName: 'Casa A antigua' });
   });
+
+  it('rejects deletion while the saved connection test is running', async () => {
+    const config = await crearConfig(alice, 'Prueba activa');
+    await call(alice, 'PUT', '/function-providers/assistant', { configId: config.id });
+    db.prepare("UPDATE ai_configs SET test_status = 'testing' WHERE id = ?").run(config.id);
+
+    const response = await call(alice, 'DELETE', `/configs/${config.id}`);
+
+    expect(response.status).toBe(409);
+    expect(await json(response)).toMatchObject({
+      success: false,
+      code: 'AI_CONFIG_TEST_RUNNING'
+    });
+    expect(db.prepare('SELECT test_status FROM ai_configs WHERE id = ?').get(config.id)).toEqual({
+      test_status: 'testing'
+    });
+    expect(
+      (await data(await call(alice, 'GET', '/function-providers'))).find(
+        (item: any) => item.functionKey === 'assistant'
+      )
+    ).toMatchObject({ configId: config.id, providerName: 'Prueba activa' });
+  });
 });
 
 describe('permisos de configuración IA por hogar', () => {
@@ -404,7 +426,7 @@ describe('permisos de configuración IA por hogar', () => {
 });
 
 describe('POST /test-connection', () => {
-  it('acepta timeout sin límite de producto en alta, edición y prueba; rechaza fuera del rango técnico', async () => {
+  it('acepta timeouts sin límite de producto en alta, edición y prueba; rechaza fuera del rango técnico', async () => {
     const defaultConfig = await crearConfig(alice, 'Default provider');
     expect(defaultConfig.timeout).toBe(30000);
 
@@ -478,59 +500,155 @@ describe('POST /test-connection', () => {
     expect(oneMillisecondTest.status).toBe(200);
   });
 
-  it('persiste testing antes del proveedor y rechaza duplicado mientras sigue en curso', async () => {
+  it('persiste el estado antes del proveedor, deduplica pruebas activas y devuelve 202', async () => {
     const config = await crearConfig(alice, 'Slow provider');
     let releaseProvider!: (response: Response) => void;
     let markProviderStarted!: () => void;
     let providerCalls = 0;
-    const started = new Promise<void>((resolve) => (markProviderStarted = resolve));
+    const providerStarted = new Promise<void>((resolve) => (markProviderStarted = resolve));
     const providerResponse = new Promise<Response>((resolve) => (releaseProvider = resolve));
-    vi.stubGlobal('fetch', (async () => {
-      providerCalls += 1;
-      markProviderStarted();
-      return providerResponse;
-    }) as unknown as typeof fetch);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => {
+        providerCalls += 1;
+        markProviderStarted();
+        return providerResponse;
+      }) as unknown as typeof fetch
+    );
 
-    const firstRequest = call(alice, 'POST', '/test-connection', { configId: config.id });
-    await started;
+    const successfulResponse = () =>
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: '{"status":"ok","message":"conexión establecida"}' } }]
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      );
+
     try {
-      expect(
-        (db.prepare('SELECT test_status FROM ai_configs WHERE id = ?').get(config.id) as any)
-          .test_status
-      ).toBe('testing');
+      const responses = await Promise.all([
+        call(alice, 'POST', '/test-connection', { configId: config.id }),
+        call(alice, 'POST', '/test-connection', { configId: config.id })
+      ]);
+      expect(responses.map((response) => response.status)).toEqual([202, 202]);
+      for (const response of responses) {
+        expect(await data(response)).toMatchObject({ status: 'testing', configId: config.id });
+      }
+
+      const initial = db
+        .prepare(
+          'SELECT test_status, test_error, test_started_at, test_latency_ms FROM ai_configs WHERE id = ?'
+        )
+        .get(config.id) as {
+        test_status: string | null;
+        test_error: string | null;
+        test_started_at: string | null;
+        test_latency_ms: number | null;
+      };
+      expect(initial).toMatchObject({
+        test_status: 'testing',
+        test_error: null,
+        test_latency_ms: null
+      });
+      expect(initial.test_started_at).toBeTruthy();
+
       const refreshedConfig = (await data(await call(alice, 'GET', '/configs')))[0];
-      expect(refreshedConfig.testStatus).toBe('testing');
+      expect(refreshedConfig).toMatchObject({
+        id: config.id,
+        testStatus: 'testing',
+        testError: null,
+        testLatencyMs: null
+      });
+      expect(refreshedConfig.testStartedAt).toBeTruthy();
       expect(refreshedConfig).not.toHaveProperty('apiKey');
       expect(refreshedConfig).not.toHaveProperty('api_key');
 
-      const duplicate = await call(alice, 'POST', '/test-connection', { configId: config.id });
-      expect(duplicate.status).toBe(409);
+      await providerStarted;
+      const repeated = await call(alice, 'POST', '/test-connection', { configId: config.id });
+      expect(repeated.status).toBe(202);
+      expect(await data(repeated)).toMatchObject({ status: 'testing', configId: config.id });
       expect(providerCalls).toBe(1);
       expect(
         (
-          db.prepare("SELECT COUNT(*) AS n FROM ai_jobs WHERE kind = 'connection_test'").get() as {
-            n: number;
-          }
+          db
+            .prepare(
+              "SELECT COUNT(*) AS n FROM ai_jobs WHERE config_id = ? AND kind = 'connection_test'"
+            )
+            .get(config.id) as { n: number }
         ).n
       ).toBe(1);
     } finally {
-      releaseProvider(
-        new Response(
-          JSON.stringify({ choices: [{ message: { content: '{"status":"ok","message":"ok"}' } }] }),
-          {
-            status: 200
-          }
-        )
-      );
-      await firstRequest;
+      releaseProvider(successfulResponse());
     }
-    expect(
-      (db.prepare('SELECT test_status FROM ai_configs WHERE id = ?').get(config.id) as any)
-        .test_status
-    ).toBe('success');
+
+    await vi.waitFor(() => {
+      const final = db
+        .prepare(
+          'SELECT test_status, test_error, test_started_at, test_latency_ms FROM ai_configs WHERE id = ?'
+        )
+        .get(config.id) as {
+        test_status: string | null;
+        test_error: string | null;
+        test_started_at: string | null;
+        test_latency_ms: number | null;
+      };
+      expect(final).toMatchObject({
+        test_status: 'success',
+        test_error: null,
+        test_started_at: null
+      });
+      expect(typeof final.test_latency_ms).toBe('number');
+    });
+    expect(providerCalls).toBe(1);
+    const completedConfig = (await data(await call(alice, 'GET', '/configs')))[0];
+    expect(completedConfig.testStatus).toBe('success');
+    expect(completedConfig.testLatencyMs).toEqual(expect.any(Number));
+    expect(completedConfig.testStartedAt).toBeNull();
   });
 
-  it('recupera estado testing interrumpido al reconstruir la cola tras un reinicio', async () => {
+  it('no inicia una prueba para una configuración fuera del scope del usuario', async () => {
+    const other = await makeUser('other-ai-owner@test.local');
+    const otherConfig = await crearConfig(other, 'Private provider');
+    const response = await call(alice, 'POST', '/test-connection', { configId: otherConfig.id });
+
+    expect(response.status).toBe(404);
+    expect(
+      await db.prepare('SELECT test_status FROM ai_configs WHERE id = ?').get(otherConfig.id)
+    ).toEqual({ test_status: null });
+  });
+
+  it('persiste un fallo terminal sin guardar credenciales repetidas por el proveedor', async () => {
+    const config = await crearConfig(alice, 'Local');
+    const secret = 'fixture-secret-not-to-persist';
+    db.prepare('UPDATE ai_configs SET api_key = ? WHERE id = ?').run(secret, config.id);
+    vi.stubGlobal(
+      'fetch',
+      (async () => new Response(`Invalid API key: ${secret}`, { status: 401 })) as typeof fetch
+    );
+
+    const response = await call(alice, 'POST', '/test-connection', { configId: config.id });
+    expect(response.status).toBe(202);
+    const responseText = await response.text();
+    expect(responseText).toContain('testing');
+    expect(responseText).not.toContain(secret);
+
+    await vi.waitFor(() => {
+      const row = db
+        .prepare('SELECT test_status, test_error, test_latency_ms FROM ai_configs WHERE id = ?')
+        .get(config.id) as {
+        test_status: string | null;
+        test_error: string | null;
+        test_latency_ms: number | null;
+      };
+      expect(row.test_status).toBe('failed');
+      expect(row.test_error).toBe(
+        'No se pudo completar la prueba de conexión. Revisa URL, modelo y credenciales.'
+      );
+      expect(row.test_error).not.toContain(secret);
+      expect(typeof row.test_latency_ms).toBe('number');
+    });
+  });
+
+  it('recovery de la cola libera el estado testing interrumpido', async () => {
     const config = await crearConfig(alice, 'Interrupted provider');
     db.prepare("UPDATE ai_configs SET test_status = 'testing', test_error = NULL WHERE id = ?").run(
       config.id
@@ -539,69 +657,48 @@ describe('POST /test-connection', () => {
     const { barrerArranque } = await import('../utils/ticket-queue.js');
     barrerArranque(db);
 
-    const estado = db
+    const state = db
       .prepare('SELECT test_status, test_error FROM ai_configs WHERE id = ?')
       .get(config.id) as { test_status: string; test_error: string };
-    expect(estado.test_status).toBe('failed');
-    expect(estado.test_error).toMatch(/interrump/i);
+    expect(state.test_status).toBe('failed');
+    expect(state.test_error).toMatch(/interrump/i);
   });
 
-  it('la config guardada se prueba con el JSON dado, y el estado queda en la fila', async () => {
-    const config = await crearConfig(alice, 'Local');
+  it('prueba el formulario sin guardar y no persiste su configuración', async () => {
     stubDelProveedor('{"status":"ok","message":"conexión establecida"}');
 
-    const respuesta = await call(alice, 'POST', '/test-connection', { configId: config.id });
-    expect(respuesta.status).toBe(200);
-    const cuerpo = await data(respuesta);
-    expect(cuerpo.success).toBe(true);
-    expect(cuerpo.model).toBe('gpt-5');
-    expect(typeof cuerpo.latency).toBe('number');
-
-    const fila = db
-      .prepare('SELECT test_status, test_error FROM ai_configs WHERE id = ?')
-      .get(config.id) as { test_status: string | null; test_error: string | null };
-    expect(fila.test_status).toBe('success');
-    expect(fila.test_error).toBeNull();
-  });
-
-  it('el modelo que no devuelve el JSON pedido suspende la prueba, con su error en la fila', async () => {
-    const config = await crearConfig(alice, 'Local');
-    stubDelProveedor('Hello! How can I help you today?');
-
-    const respuesta = await call(alice, 'POST', '/test-connection', { configId: config.id });
-    const cuerpo = await data(respuesta);
-    expect(cuerpo.success).toBe(false);
-    expect(cuerpo.error).toContain('no devolvió el JSON pedido');
-
-    const fila = db
-      .prepare('SELECT test_status, test_error FROM ai_configs WHERE id = ?')
-      .get(config.id) as { test_status: string | null; test_error: string | null };
-    expect(fila.test_status).toBe('failed');
-    expect(fila.test_error).toContain('no devolvió el JSON pedido');
-  });
-
-  it('se puede probar desde el formulario (sin guardar): el veredicto si, la fila no', async () => {
-    stubDelProveedor('{"status":"ok","message":"conexión establecida"}');
-
-    const respuesta = await call(alice, 'POST', '/test-connection', {
+    const response = await call(alice, 'POST', '/test-connection', {
       baseUrl: 'http://localhost:9',
       apiKey: 'sk-x',
       model: 'gpt-5'
     });
-    expect(respuesta.status).toBe(200);
-    const cuerpo = await data(respuesta);
-    expect(cuerpo.success).toBe(true);
-
-    // Sin configId no hay fila que tocar: la casa aun no ha guardado nada.
+    expect(response.status).toBe(200);
+    expect((await data(response)).success).toBe(true);
     expect((db.prepare('SELECT COUNT(*) AS n FROM ai_configs').get() as { n: number }).n).toBe(0);
   });
 
-  it('sin configId y sin datos de formulario no hay prueba que hacer', async () => {
-    const respuesta = await call(alice, 'POST', '/test-connection', {});
-    expect(respuesta.status).toBe(400);
+  it('devuelve un error seguro si falla el proveedor al probar desde el formulario', async () => {
+    const secret = 'fixture-error-secret';
+    vi.stubGlobal('fetch', (async () => {
+      throw new Error(`provider failure containing ${secret}`);
+    }) as typeof fetch);
+
+    const response = await call(alice, 'POST', '/test-connection', {
+      baseUrl: 'http://localhost:9',
+      apiKey: secret,
+      model: 'gpt-5'
+    });
+    expect(response.status).toBe(200);
+    const text = await response.text();
+    expect(text).toContain('No se pudo conectar con el proveedor');
+    expect(text).not.toContain(secret);
+  });
+
+  it('sin configId ni datos de formulario no hay prueba que hacer', async () => {
+    const response = await call(alice, 'POST', '/test-connection', {});
+    expect(response.status).toBe(400);
   });
 });
-
 const recetaGenerada = {
   name: 'Lentejas de prueba',
   description: 'Una receta determinista de prueba.',

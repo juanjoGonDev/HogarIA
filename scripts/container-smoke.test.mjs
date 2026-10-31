@@ -3,8 +3,8 @@ import { test } from 'node:test';
 
 import { verifyContainerSmoke } from './container-smoke.mjs';
 
-const health = () =>
-  new Response(JSON.stringify({ status: 'ok', uptime: 1, version: '1.0.0' }), {
+const health = (imageRef = 'ghcr.io/juanjoGonDev/hogaria:0123456789abcdef0123456789abcdef01234567') =>
+  new Response(JSON.stringify({ status: 'ok', uptime: 1, version: '1.0.0', imageRef }), {
     status: 200,
     headers: { 'content-type': 'application/json' }
   });
@@ -78,6 +78,45 @@ test('fails when the server never becomes healthy', async () => {
       sleep: async () => {}
     })
     //health did not become ready/
+  );
+});
+
+test('fails closed when health does not include the image reference', async () => {
+  const fetcher = async (input, init = {}) => {
+    const url = new URL(input);
+    if (url.pathname === '/health' || url.pathname === '/api/health') return health('');
+    return healthyFetcher()(input, init);
+  };
+
+  await assert.rejects(
+    verifyContainerSmoke('http://127.0.0.1:3000', {
+      fetcher,
+      timeoutMs: 50,
+      pollIntervalMs: 0
+    }),
+    /did not become ready.*invalid health payload/
+  );
+});
+
+test('rejects an image ref that differs from the expected published ref', async () => {
+  await assert.rejects(
+    verifyContainerSmoke('http://127.0.0.1:3000', {
+      fetcher: healthyFetcher(),
+      timeoutMs: 50,
+      pollIntervalMs: 0,
+      expectedImageRef: 'ghcr.io/juanjoGonDev/hogaria:deadbeef'
+    }),
+    /did not become ready.*does not match the expected image ref/
+  );
+});
+
+test('rejects a blank expected image reference', async () => {
+  await assert.rejects(
+    verifyContainerSmoke('http://127.0.0.1:3000', {
+      fetcher: healthyFetcher(),
+      expectedImageRef: '   '
+    }),
+    /expectedImageRef must not be blank/
   );
 });
 

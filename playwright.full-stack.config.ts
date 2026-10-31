@@ -41,7 +41,8 @@ export default defineConfig({
     '**/rate-limit.spec.ts',
     '**/request-budget.spec.ts',
     '**/served-app.spec.ts',
-    '**/logs-live.spec.ts'
+    '**/logs-live.spec.ts',
+    '**/service-worker-update.spec.ts'
   ],
   // La misma semilla del run: el reporter y el backend tienen que ver lo mismo.
   globalSetup: './tests/e2e/global-setup.ts',

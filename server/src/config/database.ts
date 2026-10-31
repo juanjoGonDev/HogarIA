@@ -95,8 +95,26 @@ export async function initializeDatabase(): Promise<void> {
 
   // Run migrations
   await runMigrations(db);
+  recoverInterruptedAiConnectionTests(db);
 
   console.log('Database configured with WAL mode and low memory settings');
+}
+
+/** A background connection probe cannot survive a server process restart; never leave it pending forever. */
+export function recoverInterruptedAiConnectionTests(
+  database: Database.Database = getDatabase()
+): number {
+  const recovered = database
+    .prepare(
+      `UPDATE ai_configs
+          SET test_status = 'interrupted',
+              test_error = 'Connection test interrupted after server restart',
+              test_started_at = NULL,
+              test_latency_ms = NULL
+        WHERE test_status = 'testing'`
+    )
+    .run();
+  return recovered.changes;
 }
 
 async function runMigrations(db: Database.Database): Promise<void> {
@@ -514,6 +532,8 @@ async function runMigrations(db: Database.Database): Promise<void> {
       last_tested DATETIME,
       test_status TEXT,
       test_error TEXT,
+      test_started_at DATETIME,
+      test_latency_ms INTEGER,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id),
@@ -1024,6 +1044,8 @@ async function runMigrations(db: Database.Database): Promise<void> {
   addColumnIfMissing('ai_configs', 'last_tested', 'DATETIME');
   addColumnIfMissing('ai_configs', 'test_status', 'TEXT');
   addColumnIfMissing('ai_configs', 'test_error', 'TEXT');
+  addColumnIfMissing('ai_configs', 'test_started_at', 'DATETIME');
+  addColumnIfMissing('ai_configs', 'test_latency_ms', 'INTEGER');
   addColumnIfMissing('ai_configs', 'created_at', 'DATETIME');
   addColumnIfMissing('ai_configs', 'updated_at', 'DATETIME');
   db.exec(

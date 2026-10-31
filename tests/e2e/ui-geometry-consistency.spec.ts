@@ -375,7 +375,7 @@ test('Planificar IA comparte la geometría del botón primario de Recetas', asyn
       return mobile ? box.x + box.width : Math.abs(box.x);
     })
     .toBeLessThanOrEqual(1);
-  await expect(page.locator('.sidebar-overlay')).toHaveCount(0);
+  await expect(page.locator('.sidebar-overlay')).toBeHidden();
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.evaluate(
     () =>

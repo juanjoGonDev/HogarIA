@@ -1,5 +1,6 @@
 import { test, expect } from './fixtures';
 import { registerAndGoto } from './helpers/auth';
+import { createServer } from 'node:http';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -893,6 +894,105 @@ test.describe('AI Config', () => {
     await testButton.click();
     await expect(page.locator('.test-result__title')).toContainText('Error de conexión');
     await expect(card.locator('.config-card__status app-badge').last()).toContainText('Error');
+  });
+
+  test('one saved AI test survives closing the page and resumes after reopening', async ({
+    page,
+    context
+  }, testInfo) => {
+    let providerCalls = 0;
+    const provider = createServer((_request, response) => {
+      providerCalls += 1;
+      setTimeout(() => {
+        response.writeHead(200, { 'content-type': 'application/json' });
+        response.end(
+          JSON.stringify({
+            choices: [{ message: { content: '{"status":"ok","message":"synthetic success"}' } }]
+          })
+        );
+      }, 8000);
+    });
+    await new Promise<void>((resolve, reject) => {
+      provider.once('error', reject);
+      provider.listen(0, '127.0.0.1', resolve);
+    });
+    const address = provider.address();
+    if (!address || typeof address === 'string') {
+      throw new Error('Synthetic provider did not bind to a TCP port');
+    }
+
+    try {
+      const name = 'Background test synthetic';
+      await page
+        .getByRole('button', { name: /Agregar configuración/ })
+        .first()
+        .click();
+      await page.fill('input#name', name);
+      await page.fill('input#model', 'gpt-test');
+      await page.fill('input#baseUrl', `http://127.0.0.1:${address.port}/v1`);
+      await page.fill('input#apiKey', 'synthetic-only-provider-key');
+      await page.locator('app-modal button[type="submit"]').click();
+
+      const card = page.locator('.config-card').filter({ hasText: name });
+      await expect(card).toBeVisible();
+      const accepted = page.waitForResponse(
+        (response) =>
+          response.request().method() === 'POST' &&
+          new URL(response.url()).pathname.endsWith('/api/ai/test-connection')
+      );
+      await card.getByRole('button', { name: /Probar/ }).click();
+      expect((await accepted).status()).toBe(202);
+      await expect(card.getByRole('button', { name: /Comprobando/ })).toBeDisabled();
+      await expect(card.locator('.config-card__status app-badge').last()).toContainText('Probando');
+
+      // Close the tab after the API has accepted the run. A newly opened page must recover it
+      // from the server; it must not POST a second provider probe.
+      await page.close();
+      const reopened = await context.newPage();
+      await reopened.goto('/ai-config');
+      const reopenedCard = reopened.locator('.config-card').filter({ hasText: name });
+      const runningButton = reopenedCard.getByRole('button', { name: /Comprobando/ });
+      await expect(runningButton).toBeDisabled();
+      await expect(reopenedCard.locator('.config-card__status app-badge').last()).toContainText(
+        'Probando'
+      );
+
+      const screenshotDirectory = process.env.E2E_SCREENSHOT_DIR;
+      if (screenshotDirectory) {
+        const isMobile = testInfo.project.name === 'mobile-chrome';
+        mkdirSync(screenshotDirectory, { recursive: true });
+        await reopened.setViewportSize(
+          isMobile ? { width: 393, height: 852 } : { width: 1440, height: 900 }
+        );
+        await reopened.screenshot({
+          path: join(screenshotDirectory, `ai-test-running-${isMobile ? 'mobile' : 'desktop'}.png`),
+          animations: 'disabled'
+        });
+      }
+
+      if (testInfo.project.name === 'mobile-chrome') {
+        for (const viewport of [
+          { width: 320, height: 568 },
+          { width: 852, height: 393 }
+        ]) {
+          await reopened.setViewportSize(viewport);
+          const documentWidth = await reopened.evaluate(() => document.documentElement.scrollWidth);
+          expect(documentWidth).toBeLessThanOrEqual(viewport.width + 1);
+          await expect(runningButton).toBeVisible();
+        }
+      }
+
+      await expect(reopenedCard.locator('.config-card__status app-badge').last()).toContainText(
+        'OK',
+        { timeout: 15000 }
+      );
+      expect(providerCalls).toBe(1);
+      await reopened.close();
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        provider.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
   });
 
   test('probar desde el formulario: el boton se bloquea en «Comprobando…» y el resultado llega al terminar', async ({

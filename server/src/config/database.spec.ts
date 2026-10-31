@@ -713,3 +713,71 @@ describe('initializeDatabase con fichero heredado', () => {
     }
   });
 });
+
+describe('AI connection-test restart recovery', () => {
+  it('adds durable result columns and closes a testing row as interrupted after restart', async () => {
+    const databaseFile = target();
+    const mod = await dbModuleWith(databaseFile);
+    let restarted: DbModule | undefined;
+    try {
+      await mod.initializeDatabase();
+      const db = mod.getDatabase();
+      // Simulate a deployed legacy ai_configs table from before the background-test columns.
+      db.exec(
+        'ALTER TABLE ai_configs DROP COLUMN test_started_at; ALTER TABLE ai_configs DROP COLUMN test_latency_ms'
+      );
+      db.prepare('INSERT INTO users (id, email, name, password_hash) VALUES (?, ?, ?, ?)').run(
+        'connection-test-user',
+        'connection-test@test.invalid',
+        'Connection test',
+        'synthetic-hash'
+      );
+      db.prepare(
+        `INSERT INTO ai_configs
+          (id, user_id, name, base_url, api_key, model, test_status)
+         VALUES (?, ?, ?, ?, ?, ?, 'testing')`
+      ).run(
+        'connection-test-config',
+        'connection-test-user',
+        'Synthetic config',
+        'https://provider.invalid/v1',
+        'synthetic-secret',
+        'synthetic-model'
+      );
+
+      const legacyColumns = db.prepare('PRAGMA table_info(ai_configs)').all() as { name: string }[];
+      expect(legacyColumns.map((column) => column.name)).not.toContain('test_started_at');
+      expect(legacyColumns.map((column) => column.name)).not.toContain('test_latency_ms');
+
+      mod.closeDatabase();
+      restarted = await dbModuleWith(databaseFile);
+      await restarted.initializeDatabase();
+      const migratedColumns = restarted
+        .getDatabase()
+        .prepare('PRAGMA table_info(ai_configs)')
+        .all() as { name: string }[];
+      expect(migratedColumns.map((column) => column.name)).toContain('test_started_at');
+      expect(migratedColumns.map((column) => column.name)).toContain('test_latency_ms');
+      const recovered = restarted
+        .getDatabase()
+        .prepare(
+          'SELECT test_status, test_error, test_started_at, test_latency_ms FROM ai_configs WHERE id = ?'
+        )
+        .get('connection-test-config') as {
+        test_status: string | null;
+        test_error: string | null;
+        test_started_at: string | null;
+        test_latency_ms: number | null;
+      };
+      expect(recovered).toMatchObject({
+        test_status: 'interrupted',
+        test_error: 'Connection test interrupted after server restart',
+        test_started_at: null,
+        test_latency_ms: null
+      });
+    } finally {
+      restarted?.closeDatabase();
+      mod.closeDatabase();
+    }
+  });
+});

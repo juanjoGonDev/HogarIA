@@ -155,9 +155,11 @@ describe('estaticos', () => {
     mkdirSync(join(dir, 'assets'));
     writeFileSync(join(dir, 'assets', 'logo.svg'), '<svg/>');
     writeFileSync(join(dir, 'main-ABCDEFGH.js'), 'console.log(1)');
+    writeFileSync(join(dir, 'main.js'), 'console.log(1)');
     writeFileSync(join(dir, 'manifest.json'), '{}');
     writeFileSync(join(dir, 'ngsw.json'), '{}');
     writeFileSync(join(dir, 'ngsw-worker.js'), '/* service worker */');
+    writeFileSync(join(dir, 'safety-worker.js'), '/* safety worker */');
     mkdirSync(join(dir, 'deep'));
     writeFileSync(join(dir, 'deep', 'index.html'), '<html>deep</html>');
   });
@@ -177,6 +179,67 @@ describe('estaticos', () => {
     expect(resolveStaticAsset(dir, '/index.html%00.png')).toBeNull();
   });
 
+  it('no almacena recursos sin hash y reserva cache inmutable a bundles con hash', async () => {
+    const app = createApp({ rateLimit: null, staticDir: dir });
+
+    for (const path of [
+      '/',
+      '/index.html',
+      '/ruta-spa',
+      '/manifest.json',
+      '/ngsw.json',
+      '/ngsw-worker.js',
+      '/safety-worker.js',
+      '/main.js',
+      '/assets/logo.svg'
+    ]) {
+      const response = await app.request(path);
+      expect(response.status, path).toBe(200);
+      expect(response.headers.get('cache-control'), path).toBe(
+        'no-cache, no-store, must-revalidate'
+      );
+    }
+
+    const hashedBundle = await app.request('/main-ABCDEFGH.js');
+    expect(hashedBundle.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+  });
+
+  it('configura Nginx para no cachear recursos sin hash y reservar immutable a los hash', () => {
+    const config = readFileSync(new URL('../../nginx/nginx.conf', import.meta.url), 'utf8');
+
+    for (const path of [
+      '/index.html',
+      '/ngsw.json',
+      '/ngsw-worker.js',
+      '/safety-worker.js',
+      '/manifest.json'
+    ]) {
+      const escapedPath = path.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&');
+      const location = new RegExp(
+        `location = ${escapedPath}\\s*\\{[^}]*Cache-Control \\"no-cache, no-store, must-revalidate\\" always;[^}]*\\}`,
+        's'
+      );
+      expect(config, `nginx location ${path}`).toMatch(location);
+    }
+    expect(config).toContain(String.raw`location ~* "-[a-z0-9_-]{8,}\.(js|css|png`);
+    expect(config).not.toContain(String.raw`location ~* \.(js|css|png`);
+  });
+
+  it('conserva cabeceras de seguridad en cada location que sobrescribe Cache-Control', () => {
+    const config = readFileSync(new URL('../../nginx/nginx.conf', import.meta.url), 'utf8');
+    const cacheLocations = config
+      .split(/^\s*location\s+/m)
+      .slice(1)
+      .map((location) => location.split(/\n\s*}\s*/)[0] ?? '')
+      .filter((body) => /add_header\s+Cache-Control\b/.test(body));
+
+    expect(cacheLocations).toHaveLength(7);
+    for (const body of cacheLocations) {
+      expect(body).toMatch(/add_header\s+X-Frame-Options\s+"SAMEORIGIN"\s+always;/);
+      expect(body).toMatch(/add_header\s+X-Content-Type-Options\s+"nosniff"\s+always;/);
+    }
+  });
+
   it('encuentra el dist donde cada uno lo tiene', () => {
     const root = mkdtempSync(join(tmpdir(), 'hogaria-layout-'));
     mkdirSync(join(root, 'public', 'browser'), { recursive: true });
@@ -189,9 +252,19 @@ describe('estaticos', () => {
     expect(resolveStaticDir({}, mkdtempSync(join(tmpdir(), 'hogaria-empty-')))).toBeNull();
   });
 
-  it('revalida el shell y service worker sin cambiar la caché inmutable de chunks con hash', async () => {
+  it('no almacena recursos sin hash y reserva cache inmutable a los hash', async () => {
     const app = createApp({ rateLimit: null, staticDir: dir });
-    const paths = ['/', '/shopping/abc-123', '/manifest.json', '/ngsw.json', '/ngsw-worker.js'];
+    const paths = [
+      '/',
+      '/index.html',
+      '/shopping/abc-123',
+      '/manifest.json',
+      '/ngsw.json',
+      '/ngsw-worker.js',
+      '/safety-worker.js',
+      '/main.js',
+      '/assets/logo.svg'
+    ];
 
     for (const path of paths) {
       const response = await app.request(path);
@@ -203,8 +276,6 @@ describe('estaticos', () => {
 
     const hashedChunk = await app.request('/main-ABCDEFGH.js');
     expect(hashedChunk.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
-    const unhashedAsset = await app.request('/assets/logo.svg');
-    expect(unhashedAsset.headers.get('cache-control')).toBe('public, max-age=3600');
   });
 
   it('configura nginx para revalidar el shell/manifest y conservar las cabeceras de seguridad', () => {
@@ -227,8 +298,11 @@ describe('estaticos', () => {
       expect(config.match(location)?.[0]).toContain('X-Frame-Options "SAMEORIGIN" always');
       expect(config.match(location)?.[0]).toContain('X-Content-Type-Options "nosniff" always');
     }
-    expect(config).toContain('location ~* \\.(js|css|png|jpg|jpeg|gif|ico|svg|woff2?)$ {');
-    expect(config).toContain('add_header Cache-Control "public, immutable";');
+    expect(config).toContain(String.raw`location ~* "-[a-z0-9_-]{8,}\.(js|css|png`);
+    expect(config).not.toContain(String.raw`location ~* \.(js|css|png`);
+    expect(config).toContain(
+      'add_header Cache-Control "public, max-age=31536000, immutable" always;'
+    );
   });
 
   it('el limitador se apaga y se configura, y una tonteria no lo apaga', () => {

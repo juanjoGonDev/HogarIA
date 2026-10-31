@@ -395,7 +395,7 @@ describe('AiService', () => {
     service.createConfig(CONFIG).subscribe();
     http.expectOne('/api/ai/configs').flush({ data: CONFIG });
 
-    let deleted: boolean | undefined;
+    let deleted: unknown;
     service.deleteConfig(CONFIG.id).subscribe((result) => {
       deleted = result;
     });
@@ -403,19 +403,32 @@ describe('AiService', () => {
     expect(request.request.method).toBe('DELETE');
     expect(request.request.context.get(SILENT_TOAST)).toBeTrue();
     request.flush({ success: true });
-    expect(deleted).toBeTrue();
+    expect(deleted).toEqual({ deleted: true });
     expect(service.configs()).toEqual([]);
 
     service.createConfig(CONFIG).subscribe();
     http.expectOne('/api/ai/configs').flush({ data: CONFIG });
-    let failure: boolean | undefined;
+    let failure: unknown;
     service.deleteConfig(CONFIG.id).subscribe((result) => {
       failure = result;
     });
     http
       .expectOne(`/api/ai/configs/${CONFIG.id}`)
       .flush({}, { status: 500, statusText: 'Server error' });
-    expect(failure).toBeFalse();
+    expect(failure).toEqual({ deleted: false, reason: 'unknown' });
+    expect(service.configs()).toEqual([CONFIG]);
+
+    let blocked: unknown;
+    service.deleteConfig(CONFIG.id).subscribe((result) => {
+      blocked = result;
+    });
+    http
+      .expectOne(`/api/ai/configs/${CONFIG.id}`)
+      .flush(
+        { success: false, code: 'AI_CONFIG_TEST_RUNNING' },
+        { status: 409, statusText: 'Conflict' }
+      );
+    expect(blocked).toEqual({ deleted: false, reason: 'test_running' });
     expect(service.configs()).toEqual([CONFIG]);
   });
 
@@ -430,6 +443,16 @@ describe('AiService', () => {
     expect(savedRequest.request.body).toEqual({ configId: CONFIG.id });
     savedRequest.flush({ data: { success: true, model: 'gpt-test', latency: 10 } });
     expect(result).toEqual({ success: true, model: 'gpt-test', latency: 10 });
+
+    service.testConnection({ configId: CONFIG.id }).subscribe((value) => {
+      result = value;
+    });
+    const acceptedRequest = http.expectOne('/api/ai/test-connection');
+    acceptedRequest.flush(
+      { data: { status: 'testing', configId: CONFIG.id } },
+      { status: 202, statusText: 'Accepted' }
+    );
+    expect(result).toEqual({ status: 'testing', configId: CONFIG.id });
 
     service
       .testConnection({

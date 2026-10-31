@@ -4,7 +4,7 @@ import { prettyJSON } from 'hono/pretty-json';
 import { secureHeaders } from 'hono/secure-headers';
 import { rateLimiter } from 'hono-rate-limiter';
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { basename, isAbsolute, join, resolve, sep } from 'node:path';
+import { isAbsolute, join, resolve, sep } from 'node:path';
 
 import { config } from './config/app.config.js';
 import { errorHandler } from './middleware/error.middleware.js';
@@ -504,23 +504,15 @@ export function createApp(options: AppOptions = {}): Hono {
       const file = resolveStaticAsset(staticDir, path);
       if (!file) return next404(c);
       const body = readFileSync(file);
-      const immutable = /-[A-Za-z0-9_]{8,}\./.test(path); // hashed chunk de Angular
-      const revalidate = [
-        'index.html',
-        'manifest.json',
-        'ngsw.json',
-        'ngsw-worker.js',
-        'safety-worker.js'
-      ].includes(basename(file).toLowerCase());
+      const immutable =
+        /-[A-Za-z0-9_]{8,}\.(?:js|css|png|jpe?g|svg|webp|avif|woff2?)(?:$|\?)/i.test(path);
       return new Response(body, {
         status: 200,
         headers: {
           'content-type': mimeFor(file),
-          'cache-control': revalidate
-            ? 'no-cache, no-store, must-revalidate'
-            : immutable
-              ? 'public, max-age=31536000, immutable'
-              : 'public, max-age=3600'
+          'cache-control': immutable
+            ? 'public, max-age=31536000, immutable'
+            : 'no-cache, no-store, must-revalidate'
         }
       });
     });

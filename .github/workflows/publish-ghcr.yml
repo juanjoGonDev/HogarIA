@@ -184,6 +184,7 @@ jobs:
         env:
           IMAGE: ${{ steps.image.outputs.name }}
           COMMIT_SHA: ${{ github.sha }}
+          EXPECTED_IMAGE_REF: ${{ steps.image.outputs.name }}:${{ github.sha }}
           ARCH: ${{ matrix.arch }}
           PLATFORM: ${{ matrix.platform }}
         run: |
