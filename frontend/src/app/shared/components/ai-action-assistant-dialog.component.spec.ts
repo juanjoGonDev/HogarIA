@@ -481,8 +481,10 @@ describe('AiActionAssistantDialogComponent', () => {
     fakeClockInstalled = true;
     householdContext.activeHouseholdId.set('home-meals');
     householdContext.household.set(syntheticMealHousehold());
-    const action = mealPlanAction();
-    const weekStart = '2026-10-19';
+    const { weekStart, endDate } = upcomingMealWeek();
+    const action = mealPlanAction(weekStart);
+    const today = new Date().toISOString().slice(0, 10);
+    const shoppingStartDate = weekStart < today ? today : weekStart;
     const plan: AssistantActionPlan = {
       id: 'meal-shopping-plan',
       summary: 'Planifica y revisa faltantes.',
@@ -491,11 +493,11 @@ describe('AiActionAssistantDialogComponent', () => {
     };
     assistant.propose.and.returnValue(of(plan));
     mealProposals.createAssistantProposal.and.returnValue(
-      of(householdMealProposal('shopping-proposal', 2))
+      of(householdMealProposal('shopping-proposal', 2, weekStart))
     );
     const preview: HouseholdMealShoppingPreview = {
-      startDate: weekStart,
-      endDate: '2026-10-25',
+      startDate: shoppingStartDate,
+      endDate,
       previewId: 'a'.repeat(64),
       sharedPantry: true,
       plannedMealCount: 1,
@@ -577,7 +579,7 @@ describe('AiActionAssistantDialogComponent', () => {
     click('[data-test="ai-assistant-meals-shopping-open"]');
     await fixture.whenStable();
     fixture.detectChanges();
-    expect(mealShopping.loadPreview).toHaveBeenCalledWith('home-meals', '2026-10-19', '2026-10-25');
+    expect(mealShopping.loadPreview).toHaveBeenCalledWith('home-meals', shoppingStartDate, endDate);
     expect(mealShopping.approve).not.toHaveBeenCalled();
 
     const lines = Array.from(
@@ -602,8 +604,8 @@ describe('AiActionAssistantDialogComponent', () => {
     fixture.detectChanges();
 
     expect(mealShopping.approve).toHaveBeenCalledWith('home-meals', {
-      startDate: '2026-10-19',
-      endDate: '2026-10-25',
+      startDate: shoppingStartDate,
+      endDate,
       previewId: 'a'.repeat(64),
       items: [
         { name: 'Arroz', unit: 'g', quantity: 75 },
@@ -677,7 +679,8 @@ describe('AiActionAssistantDialogComponent', () => {
     fakeClockInstalled = true;
     householdContext.activeHouseholdId.set('home-meals');
     householdContext.household.set(syntheticMealHousehold());
-    const action = mealPlanAction();
+    const { weekStart } = upcomingMealWeek();
+    const action = mealPlanAction(weekStart);
     assistant.propose.and.returnValue(
       of({
         id: 'meal-shopping-cancel-plan',
@@ -687,7 +690,7 @@ describe('AiActionAssistantDialogComponent', () => {
       })
     );
     mealProposals.createAssistantProposal.and.returnValue(
-      of(householdMealProposal('shopping-cancel', 2))
+      of(householdMealProposal('shopping-cancel', 2, weekStart))
     );
     let cancelled = false;
     mealShopping.loadPreview.and.returnValue(
@@ -2614,6 +2617,18 @@ function emptyMealShoppingPreview(): HouseholdMealShoppingPreview {
   };
 }
 
+function upcomingMealWeek(now = new Date()): { weekStart: string; endDate: string } {
+  const weekStart = new Date(`${now.toISOString().slice(0, 10)}T00:00:00.000Z`);
+  const daysUntilNextMonday = (8 - weekStart.getUTCDay()) % 7 || 7;
+  weekStart.setUTCDate(weekStart.getUTCDate() + daysUntilNextMonday);
+  const endDate = new Date(weekStart);
+  endDate.setUTCDate(endDate.getUTCDate() + 6);
+  return {
+    weekStart: weekStart.toISOString().slice(0, 10),
+    endDate: endDate.toISOString().slice(0, 10)
+  };
+}
+
 function emptyMealShoppingApproval(): HouseholdMealShoppingApproval {
   return {
     listId: null,
@@ -2683,7 +2698,7 @@ function pantryPlan(): AssistantActionPlan {
   return { id: 'plan-1', summary: 'Añadir lentejas', actions: [action], questions: [] };
 }
 
-function mealPlanAction(): AssistantAction {
+function mealPlanAction(weekStart = '2026-10-19'): AssistantAction {
   return {
     id: 'meal-action-1',
     kind: 'household.plan_meals',
@@ -2691,7 +2706,7 @@ function mealPlanAction(): AssistantAction {
     actionType: 'plan_meals',
     title: 'Proponer comidas',
     summary: 'Prepara una propuesta de comidas revisable.',
-    payload: { weekStart: '2026-10-19', instructions: 'Cenas sencillas.' },
+    payload: { weekStart, instructions: 'Cenas sencillas.' },
     dependsOn: [],
     warnings: [],
     selected: false,
@@ -2709,10 +2724,14 @@ function emptyMealProposal(): HouseholdMealProposal {
   };
 }
 
-function householdMealProposal(proposalId: string, servings: number): HouseholdMealProposal {
+function householdMealProposal(
+  proposalId: string,
+  servings: number,
+  weekStart = '2026-10-19'
+): HouseholdMealProposal {
   return {
     proposalId,
-    weekStart: '2026-10-19',
+    weekStart,
     participants: [{ alias: 'P1', householdMemberId: 'membership-1' }],
     recipes: [
       {
@@ -2729,7 +2748,7 @@ function householdMealProposal(proposalId: string, servings: number): HouseholdM
     events: [
       {
         id: 'event-1',
-        date: '2026-10-19',
+        date: weekStart,
         mealType: 'lunch',
         time: '13:00',
         recipeAlias: 'N1',

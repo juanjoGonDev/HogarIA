@@ -3,8 +3,8 @@ import { householdMealShoppingPreviewQuerySchema } from './household-meal-shoppi
 
 const approvedItemSchema = z
   .object({
-    name: z.string().trim().min(1).max(200),
-    unit: z.string().trim().min(1).max(40),
+    name: z.string().trim().min(1),
+    unit: z.string().trim().min(1),
     quantity: z.number().finite().positive().max(10_000)
   })
   .strict();

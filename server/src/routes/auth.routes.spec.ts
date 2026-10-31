@@ -392,8 +392,8 @@ describe('saltarse el onboarding (HOGARIA-SPEC 12o)', () => {
   });
 });
 
-describe('límites del perfil de preferencias', () => {
-  it('acepta 60 caracteres y 60 opciones, y rechaza cada límite excedido', async () => {
+describe('texto natural del perfil de preferencias', () => {
+  it('acepta texto largo y conserva el límite de cantidad de opciones', async () => {
     const { token } = await register('Nora');
     const patchTaste = (allergies: string[]) =>
       app.request(
@@ -402,12 +402,10 @@ describe('límites del perfil de preferencias', () => {
       );
     const withinListLimit = Array.from({ length: 60 }, (_, index) => `Alergia ${index}`);
 
-    const atCharacterLimit = await patchTaste(['A'.repeat(60)]);
-    expect(atCharacterLimit.status).toBe(200);
-    expect((await json(atCharacterLimit)).data.taste.allergies).toEqual(['A'.repeat(60)]);
-
-    const aboveCharacterLimit = await patchTaste(['A'.repeat(61)]);
-    expect(aboveCharacterLimit.status).toBe(400);
+    const longAllergy = `Alérgeno ${'descripción '.repeat(249)}descripción`;
+    const longText = await patchTaste([longAllergy]);
+    expect(longText.status).toBe(200);
+    expect((await json(longText)).data.taste.allergies).toEqual([longAllergy]);
 
     const atListLimit = await patchTaste(withinListLimit);
     expect(atListLimit.status).toBe(200);

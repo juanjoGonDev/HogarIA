@@ -35,4 +35,12 @@ describe('householdMealPlanningPatchSchema', () => {
         .success
     ).toBe(false);
   });
+
+  it('accepts complete long household meal-planning notes', () => {
+    const notes = 'Preferencias del hogar. '.repeat(140).trim();
+    const result = householdMealPlanningPatchSchema.parse({
+      household: { objective: { notes } }
+    });
+    expect(result.household?.objective?.notes).toBe(notes);
+  });
 });

@@ -63,14 +63,8 @@ test('publishes GHCR manifests from native architecture builds on the default br
   assert.match(trigger, /push:\s*\n\s+branches:\s*\[master\]/);
   assert.doesNotMatch(trigger, /pull_request/);
   assert.match(publish, /^permissions:\s*\n\s+contents:\s*read\s*$/m);
-  assert.match(
-    build,
-    /arch:\s*amd64\s+platform:\s*linux\/amd64\s+runner:\s*ubuntu-24\.04\s/
-  );
-  assert.match(
-    build,
-    /arch:\s*arm64\s+platform:\s*linux\/arm64\s+runner:\s*ubuntu-24\.04-arm\s/
-  );
+  assert.match(build, /arch:\s*amd64\s+platform:\s*linux\/amd64\s+runner:\s*ubuntu-24\.04\s/);
+  assert.match(build, /arch:\s*arm64\s+platform:\s*linux\/arm64\s+runner:\s*ubuntu-24\.04-arm\s/);
   assert.match(build, /runs-on:\s*\$\{\{ matrix\.runner \}\}/);
   assert.match(build, /packages:\s*write/);
   assert.match(build, /github\.ref == 'refs\/heads\/master'/);
@@ -88,19 +82,29 @@ test('publishes GHCR manifests from native architecture builds on the default br
     manifest,
     /docker buildx imagetools create[\s\S]*--tag "\$IMAGE:\$COMMIT_SHA"[\s\S]*--tag "\$IMAGE:latest"[\s\S]*"\$IMAGE:\$\{COMMIT_SHA\}-amd64"[\s\S]*"\$IMAGE:\$\{COMMIT_SHA\}-arm64"/
   );
-  assert.match(manifest, /for tag in "\$COMMIT_SHA" latest; do[\s\S]*"\$actual_digest" != "\$EXPECTED_DIGEST"/);
+  assert.match(
+    manifest,
+    /docker buildx imagetools inspect --format '\{\{json \.Manifest\}\}' "\$IMAGE:\$COMMIT_SHA" \\\s*\| node scripts\/read-image-manifest-digest\.mjs/
+  );
+  assert.match(
+    manifest,
+    /docker buildx imagetools inspect --format '\{\{json \.Manifest\}\}' "\$IMAGE:\$tag" \\\s*\| node scripts\/read-image-manifest-digest\.mjs/
+  );
+  assert.equal((manifest.match(/read-image-manifest-digest\.mjs/g) ?? []).length, 2);
+  assert.match(
+    manifest,
+    /for tag in "\$COMMIT_SHA" latest; do[\s\S]*"\$actual_digest" != "\$EXPECTED_DIGEST"/
+  );
+  assert.doesNotMatch(manifest, /awk/);
   assert.match(manifest, /scripts\/check-image-platforms\.mjs/);
-  assert.match(manifest, /imagetools inspect --raw "\$IMAGE:\$tag" \| node scripts\/check-image-platforms\.mjs/);
+  assert.match(
+    manifest,
+    /imagetools inspect --raw "\$IMAGE:\$tag" \| node scripts\/check-image-platforms\.mjs/
+  );
   assert.match(manifest, /EXPECTED_DIGEST:\s*\$\{\{ steps\.manifest\.outputs\.digest \}\}/);
   assert.match(smoke, /needs:\s*\[publish-manifest\]/);
-  assert.match(
-    smoke,
-    /arch:\s*amd64\s+platform:\s*linux\/amd64\s+runner:\s*ubuntu-24\.04\s/
-  );
-  assert.match(
-    smoke,
-    /arch:\s*arm64\s+platform:\s*linux\/arm64\s+runner:\s*ubuntu-24\.04-arm\s/
-  );
+  assert.match(smoke, /arch:\s*amd64\s+platform:\s*linux\/amd64\s+runner:\s*ubuntu-24\.04\s/);
+  assert.match(smoke, /arch:\s*arm64\s+platform:\s*linux\/arm64\s+runner:\s*ubuntu-24\.04-arm\s/);
   assert.match(smoke, /runs-on:\s*\$\{\{ matrix\.runner \}\}/);
   assert.match(smoke, /packages:\s*read/);
   assert.match(smoke, /docker pull --platform "\$PLATFORM"/);

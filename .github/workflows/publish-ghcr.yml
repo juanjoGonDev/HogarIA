@@ -108,7 +108,10 @@ jobs:
             --tag "$IMAGE:latest" \
             "$IMAGE:${COMMIT_SHA}-amd64" \
             "$IMAGE:${COMMIT_SHA}-arm64"
-          digest="$(docker buildx imagetools inspect "$IMAGE:$COMMIT_SHA" | awk '$1 == "Digest:" { print $2; exit }')"
+          digest="$(
+            docker buildx imagetools inspect --format '{{json .Manifest}}' "$IMAGE:$COMMIT_SHA" \
+              | node scripts/read-image-manifest-digest.mjs
+          )"
           if [[ -z "$digest" ]]; then
             echo "GHCR did not return a digest for the published manifest" >&2
             exit 1
@@ -123,7 +126,10 @@ jobs:
         run: |
           set -euo pipefail
           for tag in "$COMMIT_SHA" latest; do
-            actual_digest="$(docker buildx imagetools inspect "$IMAGE:$tag" | awk '$1 == "Digest:" { print $2; exit }')"
+            actual_digest="$(
+              docker buildx imagetools inspect --format '{{json .Manifest}}' "$IMAGE:$tag" \
+                | node scripts/read-image-manifest-digest.mjs
+            )"
             if [[ "$actual_digest" != "$EXPECTED_DIGEST" ]]; then
               echo "GHCR tag $tag resolves to an unexpected digest" >&2
               exit 1

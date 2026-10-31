@@ -27,6 +27,7 @@ Prioridades: corrección > seguridad/datos > mantenimiento > simplicidad > UX. T
 ## Commits, PRs y colaboración
 
 - Haz commits atómicos por unidad de checklist, con pruebas y docs que expliquen esa unidad. Usa mensaje Conventional Commit y deja un rollback claro.
+- Por preferencia persistente del usuario, haz commit atómico y push al upstream de esta rama tras verificar cada unidad. No cambies de rama ni uses force-push; si la rama remota diverge, conserva los cambios y comunica el bloqueo.
 - Corre hooks de commit y push. Nunca uses `--no-verify` ni otro bypass. Si falla un hook de push sobre un commit aún local, corrige la causa y amenda ese commit antes de reintentar; no reescribas historia ya publicada: crea otro commit.
 - Mantén cada PR en Draft durante el trabajo, enlaza evidencia/checklist y no lo marques listo hasta que gates y pruebas estén verdes. No impongas un límite predeterminado de PR: separa el trabajo en unidades revisables y sigue cualquier límite explícito que indique el usuario.
 - Usa subagentes en paralelo cuando aporte valor, con tareas delimitadas y sin editar los mismos archivos. Considera worktrees paralelos si reducen espera sin elevar el coste de RAM; integra sus cambios en la rama/worktree inicial, verifica el resultado conjunto y elimina worktrees temporales ya integrados.
@@ -43,28 +44,26 @@ Prioridades: corrección > seguridad/datos > mantenimiento > simplicidad > UX. T
 - Antes de cerrar cambios de UI, compara en el navegador la geometría calculada de elementos equivalentes en las rutas y breakpoints afectados (tolerancia máxima de 1 CSS px), revisa márgenes y padding y guarda capturas sintéticas comparables de escritorio y móvil. Si el cambio afecta un token o shell compartido, revalida la matriz completa de rutas/familias; no cierres la auditoría global si queda una familia pendiente.
 - Lee solo la spec/decisión vigente y los archivos necesarios. No cambies dependencias, datos ni archivos fuera del alcance sin necesidad demostrada.
 
-## Design Context
+## Contexto de diseño de HogarIA
 
-### Users
+Esta guía también se mantiene en `.better-web-ui.md`. Consúltala antes de cualquier cambio de interfaz; si ambos archivos discrepan, registra y resuelve la discrepancia antes de implementar.
 
-Personas hispanohablantes que organizan despensa, comidas, compras y hogar en HogarIA desde escritorio o móvil. Quienes administran el hogar configuran proveedores de IA compartidos.
+### Personas y necesidades
 
-### Brand Personality
+- Audiencia: miembros del hogar con experiencia culinaria variada, incluidas personas principiantes.
+- Tareas clave de recetas: explorar, crear y editar; elegir instrucciones por nivel; ajustar raciones; cocinar paso a paso con consejos, avisos, temporizadores e información de conservación y nutrición.
+- Contexto más sensible: uso móvil en la cocina, a menudo con una mano; escritorio para planificar y editar.
 
-Práctica, cálida y directa. Prioriza confianza tranquila sobre lenguaje promocional. La interfaz usa los diccionarios i18n ES/EN existentes.
+### Sensación de producto
 
-### Aesthetic Direction
+- Práctico, cálido, fiable y sin juzgar; español de España por defecto.
+- Conserva la paleta naranja existente, tipografía, tokens, controles compartidos y shell. No inventes un segundo sistema visual para recetas.
+- Usa como referencia el patrón paso a paso de Tasty para instrucciones enfocadas y medios opcionales, breves y con licencia; no copies su marca.
+- Barra de calidad: acabado listo para producción y alineación precisa. Controles equivalentes comparten dimensiones, iconografía, espaciado y estados en rutas y breakpoints.
 
-Conservar las superficies neutras cálidas, paleta naranja/verde, tokens y geometría de componentes existentes. Formularios y ajustes deben ser mínimos, alineados y centrados en la tarea. Evitar títulos/ayudas redundantes, tarjetas anidadas, decoración genérica de IA y confirmaciones extra. Mantener cada aviso junto al control que explica.
+### Interacciones
 
-### Implementation Defaults
-
-Usar Angular con componentes standalone, componentes UI compartidos, tokens SCSS y patrones existentes de formularios/i18n. Mantener validación en helpers y solicitudes API en servicios existentes. No añadir librerías para UI rutinaria.
-
-### Design Principles
-
-- Una acción primaria clara; acciones secundarias discretas.
-- Una instrucción breve y solo la ayuda necesaria; añadir ejemplos únicamente si aclaran la tarea.
-- Agrupar controles y avisos por proximidad; revelar detalles secundarios con disclosures accesibles.
-- Reutilizar componentes y geometría; expresar estados con color semántico o iconos, no con tamaños arbitrarios.
-- En móvil, presentar flujos enfocados; no comprimir el escritorio ni apilar paneles sin fin.
+- Usa tabs/subtabs para separar edición y tareas de cocina; no apiles todas las secciones en una pantalla larga.
+- Conserva la navegación lateral global y evita navegación inferior en móvil.
+- Da soporte a teclado y foco, targets táctiles, movimiento reducido y ahorro de datos. Los medios son opcionales y nunca bloquean el contenido de recetas.
+- La salida de IA es un borrador revisable. Una acción explícita la aplica; una acción explícita de guardado la persiste.

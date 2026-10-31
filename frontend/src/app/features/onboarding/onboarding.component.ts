@@ -145,7 +145,6 @@ import { PageContainerComponent } from '../../shared/components/page-container/p
                   name="tasteNotes"
                   class="onboarding__textarea"
                   rows="3"
-                  maxlength="1000"
                   [placeholder]="'preferences.ej_ceno_pronto_nada' | t"
                   [(ngModel)]="taste.notes"
                 ></textarea>
@@ -189,7 +188,6 @@ import { PageContainerComponent } from '../../shared/components/page-container/p
                   name="goalNotes"
                   class="onboarding__textarea"
                   rows="3"
-                  maxlength="500"
                   [placeholder]="
                     taste.goals.includes('custom')
                       ? ('onboarding.ej_sin_carne_los_lunes' | t)

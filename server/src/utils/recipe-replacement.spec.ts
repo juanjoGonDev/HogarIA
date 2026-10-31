@@ -53,4 +53,12 @@ describe('findIngredientRestrictionConflicts', () => {
       'Sin picante; correo [dato omitido], tel. [dato omitido]'
     );
   });
+
+  it('keeps full sanitized culinary notes instead of truncating them by characters', () => {
+    const longNote = `Sin picante. ${'Prioriza legumbres y verduras. '.repeat(80)}`;
+    expect(safeGuestNote(longNote)).toBe(longNote);
+    expect(safeGuestNote(`${longNote} correo ana@example.test`)).toBe(
+      `${longNote} correo [dato omitido]`
+    );
+  });
 });

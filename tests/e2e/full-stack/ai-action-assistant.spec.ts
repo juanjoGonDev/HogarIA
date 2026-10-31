@@ -2786,9 +2786,12 @@ test('asistente global: propone, refina y confirma comidas con participantes exp
   const mealActionId = '88888888-8888-4888-8888-888888888888';
   const taskActionId = '99999999-9999-4999-8999-999999999999';
   const eventActionId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
-  const weekStart = '2026-10-19';
-  const weekEnd = '2026-10-25';
-  const friday = '2026-10-23';
+  const nextMonday = new Date();
+  nextMonday.setUTCHours(0, 0, 0, 0);
+  nextMonday.setUTCDate(nextMonday.getUTCDate() + ((8 - nextMonday.getUTCDay()) % 7 || 7));
+  const weekStart = nextMonday.toISOString().slice(0, 10);
+  const weekEnd = addIsoDays(weekStart, 6);
+  const friday = addIsoDays(weekStart, 4);
   const taskTitle = 'Preparar cena del viernes';
   const eventTitle = 'Cena del viernes';
   let generatedRequests = 0;
@@ -2878,7 +2881,12 @@ test('asistente global: propone, refina y confirma comidas con participantes exp
     const body = route.request().postDataJSON() as { householdMemberIds: string[] };
     refinedProposalId = `meal-proposal-refined-${body.householdMemberIds[0]}`;
     await route.fulfill({
-      json: assistantMealDraft(refinedProposalId, 'Pasta con verduras', body.householdMemberIds)
+      json: assistantMealDraft(
+        refinedProposalId,
+        'Pasta con verduras',
+        body.householdMemberIds,
+        weekStart
+      )
     });
   });
   await page.route('**/api/ai/assistant/meal-proposals', async (route) => {
@@ -2888,7 +2896,8 @@ test('asistente global: propone, refina y confirma comidas con participantes exp
       json: assistantMealDraft(
         'meal-proposal-generated',
         'Crema de verduras',
-        body.householdMemberIds
+        body.householdMemberIds,
+        weekStart
       )
     });
   });
@@ -2953,7 +2962,7 @@ test('asistente global: propone, refina y confirma comidas con participantes exp
   await page
     .locator('[data-test="ai-assistant-prompt"]')
     .fill(
-      'Planifica cenas de la semana del 19 de octubre; el viernes 23 a las 21:00. Añade una tarea de preparación y un evento. Revisa los faltantes antes de guardar.'
+      `Planifica cenas de la semana que empieza el ${weekStart}; el viernes ${friday} a las 21:00. Añade una tarea de preparación y un evento. Revisa los faltantes antes de guardar.`
     );
   await page.locator('[data-test="ai-assistant-submit"] button').click();
   const review = page.locator('[data-test="ai-assistant-review"]');
@@ -2987,7 +2996,7 @@ test('asistente global: propone, refina y confirma comidas con participantes exp
   await page
     .locator('[data-test="ai-assistant-prompt"]')
     .fill(
-      'Planifica cenas de la semana del 19 de octubre; el viernes 23 a las 21:00. Añade una tarea de preparación y un evento. Revisa los faltantes antes de guardar.'
+      `Planifica cenas de la semana que empieza el ${weekStart}; el viernes ${friday} a las 21:00. Añade una tarea de preparación y un evento. Revisa los faltantes antes de guardar.`
     );
   await page.locator('[data-test="ai-assistant-submit"] button').click();
   await expect(review).toBeVisible();
@@ -3274,7 +3283,18 @@ test('asistente global: propone, refina y confirma comidas con participantes exp
   );
 });
 
-function assistantMealDraft(proposalId: string, recipeName: string, memberIds: string[]) {
+function addIsoDays(date: string, days: number): string {
+  const value = new Date(`${date}T00:00:00.000Z`);
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
+}
+
+function assistantMealDraft(
+  proposalId: string,
+  recipeName: string,
+  memberIds: string[],
+  weekStart: string
+) {
   const recipe = {
     name: recipeName,
     description: `Receta sintética ${recipeName}.`,
@@ -3338,11 +3358,11 @@ function assistantMealDraft(proposalId: string, recipeName: string, memberIds: s
     success: true,
     data: {
       proposalId,
-      weekStart: '2026-10-19',
+      weekStart,
       participants,
       recipes: [{ alias: 'N1', source: 'new', recipeId: null, recipe }],
       events: Array.from({ length: 7 }, (_, index) => {
-        const date = new Date(Date.UTC(2026, 9, 19 + index)).toISOString().slice(0, 10);
+        const date = addIsoDays(weekStart, index);
         return {
           id: `${proposalId}-event-${index}`,
           date,

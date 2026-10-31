@@ -8,7 +8,7 @@ export const aiFunctionProviderAssignmentSchema = z
   .object({ configId: z.string().trim().min(1).nullable() })
   .strict();
 const detailLevelEnum = z.enum(['basic', 'intermediate', 'expert']);
-const guestPreferenceList = z.array(z.string().trim().min(1).max(60)).max(20).default([]);
+const guestPreferenceList = z.array(z.string().trim().min(1)).max(20).default([]);
 
 export const guestPreferencesSchema = z
   .object({
@@ -17,7 +17,7 @@ export const guestPreferencesSchema = z
     diets: guestPreferenceList,
     likes: guestPreferenceList,
     dislikes: guestPreferenceList,
-    notes: z.string().trim().max(300).default('')
+    notes: z.string().trim().default('')
   })
   .strict();
 
@@ -34,7 +34,7 @@ const weeklyPlanGoalsSchema = z
     caloriesTarget: formField(z.number().positive()),
     proteinTarget: formField(z.number().positive()),
     restrictions: formDefault(z.array(z.string()), []),
-    customInstructions: formField(z.string().trim().max(2000))
+    customInstructions: formField(z.string().trim())
   })
   .passthrough()
   .superRefine((goals, context) => {

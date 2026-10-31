@@ -34,6 +34,11 @@ export function formText(max: number, label = 'campo') {
   );
 }
 
+/** Cadena natural de formulario: conserva el texto completo y normaliza vacios como null. */
+export function formNaturalText() {
+  return z.preprocess(blankToNull, z.string().trim().nullish());
+}
+
 /** Cadena obligatoria de formulario: vacio NO es «sin valor», es un error que hay que decir. */
 export function requiredText(max: number, label: string) {
   return z

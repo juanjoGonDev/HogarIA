@@ -74,7 +74,7 @@ interface ReplanDraft {
         <p class="cal-muted">{{ 'calendar.replan_intro' | t: { period: weekLabel() } }}</p>
 
         <app-ai-participants
-          [members]="contextChanged() ? [] : householdService.household()?.members ?? []"
+          [members]="contextChanged() ? [] : (householdService.household()?.members ?? [])"
           [selectedMemberIds]="selectedMemberIds()"
           (selectedMemberIdsChange)="updateMembers($event)"
           [guests]="guests()"
@@ -105,7 +105,6 @@ interface ReplanDraft {
             <textarea
               name="replanCustomGoal"
               rows="3"
-              maxlength="2000"
               [(ngModel)]="customInstructions"
               (ngModelChange)="resetCandidatePreview()"
               [disabled]="isGenerating() || isApplying()"
@@ -229,12 +228,7 @@ interface ReplanDraft {
             </div>
             <label class="replan__field">
               <span>{{ 'calendar.replan_candidate_name' | t }}</span>
-              <input
-                class="cal-input"
-                [(ngModel)]="draft.name"
-                maxlength="120"
-                [disabled]="isApplying()"
-              />
+              <input class="cal-input" [(ngModel)]="draft.name" [disabled]="isApplying()" />
             </label>
             <p>{{ draft.description }}</p>
             <p class="cal-hint">
@@ -525,10 +519,7 @@ export class CalendarReplanComponent implements OnInit, OnDestroy {
   private readonly householdContextEffect = effect(() => {
     const revision = this.householdService.contextRevision();
     const activeHouseholdId = this.householdService.activeHouseholdId();
-    if (
-      revision === this.lastContextRevision &&
-      activeHouseholdId === this.lastActiveHouseholdId
-    ) {
+    if (revision === this.lastContextRevision && activeHouseholdId === this.lastActiveHouseholdId) {
       return;
     }
     this.lastContextRevision = revision;

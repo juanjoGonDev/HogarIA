@@ -108,7 +108,7 @@ function normalizeObjective(value: unknown): MealPlanningObjective {
   }
   return {
     goals: goals.length ? goals : [...DEFAULT_OBJECTIVE.goals],
-    notes: typeof raw.notes === 'string' ? raw.notes.trim().slice(0, 500) : ''
+    notes: typeof raw.notes === 'string' ? raw.notes.trim() : ''
   };
 }
 

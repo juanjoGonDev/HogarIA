@@ -172,7 +172,6 @@ const PREFERENCES_TABS = ['profile', 'allergies', 'tastes', 'meals', 'goal'] as 
               name="tasteNotes"
               class="preferences__textarea"
               rows="3"
-              maxlength="1000"
               [placeholder]="'preferences.ej_ceno_pronto_nada' | t"
               [(ngModel)]="taste.notes"
             ></textarea>
@@ -230,7 +229,6 @@ const PREFERENCES_TABS = ['profile', 'allergies', 'tastes', 'meals', 'goal'] as 
               name="goalNotes"
               class="preferences__textarea"
               rows="3"
-              maxlength="500"
               [placeholder]="
                 taste.goals.includes('custom')
                   ? ('onboarding.ej_sin_carne_los_lunes' | t)
