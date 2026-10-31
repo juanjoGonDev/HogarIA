@@ -1,6 +1,6 @@
 # HogarIA — prueba de IA en segundo plano, runtime y actualización web
 
-**Estado:** código #63 reconciliado con #56; gates locales verdes; CI remoto final pendiente. PR #63 sigue Ready por decisión del usuario.
+**Estado:** #56 integrado; merge commit local de #63 `a2d9d78`; gates locales verdes; CI remoto final pendiente. PR #63 sigue Ready por decisión del usuario.
 **Base vigente:** `origin/master` en `b2e3de8` (squash de #56; rama predeterminada: `master`).
 **Rama:** `feat/runtime-operations-ui`.
 **PR funcional:** [#63](https://github.com/juanjoGonDev/HogarIA/pull/63), Ready por decisión del usuario. El usuario autorizó integrar/mergear #56 y después #63; conservar Ready y no mergear hasta que la rama esté reconciliada y CI esté verde. #56 ya está mergeado.
@@ -35,7 +35,7 @@ La fuente de verdad para la prueba guardada es `AI-PROVIDER-SETTINGS-SPEC.md`, a
 
 ### Integración con #56 (nueva base)
 
-- [ ] Integrar `origin/master` (`b2e3de8`) mediante merge commit regular; no rebase/force-push. Resolver conflictos sin perder proveedores/asignaciones, token opcional, validación de mensajes, timeout ilimitado de producto, `imageRef`, Logs, headers no-cache ni cambios de soporte ya mergeados.
+- [x] Integrar `origin/master` (`b2e3de8`) mediante merge commit regular `a2d9d78`; no rebase/force-push. Resolver conflictos preservando proveedores/asignaciones, token opcional, validación, timeout ilimitado, `imageRef`, Logs, headers no-cache y enlaces renombrados.
 - [x] Mantener exactamente un flujo de actualización web: aviso accesible y acción explícita; no recargar automáticamente con formularios sin guardar. Preservar `/health` y `APP_IMAGE_REF` como contrato de runtime. Polling cada 5 min; E2E de actualización incluido en gate full-stack.
 - [x] Portar/ajustar el test guardado desacoplado a la API multi-proveedor de #56: respuesta `202`, claim único por config/hogar, consulta de estado autorizada, prueba efímera sin persistir secretos, timeout/reintentos coherentes y recuperación segura tras reinicio. La UI presenta `interrupted` como estado terminal.
 - [x] Revisar migraciones/DB de `test_started_at` y `test_latency_ms`, `Dockerfile`, workflow, `app.ts`, logs y smoke HTTP real de Nginx con los contratos ya presentes en `master`.
@@ -43,7 +43,7 @@ La fuente de verdad para la prueba guardada es `AI-PROVIDER-SETTINGS-SPEC.md`, a
 
 ## Criterios de aceptación
 
-> Las casillas de la ejecución anterior documentan resultados del HEAD pre-#56. La sección «Revisión integrada» registra la evidencia local posterior a #56; queda pendiente solo el merge commit/push y su CI remoto final.
+> Las casillas anteriores documentan resultados del HEAD pre-#56. La sección «Revisión integrada» registra evidencia local sobre el merge commit `a2d9d78`; queda pendiente el push y su CI remoto final.
 
 ### Test de IA guardado — único y en segundo plano
 
@@ -107,7 +107,7 @@ El tamaño total supera 400 líneas revisadas. El usuario eligió explícitament
 - `pnpm run lint`: no pasa por herramienta/configuración existente (detalle arriba); no es un fallo de lint de los cambios.
 - El run remoto `41218712834` del HEAD `77f3728` falló solo en shard 1 porque `ai-provider-queue.spec.ts` trataba el test de conexión guardada como un job genérico. Tras corregir el E2E, `41220436428` del código en `c95e0a6` pasó build, tipos, tests de servidor, E2E, smoke amd64/arm64 y CodeQL. Ese CI es histórico y no sustituye el CI nuevo tras integrar #56.
 
-### Revisión integrada tras #56 (antes del merge commit)
+### Revisión integrada tras #56 (merge commit `a2d9d78`)
 
 - `pnpm run check:ui`: **271 ficheros, 21 reglas**; pasó con la etiqueta traducida `interrupted` ya conectada a la UI.
 - `pnpm run typecheck:e2e`: pasó.
@@ -119,4 +119,4 @@ El tamaño total supera 400 líneas revisadas. El usuario eligió explícitament
 - Playwright aislado: full-stack AI provider **6/6**; prueba guardada tras cerrar/reabrir **2/2** (desktop/móvil); Logs uptime/imageRef **2/2**; aviso service worker **2/2**; cola de receta **3/3**; geometría/settings IA hogar **8/8**.
 - `node scripts/nginx-static-headers-smoke.mjs`: **6/6 respuestas** desde Nginx real; caché y cabeceras de seguridad verificadas.
 - Capturas sintéticas PC/móvil revisadas en `.e2e-screenshots/merge-review/` (ignorado por Git); usan datos sintéticos, DB efímera y proveedor HTTP local.
-- CI remoto final pendiente del merge commit/push. No se ejecutó ningún proveedor externo. El test de geometría corregido solo exige overlay realmente oculto: el elemento existe intencionadamente en DOM en móvil para permitir cerrar el drawer.
+- CI remoto final pendiente del push. No se ejecutó ningún proveedor externo. El test de geometría corregido solo exige overlay realmente oculto: el elemento existe intencionadamente en DOM en móvil para permitir cerrar el drawer.
