@@ -421,6 +421,8 @@ export const aiConfigs = sqliteTable('ai_configs', {
   lastTested: text('last_tested'),
   testStatus: text('test_status'),
   testError: text('test_error'),
+  testStartedAt: text('test_started_at'),
+  testLatencyMs: integer('test_latency_ms'),
   createdAt: text('created_at').default('CURRENT_TIMESTAMP'),
   updatedAt: text('updated_at').default('CURRENT_TIMESTAMP')
 });

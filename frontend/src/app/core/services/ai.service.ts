@@ -9,7 +9,7 @@ import {
   AIRecipeImproveRequest,
   AIRecipeImproveResponse,
   AIRecipeResponse,
-  AITestConnectionResponse,
+  AITestConnectionOutcome,
   AIReplacementCandidate,
   AIReplacementGuest
 } from '../../shared/models/ai-config.model';
@@ -133,11 +133,11 @@ export class AiService {
     apiKey?: string;
     model?: string;
     timeout?: number;
-  }): Observable<AITestConnectionResponse | null> {
+  }): Observable<AITestConnectionOutcome | null> {
     return this.http
       .post<any>(`${this.apiUrl}/test-connection`, params, { context: this.silentContext() })
       .pipe(
-        map((response) => (response as { data?: AITestConnectionResponse })?.data ?? null),
+        map((response) => (response as { data?: AITestConnectionOutcome })?.data ?? null),
         catchError(() => of(null))
       );
   }

@@ -341,8 +341,9 @@ describe('AiService', () => {
     expect(savedRequest.request.method).toBe('POST');
     expect(savedRequest.request.context.get(SILENT_TOAST)).toBeTrue();
     expect(savedRequest.request.body).toEqual({ configId: CONFIG.id });
-    savedRequest.flush({ data: { success: true, model: 'gpt-test', latency: 10 } });
-    expect(result).toEqual({ success: true, model: 'gpt-test', latency: 10 });
+    const accepted = { status: 'testing', configId: CONFIG.id };
+    savedRequest.flush({ success: true, data: accepted }, { status: 202, statusText: 'Accepted' });
+    expect(result).toEqual(accepted);
 
     service
       .testConnection({

@@ -1,7 +1,7 @@
-import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
 import { signal } from '@angular/core';
 import { provideRouter } from '@angular/router';
-import { of, Subject, throwError } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import { AiConfigComponent } from './ai-config.component';
 import { AiService } from '../../core/services/ai.service';
 import { ConfirmService } from '../../core/services/confirm.service';
@@ -35,11 +35,14 @@ describe('AiConfigComponent', () => {
   let confirm: jasmine.SpyObj<ConfirmService>;
 
   function createAiService() {
-    return {
+    const mock = {
       configs: signal<AIProviderConfig[]>([]),
       configsLoading: signal(false),
       configsError: signal(false),
       loadConfigs: jasmine.createSpy('loadConfigs'),
+      loadConfigsSnapshot: jasmine
+        .createSpy('loadConfigsSnapshot')
+        .and.returnValue(of([] as AIProviderConfig[])),
       createConfig: jasmine.createSpy('createConfig').and.returnValue(of(CONFIG)),
       updateConfig: jasmine.createSpy('updateConfig').and.returnValue(of(CONFIG)),
       deleteConfig: jasmine.createSpy('deleteConfig').and.returnValue(of(true)),
@@ -47,6 +50,8 @@ describe('AiConfigComponent', () => {
         .createSpy('testConnection')
         .and.returnValue(of({ success: true, model: 'gpt-test', latency: 12 }))
     };
+    mock.loadConfigs.and.callFake(() => mock.loadConfigsSnapshot().subscribe());
+    return mock;
   }
 
   const i18n = {
@@ -264,25 +269,73 @@ describe('AiConfigComponent', () => {
     expect(component.probandoForm()).toBeFalse();
   });
 
-  it('serializes saved tests and refreshes the persisted status after a response', () => {
-    const pending = new Subject<{ success: boolean; model: string; latency: number }>();
-    service.testConnection.and.returnValue(pending);
+  it('resumes a server-owned test after page recreation without starting another test', fakeAsync(() => {
+    const running = { ...CONFIG, testStatus: 'testing' as const };
+    const completed = { ...CONFIG, testStatus: 'success' as const };
+    const snapshots = [[running], [completed]];
+    service.loadConfigsSnapshot.and.callFake(() => {
+      const next = snapshots.shift() ?? [completed];
+      service.configs.set(next);
+      return of(next);
+    });
+
+    fixture.destroy();
+    service.loadConfigsSnapshot.calls.reset();
+    fixture = TestBed.createComponent(AiConfigComponent);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+
+    const button = fixture.nativeElement.querySelector(
+      '[data-test="probar-Synthetic provider"] button'
+    ) as HTMLButtonElement | null;
+    expect(service.testConnection).not.toHaveBeenCalled();
+    expect(button?.disabled).toBeTrue();
+    expect(button?.getAttribute('aria-busy')).toBe('true');
+
+    tick(2000);
+    fixture.detectChanges();
+
+    expect(service.loadConfigsSnapshot).toHaveBeenCalledTimes(2);
+    expect(service.configs()[0]?.testStatus).toBe('success');
+    const completedButton = fixture.nativeElement.querySelector(
+      '[data-test="probar-Synthetic provider"] button'
+    ) as HTMLButtonElement | null;
+    expect(completedButton?.disabled).toBeFalse();
+  }));
+
+  it('keeps a saved test running after the API accepts it in the background', fakeAsync(() => {
+    const running = { ...CONFIG, testStatus: 'testing' as const };
+    const completed = { ...CONFIG, testStatus: 'success' as const, testLatencyMs: 10 };
+    const snapshots = [[running], [completed]];
+    service.testConnection.and.returnValue(of({ status: 'testing', configId: CONFIG.id }));
+    service.loadConfigsSnapshot.and.callFake(() => {
+      const next = snapshots.shift() ?? [completed];
+      service.configs.set(next);
+      return of(next);
+    });
+
     component.testConfig(CONFIG);
+    fixture.detectChanges();
+
     expect(component.probandoId()).toBe(CONFIG.id);
-    component.testConfig(CONFIG);
-    expect(service.testConnection).toHaveBeenCalledTimes(1);
+    expect(component.isTestResultOpen()).toBeFalse();
+    const button = fixture.nativeElement.querySelector(
+      '[data-test="probar-Synthetic provider"] button'
+    ) as HTMLButtonElement | null;
+    expect(button?.disabled).toBeTrue();
+    expect(button?.getAttribute('aria-busy')).toBe('true');
 
-    pending.next({ success: true, model: CONFIG.model, latency: 10 });
-    pending.complete();
-    expect(component.probandoId()).toBeNull();
+    tick(2000);
+    fixture.detectChanges();
     expect(component.isTestResultOpen()).toBeTrue();
-    expect(service.loadConfigs).toHaveBeenCalledTimes(2);
-
-    service.testConnection.and.returnValue(of(null));
-    component.testConfig(CONFIG);
-    expect(component.testResult()?.success).toBeFalse();
-    expect(component.isTestResultOpen()).toBeTrue();
-  });
+    expect(component.testResult()).toEqual({
+      success: true,
+      model: CONFIG.model,
+      latency: 10,
+      error: undefined
+    });
+    fixture.destroy();
+  }));
 
   it('handles active toggle and failed update without a false success toast', () => {
     service.updateConfig.and.returnValue(of({ ...CONFIG, isActive: false }));
@@ -318,6 +371,8 @@ describe('AiConfigComponent', () => {
     expect(component.getTestStatusLabel('success')).toBe('OK');
     expect(component.getTestStatusLabel('failed')).toBe('ui.error');
     expect(component.getTestStatusLabel('testing')).toBe('ai_config.probando');
+    expect(component.getTestStatusVariant('interrupted')).toBe('error');
+    expect(component.getTestStatusLabel('interrupted')).toBe('ai_config.test_interrupted');
     expect(component.getTestStatusLabel('idle')).toBe('ai_config.pendiente');
   });
 });

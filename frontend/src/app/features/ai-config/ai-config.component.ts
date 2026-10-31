@@ -1,4 +1,4 @@
-import { Component, inject, OnInit, signal } from '@angular/core';
+import { Component, effect, inject, OnDestroy, OnInit, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { AiService } from '../../core/services/ai.service';
@@ -14,6 +14,7 @@ import { TranslatePipe } from '../../core/pipes/translate.pipe';
 import { I18nService } from '../../core/services/i18n.service';
 import { IconComponent } from '../../shared/components/ui/icon/icon.component';
 import { RouterLink } from '@angular/router';
+import { exhaustMap, Subscription, timer } from 'rxjs';
 
 @Component({
   selector: 'app-ai-config',
@@ -138,12 +139,12 @@ import { RouterLink } from '@angular/router';
               size="sm"
               type="button"
               [touchTarget]="true"
-              [loading]="probandoId() === config.id"
+              [loading]="isTestRunning(config)"
               (onClick)="testConfig(config)"
               [attr.data-test]="'probar-' + config.name"
             >
               <app-icon name="link" [size]="16" [label]="null" />
-              {{ (probandoId() === config.id ? 'ai_config.comprobando' : 'ai_config.probar') | t }}
+              {{ (isTestRunning(config) ? 'ai_config.comprobando' : 'ai_config.probar') | t }}
             </app-button>
             <app-button
               variant="ghost"
@@ -710,7 +711,7 @@ import { RouterLink } from '@angular/router';
     `
   ]
 })
-export class AiConfigComponent implements OnInit {
+export class AiConfigComponent implements OnInit, OnDestroy {
   private readonly i18n = inject(I18nService);
 
   /** «3 configuraciones» / «1 configuración»: el numero y el sustantivo se eligen a la vez. */
@@ -737,6 +738,14 @@ export class AiConfigComponent implements OnInit {
   probandoId = signal<string | null>(null);
   probandoForm = signal(false);
   concurrencyError = signal('');
+  private connectionTestPolling?: Subscription;
+  private readonly connectionTestStatusWatcher = effect(() => {
+    const shouldPoll =
+      this.probandoId() !== null ||
+      this.aiService.configs().some((config) => config.testStatus === 'testing');
+    if (shouldPoll) this.startConnectionTestPolling();
+    else this.stopConnectionTestPolling();
+  });
 
   formData = {
     name: '',
@@ -825,11 +834,23 @@ export class AiConfigComponent implements OnInit {
   }
 
   testConfig(config: AIProviderConfig): void {
-    if (this.probandoId() || this.probandoForm()) return;
+    if (
+      this.probandoId() ||
+      this.probandoForm() ||
+      this.aiService.configs().some((current) => current.testStatus === 'testing')
+    ) {
+      return;
+    }
     this.probandoId.set(config.id);
 
     this.aiService.testConnection({ configId: config.id }).subscribe({
       next: (result) => {
+        if (result && 'status' in result && result.status === 'testing') {
+          // Only the server owns this run. Refresh persisted state; component teardown merely
+          // stops polling and never cancels the server-side provider request.
+          this.aiService.loadConfigs();
+          return;
+        }
         this.probandoId.set(null);
         if (result) this.aiService.loadConfigs();
         this.testResult.set(
@@ -950,6 +971,7 @@ export class AiConfigComponent implements OnInit {
       case 'success':
         return 'success';
       case 'failed':
+      case 'interrupted':
         return 'error';
       default:
         return 'warning';
@@ -964,6 +986,8 @@ export class AiConfigComponent implements OnInit {
         return this.i18n.t('ui.error');
       case 'testing':
         return this.i18n.t('ai_config.probando');
+      case 'interrupted':
+        return this.i18n.t('ai_config.test_interrupted');
       default:
         return this.i18n.t('ai_config.pendiente');
     }
@@ -971,6 +995,54 @@ export class AiConfigComponent implements OnInit {
 
   closeTestResult(): void {
     this.isTestResultOpen.set(false);
+  }
+
+  isTestRunning(config: AIProviderConfig): boolean {
+    return this.probandoId() === config.id || config.testStatus === 'testing';
+  }
+
+  ngOnDestroy(): void {
+    this.stopConnectionTestPolling();
+  }
+
+  private startConnectionTestPolling(): void {
+    if (this.connectionTestPolling) return;
+    this.connectionTestPolling = timer(2000, 2000)
+      .pipe(exhaustMap(() => this.aiService.loadConfigsSnapshot()))
+      .subscribe((configs) => {
+        if (!configs) return;
+
+        const currentTestId = this.probandoId();
+        if (currentTestId) {
+          const completed = configs.find((config) => config.id === currentTestId);
+          if (!completed || completed.testStatus !== 'testing') {
+            this.probandoId.set(null);
+            if (completed) this.showPersistedTestResult(completed);
+          }
+        }
+
+        if (!configs.some((config) => config.testStatus === 'testing') && !this.probandoId()) {
+          this.stopConnectionTestPolling();
+        }
+      });
+  }
+
+  private stopConnectionTestPolling(): void {
+    this.connectionTestPolling?.unsubscribe();
+    this.connectionTestPolling = undefined;
+  }
+
+  private showPersistedTestResult(config: AIProviderConfig): void {
+    const success = config.testStatus === 'success';
+    this.testResult.set({
+      success,
+      model: config.model,
+      latency: config.testLatencyMs,
+      error: success
+        ? undefined
+        : (config.testError ?? this.i18n.t('ai_config.no_se_pudo_conectar'))
+    });
+    this.isTestResultOpen.set(true);
   }
 
   private notifySaveError(): void {

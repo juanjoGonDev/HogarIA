@@ -287,38 +287,154 @@ describe('permisos de configuración IA por hogar', () => {
 });
 
 describe('POST /test-connection', () => {
-  it('la config guardada se prueba con el JSON dado, y el estado queda en la fila', async () => {
+  it('acepta la prueba guardada en background, deduplica la carrera y conserva el estado', async () => {
     const config = await crearConfig(alice, 'Local');
-    stubDelProveedor('{"status":"ok","message":"conexión establecida"}');
+    let resolveProvider!: (response: Response) => void;
+    let providerCalls = 0;
+    const providerResponse = new Promise<Response>((resolve) => {
+      resolveProvider = resolve;
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => {
+        providerCalls += 1;
+        return providerResponse;
+      }) as unknown as typeof fetch
+    );
 
-    const respuesta = await call(alice, 'POST', '/test-connection', { configId: config.id });
-    expect(respuesta.status).toBe(200);
-    const cuerpo = await data(respuesta);
-    expect(cuerpo.success).toBe(true);
-    expect(cuerpo.model).toBe('gpt-5');
-    expect(typeof cuerpo.latency).toBe('number');
+    const requests = [
+      call(alice, 'POST', '/test-connection', { configId: config.id }),
+      call(alice, 'POST', '/test-connection', { configId: config.id })
+    ];
+    const timedOut = Symbol('saved connection test did not return in background');
+    let timer: NodeJS.Timeout | undefined;
+    const accepted = await Promise.race([
+      Promise.all(requests),
+      new Promise<typeof timedOut>((resolve) => {
+        timer = setTimeout(() => resolve(timedOut), 100);
+      })
+    ]);
+    if (timer) clearTimeout(timer);
+    if (accepted === timedOut) {
+      resolveProvider(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: '{"status":"ok","message":"conexión establecida"}' } }]
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      );
+      await Promise.all(requests);
+    }
+    expect(accepted).not.toBe(timedOut);
 
-    const fila = db
-      .prepare('SELECT test_status, test_error FROM ai_configs WHERE id = ?')
-      .get(config.id) as { test_status: string | null; test_error: string | null };
-    expect(fila.test_status).toBe('success');
-    expect(fila.test_error).toBeNull();
+    const acceptedResponses = accepted as Response[];
+    for (const response of acceptedResponses) {
+      expect(response.status).toBe(202);
+      expect(await data(response)).toMatchObject({ status: 'testing', configId: config.id });
+    }
+
+    const initial = db
+      .prepare(
+        'SELECT test_status, test_error, test_started_at, test_latency_ms FROM ai_configs WHERE id = ?'
+      )
+      .get(config.id) as {
+      test_status: string | null;
+      test_error: string | null;
+      test_started_at: string | null;
+      test_latency_ms: number | null;
+    };
+    expect(initial).toMatchObject({
+      test_status: 'testing',
+      test_error: null,
+      test_latency_ms: null
+    });
+    expect(initial.test_started_at).toBeTruthy();
+
+    const duringTestConfigs = await data(await call(alice, 'GET', '/configs'));
+    expect(duringTestConfigs[0]).toMatchObject({
+      id: config.id,
+      testStatus: 'testing',
+      testError: null,
+      testLatencyMs: null
+    });
+    expect(duringTestConfigs[0].testStartedAt).toBeTruthy();
+    expect(duringTestConfigs[0]).not.toHaveProperty('api_key');
+
+    const repeated = await call(alice, 'POST', '/test-connection', { configId: config.id });
+    expect(repeated.status).toBe(202);
+    expect(await data(repeated)).toMatchObject({ status: 'testing', configId: config.id });
+
+    // Ensure the background task actually reaches the provider before resolving the held response.
+    const deadline = Date.now() + 1000;
+    while (providerCalls === 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(providerCalls).toBe(1);
+    resolveProvider(
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: '{"status":"ok","message":"conexión establecida"}' } }]
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )
+    );
+
+    const finalDeadline = Date.now() + 1500;
+    let final:
+      | { test_status: string | null; test_error: string | null; test_latency_ms: number | null }
+      | undefined;
+    while (Date.now() < finalDeadline) {
+      final = db
+        .prepare('SELECT test_status, test_error, test_latency_ms FROM ai_configs WHERE id = ?')
+        .get(config.id) as typeof final;
+      if (final?.test_status === 'success') break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(final?.test_status).toBe('success');
+    expect(final?.test_error).toBeNull();
+    expect(typeof final?.test_latency_ms).toBe('number');
+    expect(providerCalls).toBe(1);
+
+    const completedConfig = (await data(await call(alice, 'GET', '/configs')))[0];
+    expect(completedConfig).toMatchObject({
+      id: config.id,
+      testStatus: 'success',
+      testError: null,
+      testLatencyMs: final?.test_latency_ms,
+      testStartedAt: null
+    });
   });
 
-  it('el modelo que no devuelve el JSON pedido suspende la prueba, con su error en la fila', async () => {
+  it('persiste un fallo terminal sin guardar una credencial repetida por el proveedor', async () => {
     const config = await crearConfig(alice, 'Local');
-    stubDelProveedor('Hello! How can I help you today?');
+    const secret = 'fixture-secret-not-to-persist';
+    db.prepare('UPDATE ai_configs SET api_key = ? WHERE id = ?').run(secret, config.id);
+    vi.stubGlobal(
+      'fetch',
+      (async () =>
+        new Response(`Invalid API key: ${secret}`, { status: 401 })) as unknown as typeof fetch
+    );
 
     const respuesta = await call(alice, 'POST', '/test-connection', { configId: config.id });
-    const cuerpo = await data(respuesta);
-    expect(cuerpo.success).toBe(false);
-    expect(cuerpo.error).toContain('no devolvió el JSON pedido');
+    expect(respuesta.status).toBe(202);
+    expect(await data(respuesta)).toMatchObject({ status: 'testing', configId: config.id });
 
-    const fila = db
-      .prepare('SELECT test_status, test_error FROM ai_configs WHERE id = ?')
-      .get(config.id) as { test_status: string | null; test_error: string | null };
-    expect(fila.test_status).toBe('failed');
-    expect(fila.test_error).toContain('no devolvió el JSON pedido');
+    const deadline = Date.now() + 1500;
+    let fila:
+      | { test_status: string | null; test_error: string | null; test_latency_ms: number | null }
+      | undefined;
+    while (Date.now() < deadline) {
+      fila = db
+        .prepare('SELECT test_status, test_error, test_latency_ms FROM ai_configs WHERE id = ?')
+        .get(config.id) as typeof fila;
+      if (fila?.test_status === 'failed') break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(fila?.test_status).toBe('failed');
+    expect(fila?.test_error).toBeTruthy();
+    expect(fila?.test_error).not.toContain(secret);
+    expect(typeof fila?.test_latency_ms).toBe('number');
   });
 
   it('se puede probar desde el formulario (sin guardar): el veredicto si, la fila no', async () => {

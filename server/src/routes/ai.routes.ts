@@ -144,9 +144,80 @@ function toClientConfig(row: Record<string, unknown>) {
     isActive: row.is_active === 1,
     lastTested: (row.last_tested as string | null) ?? undefined,
     testStatus: (row.test_status as string | null) ?? undefined,
-    testError: (row.test_error as string | null) ?? undefined,
+    testError: (row.test_error as string | null) ?? null,
+    testStartedAt: (row.test_started_at as string | null) ?? null,
+    testLatencyMs: (row.test_latency_ms as number | null) ?? null,
     updatedAt: row.updated_at as string
   };
+}
+
+function runConnectionTest(
+  db: ReturnType<typeof getDatabase>,
+  userId: string,
+  config: Record<string, unknown>,
+  configId: string | null
+) {
+  return pingDeConexion(
+    {
+      base_url: String(config.base_url),
+      api_key: String(config.api_key),
+      model: String(config.model),
+      timeout: (config.timeout as number | null) ?? null
+    },
+    {
+      db,
+      userId,
+      config: {
+        id: String(config.id ?? `ephemeral-${userId}`),
+        name: String(config.name ?? 'Connection test'),
+        provider: String(config.provider ?? 'custom'),
+        base_url: String(config.base_url),
+        api_key: String(config.api_key),
+        model: String(config.model),
+        temperature: (config.temperature as number | null) ?? null,
+        max_tokens: (config.max_tokens as number | null) ?? null,
+        top_p: (config.top_p as number | null) ?? null,
+        frequency_penalty: (config.frequency_penalty as number | null) ?? null,
+        presence_penalty: (config.presence_penalty as number | null) ?? null,
+        timeout: (config.timeout as number | null) ?? null,
+        retry_attempts: (config.retry_attempts as number | null) ?? 0,
+        concurrency: (config.concurrency as number | null) ?? 0
+      } satisfies AiConfigRow,
+      configId
+    }
+  );
+}
+
+function finishSavedConnectionTest(
+  db: ReturnType<typeof getDatabase>,
+  configId: string,
+  result: Awaited<ReturnType<typeof runConnectionTest>> | null
+): void {
+  const success = result?.ok === true;
+  const latency =
+    result && Number.isFinite(result.latency) ? Math.max(0, Math.round(result.latency)) : null;
+
+  try {
+    db.prepare(
+      `UPDATE ai_configs
+          SET test_status = ?,
+              test_error = ?,
+              test_started_at = NULL,
+              test_latency_ms = ?,
+              last_tested = CURRENT_TIMESTAMP
+        WHERE id = ? AND test_status = 'testing'`
+    ).run(
+      success ? 'success' : 'failed',
+      success
+        ? null
+        : 'No se pudo completar la prueba de conexión. Revisa URL, modelo y credenciales.',
+      latency,
+      configId
+    );
+  } catch {
+    // Never log provider errors, credentials, URLs, or a response body from this detached task.
+    console.warn('[AI] Could not persist the connection-test result');
+  }
 }
 
 aiRoutes.post('/configs', async (c) => {
@@ -352,47 +423,46 @@ aiRoutes.post('/test-connection', async (c) => {
     return c.json({ success: false, message: 'No AI config found' }, 404);
   }
 
+  if (input.configId) {
+    const configId = String(config.id);
+    const claimed = db
+      .prepare(
+        `UPDATE ai_configs
+            SET test_status = 'testing',
+                test_error = NULL,
+                test_started_at = CURRENT_TIMESTAMP,
+                test_latency_ms = NULL
+          WHERE id = ? AND ${aiConfigScopeWhere(scope)}
+            AND (test_status IS NULL OR test_status != 'testing')`
+      )
+      .run(configId, aiConfigScopeValue(scope));
+
+    if (!claimed.changes) {
+      const current = db
+        .prepare(`SELECT test_status FROM ai_configs WHERE id = ? AND ${aiConfigScopeWhere(scope)}`)
+        .get(configId, aiConfigScopeValue(scope)) as { test_status: string | null } | undefined;
+      if (!current) return c.json({ success: false, message: 'No AI config found' }, 404);
+      if (current.test_status === 'testing') {
+        return c.json({ success: true, data: { status: 'testing', configId } }, 202);
+      }
+      return c.json({ success: false, message: 'Could not start connection test' }, 409);
+    }
+
+    // A detached promise, not tied to the request's AbortSignal or client connection. Persisted
+    // state lets a later page load observe the same run; process startup marks an interrupted run.
+    setImmediate(() => {
+      void runConnectionTest(db, userId, config, configId)
+        .then((result) => finishSavedConnectionTest(db, configId, result))
+        .catch(() => finishSavedConnectionTest(db, configId, null));
+    });
+    return c.json({ success: true, data: { status: 'testing', configId } }, 202);
+  }
+
   // La prueba ya no es un «Hello» a ver que contesta: se le pide al modelo un JSON DADO con
   // `response_format` de esquema estricto —el mismo contrato que exige el resto de la app, que
   // parsea JSON en todas sus funciones de IA— y se valida la contestacion. Un proveedor que no
   // sabe responder esto no sirve para la casa, y es mejor saberlo en Ajustes que en un ticket.
-  const veredicto = await pingDeConexion(
-    {
-      base_url: config.base_url,
-      api_key: config.api_key,
-      model: config.model,
-      timeout: config.timeout
-    },
-    {
-      db,
-      userId,
-      config: {
-        id: config.id ?? `ephemeral-${userId}`,
-        name: String(config.name ?? 'Connection test'),
-        provider: String(config.provider ?? 'custom'),
-        base_url: config.base_url,
-        api_key: config.api_key,
-        model: config.model,
-        temperature: (config.temperature as number | null) ?? null,
-        max_tokens: (config.max_tokens as number | null) ?? null,
-        top_p: (config.top_p as number | null) ?? null,
-        frequency_penalty: (config.frequency_penalty as number | null) ?? null,
-        presence_penalty: (config.presence_penalty as number | null) ?? null,
-        timeout: (config.timeout as number | null) ?? null,
-        retry_attempts: (config.retry_attempts as number | null) ?? 0,
-        concurrency: (config.concurrency as number | null) ?? 0
-      } satisfies AiConfigRow,
-      configId: input.configId ? String(config.id) : null
-    }
-  );
-
-  // El estado de la prueba solo se persiste cuando se prueba una config GUARDADA; la del
-  // formulario se ensena y ya.
-  if (input.configId) {
-    db.prepare(
-      'UPDATE ai_configs SET test_status = ?, test_error = ?, last_tested = CURRENT_TIMESTAMP WHERE id = ?'
-    ).run(veredicto.ok ? 'success' : 'failed', veredicto.ok ? null : veredicto.error, config.id);
-  }
+  const veredicto = await runConnectionTest(db, userId, config, null);
 
   if (!veredicto.ok) {
     return c.json({
