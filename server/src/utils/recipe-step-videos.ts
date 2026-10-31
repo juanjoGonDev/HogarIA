@@ -86,7 +86,7 @@ const SCENE_QUERIES: Record<RecipeStepVideoScene, string> = {
 const COMMONS_API_URL = 'https://commons.wikimedia.org/w/api.php';
 const COMMONS_REST_FILE_URL = 'https://commons.wikimedia.org/w/rest.php/v1/file/';
 const USER_AGENT =
-  'HogarIA/1.0 (+https://github.com/juanjoGonDev/MiCocinAI; local cooking recipe video search)';
+  'HogarIA/1.0 (+https://github.com/juanjoGonDev/HogarIA; local cooking recipe video search)';
 const UPSTREAM_TIMEOUT_MS = 8000;
 const STREAM_IDLE_TIMEOUT_MS = 10000;
 const MAX_JSON_BYTES = 2 * 1024 * 1024;
