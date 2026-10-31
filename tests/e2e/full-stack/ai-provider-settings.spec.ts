@@ -163,7 +163,7 @@ test.describe('AI provider settings in household', () => {
     await expect(assistantRow).toContainText('Proveedor sintético antiguo');
   });
 
-  test('keeps a saved connection test locked after reload without starting a duplicate', async ({
+  test('keeps a saved connection test running after closing the tab without starting a duplicate', async ({
     page
   }) => {
     await registerWithHousehold(page, '/household?tab=settings', 'Test persistente sintético');
@@ -204,7 +204,7 @@ test.describe('AI provider settings in household', () => {
     const providerAddress = provider.address() as AddressInfo;
     const configName = 'Proveedor prueba persistente';
     let postCount = 0;
-    page.on('request', (request) => {
+    page.context().on('request', (request) => {
       if (request.method() === 'POST' && request.url().endsWith('/api/ai/test-connection')) {
         postCount += 1;
       }
@@ -233,17 +233,20 @@ test.describe('AI provider settings in household', () => {
         'testing'
       );
 
-      await page.reload();
-      const reloadedCard = page.locator('.config-card').filter({ hasText: configName });
-      const reloadedTestButton = page.locator(`[data-test="probar-${configName}"]`);
-      await expect(reloadedCard.locator('app-badge').nth(1)).toContainText('Probando');
-      await expect(reloadedTestButton.locator('button')).toBeDisabled();
-      await page.waitForTimeout(2300);
+      const context = page.context();
+      await page.close();
+      const observerPage = await context.newPage();
+      await observerPage.goto('/household?tab=settings');
+      const runningCard = observerPage.locator('.config-card').filter({ hasText: configName });
+      const runningTestButton = observerPage.locator(`[data-test="probar-${configName}"]`);
+      await expect(runningCard.locator('app-badge').nth(1)).toContainText('Probando');
+      await expect(runningTestButton.locator('button')).toBeDisabled();
+      await observerPage.waitForTimeout(2300);
       expect(postCount).toBe(1);
       expect(providerRequestCount).toBe(1);
 
       resolveProviderRequest();
-      await expect(reloadedCard.locator('app-badge').nth(1)).toHaveText('OK', {
+      await expect(runningCard.locator('app-badge').nth(1)).toHaveText('OK', {
         timeout: 10_000
       });
       expect(postCount).toBe(1);
