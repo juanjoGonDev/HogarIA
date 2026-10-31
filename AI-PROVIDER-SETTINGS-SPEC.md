@@ -14,6 +14,8 @@
 - El límite de timeout actual de 240 s se eleva a **600 s** para probar proveedores lentos. UI, API y transporte comparten ese límite; la concesión del worker debe superarlo con margen. El campo puede omitirse para usar el default actual de 30 s; no se introduce un mínimo de producto adicional, aunque un valor explícito debe ser un entero positivo.
 - Un test de conexión persistido muestra estado `testing` antes de iniciar la petición, impide duplicados y permite reanudar la consulta de estado tras recargar. El estado/resultado puede persistirse; claves y credenciales efímeras nunca se escriben en tablas de jobs, estado de test, logs ni navegador persistente.
 - El registro pide repetir la contraseña y valida igualdad en cliente. Solo se envía la contraseña original al servidor.
+- Al editar un proveedor guardado, la API key se mantiene vacía y opcional: omitirla conserva la clave actual; escribir otra la sustituye. Nunca se devuelve la clave guardada al navegador.
+- Los errores de validación Joi/Zod que se muestren en un toast identifican campo y regla incumplida, incluidos límites numéricos. Guardar/probar una configuración no puede convertir un error de validación en un toast genérico; los flujos con error inline propio conservan su comportamiento silencioso.
 - La entrega será **un único PR**, por decisión explícita del usuario aunque el diff supere 400 líneas; documentar esa excepción con la etiqueta `size:exception` y mantener el PR en Draft durante el trabajo.
 
 ## Fuente de verdad y discrepancias
@@ -21,10 +23,10 @@
 - `HOGARIA-SPEC.md` §12am y §12an documentan la antigua configuración mono-activa. Esta spec supersede **solo** la regla de exclusividad; endpoint OpenAI-compatible, redacción de claves, dispatcher único, límites de cola y jobs fijados siguen vigentes.
 - `HOGARIA-SPEC.md` §12ap y `QA-HOUSEHOLD.AI.HOME-CONFIG-AND-PINNED-JOBS.1` mantienen el scope, ACL y pinning por hogar.
 - `SPEC.md` del asistente global no gestiona credenciales ni proveedores; esta spec cubre la configuración que consume.
-- El log adjunto `Texto pegado.txt` solo registra health/readiness/receipts con 200 y no contiene solicitudes al conector ni timeouts. No basta para atribuir la causa exacta del fallo; validar el comportamiento con el harness aislado y guardar el límite como incertidumbre si persiste.
+- La captura muestra un `timeout: 300000` rechazado por un servidor que informa máximo `240000`; el contrato activo de esta rama fija máximo compartido `600000` para alta, edición, test y transporte. El log adjunto del 31-10-2026 contiene 56 respuestas, todas `GET`/200; no contiene `POST`/`PATCH` de configuración ni test de conexión, por lo que no permite atribuir el fallo observado a una petición concreta.
 - En la base de esta rama, `createAiConfigSchema` limitaba timeout a 240000 ms, `testConnectionSchema` no compartía ese tope y `ticket-queue.ts` usaba una concesión fija de 300 s. La primera unidad elevó el límite compartido de API a 600000 ms, la concesión a 660 s, el estado guardado a `testing` antes de la llamada, bloqueo atómico de duplicados y recuperación a fallo seguro al reiniciar. Está validado con Vitest y Playwright contra la app/API aislada usando un servidor HTTP sintético local.
 - El contrato anterior imponía un solo proveedor activo. Esta unidad lo sustituye por `ai_function_providers`; desactivar/eliminar conserva el comportamiento seguro existente de cancelar jobs del proveedor, pero solo las funciones asignadas hacen fallback al proveedor activo más antiguo. Cambiar asignación no altera jobs admitidos.
-- El pre-push detectó dos pruebas del asistente con semana fija `2026-10-19` y reloj real; se reprodujeron en `2026-10-20`, cuando la lógica excluye el lunes pasado. Ambas fijan el reloj en el test, sin cambiar comportamiento de producto. Verificado: spec frontend, 55/55; test server focal, 1/1.
+- El pre-push detectó pruebas del asistente con semana fija `2026-10-19` y reloj real; se reproducen cuando esa semana queda en el pasado y la lógica excluye días sin compra futura. Los tests fijan el reloj al escenario esperado, sin cambiar comportamiento de producto. Verificación inicial de esta unidad: el pre-push falló 1 de 1740 frontend tests en `ai-action-assistant-dialog.component.spec.ts`; corregido al fijar la fecha en ese caso.
 
 ## Checklist de aceptación
 
@@ -39,6 +41,14 @@
 - [x] Con un proveedor activo, mostrarlo fijo; con varios, mostrar selectores por función solo con opciones activas. Con cero activos, no mostrar selector falso.
 - [x] Ocultar el acceso global a IA cuando no haya proveedor activo. Los puntos de generación cubiertos muestran un modal accesible con enlace directo a Hogar → Ajustes; las pruebas verifican que no se dispara la petición. El backend conserva sus guards.
 - [x] El estado de disponibilidad, sin credenciales, se puede leer antes de crear un hogar tras autenticar y responde 200 con estado no configurado; no debe provocar 409 de setup ni solicitudes de generación. Probado por el middleware de setup sobre `createApp`.
+
+### Edición segura y errores de validación
+
+- [ ] Al editar, la API key queda vacía y no requerida; texto auxiliar explica que vacía conserva la guardada. Crear sigue exigiendo una clave.
+- [ ] Guardar sin API key omite `apiKey` y conserva la clave; guardar una clave nueva la envía y sustituye la anterior. Las respuestas no incluyen la clave.
+- [ ] Los errores Joi/Zod presentados en un toast indican campo y requisito real (por ejemplo, máximo/mínimo con valor), en español e inglés; procesan tanto `issues` Zod como `details` Joi y no muestran secretos.
+- [ ] Crear, editar y probar muestran el detalle de validación sin toast genérico duplicado; mantener silenciosos los flujos que tienen recuperación inline propia.
+- [ ] Cubrir cambios con tests de formatter/interceptor, servicio/componente y Playwright real en escritorio y móvil; capturas sintéticas comparables y geometría del modal revisada.
 
 ### Timeout y estado del test de conexión
 

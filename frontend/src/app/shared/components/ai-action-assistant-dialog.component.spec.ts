@@ -672,6 +672,9 @@ describe('AiActionAssistantDialogComponent', () => {
   });
 
   it('cancels a post-confirmation shopping preview when the dialog is destroyed', async () => {
+    jasmine.clock().install();
+    jasmine.clock().mockDate(new Date('2026-10-19T12:00:00.000Z'));
+    fakeClockInstalled = true;
     householdContext.activeHouseholdId.set('home-meals');
     householdContext.household.set(syntheticMealHousehold());
     const action = mealPlanAction();
