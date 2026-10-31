@@ -84,6 +84,7 @@ El tamaño total supera 400 líneas revisadas. El usuario eligió explícitament
 - `pnpm run test:e2e -- tests/e2e/ai-config.spec.ts tests/e2e/logs.spec.ts --project=chromium --project=mobile-chrome`: 68/68, stack dev aislado.
 - `node scripts/run-isolated-playwright.mjs tests/e2e/ai-config.spec.ts tests/e2e/logs.spec.ts --grep='one saved AI test survives closing the page|shows synthetic server uptime' --project=chromium --project=mobile-chrome`: 4/4; se repitió tras añadir anchos 320 px y landscape 852×393.
 - `node scripts/run-isolated-playwright.mjs --config=playwright.full-stack.config.ts tests/e2e/full-stack/service-worker-update.spec.ts --project=chromium --project=mobile-chrome`: 2/2, build servido en modo producción y DB temporal.
+- `node scripts/run-isolated-playwright.mjs tests/e2e/ai-provider-queue.spec.ts --project=chromium`: 3/3; los E2E de cola usan ahora generación de receta (la prueba de conexión guardada responde `202` y se deduplica, no representa un job de la cola genérica). El caso de reintento comprueba la segunda ejecución y la cancela de forma aislada.
 - `pnpm --filter @hogaria/server exec vitest run src/app.spec.ts`: 13/13.
 - `pnpm --filter @hogaria/web exec ng test --no-watch --include=src/app/core/services/service-worker-update.service.spec.ts --include=src/app/shared/components/app-update-notice.component.spec.ts`: 11/11.
 - `pnpm --filter @hogaria/web exec ng test --no-watch --include=src/environments/environment.spec.ts`: 1/1; repository support URL matches in dev and production.
@@ -93,4 +94,4 @@ El tamaño total supera 400 líneas revisadas. El usuario eligió explícitament
 - `node scripts/nginx-static-headers-smoke.mjs`: 5/5 respuestas HTTP reales desde `nginx:alpine` con fixtures sintéticos; verificó `Cache-Control`, `X-Frame-Options` y `X-Content-Type-Options` en shell/manifiestos/bundle. Contenedor/fixtures temporales eliminados. El test de config falló antes del arreglo y pasó después.
 - Workflow/container smoke: 12/12.
 - `pnpm run lint`: no pasa por herramienta/configuración existente (detalle arriba); no es un fallo de lint de los cambios.
-- CI remota pendiente para el HEAD final. No mergear; PR permanece Draft.
+- El run remoto `41218712834` del HEAD `77f3728` falló solo en shard 1 porque `ai-provider-queue.spec.ts` trataba el test de conexión guardada como un job genérico; otros jobs y los otros tres shards pasaron. El E2E corregido pasa localmente 3/3; CI remota pendiente para el nuevo HEAD. No mergear; PR permanece Draft.

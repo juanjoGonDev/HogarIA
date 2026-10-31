@@ -9,6 +9,7 @@ type QueueJob = {
   id: string;
   status: 'queued' | 'running' | 'failed';
   queueOrder: number;
+  attempts: number;
   retryable: boolean;
 };
 
@@ -115,21 +116,34 @@ async function createConfig(
   return String(reply.body.data.id);
 }
 
-async function startConnectionTest(
+async function startQueuedRecipeGeneration(
   page: Page,
-  configId: string
+  sequence: number
 ): Promise<{
   result: Promise<ApiReply>;
 }> {
   const token = await page.evaluate(() => localStorage.getItem('hogar:v1:auth_token'));
   const base = new URL(page.url());
-  const result = fetch(new URL('/api/ai/test-connection', base), {
+  const result = fetch(new URL('/api/ai/generate-recipe', base), {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
       authorization: `Bearer ${token}`
     },
-    body: JSON.stringify({ configId })
+    body: JSON.stringify({
+      ingredients: [
+        {
+          id: `synthetic-ingredient-${sequence}`,
+          name: `Synthetic ingredient ${sequence}`,
+          quantity: 1,
+          unit: 'unit'
+        }
+      ],
+      utensils: [],
+      servings: 1,
+      difficulty: 'easy',
+      detailLevel: 'basic'
+    })
   }).then(async (response) => ({ status: response.status, body: await response.json() }));
   return { result };
 }
@@ -218,12 +232,10 @@ test.describe('gestor de cola de IA por proveedor', () => {
     const manager = page.locator('[data-test="ai-provider-queue"]');
     await expect(manager).toBeVisible();
 
-    provider.setNextBehaviors('hold', 'success');
-    const calls = [
-      await startConnectionTest(page, configId),
-      await startConnectionTest(page, configId),
-      await startConnectionTest(page, configId)
-    ];
+    provider.setNextBehaviors('hold');
+    const calls = await Promise.all(
+      [1, 2, 3].map((sequence) => startQueuedRecipeGeneration(page, sequence))
+    );
 
     await waitForProviderRequest(provider, 1);
     await expect(page.locator('[data-test="ai-queue-job-running"]')).toHaveCount(1);
@@ -328,21 +340,22 @@ test.describe('gestor de cola de IA por proveedor', () => {
     const queuedToCancel = page.locator(`.ai-queue__job[data-job-id="${secondId}"]`);
     await queuedToCancel.getByRole('button', { name: /Cancelar/ }).click();
     await expect(page.locator('[data-test="ai-queue-job-queued"]')).toHaveCount(1);
+    const remainingQueued = page.locator(`.ai-queue__job[data-job-id="${firstId}"]`);
+    await remainingQueued.getByRole('button', { name: /Cancelar/ }).click();
+    await expect(page.locator('[data-test="ai-queue-job-queued"]')).toHaveCount(0);
 
     const runningId = (await queueJobs(page, configId)).find((job) => job.status === 'running')?.id;
     expect(runningId).toBeTruthy();
     const runningRow = page.locator(`.ai-queue__job[data-job-id="${runningId}"]`);
     await runningRow.getByRole('button', { name: /Cancelar/ }).click();
     await expect.poll(() => provider.abortCount, { timeout: 10000 }).toBeGreaterThan(0);
-    await expect(page.locator('[data-test="ai-queue-job-queued"]')).toHaveCount(0);
     await expect(page.locator('[data-test="ai-queue-job-running"]')).toHaveCount(0);
-    await waitForProviderRequest(provider, 2);
+    await waitForProviderRequest(provider, 1);
     expect((await queueJobs(page, configId)).some((job) => job.status === 'failed')).toBe(false);
 
-    const first = await calls[0].result;
-    expect(first.status).toBeGreaterThanOrEqual(400);
-    await calls[1].result;
-    await calls[2].result;
+    const replies = await Promise.all(calls.map(({ result }) => result));
+    expect(replies.every((reply) => reply.status >= 400)).toBe(true);
+    expect(provider.requestCount).toBe(1);
   });
 
   test('permite reintentar manualmente un fallo terminal sin exponer payloads ni claves', async ({
@@ -355,9 +368,9 @@ test.describe('gestor de cola de IA por proveedor', () => {
     await expect(page).toHaveURL(new RegExp(`/ai-config/${configId}/queue$`));
     const manager = page.locator('[data-test="ai-provider-queue"]');
     await expect(manager).toBeVisible();
-    provider.setNextBehaviors('fail', 'success');
+    provider.setNextBehaviors('fail', 'hold');
 
-    const call = await startConnectionTest(page, configId);
+    const call = await startQueuedRecipeGeneration(page, 1);
     await expect(page.locator('[data-test="ai-queue-job-failed"]')).toHaveCount(1);
     const failed = (await queueJobs(page, configId)).find((job) => job.status === 'failed');
     expect(failed?.retryable).toBe(true);
@@ -372,10 +385,20 @@ test.describe('gestor de cola de IA por proveedor', () => {
       .locator(`.ai-queue__job[data-job-id="${failed!.id}"]`)
       .getByRole('button', { name: /Reintentar/ })
       .click();
-    await expect(page.locator('[data-test="ai-queue-job-failed"]')).toHaveCount(0);
+    await expect.poll(() => provider.requestCount).toBe(2);
+    await expect(page.locator('[data-test="ai-queue-job-running"]')).toHaveCount(1);
+    const retried = (await queueJobs(page, configId)).find((job) => job.id === failed!.id);
+    expect(retried).toMatchObject({ status: 'running', attempts: 1 });
+
+    await page
+      .locator(`.ai-queue__job[data-job-id="${failed!.id}"]`)
+      .getByRole('button', { name: /Cancelar/ })
+      .click();
+    await expect.poll(() => provider.abortCount, { timeout: 10000 }).toBeGreaterThan(0);
+    await expect(page.locator('[data-test="ai-queue-job-running"]')).toHaveCount(0);
+    await expect.poll(() => provider.requestCount).toBe(2);
     const reply = await call.result;
-    expect(reply.status).toBe(200);
-    expect(reply.body.data.success).toBe(true);
+    expect(reply.status).toBeGreaterThanOrEqual(400);
     expect(provider.requestCount).toBe(2);
   });
 
