@@ -17,6 +17,7 @@ import {
   readActiveHouseholdId
 } from './household-context.js';
 import { resolveAiFunctionProvider, type AiFunctionKey } from './ai-function-providers.js';
+import { effectiveAiTimeoutMs } from './ai-timeout.js';
 import type { AiCallResponseFormat, AiResponseFormat } from '../schemas/ai-response-format.js';
 
 export type AiMessagePart =
@@ -62,7 +63,6 @@ export interface AiConfigRow {
   concurrency: number | null;
 }
 
-const DEFAULT_TIMEOUT_MS = 30_000;
 const REAL_SMOKE_PROVIDER_KEY_MARKER = '__HOGARIA_AI_REAL_SMOKE_PROVIDER_KEY__';
 const REAL_SMOKE_ENABLED_ENV = 'HOGARIA_AI_REAL_SMOKE';
 const REAL_SMOKE_PROXY_URL_ENV = 'HOGARIA_AI_REAL_SMOKE_PROXY_URL';
@@ -279,7 +279,7 @@ export async function callAIWithConfig(
       body: JSON.stringify(
         chatBody(active, { messages, response_format: responseFormat, ...requestOptions })
       ),
-      signal: señalConTimeout(signal, active.timeout ?? DEFAULT_TIMEOUT_MS)
+      signal: señalConTimeout(signal, effectiveAiTimeoutMs(active.timeout))
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -356,7 +356,7 @@ export async function callAIStreamingWithConfig(
   senal: AbortSignal
 ): Promise<string> {
   const apiKey = resolveProviderApiKey(active.base_url, active.api_key);
-  const signal = señalConTimeout(senal, active.timeout ?? DEFAULT_TIMEOUT_MS);
+  const signal = señalConTimeout(senal, effectiveAiTimeoutMs(active.timeout));
   let response: Response;
   try {
     response = await fetch(endpoint(active.base_url), {
@@ -534,7 +534,7 @@ export async function pingDeConexionTransport(config: {
           }
         }
       }),
-      signal: señalConTimeout(config.signal, config.timeout ?? DEFAULT_TIMEOUT_MS)
+      signal: señalConTimeout(config.signal, effectiveAiTimeoutMs(config.timeout))
     });
 
     const latency = Date.now() - startTime;

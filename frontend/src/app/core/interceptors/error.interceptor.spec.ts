@@ -71,6 +71,263 @@ describe('errorInterceptor', () => {
     }
   });
 
+  it('shows Zod field and numeric requirement in the validation toast', () => {
+    const original = new HttpErrorResponse({
+      status: 400,
+      error: {
+        success: false,
+        error: 'Validation Error',
+        message: 'timeout: debe ser como máximo 600.000',
+        issues: [
+          { field: 'timeout', message: 'debe ser como máximo 600.000' },
+          { field: 'maxTokens', message: 'debe ser como máximo 4.096' }
+        ]
+      }
+    });
+
+    const propagated = intercept(original);
+
+    expect(propagated.validation).toBeTrue();
+    expect(propagated.message).toBe(
+      'timeout: debe ser como máximo 600.000 · maxTokens: debe ser como máximo 4096'
+    );
+    expect(toastService.error).toHaveBeenCalledOnceWith(
+      'Error',
+      'timeout: debe ser como máximo 600.000 · maxTokens: debe ser como máximo 4096'
+    );
+
+    jasmine.clock().tick(4_001);
+    i18n.setLang('en');
+    TestBed.flushEffects();
+    const english = intercept(
+      new HttpErrorResponse({
+        status: 400,
+        error: {
+          error: 'Validation Error',
+          issues: [
+            { field: 'timeout', message: 'debe ser como máximo 600.000' },
+            { field: 'maxTokens', message: 'debe ser como máximo 4.096' }
+          ]
+        }
+      })
+    );
+    expect(english.message).toBe(
+      'timeout: must be at most 600,000 · maxTokens: must be at most 4,096'
+    );
+  });
+
+  it('localizes URL validation details from Zod in Spanish and English', () => {
+    const spanish = intercept(
+      new HttpErrorResponse({
+        status: 400,
+        error: {
+          error: 'Validation Error',
+          issues: [{ field: 'baseUrl', message: 'Invalid URL format' }]
+        }
+      })
+    );
+    expect(spanish.message).toBe('baseUrl: debe ser una URL válida');
+
+    jasmine.clock().tick(4_001);
+    i18n.setLang('en');
+    TestBed.flushEffects();
+    const english = intercept(
+      new HttpErrorResponse({
+        status: 400,
+        error: {
+          error: 'Validation Error',
+          issues: [{ field: 'baseUrl', message: 'Invalid URL format' }]
+        }
+      })
+    );
+    expect(english.message).toBe('baseUrl: must be a valid URL');
+  });
+
+  it('formats Joi numeric details in the active language', () => {
+    const spanish = intercept(
+      new HttpErrorResponse({
+        status: 400,
+        error: {
+          error: 'Bad Request',
+          details: [
+            {
+              path: ['timeout'],
+              type: 'number.max',
+              message: '"timeout" must be less than or equal to 600000'
+            },
+            {
+              path: ['retryAttempts'],
+              type: 'number.min',
+              message: '"retryAttempts" must be greater than or equal to 1'
+            }
+          ]
+        }
+      })
+    );
+    expect(spanish.message).toBe(
+      'timeout: debe ser como máximo 600.000 · retryAttempts: debe ser como mínimo 1'
+    );
+
+    jasmine.clock().tick(4_001);
+    i18n.setLang('en');
+    TestBed.flushEffects();
+    const english = intercept(
+      new HttpErrorResponse({
+        status: 400,
+        error: {
+          error: 'Bad Request',
+          details: [
+            {
+              path: ['timeout'],
+              type: 'number.max',
+              message: '"timeout" must be less than or equal to 600000'
+            },
+            {
+              path: ['retryAttempts'],
+              type: 'number.min',
+              message: '"retryAttempts" must be greater than or equal to 1'
+            }
+          ]
+        }
+      })
+    );
+    expect(english.message).toBe(
+      'timeout: must be at most 600,000 · retryAttempts: must be at least 1'
+    );
+  });
+
+  it('translates required Joi fields without echoing their submitted value', () => {
+    const original = new HttpErrorResponse({
+      status: 400,
+      error: {
+        error: 'Bad Request',
+        details: [
+          {
+            path: ['apiKey'],
+            type: 'any.required',
+            message: '"apiKey" is required'
+          }
+        ]
+      }
+    });
+
+    expect(intercept(original).message).toBe('apiKey: es obligatorio');
+  });
+
+  it('redacts secret values echoed by unknown Joi validation details', () => {
+    const secret = 'synthetic-ghp-secret-value';
+    const original = new HttpErrorResponse({
+      status: 400,
+      error: {
+        error: 'Bad Request',
+        details: [
+          {
+            path: ['apiKey'],
+            type: 'string.pattern.base',
+            message: `"apiKey" with value "${secret}" fails to match the required pattern`
+          }
+        ]
+      }
+    });
+
+    const propagated = intercept(original);
+
+    expect(propagated.message).toBe('apiKey: tiene un formato no válido');
+    expect(propagated.message).not.toContain(secret);
+    expect(toastService.error.calls.mostRecent().args[1]).not.toContain(secret);
+
+    jasmine.clock().tick(4_001);
+    const untyped = intercept(
+      new HttpErrorResponse({
+        status: 400,
+        error: {
+          error: 'Bad Request',
+          details: [
+            {
+              path: ['apiKey'],
+              message: `The submitted API key "${secret}" does not match this provider's policy`
+            }
+          ]
+        }
+      })
+    );
+    expect(untyped.message).toBe('apiKey: tiene un valor no válido');
+    expect(untyped.message).not.toContain(secret);
+    expect(toastService.error.calls.mostRecent().args[1]).not.toContain(secret);
+
+    jasmine.clock().tick(4_001);
+    const credentialedUrl = 'https://synthetic-user:synthetic-password@example.test';
+    const urlError = intercept(
+      new HttpErrorResponse({
+        status: 400,
+        error: {
+          error: 'Bad Request',
+          details: [
+            {
+              path: ['baseUrl'],
+              message: `Could not accept ${credentialedUrl}`
+            }
+          ]
+        }
+      })
+    );
+    expect(urlError.message).toBe('baseUrl: tiene un valor no válido');
+    expect(urlError.message).not.toContain(credentialedUrl);
+    expect(toastService.error.calls.mostRecent().args[1]).not.toContain(credentialedUrl);
+  });
+
+  it('preserves character units for Joi and Zod length boundaries', () => {
+    const joi = intercept(
+      new HttpErrorResponse({
+        status: 400,
+        error: {
+          error: 'Bad Request',
+          details: [
+            {
+              path: ['name'],
+              type: 'string.max',
+              limit: 100,
+              message: '"name" length must be less than or equal to 100 characters long'
+            }
+          ]
+        }
+      })
+    );
+    expect(joi.message).toBe('name: no puede superar 100 caracteres');
+
+    jasmine.clock().tick(4_001);
+    i18n.setLang('en');
+    TestBed.flushEffects();
+    const zod = intercept(
+      new HttpErrorResponse({
+        status: 400,
+        error: {
+          error: 'Validation Error',
+          issues: [{ field: 'name', message: 'debe tener al menos 3 caracteres' }]
+        }
+      })
+    );
+    expect(zod.message).toBe('name: must be at least 3 characters');
+  });
+
+  it('keeps detailed validation available to silent flows without showing a toast', () => {
+    const propagated = intercept(
+      new HttpErrorResponse({
+        status: 400,
+        error: {
+          error: 'Validation Error',
+          issues: [{ field: 'timeout', message: 'debe ser como máximo 600.000' }]
+        }
+      }),
+      '/api/ai/configs',
+      new HttpContext().set(SILENT_TOAST, true)
+    );
+
+    expect(propagated.validation).toBeTrue();
+    expect(propagated.message).toBe('timeout: debe ser como máximo 600.000');
+    expect(toastService.error).not.toHaveBeenCalled();
+  });
+
   it('uses the client ErrorEvent message and keeps an unknown client failure visible', () => {
     const original = new HttpErrorResponse({
       status: 0,
@@ -175,8 +432,10 @@ describe('errorInterceptor', () => {
     original: HttpErrorResponse,
     url = '/api/resource',
     context = new HttpContext()
-  ): { status: number; message: string; original: HttpErrorResponse } {
-    let propagated: { status: number; message: string; original: HttpErrorResponse } | undefined;
+  ): { status: number; message: string; validation: boolean; original: HttpErrorResponse } {
+    let propagated:
+      | { status: number; message: string; validation: boolean; original: HttpErrorResponse }
+      | undefined;
     const request = new HttpRequest('GET', url, null, { context });
 
     TestBed.runInInjectionContext(() =>

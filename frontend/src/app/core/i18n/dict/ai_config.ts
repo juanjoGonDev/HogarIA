@@ -31,6 +31,8 @@ export const aiConfigEs = {
     'Agrega un proveedor de IA para que el planificador y las sugerencias funcionen',
   'ai_config.agregar_configuracion': 'Agregar configuración',
   'ai_config.api_key': 'API Key',
+  'ai_config.api_key_edit_helper':
+    'Déjala vacía para conservar la clave guardada; escribe otra para cambiarla.',
   'ai_config.conecta_tu_proveedor_de':
     'Conecta tu proveedor de IA para que la app proponga recetas, menús y cestas a tu medida. Soporta cualquier API compatible con OpenAI.',
   'ai_config.configuracion_ia': 'Configuración IA',
@@ -53,7 +55,7 @@ export const aiConfigEs = {
   'ai_config.sin_configuraciones': 'Sin configuraciones',
   'ai_config.temperatura': 'Temperatura',
   'ai_config.timeout_ms': 'Timeout (ms)',
-  'ai_config.timeout_helper': 'Hasta 600000 ms; vacío usa 30000.',
+  'ai_config.timeout_helper': 'Vacío usa 30000 ms.',
   'ai_config.url_base': 'URL Base',
   'ai_config.url_helper': 'URL de la API compatible con OpenAI',
   'ai_config.url': 'URL',
@@ -170,6 +172,8 @@ export const aiConfigEn: Record<keyof typeof aiConfigEs, string> = {
     'Add an AI provider so the planner and the suggestions start working',
   'ai_config.agregar_configuracion': 'Add configuration',
   'ai_config.api_key': 'API Key',
+  'ai_config.api_key_edit_helper':
+    'Leave it blank to keep the saved key; enter a new one to replace it.',
   'ai_config.conecta_tu_proveedor_de':
     'Connect your AI provider so the app can tailor recipes, menus and baskets to you. Any OpenAI-compatible API works.',
   'ai_config.configuracion_ia': 'AI Settings',
@@ -191,7 +195,7 @@ export const aiConfigEn: Record<keyof typeof aiConfigEs, string> = {
   'ai_config.sin_configuraciones': 'No configurations',
   'ai_config.temperatura': 'Temperature',
   'ai_config.timeout_ms': 'Timeout (ms)',
-  'ai_config.timeout_helper': 'Up to 600000 ms; blank uses 30000.',
+  'ai_config.timeout_helper': 'Blank uses 30000 ms.',
   'ai_config.url_base': 'Base URL',
   'ai_config.url_helper': 'URL of an OpenAI-compatible API',
   'ai_config.url': 'URL',

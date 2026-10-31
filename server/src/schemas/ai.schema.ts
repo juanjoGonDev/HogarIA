@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { formDefault, formField, formPartial } from './form.js';
 import { tasteGoalEnum } from '../utils/taste-profile.js';
+import { AI_TIMEOUT_DEFAULT_MS, AI_TIMEOUT_MAX_MS } from '../utils/ai-timeout.js';
 
 const aiProviderEnum = z.enum(['openai', 'custom']);
 export const aiFunctionProviderAssignmentSchema = z
@@ -94,8 +95,8 @@ export const mealReplacementResponseSchema = z
     servings: z.number().int().nullable()
   })
   .strict();
-// Provider requests cap at ten minutes; the AI worker lease adds a one-minute safety margin.
-export const AI_CONFIG_MAX_TIMEOUT_MS = 600_000;
+// No product cap: only Node's maximum safe timer range is enforced.
+export const AI_CONFIG_MAX_TIMEOUT_MS = AI_TIMEOUT_MAX_MS;
 export const AI_CONFIG_MAX_TOKENS = 4096;
 export const AI_CONFIG_DEFAULT_MAX_TOKENS = AI_CONFIG_MAX_TOKENS;
 
@@ -104,7 +105,10 @@ export const createAiConfigSchema = z.object({
   name: z.string().min(1, 'Name is required').max(100),
   provider: formDefault(aiProviderEnum, 'custom'),
   baseUrl: z.string().url('Invalid URL format'),
-  apiKey: z.string().min(1, 'API key is required'),
+  apiKey: z
+    .string()
+    .min(1, 'API key is required')
+    .refine((value) => Boolean(value.trim()), 'API key is required'),
   model: z.string().min(1, 'Model is required'),
   temperature: formDefault(z.number().min(0).max(2), 0.7),
   maxTokens: formDefault(
@@ -114,7 +118,10 @@ export const createAiConfigSchema = z.object({
   topP: formField(z.number().min(0).max(1)),
   frequencyPenalty: formField(z.number().min(-2).max(2)),
   presencePenalty: formField(z.number().min(-2).max(2)),
-  timeout: formDefault(z.number().int().positive().max(AI_CONFIG_MAX_TIMEOUT_MS), 30000),
+  timeout: formDefault(
+    z.number().int().positive().max(AI_CONFIG_MAX_TIMEOUT_MS),
+    AI_TIMEOUT_DEFAULT_MS
+  ),
   retryAttempts: formDefault(z.number().int().min(0).max(5), 3),
   // Máximo de trabajo de IA en vuelo por proveedor: 0 elimina el límite configurado.
   concurrency: formDefault(z.number().int().min(0).max(8), 0)

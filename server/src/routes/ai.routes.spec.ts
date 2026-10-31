@@ -196,6 +196,38 @@ describe('proveedores de IA por función', () => {
     expect(cuerpo.data[0].baseUrl).toBe('http://localhost:9/v1'); // camelCase, lo que la UI lee
   });
 
+  it('preserva la API key omitida y reemplaza solo cuando se envía otra', async () => {
+    const config = await crearConfig(alice, 'Con llave', undefined, 3, 'fixture-old-key');
+
+    const unchanged = await call(alice, 'PATCH', `/configs/${config.id}`, { name: 'Sin cambios' });
+    expect(unchanged.status).toBe(200);
+    expect(db.prepare('SELECT api_key FROM ai_configs WHERE id = ?').get(config.id)).toEqual({
+      api_key: 'fixture-old-key'
+    });
+    expect(await unchanged.text()).not.toContain('fixture-old-key');
+
+    const replaced = await call(alice, 'PATCH', `/configs/${config.id}`, {
+      apiKey: 'fixture-new-key'
+    });
+    expect(replaced.status).toBe(200);
+    expect(db.prepare('SELECT api_key FROM ai_configs WHERE id = ?').get(config.id)).toEqual({
+      api_key: 'fixture-new-key'
+    });
+    expect(await replaced.text()).not.toContain('fixture-new-key');
+  });
+
+  it('trata una API key PATCH vacía o con espacios como omitida', async () => {
+    const config = await crearConfig(alice, 'Con llave', undefined, 3, 'fixture-kept-key');
+
+    const whitespace = await call(alice, 'PATCH', `/configs/${config.id}`, { apiKey: '   ' });
+
+    expect(whitespace.status).toBe(200);
+    expect(db.prepare('SELECT api_key FROM ai_configs WHERE id = ?').get(config.id)).toEqual({
+      api_key: 'fixture-kept-key'
+    });
+    expect(await whitespace.text()).not.toContain('fixture-kept-key');
+  });
+
   it('activar o desactivar solo cambia ese proveedor y reasigna sus funciones al activo más antiguo', async () => {
     const vieja = await crearConfig(alice, 'Vieja');
     const nueva = await crearConfig(alice, 'Nueva');
@@ -372,7 +404,7 @@ describe('permisos de configuración IA por hogar', () => {
 });
 
 describe('POST /test-connection', () => {
-  it('acepta timeout hasta 600000 ms en alta, edición y prueba; rechaza valores fuera del contrato', async () => {
+  it('acepta timeout sin límite de producto en alta, edición y prueba; rechaza fuera del rango técnico', async () => {
     const defaultConfig = await crearConfig(alice, 'Default provider');
     expect(defaultConfig.timeout).toBe(30000);
 
@@ -382,11 +414,11 @@ describe('POST /test-connection', () => {
       baseUrl: 'http://localhost:9/v1',
       apiKey: 'sk-x',
       model: 'gpt-5',
-      timeout: 600000
+      timeout: 900000
     });
     expect(create.status).toBe(201);
     const config = await data(create);
-    expect(config.timeout).toBe(600000);
+    expect(config.timeout).toBe(900000);
 
     const invalidCreate = await call(alice, 'POST', '/configs', {
       name: 'Too slow',
@@ -394,23 +426,29 @@ describe('POST /test-connection', () => {
       baseUrl: 'http://localhost:9/v1',
       apiKey: 'sk-x',
       model: 'gpt-5',
-      timeout: 600001
+      timeout: 2_147_483_648
     });
     expect(invalidCreate.status).toBe(400);
+    const invalidCreateBody = await json(invalidCreate);
+    expect(invalidCreateBody.message).toBe('timeout: debe ser como máximo 2.147.483.647');
+    expect(invalidCreateBody.issues).toContainEqual({
+      field: 'timeout',
+      message: 'debe ser como máximo 2.147.483.647'
+    });
 
-    expect((await call(alice, 'PATCH', `/configs/${config.id}`, { timeout: 600000 })).status).toBe(
-      200
-    );
-    expect((await call(alice, 'PATCH', `/configs/${config.id}`, { timeout: 600001 })).status).toBe(
-      400
-    );
+    expect(
+      (await call(alice, 'PATCH', `/configs/${config.id}`, { timeout: 1_800_000 })).status
+    ).toBe(200);
+    expect(
+      (await call(alice, 'PATCH', `/configs/${config.id}`, { timeout: 2_147_483_648 })).status
+    ).toBe(400);
 
     stubDelProveedor('{"status":"ok","message":"conexión establecida"}');
     const validTest = await call(alice, 'POST', '/test-connection', {
       baseUrl: 'http://localhost:9',
       apiKey: 'sk-x',
       model: 'gpt-5',
-      timeout: 600000
+      timeout: 1_800_000
     });
     expect(validTest.status).toBe(200);
 
@@ -418,7 +456,7 @@ describe('POST /test-connection', () => {
       baseUrl: 'http://localhost:9',
       apiKey: 'sk-x',
       model: 'gpt-5',
-      timeout: 600001
+      timeout: 2_147_483_648
     });
     expect(invalidTest.status).toBe(400);
     for (const timeout of [0, -1, 1.5]) {

@@ -345,7 +345,8 @@ const FUNCTION_LABELS: Record<AiFunctionKey, TranslationKey> = {
             [label]="'ai_config.api_key' | t"
             placeholder="sk-..."
             [(ngModel)]="formData.apiKey"
-            [required]="true"
+            [required]="!editingConfig()"
+            [helper]="editingConfig() ? ('ai_config.api_key_edit_helper' | t) : ''"
           ></app-input>
 
           <div class="form-row">
@@ -383,7 +384,6 @@ const FUNCTION_LABELS: Record<AiFunctionKey, TranslationKey> = {
               type="number"
               [label]="'ai_config.timeout_ms' | t"
               placeholder="30000"
-              [max]="600000"
               [helper]="'ai_config.timeout_helper' | t"
               [(ngModel)]="formData.timeout"
             ></app-input>
@@ -986,7 +986,7 @@ export class AiConfigComponent implements OnInit {
     this.isSaving.set(true);
 
     const data: Partial<typeof this.formData> = { ...this.formData };
-    if (!data.apiKey && this.editingConfig()) {
+    if (this.editingConfig() && !data.apiKey?.trim()) {
       delete data.apiKey;
     }
 
@@ -1014,8 +1014,8 @@ export class AiConfigComponent implements OnInit {
         this.aiService.loadFunctionProviders();
         this.providerAvailability.load(true).subscribe();
       },
-      error: () => {
-        this.notifySaveError();
+      error: (error: unknown) => {
+        this.notifySaveError(error);
         this.isSaving.set(false);
       }
     });
@@ -1034,8 +1034,9 @@ export class AiConfigComponent implements OnInit {
         );
         this.isTestResultOpen.set(true);
       },
-      error: () => {
+      error: (error: unknown) => {
         this.probandoId.set(null);
+        if (this.notifyValidationError(error)) return;
         this.testResult.set({
           success: false,
           error: this.i18n.t('ai_config.no_se_pudo_conectar')
@@ -1078,8 +1079,9 @@ export class AiConfigComponent implements OnInit {
           );
           this.isTestResultOpen.set(true);
         },
-        error: () => {
+        error: (error: unknown) => {
           this.probandoForm.set(false);
+          if (this.notifyValidationError(error)) return;
           this.testResult.set({
             success: false,
             error: this.i18n.t('ai_config.no_se_pudo_conectar')
@@ -1123,6 +1125,13 @@ export class AiConfigComponent implements OnInit {
           this.aiService.loadConfigs();
           this.aiService.loadFunctionProviders();
           this.providerAvailability.load(true).subscribe();
+        },
+        error: (error: unknown) => {
+          if (this.notifyValidationError(error)) return;
+          this.toastService.error(
+            this.i18n.t('ui.error'),
+            this.i18n.t('ai_config.no_se_pudo_actualizar')
+          );
         }
       });
   }
@@ -1220,8 +1229,17 @@ export class AiConfigComponent implements OnInit {
     this.isTestResultOpen.set(false);
   }
 
-  private notifySaveError(): void {
+  private notifySaveError(error?: unknown): void {
+    if (this.notifyValidationError(error)) return;
     this.toastService.error(this.i18n.t('ui.error'), this.i18n.t('ai_config.no_se_pudo_guardar'));
+  }
+
+  private notifyValidationError(error: unknown): boolean {
+    if (error === null || typeof error !== 'object') return false;
+    const response = error as { validation?: unknown; message?: unknown };
+    if (response.validation !== true || typeof response.message !== 'string') return false;
+    this.toastService.error(this.i18n.t('ui.error'), response.message);
+    return true;
   }
 
   private resetForm(): void {

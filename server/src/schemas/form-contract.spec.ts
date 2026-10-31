@@ -1192,6 +1192,19 @@ describe('contrato de formularios: lo opcional puede no llegar', () => {
       true
     );
   });
+
+  it('incluye los valores de los limites numericos en el motivo', () => {
+    const schema = z.object({ timeout: z.number().max(600_000), concurrency: z.number().min(1) });
+    const parsed = schema.safeParse({ timeout: 600_001, concurrency: 0 });
+    expect(parsed.success).toBe(false);
+
+    const report = describeIssues((parsed as { error: z.ZodError }).error);
+    expect(report.issues.map((issue) => issue.message)).toEqual([
+      'debe ser como máximo 600.000',
+      'debe ser como mínimo 1'
+    ]);
+    expect(report.message).toBe('timeout: debe ser como máximo 600.000');
+  });
 });
 
 /**

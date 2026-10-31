@@ -189,12 +189,12 @@ describe('AiConfigComponent', () => {
     );
   });
 
-  it('exposes the shared ten-minute timeout cap without an artificial minimum', () => {
+  it('does not expose a product timeout cap or artificial minimum', () => {
     component.openAddModal();
     fixture.detectChanges();
 
     const timeout = fixture.nativeElement.querySelector('input#timeout') as HTMLInputElement;
-    expect(timeout.max).toBe('600000');
+    expect(timeout.max).toBe('');
     expect(timeout.min).toBe('');
   });
 
@@ -233,11 +233,20 @@ describe('AiConfigComponent', () => {
     component.openAddModal();
     expect(component.isModalOpen()).toBeTrue();
     expect(component.formData.name).toBe('');
+    fixture.detectChanges();
+    expect(
+      (fixture.nativeElement.querySelector('#apiKey') as HTMLInputElement).required
+    ).toBeTrue();
 
     component.editConfig(CONFIG);
+    fixture.detectChanges();
     expect(component.editingConfig()).toBe(CONFIG);
     expect(component.formData.apiKey).toBe('');
     expect(component.formData.name).toBe(CONFIG.name);
+    expect(
+      (fixture.nativeElement.querySelector('#apiKey') as HTMLInputElement).required
+    ).toBeFalse();
+    expect(fixture.nativeElement.textContent).toContain('ai_config.api_key_edit_helper');
     component.closeModal();
     expect(component.isModalOpen()).toBeFalse();
     expect(component.editingConfig()).toBeNull();
@@ -315,11 +324,60 @@ describe('AiConfigComponent', () => {
     expect(sent['name']).toBe(updated.name);
     expect(toast.success).toHaveBeenCalled();
 
+    component.editConfig(CONFIG);
+    component.formData.apiKey = '   ';
+    component.saveConfig();
+    const whitespaceKey = service.updateConfig.calls.mostRecent().args[1] as Record<
+      string,
+      unknown
+    >;
+    expect(whitespaceKey['apiKey']).toBeUndefined();
+
+    component.editConfig(CONFIG);
+    component.formData.apiKey = 'sk-rotated-synthetic';
+    component.saveConfig();
+    const replacement = service.updateConfig.calls.mostRecent().args[1] as Record<string, unknown>;
+    expect(replacement['apiKey']).toBe('sk-rotated-synthetic');
+
     service.updateConfig.and.returnValue(of(null));
     component.editConfig(CONFIG);
     component.saveConfig();
     expect(toast.error).toHaveBeenCalled();
     expect(component.isModalOpen()).toBeTrue();
+  });
+
+  it('uses the detailed validation message for save and saved or unsaved test errors', () => {
+    const validationError = {
+      status: 400,
+      validation: true,
+      message: 'timeout: debe ser como máximo 240.000'
+    };
+    service.createConfig.and.returnValue(throwError(() => validationError));
+    component.openAddModal();
+    component.formData = {
+      ...component.formData,
+      name: 'Synthetic provider',
+      baseUrl: CONFIG.baseUrl,
+      apiKey: 'sk-synthetic-only',
+      model: CONFIG.model,
+      timeout: 300000
+    };
+    component.saveConfig();
+    expect(toast.error).toHaveBeenCalledWith('ui.error', 'timeout: debe ser como máximo 240.000');
+    expect(component.isModalOpen()).toBeTrue();
+    expect(component.isSaving()).toBeFalse();
+
+    service.testConnection.and.returnValue(throwError(() => validationError));
+    component.testFromForm();
+    expect(toast.error).toHaveBeenCalledWith('ui.error', 'timeout: debe ser como máximo 240.000');
+    expect(component.isTestResultOpen()).toBeFalse();
+    expect(component.probandoForm()).toBeFalse();
+
+    service.testConnection.and.returnValue(throwError(() => validationError));
+    component.testConfig(CONFIG);
+    expect(toast.error).toHaveBeenCalledWith('ui.error', 'timeout: debe ser como máximo 240.000');
+    expect(component.probandoId()).toBeNull();
+    expect(component.isTestResultOpen()).toBeFalse();
   });
 
   it('validates unsaved test details and displays either provider verdict', () => {

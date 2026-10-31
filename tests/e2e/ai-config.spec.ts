@@ -577,7 +577,7 @@ test.describe('AI Config', () => {
 
   test('does not reveal or resend the saved API key when editing other fields', async ({
     page
-  }) => {
+  }, testInfo) => {
     await page
       .getByRole('button', { name: /Agregar configuración/ })
       .first()
@@ -590,7 +590,29 @@ test.describe('AI Config', () => {
 
     const card = page.locator('.config-card').filter({ hasText: 'Editable provider' });
     await card.getByRole('button', { name: /Editar/ }).click();
-    await expect(page.locator('input#apiKey')).toHaveValue('');
+    const apiKey = page.locator('input#apiKey');
+    await expect(apiKey).toHaveValue('');
+    await expect(apiKey).not.toHaveAttribute('required');
+    await expect(page.getByText(/Déjala vacía para conservar la clave guardada/)).toBeVisible();
+    const saveToastClose = page.locator('.toast--success .toast__close');
+    if (await saveToastClose.count()) await saveToastClose.click();
+    const apiKeyBounds = await apiKey.boundingBox();
+    const urlBounds = await page.locator('input#baseUrl').boundingBox();
+    expect(apiKeyBounds).not.toBeNull();
+    expect(urlBounds).not.toBeNull();
+    expect(Math.abs(apiKeyBounds!.height - urlBounds!.height)).toBeLessThanOrEqual(1);
+    const screenshotDirectory = process.env.E2E_SCREENSHOT_DIR;
+    if (screenshotDirectory) {
+      mkdirSync(screenshotDirectory, { recursive: true });
+      if (testInfo.project.name === 'mobile-chrome') await apiKey.scrollIntoViewIfNeeded();
+      await page.screenshot({
+        path: join(
+          screenshotDirectory,
+          `ai-config-edit-api-key-${testInfo.project.name === 'mobile-chrome' ? 'mobile' : 'desktop'}.png`
+        ),
+        animations: 'disabled'
+      });
+    }
 
     const update = page.waitForRequest(
       (request) =>
@@ -601,6 +623,106 @@ test.describe('AI Config', () => {
     const request = await update;
     expect(request.postDataJSON()).not.toHaveProperty('apiKey');
     await expect(page.locator('.config-card__name')).toContainText('Renamed provider');
+
+    const renamedCard = page.locator('.config-card').filter({ hasText: 'Renamed provider' });
+    await renamedCard.getByRole('button', { name: /Editar/ }).click();
+    await apiKey.fill('sk-rotated-synthetic');
+    const replacementRequest = page.waitForRequest(
+      (candidate) =>
+        candidate.method() === 'PATCH' &&
+        new URL(candidate.url()).pathname.includes('/api/ai/configs/')
+    );
+    const replacementResponse = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'PATCH' &&
+        new URL(response.url()).pathname.includes('/api/ai/configs/')
+    );
+    await page.locator('app-modal button[type="submit"]').click();
+    const sentReplacement = await replacementRequest;
+    expect(sentReplacement.postDataJSON().apiKey).toBe('sk-rotated-synthetic');
+    const response = await replacementResponse;
+    expect(response.ok()).toBe(true);
+    const responseBody = await response.json();
+    expect(JSON.stringify(responseBody)).not.toContain('sk-rotated-synthetic');
+
+    const blankReplacement = page.waitForRequest(
+      (candidate) =>
+        candidate.method() === 'PATCH' &&
+        new URL(candidate.url()).pathname.includes('/api/ai/configs/')
+    );
+    const blankReplacementResponse = page.waitForResponse(
+      (candidate) =>
+        candidate.request().method() === 'PATCH' &&
+        new URL(candidate.url()).pathname.includes('/api/ai/configs/')
+    );
+    await renamedCard.getByRole('button', { name: /Editar/ }).click();
+    await apiKey.fill('   ');
+    await page.locator('app-modal button[type="submit"]').click();
+    const blankReplacementRequest = await blankReplacement;
+    expect(blankReplacementRequest.postDataJSON()).not.toHaveProperty('apiKey');
+    expect((await blankReplacementResponse).ok()).toBe(true);
+  });
+
+  test('shows Zod/Joi validation rules in test and save error toasts', async ({ page }) => {
+    await page.route('**/api/ai/test-connection', async (route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      await route.fulfill({
+        status: 400,
+        json: {
+          error: 'Bad Request',
+          details: [
+            {
+              path: ['timeout'],
+              type: 'number.max',
+              limit: 2147483647,
+              message: '"timeout" must be less than or equal to 2147483647'
+            }
+          ]
+        }
+      });
+    });
+    await page.route('**/api/ai/configs', async (route) => {
+      if (route.request().method() !== 'POST') return route.continue();
+      await route.fulfill({
+        status: 400,
+        json: {
+          success: false,
+          error: 'Validation Error',
+          message: 'timeout: debe ser como máximo 2.147.483.647',
+          issues: [{ field: 'timeout', message: 'debe ser como máximo 2.147.483.647' }]
+        }
+      });
+    });
+
+    await page
+      .getByRole('button', { name: /Agregar configuración/ })
+      .first()
+      .click();
+    await page.fill('input#name', 'Validation provider');
+    await page.fill('input#model', 'gpt-test');
+    await page.fill('input#baseUrl', 'http://localhost:8000/v1');
+    await page.fill('input#apiKey', 'sk-synthetic-only');
+    await page.fill('input#timeout', '2147483648');
+
+    await page.locator('[data-test="probar-formulario"]').click();
+    await expect(
+      page
+        .locator('.toast--error')
+        .filter({ hasText: 'timeout: debe ser como máximo 2.147.483.647' })
+    ).toBeVisible();
+    await expect(page.getByRole('dialog', { name: 'Resultado del Test' })).toHaveCount(0);
+
+    await page.locator('app-modal button[type="submit"]').click();
+    await expect(
+      page
+        .locator('.toast--error')
+        .filter({ hasText: 'timeout: debe ser como máximo 2.147.483.647' })
+    ).toBeVisible();
+    await expect(
+      page.locator('.toast--error').filter({ hasText: 'No se pudo guardar la configuración' })
+    ).toHaveCount(0);
+    await expect(page.locator('input#timeout')).toHaveValue('2147483648');
+    await expect(page.locator('input#apiKey')).toHaveValue('sk-synthetic-only');
   });
 
   test('keeps the form open and reports an error when a configuration cannot be saved', async ({

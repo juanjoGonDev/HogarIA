@@ -311,6 +311,17 @@ describe('AiService', () => {
   });
 
   it('creates and updates configurations only when the server confirms them', () => {
+    let createFailure: unknown;
+    service.createConfig(CONFIG).subscribe({ error: (error) => (createFailure = error) });
+    http.expectOne('/api/ai/configs').flush(
+      {
+        error: 'Validation Error',
+        issues: [{ field: 'timeout', message: 'debe ser como máximo 600.000' }]
+      },
+      { status: 400, statusText: 'Bad request' }
+    );
+    expect(createFailure).toEqual(jasmine.objectContaining({ status: 400 }));
+
     let created: AIProviderConfig | null | undefined;
     service.createConfig(CONFIG).subscribe((result) => {
       created = result;
@@ -338,14 +349,18 @@ describe('AiService', () => {
     expect(saved).toEqual(updated);
     expect(service.configs()).toEqual([updated, other]);
 
-    let failed: AIProviderConfig | null | undefined;
-    service.updateConfig(CONFIG.id, { name: 'Not saved' }).subscribe((result) => {
-      failed = result;
-    });
-    http
-      .expectOne(`/api/ai/configs/${CONFIG.id}`)
-      .flush({}, { status: 500, statusText: 'Server error' });
-    expect(failed).toBeNull();
+    let failed: unknown;
+    service
+      .updateConfig(CONFIG.id, { name: 'Not saved' })
+      .subscribe({ error: (error) => (failed = error) });
+    http.expectOne(`/api/ai/configs/${CONFIG.id}`).flush(
+      {
+        error: 'Validation Error',
+        issues: [{ field: 'timeout', message: 'debe ser como máximo 600.000' }]
+      },
+      { status: 400, statusText: 'Bad request' }
+    );
+    expect(failed).toEqual(jasmine.objectContaining({ status: 400 }));
     expect(service.configs()).toEqual([updated, other]);
   });
 
@@ -404,7 +419,7 @@ describe('AiService', () => {
     expect(service.configs()).toEqual([CONFIG]);
   });
 
-  it('tests saved or unsaved connection details and normalizes HTTP errors', () => {
+  it('tests saved or unsaved connection details and propagates HTTP errors', () => {
     let result: unknown;
     service.testConnection({ configId: CONFIG.id }).subscribe((value) => {
       result = value;
@@ -438,11 +453,18 @@ describe('AiService', () => {
       error: 'Synthetic failure'
     });
 
-    service.testConnection({ configId: CONFIG.id }).subscribe((value) => {
-      result = value;
-    });
-    http.expectOne('/api/ai/test-connection').flush({}, { status: 502, statusText: 'Bad gateway' });
-    expect(result).toBeNull();
+    let failure: unknown;
+    service
+      .testConnection({ configId: CONFIG.id })
+      .subscribe({ error: (error) => (failure = error) });
+    http.expectOne('/api/ai/test-connection').flush(
+      {
+        error: 'Validation Error',
+        issues: [{ field: 'timeout', message: 'debe ser como máximo 600.000' }]
+      },
+      { status: 400, statusText: 'Bad request' }
+    );
+    expect(failure).toEqual(jasmine.objectContaining({ status: 400 }));
   });
 
   it('preserves usable drafts after a failed retry and clears the opposite result on success', () => {

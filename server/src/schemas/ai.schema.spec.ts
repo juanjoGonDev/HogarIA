@@ -18,17 +18,23 @@ const config = (timeout: number) => ({
 });
 
 describe('createAiConfigSchema timeout', () => {
-  it('shares the ten-minute ceiling between saved configs and connection tests', () => {
-    expect(AI_CONFIG_MAX_TIMEOUT_MS).toBe(600_000);
+  it('removes the product ceiling and keeps only Node timer technical range', () => {
+    expect(AI_CONFIG_MAX_TIMEOUT_MS).toBe(2_147_483_647);
     expect(createAiConfigSchema.safeParse(config(AI_CONFIG_MAX_TIMEOUT_MS)).success).toBe(true);
     expect(createAiConfigSchema.safeParse(config(AI_CONFIG_MAX_TIMEOUT_MS + 1)).success).toBe(
       false
     );
     expect(
-      testConnectionSchema.safeParse({ configId: 'synthetic-config', timeout: 600_000 }).success
+      testConnectionSchema.safeParse({
+        configId: 'synthetic-config',
+        timeout: AI_CONFIG_MAX_TIMEOUT_MS
+      }).success
     ).toBe(true);
     expect(
-      testConnectionSchema.safeParse({ configId: 'synthetic-config', timeout: 600_001 }).success
+      testConnectionSchema.safeParse({
+        configId: 'synthetic-config',
+        timeout: AI_CONFIG_MAX_TIMEOUT_MS + 1
+      }).success
     ).toBe(false);
   });
 
@@ -47,6 +53,19 @@ describe('createAiConfigSchema recipe output budget', () => {
     expect(AI_CONFIG_DEFAULT_MAX_TOKENS).toBe(4096);
     expect(createAiConfigSchema.parse(config(30_000)).maxTokens).toBe(4096);
     expect(createAiConfigSchema.parse({ ...config(30_000), maxTokens: 1200 }).maxTokens).toBe(1200);
+  });
+});
+
+describe('createAiConfigSchema API key', () => {
+  it('rejects whitespace-only keys without trimming a valid provider key', () => {
+    expect(createAiConfigSchema.safeParse({ ...config(30_000), apiKey: '   ' }).success).toBe(
+      false
+    );
+
+    const keyWithIntentionalWhitespace = ' synthetic-key ';
+    expect(
+      createAiConfigSchema.parse({ ...config(30_000), apiKey: keyWithIntentionalWhitespace }).apiKey
+    ).toBe(keyWithIntentionalWhitespace);
   });
 });
 

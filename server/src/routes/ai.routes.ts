@@ -340,7 +340,8 @@ aiRoutes.patch('/configs/:id', async (c) => {
     updates.push('base_url = ?');
     values.push(input.baseUrl);
   }
-  if (input.apiKey !== undefined) {
+  // Empty form values mean “keep the stored credential”; never write null into the NOT NULL column.
+  if (typeof input.apiKey === 'string' && input.apiKey.trim().length > 0) {
     updates.push('api_key = ?');
     values.push(input.apiKey);
   }

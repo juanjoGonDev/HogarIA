@@ -47,7 +47,11 @@ export function requiredText(max: number, label: string) {
 export function formTime(label = 'hora') {
   return z.preprocess(
     blankToNull,
-    z.string().trim().regex(/^([01]\d|2[0-3]):[0-5]\d$/, `${label}: usa HH:MM`).nullish()
+    z
+      .string()
+      .trim()
+      .regex(/^([01]\d|2[0-3]):[0-5]\d$/, `${label}: usa HH:MM`)
+      .nullish()
   );
 }
 
@@ -59,14 +63,21 @@ export function formDate(label = 'fecha') {
 
 /** Fecha de formulario: la puede decidir el servidor (hoy), asi que admite el hueco. */
 export function optionalDate(label = 'fecha') {
-  return z.preprocess(blankToNull, z.string().trim().regex(DATE_PATTERN, `${label}: usa AAAA-MM-DD`).nullish());
+  return z.preprocess(
+    blankToNull,
+    z.string().trim().regex(DATE_PATTERN, `${label}: usa AAAA-MM-DD`).nullish()
+  );
 }
 
 /** `#rrggbb`, y `null` para «el color de mi capa», que es el caso normal. */
 export function formColor() {
   return z.preprocess(
     blankToNull,
-    z.string().trim().regex(/^#[0-9a-fA-F]{6}$/, 'Color: usa #rrggbb').nullish()
+    z
+      .string()
+      .trim()
+      .regex(/^#[0-9a-fA-F]{6}$/, 'Color: usa #rrggbb')
+      .nullish()
   );
 }
 
@@ -80,7 +91,9 @@ export function formUrl(label = 'URL') {
  * `'7'`. `z.coerce.number()` con `''` habia dado `0`, y `0` en calorias no es «sin valor»: es un
  * día de cero calorias, que es peor que un error.
  */
-export function formNumber(input: { int?: boolean; positive?: boolean; min?: number; max?: number } = {}) {
+export function formNumber(
+  input: { int?: boolean; positive?: boolean; min?: number; max?: number } = {}
+) {
   let inner: z.ZodNumber = z.coerce.number();
   if (input.int) inner = inner.int('Numero entero');
   if (input.positive) inner = inner.positive('Tiene que ser mayor que cero');
@@ -107,7 +120,9 @@ export function formField<T extends z.ZodTypeAny>(inner: T) {
 export function formDefault<T extends z.ZodTypeAny>(inner: T, fallback: unknown) {
   return z.preprocess(
     (value: unknown) =>
-      value === undefined || value === null || (typeof value === 'string' && !value.trim()) ? fallback : value,
+      value === undefined || value === null || (typeof value === 'string' && !value.trim())
+        ? fallback
+        : value,
     inner
   );
 }
@@ -149,7 +164,13 @@ export function formBool() {
  * `null` persistido seria una bomba de relojeria en el primer `.map()` del frontend.
  */
 export function formArray<T extends z.ZodTypeAny>(item: T) {
-  return z.preprocess(blankToNull, z.array(item).nullish().transform((value) => value ?? []));
+  return z.preprocess(
+    blankToNull,
+    z
+      .array(item)
+      .nullish()
+      .transform((value) => value ?? [])
+  );
 }
 
 /**
@@ -164,16 +185,23 @@ export function formList<T extends z.ZodTypeAny>(item: T) {
  * Los motivos de zod, en una frase para una persona. Sin esto el 400 decia «Invalid input» o el
  * primer mensaje en ingles del issue, y quien rellena el formulario no sabe a que campo volver.
  */
-export function describeIssues(error: z.ZodError): { message: string; issues: { field: string; message: string }[] } {
+export function describeIssues(error: z.ZodError): {
+  message: string;
+  issues: { field: string; message: string }[];
+} {
   const issues = error.issues.map((issue) => ({
     field: issue.path.length ? issue.path.join('.') : '',
     // Los mensajes de los helpers de arriba ya estan en espanol; solo se traducen los que zod
     // pone por su cuenta (los de `.min()`/`.max()` sin mensaje propio y los de tipo).
-    message: translate(issue.message)
+    message: translateIssue(issue)
   }));
   const first = issues[0];
   return {
-    message: first ? (first.field ? `${first.field}: ${first.message}` : first.message) : 'Datos invalidos',
+    message: first
+      ? first.field
+        ? `${first.field}: ${first.message}`
+        : first.message
+      : 'Datos invalidos',
     issues
   };
 }
@@ -188,6 +216,52 @@ const TRANSLATIONS: [RegExp, string][] = [
   [/Invalid email/, 'el correo no tiene formato valido'],
   [/unrecognized_keys/i, 'hay campos que no van aqui']
 ];
+
+function translateIssue(issue: z.ZodIssue): string {
+  // Zod 4 conserva el límite como dato estructurado. No reducir «<= 600000» a «demasiado
+  // largo»: ese mensaje no permite corregir el formulario sin adivinar el valor admitido.
+  if (issue.code === 'too_big' && /^Too big/i.test(issue.message)) {
+    const maximum = new Intl.NumberFormat('es-ES').format(issue.maximum);
+    if (issue.origin === 'number' || issue.origin === 'int') {
+      return issue.inclusive === false
+        ? `debe ser menor que ${maximum}`
+        : `debe ser como máximo ${maximum}`;
+    }
+    if (issue.origin === 'string') {
+      return issue.inclusive === false
+        ? `debe tener menos de ${maximum} caracteres`
+        : `no puede superar ${maximum} caracteres`;
+    }
+    if (issue.origin === 'array' || issue.origin === 'set') {
+      return issue.inclusive === false
+        ? `debe contener menos de ${maximum} elementos`
+        : `no puede contener más de ${maximum} elementos`;
+    }
+    return `no puede superar ${maximum}`;
+  }
+
+  if (issue.code === 'too_small' && /^Too small/i.test(issue.message)) {
+    const minimum = new Intl.NumberFormat('es-ES').format(issue.minimum);
+    if (issue.origin === 'number' || issue.origin === 'int') {
+      return issue.inclusive === false
+        ? `debe ser mayor que ${minimum}`
+        : `debe ser como mínimo ${minimum}`;
+    }
+    if (issue.origin === 'string') {
+      return issue.inclusive === false
+        ? `debe tener más de ${minimum} caracteres`
+        : `debe tener al menos ${minimum} caracteres`;
+    }
+    if (issue.origin === 'array' || issue.origin === 'set') {
+      return issue.inclusive === false
+        ? `debe contener más de ${minimum} elementos`
+        : `debe contener al menos ${minimum} elementos`;
+    }
+    return `debe ser como mínimo ${minimum}`;
+  }
+
+  return translate(issue.message);
+}
 
 function translate(message: string): string {
   for (const [pattern, replacement] of TRANSLATIONS) {

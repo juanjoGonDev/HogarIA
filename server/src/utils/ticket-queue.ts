@@ -53,13 +53,11 @@ import { deduplicateTicketLines } from './ticket-lines-dedup.js';
 import { ticketAnswerSchema } from '../schemas/receipts.schema.js';
 import { RECEIPT_RESPONSE_FORMAT } from '../schemas/ai-generated-output.schema.js';
 import { leerTicket } from './ticket-files.js';
+import { aiJobLeaseSeconds } from './ai-timeout.js';
 
 // The queue is local to this process/database. Jobs wake it directly; the slow
 // interval is only a recovery sweep for durable rows changed outside the API.
 const QUEUE_RECONCILIATION_INTERVAL_MS = 30_000;
-// Must outlive the maximum provider timeout (600s) so a slow request is never reclaimed early.
-export const AI_JOB_LEASE_SECONDS = 660;
-
 type Trabajador = {
   temporizador: NodeJS.Timeout;
   despertador: NodeJS.Timeout | null;
@@ -494,7 +492,13 @@ function paso(): void {
       // Generic payload closures exist only in this process. A different worker sharing SQLite
       // must never claim them and turn a live caller's job into INPUT_EXPIRED.
       if (!durableReceipt && !trabajosEnMemoria.has(trabajo.id)) continue;
-      const claimGeneration = reclamarTrabajo(db, trabajo.id);
+      const runtime = trabajosEnMemoria.get(trabajo.id);
+      const timeoutMs = runtime ? runtime.config?.timeout : config?.timeout;
+      const claimGeneration = reclamarTrabajo(
+        db,
+        trabajo.id,
+        aiJobLeaseSeconds(timeoutMs, trabajo.kind)
+      );
       if (!claimGeneration) {
         const persisted = db.prepare('SELECT status FROM ai_jobs WHERE id = ?').get(trabajo.id) as
           { status: string } | undefined;
@@ -553,7 +557,7 @@ function esperarReintentoManual(
 }
 
 /** Atomically enforces the provider cap inside this process's shared dispatcher. */
-function reclamarTrabajo(db: SqlDb, jobId: string): number | null {
+function reclamarTrabajo(db: SqlDb, jobId: string, leaseSeconds: number): number | null {
   return db
     .transaction(() => {
       const fila = db
@@ -602,10 +606,10 @@ function reclamarTrabajo(db: SqlDb, jobId: string): number | null {
       const changed = db
         .prepare(
           `UPDATE ai_jobs SET status = 'running', attempts = attempts + 1, claim_generation = ?,
-           started_at = CURRENT_TIMESTAMP, lease_until = datetime('now', '+${AI_JOB_LEASE_SECONDS} seconds'),
+           started_at = CURRENT_TIMESTAMP, lease_until = datetime('now', ?),
            updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'queued'`
         )
-        .run(claimGeneration, jobId).changes;
+        .run(claimGeneration, `+${leaseSeconds} seconds`, jobId).changes;
       return changed === 1 ? claimGeneration : null;
     })
     .immediate();

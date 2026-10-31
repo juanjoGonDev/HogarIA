@@ -138,8 +138,7 @@ export class AiService {
             this.invalidateConfigLoads();
             this.configsSignal.update((list) => [...list, created]);
           }
-        }),
-        catchError(() => of(null))
+        })
       );
   }
 
@@ -154,8 +153,7 @@ export class AiService {
           this.configsSignal.update((list) =>
             list.map((current) => (current.id === id ? updated : current))
           );
-        }),
-        catchError(() => of(null))
+        })
       );
   }
 
@@ -187,10 +185,7 @@ export class AiService {
   }): Observable<AITestConnectionResponse | null> {
     return this.http
       .post<any>(`${this.apiUrl}/test-connection`, params, { context: this.silentContext() })
-      .pipe(
-        map((response) => (response as { data?: AITestConnectionResponse })?.data ?? null),
-        catchError(() => of(null))
-      );
+      .pipe(map((response) => (response as { data?: AITestConnectionResponse })?.data ?? null));
   }
 
   // ═══════════════════════════════════════════════════════════════
