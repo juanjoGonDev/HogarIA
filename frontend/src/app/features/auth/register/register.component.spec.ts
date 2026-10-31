@@ -42,7 +42,7 @@ describe('RegisterComponent', () => {
           useValue: { snapshot: { queryParamMap: { get: routeCode } } }
         },
         { provide: HouseholdService, useValue: household },
-        { provide: I18nService, useValue: { t: translate } }
+        { provide: I18nService, useValue: { t: translate, changeTick: () => 0 } }
       ]
     }).compileComponents();
 
@@ -56,7 +56,50 @@ describe('RegisterComponent', () => {
     component.name = 'Ana';
     component.email = 'ana@example.test';
     component.password = 'Abc123';
+    component.confirmPassword = 'Abc123';
   }
+
+  it('renders an explicitly labeled password confirmation field', () => {
+    fixture.detectChanges();
+
+    const input = fixture.nativeElement.querySelector(
+      '#confirm-password'
+    ) as HTMLInputElement | null;
+    const label = fixture.nativeElement.querySelector(
+      'label[for="confirm-password"]'
+    ) as HTMLLabelElement | null;
+
+    expect(input).not.toBeNull();
+    expect(input?.type).toBe('password');
+    expect(label?.textContent).toContain('auth.confirm_password');
+  });
+
+  it('blocks empty or mismatched confirmation before requesting registration', () => {
+    makeFormValid();
+    component.confirmPassword = 'Abc124';
+
+    component.onSubmit();
+
+    expect(translate).toHaveBeenCalledWith('auth.confirm_password_mismatch');
+    expect(auth.register).not.toHaveBeenCalled();
+    expect(component.isLoading()).toBeFalse();
+
+    component.confirmPassword = '';
+    component.onSubmit();
+
+    expect(translate).toHaveBeenCalledWith('auth.confirm_password_required');
+    expect(auth.register).not.toHaveBeenCalled();
+
+    component.confirmPassword = 'Abc123';
+    component.onSubmit();
+
+    expect(component.confirmPasswordError()).toBe('');
+    expect(auth.register).toHaveBeenCalledOnceWith({
+      name: 'Ana',
+      email: 'ana@example.test',
+      password: 'Abc123'
+    });
+  });
 
   it('maps every validation issue to its translated field message without requesting registration', () => {
     component.onSubmit();

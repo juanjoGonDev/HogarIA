@@ -277,13 +277,13 @@ describe('MainLayoutComponent mobile drawer keyboard behavior', () => {
     expect(isPathVisible).toHaveBeenCalledWith('/calendar');
   });
 
-  it('shows AI settings only in personal mode or for an active household settings manager', () => {
+  it('keeps provider settings inside Hogar instead of adding a separate sidebar destination', () => {
     createFixture();
     const component = fixture.componentInstance;
     const aiPathVisible = () =>
       component.visibleNavItems().some((item) => item.path === '/ai-config');
 
-    expect(aiPathVisible()).toBeTrue();
+    expect(aiPathVisible()).toBeFalse();
     memberships.set([
       {
         id: 'home-a',
@@ -299,7 +299,7 @@ describe('MainLayoutComponent mobile drawer keyboard behavior', () => {
         permissions: { settings: true }
       }
     ]);
-    expect(aiPathVisible()).toBeTrue();
+    expect(aiPathVisible()).toBeFalse();
 
     activeHouseholdId.set(null);
     expect(aiPathVisible()).toBeFalse();

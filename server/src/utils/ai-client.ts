@@ -16,6 +16,8 @@ import {
   hasActiveHouseholdMemberships,
   readActiveHouseholdId
 } from './household-context.js';
+import { resolveAiFunctionProvider, type AiFunctionKey } from './ai-function-providers.js';
+import { effectiveAiTimeoutMs } from './ai-timeout.js';
 import type { AiCallResponseFormat, AiResponseFormat } from '../schemas/ai-response-format.js';
 
 export type AiMessagePart =
@@ -36,6 +38,7 @@ export type AiJobKind =
   | 'shopping_photo'
   | 'expiry_estimate'
   | 'household_plan'
+  | 'product_image_search'
   | 'connection_test';
 
 export type AiProviderRequestOptions = { reasoning_effort?: 'none' };
@@ -60,7 +63,6 @@ export interface AiConfigRow {
   concurrency: number | null;
 }
 
-const DEFAULT_TIMEOUT_MS = 30_000;
 const REAL_SMOKE_PROVIDER_KEY_MARKER = '__HOGARIA_AI_REAL_SMOKE_PROVIDER_KEY__';
 const REAL_SMOKE_ENABLED_ENV = 'HOGARIA_AI_REAL_SMOKE';
 const REAL_SMOKE_PROXY_URL_ENV = 'HOGARIA_AI_REAL_SMOKE_PROXY_URL';
@@ -96,6 +98,39 @@ export function readOnlyActiveAiConfig(db: SqlDb, userId: string) {
   const householdId = readActiveHouseholdId(db, userId);
   if (!householdId && hasActiveHouseholdMemberships(db, userId)) return undefined;
   return activeAiConfigForScope(db, userId, householdId);
+}
+
+/** Resolve one function's provider using the user's currently selected household, read-only. */
+export function readOnlyAiConfigForFunction(db: SqlDb, userId: string, functionKey: AiFunctionKey) {
+  const householdId = readActiveHouseholdId(db, userId);
+  if (!householdId && hasActiveHouseholdMemberships(db, userId)) return undefined;
+  return resolveAiFunctionProvider(db, userId, householdId, functionKey);
+}
+
+/** Resolve one function for an already captured scope; never infer another household. */
+export function aiConfigForFunctionInScope(
+  db: SqlDb,
+  userId: string,
+  householdId: string | null,
+  functionKey: AiFunctionKey
+) {
+  return resolveAiFunctionProvider(db, userId, householdId, functionKey);
+}
+
+/** Resolve a function using the currently active scope, without personal-config fallback. */
+export function activeAiConfigForFunction(db: SqlDb, userId: string, functionKey: AiFunctionKey) {
+  const householdId = activeHouseholdId(db, userId);
+  if (!householdId && hasActiveHouseholdMemberships(db, userId)) return undefined;
+  return resolveAiFunctionProvider(db, userId, householdId, functionKey);
+}
+
+export function activeAiConfigForFunctionInScope(
+  db: SqlDb,
+  userId: string,
+  householdId: string | null,
+  functionKey: AiFunctionKey
+) {
+  return resolveAiFunctionProvider(db, userId, householdId, functionKey);
 }
 
 export function activeAiConfigForScope(db: SqlDb, userId: string, householdId: string | null) {
@@ -244,7 +279,7 @@ export async function callAIWithConfig(
       body: JSON.stringify(
         chatBody(active, { messages, response_format: responseFormat, ...requestOptions })
       ),
-      signal: señalConTimeout(signal, active.timeout ?? DEFAULT_TIMEOUT_MS)
+      signal: señalConTimeout(signal, effectiveAiTimeoutMs(active.timeout))
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -321,7 +356,7 @@ export async function callAIStreamingWithConfig(
   senal: AbortSignal
 ): Promise<string> {
   const apiKey = resolveProviderApiKey(active.base_url, active.api_key);
-  const signal = señalConTimeout(senal, active.timeout ?? DEFAULT_TIMEOUT_MS);
+  const signal = señalConTimeout(senal, effectiveAiTimeoutMs(active.timeout));
   let response: Response;
   try {
     response = await fetch(endpoint(active.base_url), {
@@ -499,7 +534,7 @@ export async function pingDeConexionTransport(config: {
           }
         }
       }),
-      signal: señalConTimeout(config.signal, config.timeout ?? DEFAULT_TIMEOUT_MS)
+      signal: señalConTimeout(config.signal, effectiveAiTimeoutMs(config.timeout))
     });
 
     const latency = Date.now() - startTime;

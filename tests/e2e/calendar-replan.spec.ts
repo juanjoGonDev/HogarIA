@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { expect, test } from './fixtures';
 import { registerWithHousehold } from './helpers/auth';
+import { mockAiFunctionAvailable } from './helpers/ai';
 
 const screenshotDir = resolve(`.e2e-screenshots/calendar-replan-${process.pid}`);
 
@@ -50,6 +51,7 @@ async function dismissCurrentToasts(page: import('./fixtures').Page): Promise<vo
 
 test.describe('Replanificación parcial del calendario', () => {
   test.beforeEach(async ({ page }) => {
+    await mockAiFunctionAvailable(page, 'recipes');
     await registerWithHousehold(page, '/calendar', 'Replan E2E');
     await expect(page.locator('h1.calendar__title')).toBeVisible();
     await addMeal(page, 'Plato original uno');

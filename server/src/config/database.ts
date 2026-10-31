@@ -11,6 +11,7 @@ import {
 } from '../utils/seed-data.js';
 import { ensureRecipeBookCatalog } from '../utils/recipe-book-seed.js';
 import { backfillHouseholdAiConfigs } from '../utils/household-ai-config.js';
+import { backfillAiFunctionProviders } from '../utils/ai-function-providers.js';
 
 let db: Database.Database;
 let drizzleDb: ReturnType<typeof drizzle>;
@@ -1029,6 +1030,24 @@ async function runMigrations(db: Database.Database): Promise<void> {
     'UPDATE ai_configs SET created_at = COALESCE(created_at, CURRENT_TIMESTAMP), updated_at = COALESCE(updated_at, CURRENT_TIMESTAMP)'
   );
   db.exec('CREATE INDEX IF NOT EXISTS idx_ai_configs_household_id ON ai_configs(household_id)');
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS ai_function_providers (
+      user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+      household_id TEXT REFERENCES households(id) ON DELETE CASCADE,
+      function_key TEXT NOT NULL CHECK (function_key IN (
+        'assistant', 'recipes', 'planning', 'shopping_pantry', 'household_automation'
+      )),
+      config_id TEXT REFERENCES ai_configs(id) ON DELETE SET NULL,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CHECK ((user_id IS NULL) != (household_id IS NULL))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_function_providers_user_function
+      ON ai_function_providers(user_id, function_key) WHERE household_id IS NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_function_providers_household_function
+      ON ai_function_providers(household_id, function_key) WHERE household_id IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_ai_function_providers_config
+      ON ai_function_providers(config_id);
+  `);
   addColumnIfMissing('ai_jobs', 'config_id', 'TEXT');
   addColumnIfMissing(
     'ai_jobs',
@@ -1046,6 +1065,7 @@ async function runMigrations(db: Database.Database): Promise<void> {
       WHERE kind = 'receipt' AND receipt_id IS NOT NULL AND household_id IS NULL`
   ).run();
   backfillHouseholdAiConfigs(db);
+  backfillAiFunctionProviders(db);
   // Los trabajos de tickets antiguos no tenían identidad de proveedor. Se fija el config del
   // recibo/hogar original (o personal si no hay casa); no se vuelve a resolver por selección actual.
   db.prepare(

@@ -1,4 +1,13 @@
-import { Component, inject, OnInit, signal } from '@angular/core';
+import {
+  Component,
+  computed,
+  DestroyRef,
+  inject,
+  Input,
+  NgZone,
+  OnInit,
+  signal
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { AiService } from '../../core/services/ai.service';
@@ -9,11 +18,23 @@ import { InputComponent } from '../../shared/components/ui/input/input.component
 import { BadgeComponent } from '../../shared/components/ui/badge/badge.component';
 import { ModalComponent } from '../../shared/components/ui/modal/modal.component';
 import { LoadingComponent } from '../../shared/components/ui/loading/loading.component';
-import { AIProviderConfig, AIProvider } from '../../shared/models/ai-config.model';
+import { AIProviderConfig, AIProvider, AiFunctionKey } from '../../shared/models/ai-config.model';
 import { TranslatePipe } from '../../core/pipes/translate.pipe';
 import { I18nService } from '../../core/services/i18n.service';
 import { IconComponent } from '../../shared/components/ui/icon/icon.component';
 import { RouterLink } from '@angular/router';
+import { interval } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { AiProviderAvailabilityService } from '../../core/services/ai-provider-availability.service';
+import type { TranslationKey } from '../../core/i18n';
+
+const FUNCTION_LABELS: Record<AiFunctionKey, TranslationKey> = {
+  assistant: 'ai_config.function_assistant',
+  recipes: 'ai_config.function_recipes',
+  planning: 'ai_config.function_planning',
+  shopping_pantry: 'ai_config.function_shopping_pantry',
+  household_automation: 'ai_config.function_household_automation'
+};
 
 @Component({
   selector: 'app-ai-config',
@@ -31,24 +52,80 @@ import { RouterLink } from '@angular/router';
     RouterLink
   ],
   template: `
-    <div class="ai-config">
+    <div class="ai-config" [class.ai-config--embedded]="embedded">
       <!-- Header -->
       <div class="ai-config__header">
         <div class="ai-config__title-section">
           <app-icon name="smart_toy" [size]="24" [label]="null" />
-          <h1 class="ai-config__title">{{ 'ai_config.configuracion_ia' | t }}</h1>
-          <span class="ai-config__count">{{ configuracionesLabel() }}</span>
+          <h1 *ngIf="!embedded; else embeddedTitle" class="ai-config__title">
+            {{ 'ai_config.configuracion_ia' | t }}
+          </h1>
+          <ng-template #embeddedTitle>
+            <h2 class="ai-config__title">{{ 'ai_config.configuracion_ia' | t }}</h2>
+          </ng-template>
+          <span *ngIf="aiService.configs().length > 0" class="ai-config__count">
+            {{ configuracionesLabel() }}
+          </span>
         </div>
-        <app-button variant="primary" (onClick)="openAddModal()">
+        <app-button
+          *ngIf="
+            aiService.configs().length > 0 || aiService.configsLoading() || aiService.configsError()
+          "
+          variant="primary"
+          (onClick)="openAddModal()"
+        >
           <app-icon name="add" [size]="18" [label]="null" />
           {{ 'ai_config.agregar_configuracion' | t }}
         </app-button>
       </div>
 
       <!-- Info -->
-      <div class="ai-config__info">
+      <div *ngIf="aiService.configs().length > 0" class="ai-config__info">
         <p>{{ 'ai_config.conecta_tu_proveedor_de' | t }}</p>
       </div>
+
+      <section
+        *ngIf="aiService.configs().length > 0"
+        class="function-provider-settings"
+        aria-labelledby="ai-function-providers-title"
+        data-test="ai-function-providers"
+      >
+        <div class="function-provider-settings__header">
+          <div>
+            <h2 id="ai-function-providers-title">
+              {{ 'ai_config.function_providers_title' | t }}
+            </h2>
+            <p>{{ 'ai_config.function_providers_hint' | t }}</p>
+          </div>
+        </div>
+        <div class="function-provider-settings__grid">
+          <div class="function-provider-row" *ngFor="let key of aiFunctionKeys">
+            <label [for]="'ai-function-provider-' + key">{{ functionLabel(key) | t }}</label>
+            <ng-container *ngIf="activeProviders().length > 1; else fixedProvider">
+              <select
+                [id]="'ai-function-provider-' + key"
+                [ngModel]="assignmentFor(key)?.configId ?? ''"
+                (ngModelChange)="assignProvider(key, $event)"
+                [name]="'provider-' + key"
+                [attr.aria-label]="functionLabel(key) | t"
+                [attr.data-test]="'ai-function-provider-' + key"
+              >
+                <option *ngFor="let provider of activeProviders()" [ngValue]="provider.id">
+                  {{ provider.name }}
+                </option>
+              </select>
+            </ng-container>
+            <ng-template #fixedProvider>
+              <span *ngIf="activeProviders().length === 1" class="function-provider-row__value">
+                {{ activeProviders()[0].name }}
+              </span>
+              <span *ngIf="activeProviders().length === 0" class="function-provider-row__value">
+                {{ 'ai_config.no_active_provider' | t }}
+              </span>
+            </ng-template>
+          </div>
+        </div>
+      </section>
 
       <!-- Configs List -->
       <div class="ai-config__list">
@@ -138,12 +215,18 @@ import { RouterLink } from '@angular/router';
               size="sm"
               type="button"
               [touchTarget]="true"
-              [loading]="probandoId() === config.id"
+              [loading]="probandoId() === config.id || config.testStatus === 'testing'"
+              [disabled]="config.testStatus === 'testing' && probandoId() !== config.id"
               (onClick)="testConfig(config)"
               [attr.data-test]="'probar-' + config.name"
             >
               <app-icon name="link" [size]="16" [label]="null" />
-              {{ (probandoId() === config.id ? 'ai_config.comprobando' : 'ai_config.probar') | t }}
+              {{
+                (probandoId() === config.id || config.testStatus === 'testing'
+                  ? 'ai_config.comprobando'
+                  : 'ai_config.probar'
+                ) | t
+              }}
             </app-button>
             <app-button
               variant="ghost"
@@ -262,7 +345,8 @@ import { RouterLink } from '@angular/router';
             [label]="'ai_config.api_key' | t"
             placeholder="sk-..."
             [(ngModel)]="formData.apiKey"
-            [required]="true"
+            [required]="!editingConfig()"
+            [helper]="editingConfig() ? ('ai_config.api_key_edit_helper' | t) : ''"
           ></app-input>
 
           <div class="form-row">
@@ -300,6 +384,7 @@ import { RouterLink } from '@angular/router';
               type="number"
               [label]="'ai_config.timeout_ms' | t"
               placeholder="30000"
+              [helper]="'ai_config.timeout_helper' | t"
               [(ngModel)]="formData.timeout"
             ></app-input>
 
@@ -397,6 +482,12 @@ import { RouterLink } from '@angular/router';
         margin: 0 auto;
       }
 
+      .ai-config--embedded {
+        max-width: none;
+        margin: 0;
+        padding-block: 0;
+      }
+
       .ai-config__header {
         display: flex;
         align-items: center;
@@ -444,6 +535,87 @@ import { RouterLink } from '@angular/router';
         p {
           font-size: var(--text-sm);
           color: var(--color-info-700);
+        }
+      }
+
+      .function-provider-settings {
+        margin-bottom: var(--space-6);
+        padding: var(--space-4);
+        border: 1px solid var(--border-default);
+        border-radius: var(--radius-lg);
+        background: var(--bg-secondary);
+      }
+
+      .function-provider-settings__header h2 {
+        margin: 0;
+        font-size: var(--text-base);
+        font-weight: var(--font-semibold);
+      }
+
+      .function-provider-settings__header p {
+        margin: var(--space-1) 0 var(--space-3);
+        color: var(--text-secondary);
+        font-size: var(--text-sm);
+      }
+
+      .function-provider-settings__grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+        gap: var(--space-2) var(--space-5);
+      }
+
+      .function-provider-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-3);
+        min-height: 44px;
+      }
+
+      .function-provider-row label {
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+      }
+
+      .function-provider-row select {
+        box-sizing: border-box;
+        width: min(15rem, 55%);
+        min-width: 9rem;
+        min-height: 44px;
+        padding: 0 var(--space-3);
+        border: 1px solid var(--border-default);
+        border-radius: var(--radius-md);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        font: inherit;
+      }
+
+      .function-provider-row select:focus-visible {
+        outline: 2px solid var(--color-primary-600);
+        outline-offset: 2px;
+      }
+
+      .function-provider-row__value {
+        max-width: 55%;
+        overflow-wrap: anywhere;
+        color: var(--text-secondary);
+        font-size: var(--text-sm);
+        text-align: right;
+      }
+
+      @media (max-width: 480px) {
+        .function-provider-row {
+          align-items: flex-start;
+          flex-direction: column;
+          justify-content: center;
+          gap: var(--space-1);
+        }
+
+        .function-provider-row select,
+        .function-provider-row__value {
+          width: 100%;
+          max-width: none;
+          text-align: left;
         }
       }
 
@@ -711,7 +883,10 @@ import { RouterLink } from '@angular/router';
   ]
 })
 export class AiConfigComponent implements OnInit {
+  @Input() embedded = false;
   private readonly i18n = inject(I18nService);
+  private readonly destroyRef = inject(DestroyRef);
+  private readonly ngZone = inject(NgZone);
 
   /** «3 configuraciones» / «1 configuración»: el numero y el sustantivo se eligen a la vez. */
   configuracionesLabel(): string {
@@ -727,6 +902,17 @@ export class AiConfigComponent implements OnInit {
   aiService = inject(AiService);
   private toastService = inject(ToastService);
   private confirmService = inject(ConfirmService);
+  private readonly providerAvailability = inject(AiProviderAvailabilityService);
+  readonly aiFunctionKeys: AiFunctionKey[] = [
+    'assistant',
+    'recipes',
+    'planning',
+    'shopping_pantry',
+    'household_automation'
+  ];
+  readonly activeProviders = computed(() =>
+    this.aiService.configs().filter((config) => config.isActive)
+  );
 
   isModalOpen = signal(false);
   editingConfig = signal<AIProviderConfig | null>(null);
@@ -753,6 +939,16 @@ export class AiConfigComponent implements OnInit {
 
   ngOnInit(): void {
     this.aiService.loadConfigs();
+    this.aiService.loadFunctionProviders();
+    this.ngZone.runOutsideAngular(() => {
+      interval(2000)
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe(() => {
+          if (this.aiService.configs().some((config) => config.testStatus === 'testing')) {
+            this.ngZone.run(() => this.aiService.loadConfigs());
+          }
+        });
+    });
   }
 
   openAddModal(): void {
@@ -790,7 +986,7 @@ export class AiConfigComponent implements OnInit {
     this.isSaving.set(true);
 
     const data: Partial<typeof this.formData> = { ...this.formData };
-    if (!data.apiKey && this.editingConfig()) {
+    if (this.editingConfig() && !data.apiKey?.trim()) {
       delete data.apiKey;
     }
 
@@ -813,19 +1009,20 @@ export class AiConfigComponent implements OnInit {
         );
         this.closeModal();
         this.isSaving.set(false);
-        // La lista local no sabe que el server ha apagado las DEMAS configuraciones al crear
-        // (o activar) esta: sin releerla, dos tarjetas dirian «Activo» a la vez.
+        // La asignación inicial solo cambia al aparecer el primer proveedor activo.
         this.aiService.loadConfigs();
+        this.aiService.loadFunctionProviders();
+        this.providerAvailability.load(true).subscribe();
       },
-      error: () => {
-        this.notifySaveError();
+      error: (error: unknown) => {
+        this.notifySaveError(error);
         this.isSaving.set(false);
       }
     });
   }
 
   testConfig(config: AIProviderConfig): void {
-    if (this.probandoId() || this.probandoForm()) return;
+    if (this.probandoId() || this.probandoForm() || config.testStatus === 'testing') return;
     this.probandoId.set(config.id);
 
     this.aiService.testConnection({ configId: config.id }).subscribe({
@@ -837,8 +1034,9 @@ export class AiConfigComponent implements OnInit {
         );
         this.isTestResultOpen.set(true);
       },
-      error: () => {
+      error: (error: unknown) => {
         this.probandoId.set(null);
+        if (this.notifyValidationError(error)) return;
         this.testResult.set({
           success: false,
           error: this.i18n.t('ai_config.no_se_pudo_conectar')
@@ -881,8 +1079,9 @@ export class AiConfigComponent implements OnInit {
           );
           this.isTestResultOpen.set(true);
         },
-        error: () => {
+        error: (error: unknown) => {
           this.probandoForm.set(false);
+          if (this.notifyValidationError(error)) return;
           this.testResult.set({
             success: false,
             error: this.i18n.t('ai_config.no_se_pudo_conectar')
@@ -892,7 +1091,18 @@ export class AiConfigComponent implements OnInit {
       });
   }
 
-  toggleActive(config: AIProviderConfig): void {
+  async toggleActive(config: AIProviderConfig): Promise<void> {
+    if (config.isActive && (config.assignedFunctions?.length ?? 0) > 0) {
+      const accepted = await this.confirmService.confirm({
+        title: this.i18n.t('ai_config.provider_in_use_title'),
+        message: this.i18n.t('ai_config.provider_in_use_message', {
+          name: config.name,
+          functions: this.assignedFunctionNames(config)
+        }),
+        confirmText: this.i18n.t('ai_config.desactivar')
+      });
+      if (!accepted) return;
+    }
     this.aiService
       .updateConfig(config.id, {
         isActive: !config.isActive
@@ -912,10 +1122,16 @@ export class AiConfigComponent implements OnInit {
               ? this.i18n.t('ai_config.configuracion_desactivada')
               : this.i18n.t('ai_config.configuracion_activada')
           );
-          // Activar es exclusivo: el server ha apagado las DEMAS configuraciones de la casa, y
-          // la lista local solo conoce el cambio de esta. Se relee —dos tarjetas con «Activo» a
-          // la vez es una mentira que se ve.
           this.aiService.loadConfigs();
+          this.aiService.loadFunctionProviders();
+          this.providerAvailability.load(true).subscribe();
+        },
+        error: (error: unknown) => {
+          if (this.notifyValidationError(error)) return;
+          this.toastService.error(
+            this.i18n.t('ui.error'),
+            this.i18n.t('ai_config.no_se_pudo_actualizar')
+          );
         }
       });
   }
@@ -923,7 +1139,13 @@ export class AiConfigComponent implements OnInit {
   async deleteConfig(config: AIProviderConfig): Promise<void> {
     const accepted = await this.confirmService.confirm({
       title: this.i18n.t('ai_config.eliminar_configuracion'),
-      message: this.i18n.t('ai_config.eliminar_la_configuracion', { name: config.name }),
+      message:
+        (config.assignedFunctions?.length ?? 0) > 0
+          ? this.i18n.t('ai_config.delete_in_use_message', {
+              name: config.name,
+              functions: this.assignedFunctionNames(config)
+            })
+          : this.i18n.t('ai_config.eliminar_la_configuracion', { name: config.name }),
       confirmText: this.i18n.t('common.delete')
     });
     if (!accepted) return;
@@ -941,8 +1163,42 @@ export class AiConfigComponent implements OnInit {
           this.i18n.t('ai_config.eliminada'),
           this.i18n.t('ai_config.configuracion_eliminada_correctamente')
         );
+        this.aiService.loadConfigs();
+        this.aiService.loadFunctionProviders();
+        this.providerAvailability.load(true).subscribe();
       }
     });
+  }
+
+  functionLabel(functionKey: AiFunctionKey): TranslationKey {
+    return FUNCTION_LABELS[functionKey];
+  }
+
+  assignmentFor(functionKey: AiFunctionKey) {
+    return this.aiService
+      .functionProviders()
+      .find((assignment) => assignment.functionKey === functionKey);
+  }
+
+  assignProvider(functionKey: AiFunctionKey, configId: string): void {
+    if (!configId) return;
+    this.aiService.assignFunctionProvider(functionKey, configId).subscribe((assignment) => {
+      if (!assignment) {
+        this.toastService.error(
+          this.i18n.t('ui.error'),
+          this.i18n.t('ai_config.provider_assignment_error')
+        );
+        this.aiService.loadFunctionProviders();
+        return;
+      }
+      this.providerAvailability.load(true).subscribe();
+    });
+  }
+
+  private assignedFunctionNames(config: AIProviderConfig): string {
+    return (config.assignedFunctions ?? [])
+      .map((key) => this.i18n.t(FUNCTION_LABELS[key]))
+      .join(', ');
   }
 
   getTestStatusVariant(status: string): 'success' | 'error' | 'warning' {
@@ -973,8 +1229,17 @@ export class AiConfigComponent implements OnInit {
     this.isTestResultOpen.set(false);
   }
 
-  private notifySaveError(): void {
+  private notifySaveError(error?: unknown): void {
+    if (this.notifyValidationError(error)) return;
     this.toastService.error(this.i18n.t('ui.error'), this.i18n.t('ai_config.no_se_pudo_guardar'));
+  }
+
+  private notifyValidationError(error: unknown): boolean {
+    if (error === null || typeof error !== 'object') return false;
+    const response = error as { validation?: unknown; message?: unknown };
+    if (response.validation !== true || typeof response.message !== 'string') return false;
+    this.toastService.error(this.i18n.t('ui.error'), response.message);
+    return true;
   }
 
   private resetForm(): void {

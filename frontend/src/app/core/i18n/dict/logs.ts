@@ -44,7 +44,13 @@ export const logsEs = {
   'logs.estado_conectando': 'Conectando',
   'logs.estado_reintentando': 'Reintentando',
   'logs.estado_reintentando_en': 'Reintentando en {seconds} s',
-  'logs.estado_sinConexion': 'Sin conexion'
+  'logs.estado_sinConexion': 'Sin conexion',
+  'logs.runtime_info': 'Estado del servidor',
+  'logs.server_uptime': 'Tiempo encendido',
+  'logs.image_ref': 'Imagen GHCR',
+  'logs.runtime_loading': 'Cargando…',
+  'logs.runtime_unavailable': 'No disponible',
+  'logs.image_local': 'Build local (sin etiqueta GHCR)'
 } as const;
 
 export const logsEn: Record<keyof typeof logsEs, string> = {
@@ -84,5 +90,11 @@ export const logsEn: Record<keyof typeof logsEs, string> = {
   'logs.estado_conectando': 'Connecting',
   'logs.estado_reintentando': 'Retrying',
   'logs.estado_reintentando_en': 'Retrying in {seconds} s',
-  'logs.estado_sinConexion': 'Offline'
+  'logs.estado_sinConexion': 'Offline',
+  'logs.runtime_info': 'Server status',
+  'logs.server_uptime': 'Server uptime',
+  'logs.image_ref': 'GHCR image',
+  'logs.runtime_loading': 'Loading…',
+  'logs.runtime_unavailable': 'Unavailable',
+  'logs.image_local': 'Local build (no GHCR tag)'
 };

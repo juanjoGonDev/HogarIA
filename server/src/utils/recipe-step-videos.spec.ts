@@ -134,6 +134,10 @@ describe('Commons recipe step video provider', () => {
       'chopping vegetables cutting board filetype:video'
     );
     expect(searchUrl.searchParams.get('srnamespace')).toBe('6');
+    expect(fetcher.mock.calls[0]?.[1]?.headers).toMatchObject({
+      'Api-User-Agent': expect.stringContaining('https://github.com/juanjoGonDev/HogarIA'),
+      'User-Agent': expect.stringContaining('https://github.com/juanjoGonDev/HogarIA')
+    });
     expect(fetcher.mock.calls.every(([, init]) => init?.redirect === 'error')).toBe(true);
   });
 

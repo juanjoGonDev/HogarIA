@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { expect, test } from './fixtures';
 import { registerWithHousehold } from './helpers/auth';
+import { mockAiFunctionAvailable } from './helpers/ai';
 import { mockRecipeStepPhotos } from './helpers/recipe-step-photos';
 import {
   createSyntheticRecipe,
@@ -119,7 +120,9 @@ test('la vista dedicada edita todos los campos, conserva el estado personal y no
   const requests: string[] = [];
   const patchRequests: string[] = [];
   page.on('request', (request) => {
-    requests.push(request.url());
+    if (request.method() === 'POST' && request.url().includes('/api/ai/')) {
+      requests.push(request.url());
+    }
     if (request.method() === 'PATCH') patchRequests.push(request.url());
   });
 
@@ -707,6 +710,7 @@ test('selecciona vídeos licenciados y solo carga el del paso activo al cocinar'
 test('revisa una mejora canónica, busca medios genéricos y persiste solo al guardar', async ({
   page
 }, testInfo) => {
+  await mockAiFunctionAvailable(page, 'recipes');
   await page.setViewportSize(
     testInfo.project.name === 'chromium'
       ? { width: 1440, height: 1000 }

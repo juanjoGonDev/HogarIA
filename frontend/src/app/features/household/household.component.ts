@@ -1,5 +1,6 @@
 import { cookingLevelWord } from '../../shared/models';
 import type {
+  Household,
   HouseholdMember,
   MemberPermissions,
   MemberRole
@@ -50,6 +51,7 @@ import { HouseholdTasksComponent } from './household-tasks.component';
 import { HouseholdMealPlannerComponent } from './household-meal-planner.component';
 import { HouseholdMealSettingsComponent } from './household-meal-settings.component';
 import { HouseholdPlanningAutomationComponent } from './household-planning-automation.component';
+import { AiConfigComponent } from '../ai-config/ai-config.component';
 
 type PermissionGroup = 'pantry' | 'recipes' | 'calendar' | 'members' | 'settings';
 type HouseholdPlanningTab = 'meals' | 'tasks' | 'settings';
@@ -127,7 +129,8 @@ function completeMemberPermissions(value: unknown, role: MemberRole): MemberPerm
     HouseholdTasksComponent,
     HouseholdMealPlannerComponent,
     HouseholdMealSettingsComponent,
-    HouseholdPlanningAutomationComponent
+    HouseholdPlanningAutomationComponent,
+    AiConfigComponent
   ],
   template: `
     <div class="household">
@@ -469,10 +472,16 @@ function completeMemberPermissions(value: unknown, role: MemberRole): MemberPerm
             </div>
           </section>
 
-          <section class="settings-section" *ngIf="!isAdmin()">
+          <section class="settings-section" *ngIf="!isAdmin() && !hasSettingsPermission(household)">
             <h2 class="settings-section__title">{{ 'household.tab_settings' | t }}</h2>
             <p class="permissions-section__hint">{{ 'household.settings_admin_only' | t }}</p>
           </section>
+
+          <app-ai-config
+            *ngIf="activeTab() === 'settings' && hasSettingsPermission(household)"
+            [embedded]="true"
+            data-test="household-ai-config"
+          />
 
           <!-- Actions -->
           <div class="household__actions">
@@ -1641,6 +1650,10 @@ export class HouseholdComponent implements OnInit, OnDestroy {
 
   isAdmin(): boolean {
     return this.householdService.isAdmin();
+  }
+
+  hasSettingsPermission(household: Household): boolean {
+    return household.myPermissions?.settings ?? household.myRole === 'admin';
   }
 
   canInvite(): boolean {

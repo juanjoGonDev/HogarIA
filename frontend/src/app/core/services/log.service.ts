@@ -20,6 +20,12 @@ export interface LogEntry {
   total?: number;
 }
 
+export interface LogRuntimeInfo {
+  uptimeSeconds: number;
+  imageRef: string;
+  observedAt: number;
+}
+
 @Injectable({ providedIn: 'root' })
 export class LogService {
   private http = inject(HttpClient);
@@ -32,6 +38,8 @@ export class LogService {
   private filterLevel = signal<LogLevel | 'all'>('all');
   private onlyErrorsSignal = signal(false);
   private pausedSignal = signal(false);
+  private runtimeInfoSignal = signal<LogRuntimeInfo | null>(null);
+  private runtimeInfoStatusSignal = signal<'idle' | 'loading' | 'ready' | 'unavailable'>('idle');
 
   private stream?: StreamHandle;
   private buffer: LogEntry[] = [];
@@ -51,6 +59,40 @@ export class LogService {
   readonly sourceFilter = this.filterSource.asReadonly();
   readonly levelFilter = this.filterLevel.asReadonly();
   readonly onlyErrors = this.onlyErrorsSignal.asReadonly();
+  readonly runtimeInfo = this.runtimeInfoSignal.asReadonly();
+  readonly runtimeInfoStatus = this.runtimeInfoStatusSignal.asReadonly();
+
+  loadRuntimeInfo(): void {
+    this.runtimeInfoStatusSignal.set('loading');
+    this.http
+      .get<{ uptime?: unknown; imageRef?: unknown }>(`${environment.apiUrl}/health`)
+      .subscribe({
+        next: (response) => {
+          if (
+            typeof response.uptime !== 'number' ||
+            !Number.isFinite(response.uptime) ||
+            response.uptime < 0 ||
+            typeof response.imageRef !== 'string' ||
+            response.imageRef.length === 0
+          ) {
+            this.runtimeInfoSignal.set(null);
+            this.runtimeInfoStatusSignal.set('unavailable');
+            return;
+          }
+
+          this.runtimeInfoSignal.set({
+            uptimeSeconds: Math.floor(response.uptime),
+            imageRef: response.imageRef,
+            observedAt: Date.now()
+          });
+          this.runtimeInfoStatusSignal.set('ready');
+        },
+        error: () => {
+          this.runtimeInfoSignal.set(null);
+          this.runtimeInfoStatusSignal.set('unavailable');
+        }
+      });
+  }
 
   connect(): void {
     this.disconnect();

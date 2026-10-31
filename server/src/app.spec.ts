@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -155,6 +155,9 @@ describe('estaticos', () => {
     mkdirSync(join(dir, 'assets'));
     writeFileSync(join(dir, 'assets', 'logo.svg'), '<svg/>');
     writeFileSync(join(dir, 'main-ABCDEFGH.js'), 'console.log(1)');
+    writeFileSync(join(dir, 'manifest.json'), '{}');
+    writeFileSync(join(dir, 'ngsw.json'), '{}');
+    writeFileSync(join(dir, 'ngsw-worker.js'), '/* service worker */');
     mkdirSync(join(dir, 'deep'));
     writeFileSync(join(dir, 'deep', 'index.html'), '<html>deep</html>');
   });
@@ -184,6 +187,48 @@ describe('estaticos', () => {
     // Sin index.html en ninguna forma conocida, API puro: mejor un 404 honesto que
     // un server de estaticos apuntando a una carpeta vacia.
     expect(resolveStaticDir({}, mkdtempSync(join(tmpdir(), 'hogaria-empty-')))).toBeNull();
+  });
+
+  it('revalida el shell y service worker sin cambiar la caché inmutable de chunks con hash', async () => {
+    const app = createApp({ rateLimit: null, staticDir: dir });
+    const paths = ['/', '/shopping/abc-123', '/manifest.json', '/ngsw.json', '/ngsw-worker.js'];
+
+    for (const path of paths) {
+      const response = await app.request(path);
+      expect(response.status, path).toBe(200);
+      expect(response.headers.get('cache-control'), path).toBe(
+        'no-cache, no-store, must-revalidate'
+      );
+    }
+
+    const hashedChunk = await app.request('/main-ABCDEFGH.js');
+    expect(hashedChunk.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+    const unhashedAsset = await app.request('/assets/logo.svg');
+    expect(unhashedAsset.headers.get('cache-control')).toBe('public, max-age=3600');
+  });
+
+  it('configura nginx para revalidar el shell/manifest y conservar las cabeceras de seguridad', () => {
+    const config = readFileSync(new URL('../../nginx/nginx.conf', import.meta.url), 'utf8');
+    const paths = [
+      '/index.html',
+      '/ngsw.json',
+      '/ngsw-worker.js',
+      '/safety-worker.js',
+      '/manifest.json'
+    ];
+
+    for (const path of paths) {
+      const escapedPath = path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const location = new RegExp(
+        `location = ${escapedPath}\\s*\\{[^}]*Cache-Control \\"no-cache, no-store, must-revalidate\\" always;[^}]*\\}`,
+        's'
+      );
+      expect(config, `nginx location ${path}`).toMatch(location);
+      expect(config.match(location)?.[0]).toContain('X-Frame-Options "SAMEORIGIN" always');
+      expect(config.match(location)?.[0]).toContain('X-Content-Type-Options "nosniff" always');
+    }
+    expect(config).toContain('location ~* \\.(js|css|png|jpg|jpeg|gif|ico|svg|woff2?)$ {');
+    expect(config).toContain('add_header Cache-Control "public, immutable";');
   });
 
   it('el limitador se apaga y se configura, y una tonteria no lo apaga', () => {

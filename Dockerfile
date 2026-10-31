@@ -32,7 +32,11 @@ RUN CI=true pnpm install --filter @hogaria/server --prod --frozen-lockfile \
 
 # Runtime contains compiled assets and only server production dependencies.
 FROM node:22-alpine AS production
+ARG APP_IMAGE_REF=local-unpublished
 WORKDIR /app
+
+ENV APP_IMAGE_REF=${APP_IMAGE_REF}
+LABEL org.opencontainers.image.version=${APP_IMAGE_REF}
 
 RUN apk add --no-cache curl tini libstdc++ \
   && mkdir -p /app/data

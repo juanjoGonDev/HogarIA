@@ -15,6 +15,7 @@ export type RegisterNameIssue = Extract<
 >;
 export type RegisterEmailIssue = Extract<RegisterValidationIssue, 'required' | 'invalidEmail'>;
 export type RegisterPasswordIssue = 'required' | NewPasswordIssue;
+export type RegisterConfirmPasswordIssue = 'required' | 'mismatch';
 
 const NAME_MIN_LENGTH = 2;
 const NAME_MAX_LENGTH = 100;
@@ -36,4 +37,12 @@ export function registerEmailIssue(email: string): RegisterEmailIssue | null {
 export function registerPasswordIssue(password: string): RegisterPasswordIssue | null {
   if (!password) return 'required';
   return newPasswordIssue(password);
+}
+
+export function registerConfirmPasswordIssue(
+  confirmation: string,
+  password: string
+): RegisterConfirmPasswordIssue | null {
+  if (!confirmation) return 'required';
+  return confirmation === password ? null : 'mismatch';
 }

@@ -141,6 +141,17 @@ interface FilterOption<T extends string> {
         </div>
       </div>
 
+      <dl class="logs-runtime" [attr.aria-label]="'logs.runtime_info' | t" data-test="logs-runtime">
+        <div class="logs-runtime__item">
+          <dt>{{ 'logs.server_uptime' | t }}</dt>
+          <dd data-test="logs-server-uptime" aria-live="off">{{ runtimeUptimeLabel() }}</dd>
+        </div>
+        <div class="logs-runtime__item">
+          <dt>{{ 'logs.image_ref' | t }}</dt>
+          <dd data-test="logs-image-ref"><code>{{ runtimeImageLabel() }}</code></dd>
+        </div>
+      </dl>
+
       <!-- Terminal -->
       <div class="terminal" #terminalEl>
         <div class="terminal__header">
@@ -241,6 +252,43 @@ interface FilterOption<T extends string> {
       gap: var(--space-2);
       flex-wrap: wrap;
       align-items: center;
+    }
+
+    .logs-runtime {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--space-2);
+      margin: 0;
+    }
+
+    .logs-runtime__item {
+      display: flex;
+      flex: 1 1 15rem;
+      align-items: baseline;
+      gap: var(--space-2);
+      min-width: 0;
+      padding: var(--space-2) var(--space-3);
+      border: 1px solid var(--border-default);
+      border-radius: var(--radius-md);
+      background: var(--bg-secondary);
+      font-size: var(--text-xs);
+    }
+
+    .logs-runtime__item dt {
+      flex: 0 0 auto;
+      color: var(--text-tertiary);
+    }
+
+    .logs-runtime__item dd {
+      min-width: 0;
+      margin: 0;
+      color: var(--text-primary);
+      font-weight: var(--font-medium);
+      overflow-wrap: anywhere;
+    }
+
+    .logs-runtime__item code {
+      font: inherit;
     }
 
     .logs-only-errors {
@@ -492,6 +540,30 @@ export class LogsComponent implements OnInit, OnDestroy, AfterViewChecked {
 
   @ViewChild('bodyEl') bodyEl!: ElementRef<HTMLDivElement>;
 
+  private readonly nowMs = signal(Date.now());
+  private uptimeTimer?: number;
+  private lastRuntimeRefresh = 0;
+
+  runtimeUptimeLabel = computed(() => {
+    const runtime = this.logService.runtimeInfo();
+    if (!runtime) {
+      return this.i18n.t(
+        this.logService.runtimeInfoStatus() === 'loading'
+          ? 'logs.runtime_loading'
+          : 'logs.runtime_unavailable'
+      );
+    }
+
+    const elapsed = Math.max(0, Math.floor((this.nowMs() - runtime.observedAt) / 1000));
+    return this.formatUptime(runtime.uptimeSeconds + elapsed);
+  });
+
+  runtimeImageLabel = computed(() => {
+    const imageRef = this.logService.runtimeInfo()?.imageRef;
+    if (!imageRef) return this.i18n.t('logs.runtime_unavailable');
+    return imageRef === 'local-unpublished' ? this.i18n.t('logs.image_local') : imageRef;
+  });
+
   /**
    * Los dos filtros de la barra. `labelKey`, no `label`: un catalogo con la frase dentro se pinta tal cual en
    * el `@for` de la plantilla y no hay idioma que lo alcance (HOGARIA-SPEC ## 12u).
@@ -653,10 +725,21 @@ export class LogsComponent implements OnInit, OnDestroy, AfterViewChecked {
 
   ngOnInit(): void {
     this.logService.connect();
+    this.logService.loadRuntimeInfo();
+    this.lastRuntimeRefresh = Date.now();
+    this.uptimeTimer = window.setInterval(() => {
+      const now = Date.now();
+      this.nowMs.set(now);
+      if (now - this.lastRuntimeRefresh >= 30_000) {
+        this.lastRuntimeRefresh = now;
+        this.logService.loadRuntimeInfo();
+      }
+    }, 1000);
   }
 
   ngOnDestroy(): void {
     this.logService.disconnect();
+    if (this.uptimeTimer !== undefined) window.clearInterval(this.uptimeTimer);
   }
 
   ngAfterViewChecked(): void {
@@ -712,5 +795,15 @@ export class LogsComponent implements OnInit, OnDestroy, AfterViewChecked {
 
   levelTag(level: string): string {
     return level.toUpperCase().slice(0, 5);
+  }
+
+  formatUptime(totalSeconds: number): string {
+    const safeSeconds = Math.max(0, Math.floor(totalSeconds));
+    const days = Math.floor(safeSeconds / 86_400);
+    const hours = Math.floor((safeSeconds % 86_400) / 3_600);
+    const minutes = Math.floor((safeSeconds % 3_600) / 60);
+    const seconds = safeSeconds % 60;
+    const pad = (value: number) => String(value).padStart(2, '0');
+    return `${days}d ${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
   }
 }

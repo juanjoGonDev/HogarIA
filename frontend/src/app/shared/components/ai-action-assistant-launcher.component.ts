@@ -16,6 +16,7 @@ import { filter } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { I18nService } from '../../core/services/i18n.service';
 import { ToastService } from '../../core/services/toast.service';
+import { AiProviderAvailabilityService } from '../../core/services/ai-provider-availability.service';
 import type { AssistantRouteHint } from '../models/ai-action-assistant.model';
 import { TranslatePipe } from '../../core/pipes/translate.pipe';
 import { IconComponent } from './ui/icon/icon.component';
@@ -28,7 +29,7 @@ import { AiActionAssistantDialogComponent } from './ai-action-assistant-dialog.c
   imports: [CommonModule, TranslatePipe, IconComponent, AiActionAssistantDialogComponent],
   template: `
     <button
-      *ngIf="!keyboardOpen()"
+      *ngIf="!keyboardOpen() && availability.isConfigured('assistant') === true"
       class="assistant-launcher__button"
       type="button"
       [attr.aria-label]="'ai_assistant.open' | t"
@@ -120,6 +121,7 @@ export class AiActionAssistantLauncherComponent implements AfterViewInit, OnChan
   private readonly visualViewport = typeof window === 'undefined' ? null : window.visualViewport;
   private readonly i18n = inject(I18nService);
   private readonly toast = inject(ToastService);
+  readonly availability = inject(AiProviderAvailabilityService);
 
   readonly isOpen = signal(false);
   readonly keyboardOpen = signal(false);
@@ -131,6 +133,7 @@ export class AiActionAssistantLauncherComponent implements AfterViewInit, OnChan
   private householdExtraLift = 0;
 
   constructor() {
+    this.availability.load().subscribe();
     this.router.events
       .pipe(
         filter((event): event is NavigationEnd => event instanceof NavigationEnd),

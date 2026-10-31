@@ -21,28 +21,45 @@ test.describe.configure({ mode: 'serial' });
 
 const SESSION = 'Bearer e2e-full-stack-rate-limit-probe';
 
-async function hit(request: import('@playwright/test').APIRequestContext, path: string) {
-  return request.get(path, { headers: { authorization: SESSION }, maxRedirects: 0 });
+async function hit(
+  request: import('@playwright/test').APIRequestContext,
+  path: string,
+  session: string
+) {
+  return request.get(path, { headers: { authorization: session }, maxRedirects: 0 });
 }
 
-test('agotar el cupo responde 429 con Retry-After y no se lleva los diagnosticos por delante', async ({ request }) => {
-  const first = await hit(request, '/api/el-cubo-se-llena');
+test('agotar el cupo responde 429 con Retry-After y no se lleva los diagnosticos por delante', async ({
+  request
+}, testInfo) => {
+  // Chromium y mobile-chrome comparten el proceso de producción. Cada proyecto necesita
+  // su propio cubo, o uno puede agotar el límite antes de que el otro arranque el test.
+  const session = `${SESSION}-${testInfo.project.name}`;
+  const first = await hit(request, '/api/el-cubo-se-llena', session);
   expect(first.status()).toBe(404);
 
   const headers = first.headers();
-  const limit = Number(/limit=(\d+)/.exec(headers['ratelimit'] ?? '')?.[1] ?? headers['x-ratelimit-limit'] ?? 600);
-  expect(Number.isFinite(limit) && limit > 0, `cabecera RateLimit: ${headers['ratelimit'] ?? 'ausente'}`).toBeTruthy();
+  const limit = Number(
+    /limit=(\d+)/.exec(headers['ratelimit'] ?? '')?.[1] ?? headers['x-ratelimit-limit'] ?? 600
+  );
+  expect(
+    Number.isFinite(limit) && limit > 0,
+    `cabecera RateLimit: ${headers['ratelimit'] ?? 'ausente'}`
+  ).toBeTruthy();
 
   // Se rellena el cubo hasta el mismo 429, sin adivinar el umbral de oido.
   let blocked = first;
   for (let i = 0; i < limit + 40 && blocked.status() !== 429; i += 1) {
-    blocked = await hit(request, `/api/el-cubo-se-llena-${i}`);
+    blocked = await hit(request, `/api/el-cubo-se-llena-${i}`, session);
   }
   expect(blocked.status()).toBe(429);
 
   const retryAfter = Number(blocked.headers()['retry-after']);
   // Sin `Retry-After` el unico consejo util es «espera», y el usuario rellena de F5.
-  expect(Number.isFinite(retryAfter) && retryAfter > 0, `Retry-After: ${blocked.headers()['retry-after']}`).toBeTruthy();
+  expect(
+    Number.isFinite(retryAfter) && retryAfter > 0,
+    `Retry-After: ${blocked.headers()['retry-after']}`
+  ).toBeTruthy();
 
   const body = await blocked.json();
   expect(body.error).toBe('Too Many Requests');
@@ -53,28 +70,32 @@ test('agotar el cupo responde 429 con Retry-After y no se lleva los diagnosticos
   // aviso en un apagon, y eso es lo que dejo la app inutilizable durante un minuto.
   expect((await request.get('/api/health')).status()).toBe(200);
   expect((await request.get('/api/logs?limit=1')).status()).toBe(200);
-  expect((await request.get('/api/health'))
-    .ok())
-    .toBeTruthy();
+  expect((await request.get('/api/health')).ok()).toBeTruthy();
 });
 
-test('el cupo se recupera solo, sin reiniciar nada', async ({ request }) => {
+test('el cupo se recupera solo, sin reiniciar nada', async ({ request }, testInfo) => {
   test.setTimeout(150_000);
+  const session = `${SESSION}-${testInfo.project.name}`;
 
   // Mismo cubo que el test anterior (misma sesion de mentira): si esto vuelve a 404, el
   // bloqueo era una ventana y no un estado permanente. Si no recuperara, la unica salida
   // seria reiniciar el contenedor —que es exactamente lo que no puede pedir una app de
   // una casa.
   await expect
-    .poll(async () => (await hit(request, '/api/ya-puedo-volver')).status(), { timeout: 100_000, intervals: [1000] })
+    .poll(async () => (await hit(request, '/api/ya-puedo-volver', session)).status(), {
+      timeout: 100_000,
+      intervals: [1000]
+    })
     .toBe(404);
 });
 
-test('una sesion distinta conserva su propio cupo', async ({ request }) => {
+test('una sesion distinta conserva su propio cupo', async ({ request }, testInfo) => {
   // El detalle que evita el «no me deja probar nada»: el vecino de casa sigue comprando
   // mientras alguien, en otra pestana, agota el suyo.
-  const other = 'Bearer e2e-full-stack-otra-sesion';
+  const other = `Bearer e2e-full-stack-otra-sesion-${testInfo.project.name}`;
   for (let i = 0; i < 5; i += 1) {
-    expect((await request.get('/api/la-otra-sesion', { headers: { authorization: other } })).status()).toBe(404);
+    expect(
+      (await request.get('/api/la-otra-sesion', { headers: { authorization: other } })).status()
+    ).toBe(404);
   }
 });

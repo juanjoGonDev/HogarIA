@@ -6,14 +6,14 @@ import type { AddressInfo } from 'node:net';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { test } from './fixtures';
 import { registerAndGoto } from './helpers/auth';
+import { mockAiFunctionAvailable } from './helpers/ai';
 
 /**
- * La lectura de tickets por IA (HOGARIA-SPEC ## 12aj), de punta a punta SIN proveedor de IA:
+ * La lectura de tickets por IA (HOGARIA-SPEC ## 12aj), de punta a punta con fixtures sintéticos:
  * lo que se prueba es el ciclo que la IA no puede romper.
  *
- *  - Subir un ticket valido lo mete en la cola; sin configuracion de IA el trabajo falle con
- *    NO_CONFIG, el icono de la cabecera se pone el borde rojo y su panel ensena el trabajo con
- *    su reintento.
+ *  - Sin proveedor, la interfaz explica que hay que configurar la IA y no sube el ticket.
+ *  - Con disponibilidad sintética, los tests cubren cola, revisión manual y confirmación.
  *  - Un fichero que no es imagen ni PDF no pasa de la puerta (415 con la firma, no el
  *    Content-Type, que es una opinion).
  *  - Un ticket fallido se rescata a mano: lineas anadidas y editadas por la interfaz, tienda
@@ -215,9 +215,7 @@ async function terminarTransiciones(page: Page): Promise<void> {
 }
 
 test.describe('tickets: la cola de lectura (## 12aj)', () => {
-  test('la seccion esta en la navegacion y la bandeja sube un ticket que falla sin IA', async ({
-    page
-  }) => {
+  test('sin proveedor explica la configuración necesaria y no sube el ticket', async ({ page }) => {
     await registerAndGoto(page, '/dashboard');
 
     // El modulo de tickets trae este build: sale en el menu lateral.
@@ -229,24 +227,25 @@ test.describe('tickets: la cola de lectura (## 12aj)', () => {
     const icono = iconoVisibleDeCola(page);
     await expect(icono).toBeVisible();
 
-    // La subida: un PNG valido entra en la cola.
+    let uploadRequests = 0;
+    page.on('request', (request) => {
+      if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/receipts') {
+        uploadRequests += 1;
+      }
+    });
+
+    // Sin proveedor, el cliente informa y bloquea la petición antes del servidor.
     await page.setInputFiles('input[name="ticketFile"]', {
       name: 'ticket.png',
       mimeType: 'image/png',
       buffer: pngDeMentira()
     });
-    await expect(page.locator('[data-test="ticket-drop"]')).toBeVisible();
-
-    // Sin configuracion de IA la lectura no puede empezar: el trabajo falle y el icono
-    // de la cabecera se pone el borde rojo —lo que se ve desde el otro lado de la habitacion.
-    await expect(icono).toHaveClass(/rq__button--error/, { timeout: 20000 });
-
-    // El panel del icono: el trabajo con su estado y su reintento.
-    await icono.click();
-    const panel = page.locator('[data-test="receipt-queue-panel"]');
-    await expect(panel).toBeVisible();
-    await expect(panel.locator('[data-test="queue-job-failed"]')).toHaveCount(1);
-    await expect(panel.getByRole('button', { name: 'Volver a leer' })).toBeVisible();
+    const setupDialog = page.getByRole('dialog', { name: 'Configura la IA' });
+    await expect(setupDialog).toBeVisible();
+    await expect(setupDialog).toContainText('Compra y despensa');
+    await expect(setupDialog.getByRole('link', { name: 'Abrir ajustes' })).toBeVisible();
+    expect(uploadRequests).toBe(0);
+    await expect(icono).not.toHaveClass(/rq__button--error/);
   });
 
   test('recorre el historial completo de más de cien recibos y abre el más antiguo', async ({
@@ -496,6 +495,7 @@ test.describe('tickets: la cola de lectura (## 12aj)', () => {
   });
 
   test('un PDF tambien entra en la cola', async ({ page }) => {
+    await mockAiFunctionAvailable(page, 'shopping_pantry');
     await registerAndGoto(page, '/receipts');
 
     const uploadResponsePromise = page.waitForResponse((response) => {
@@ -524,6 +524,7 @@ test.describe('tickets: la cola de lectura (## 12aj)', () => {
   test('un ticket fallido se rescata a mano y confirma: tienda, precios e inventario', async ({
     page
   }, testInfo) => {
+    await mockAiFunctionAvailable(page, 'shopping_pantry');
     await registerAndGoto(page, '/receipts');
     const token = await tokenOf(page);
 
@@ -660,6 +661,7 @@ test.describe('tickets: la cola de lectura (## 12aj)', () => {
     await page.setViewportSize(
       isMobileProject ? { width: 390, height: 844 } : { width: 1440, height: 900 }
     );
+    await mockAiFunctionAvailable(page, 'shopping_pantry');
     await registerAndGoto(page, '/receipts');
     const token = await tokenOf(page);
 
@@ -791,6 +793,7 @@ test.describe('tickets: la cola de lectura (## 12aj)', () => {
   });
 
   test('parar todo desde el icono deja los trabajos detenidos', async ({ page }) => {
+    await mockAiFunctionAvailable(page, 'shopping_pantry');
     await registerAndGoto(page, '/receipts');
 
     await page.setInputFiles('input[name="ticketFile"]', {
@@ -903,6 +906,10 @@ test.describe('metadatos e historial con zona horaria extrema', () => {
           }
         });
         expect(configuration.status()).toBe(201);
+        await page.reload();
+        await expect(
+          page.getByRole('heading', { name: scenario.language === 'es' ? 'Tickets' : 'Receipts' })
+        ).toBeVisible();
 
         const uploadResponse = page.waitForResponse(
           (response) =>
@@ -1332,6 +1339,8 @@ test.describe('metadatos manuales en reintentos de tickets', () => {
         }
       });
       expect(configuration.status()).toBe(201);
+      await page.reload();
+      await expect(page.getByRole('heading', { name: 'Tickets' })).toBeVisible();
 
       const uploadResponse = page.waitForResponse(
         (response) =>
@@ -1496,6 +1505,8 @@ test.describe('metadatos editables mientras la IA trabaja', () => {
           }
         });
         expect(configuration.status()).toBe(201);
+        await page.reload();
+        await expect(page.getByRole('heading', { name: scenario.heading })).toBeVisible();
 
         const subirTicketSintetico = async (fileName: string) => {
           const uploadResponse = page.waitForResponse(

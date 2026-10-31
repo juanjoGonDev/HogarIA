@@ -16,6 +16,7 @@ test.describe('Authentication', () => {
     await expect(page.locator('h2')).toContainText('Iniciar sesión');
     await expect(page.locator('input#email')).toBeVisible();
     await expect(page.locator('input#password')).toBeVisible();
+    await expect(page.locator('input#confirm-password')).toHaveCount(0);
     await expect(page.locator('button[type="submit"]')).toBeVisible();
   });
 
@@ -146,6 +147,7 @@ test.describe('Authentication', () => {
     await expect(page.locator('input#name')).toBeVisible();
     await expect(page.locator('input#email')).toBeVisible();
     await expect(page.locator('input#password')).toBeVisible();
+    await expect(page.locator('input#confirm-password')).toBeVisible();
 
     // El nivel de cocina se fue del alta: es perfil, se responde en el tour y se
     // edita en Preferencias > Perfil. Aqui solo se crea la cuenta.

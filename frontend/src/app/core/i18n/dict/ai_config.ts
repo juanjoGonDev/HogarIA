@@ -31,6 +31,8 @@ export const aiConfigEs = {
     'Agrega un proveedor de IA para que el planificador y las sugerencias funcionen',
   'ai_config.agregar_configuracion': 'Agregar configuración',
   'ai_config.api_key': 'API Key',
+  'ai_config.api_key_edit_helper':
+    'Déjala vacía para conservar la clave guardada; escribe otra para cambiarla.',
   'ai_config.conecta_tu_proveedor_de':
     'Conecta tu proveedor de IA para que la app proponga recetas, menús y cestas a tu medida. Soporta cualquier API compatible con OpenAI.',
   'ai_config.configuracion_ia': 'Configuración IA',
@@ -53,6 +55,7 @@ export const aiConfigEs = {
   'ai_config.sin_configuraciones': 'Sin configuraciones',
   'ai_config.temperatura': 'Temperatura',
   'ai_config.timeout_ms': 'Timeout (ms)',
+  'ai_config.timeout_helper': 'Vacío usa 30000 ms.',
   'ai_config.url_base': 'URL Base',
   'ai_config.url_helper': 'URL de la API compatible con OpenAI',
   'ai_config.url': 'URL',
@@ -116,7 +119,28 @@ export const aiConfigEs = {
   'ai_config.queue_error_input_expired':
     'Los datos necesarios para repetir este trabajo ya no están disponibles.',
   'ai_config.queue_error_config_unavailable': 'La configuración del proveedor no está disponible.',
-  'ai_config.queue_error_unknown': 'La solicitud falló.'
+  'ai_config.queue_error_unknown': 'La solicitud falló.',
+  'ai_config.function_providers_title': 'Proveedor por función',
+  'ai_config.function_providers_hint': 'Elige qué proveedor atiende cada parte de la app.',
+  'ai_config.function_assistant': 'Asistente',
+  'ai_config.function_recipes': 'Recetas y recomendaciones',
+  'ai_config.function_planning': 'Planificación',
+  'ai_config.function_shopping_pantry': 'Compra y despensa',
+  'ai_config.function_household_automation': 'Automatización del hogar',
+  'ai_config.no_active_provider': 'Sin proveedor activo',
+  'ai_config.provider_required_title': 'Configura la IA',
+  'ai_config.provider_required_body': 'Esta función necesita un proveedor de IA activo.',
+  'ai_config.provider_required_function': 'Función: {function}',
+  'ai_config.provider_required_permission':
+    'Necesitas permiso de ajustes del hogar para configurarlo.',
+  'ai_config.open_settings': 'Abrir ajustes',
+  'ai_config.provider_in_use_title': 'Proveedor en uso',
+  'ai_config.provider_in_use_message':
+    '{name} se usa en: {functions}. Si lo desactivas, esas funciones pasarán al proveedor activo más antiguo; si no hay otro, quedarán sin proveedor.',
+  'ai_config.delete_in_use_message':
+    'Eliminar {name} afecta a: {functions}. Esas funciones pasarán al proveedor activo más antiguo; si no hay otro, quedarán sin proveedor.',
+  'ai_config.provider_assignment_error':
+    'No se pudo guardar esta asignación. Actualiza e inténtalo de nuevo.'
 } as const;
 
 export const aiConfigEn: Record<keyof typeof aiConfigEs, string> = {
@@ -148,6 +172,8 @@ export const aiConfigEn: Record<keyof typeof aiConfigEs, string> = {
     'Add an AI provider so the planner and the suggestions start working',
   'ai_config.agregar_configuracion': 'Add configuration',
   'ai_config.api_key': 'API Key',
+  'ai_config.api_key_edit_helper':
+    'Leave it blank to keep the saved key; enter a new one to replace it.',
   'ai_config.conecta_tu_proveedor_de':
     'Connect your AI provider so the app can tailor recipes, menus and baskets to you. Any OpenAI-compatible API works.',
   'ai_config.configuracion_ia': 'AI Settings',
@@ -169,6 +195,7 @@ export const aiConfigEn: Record<keyof typeof aiConfigEs, string> = {
   'ai_config.sin_configuraciones': 'No configurations',
   'ai_config.temperatura': 'Temperature',
   'ai_config.timeout_ms': 'Timeout (ms)',
+  'ai_config.timeout_helper': 'Blank uses 30000 ms.',
   'ai_config.url_base': 'Base URL',
   'ai_config.url_helper': 'URL of an OpenAI-compatible API',
   'ai_config.url': 'URL',
@@ -233,5 +260,25 @@ export const aiConfigEn: Record<keyof typeof aiConfigEs, string> = {
   'ai_config.queue_error_input_expired':
     'The data needed to retry this job is no longer available.',
   'ai_config.queue_error_config_unavailable': 'The provider configuration is unavailable.',
-  'ai_config.queue_error_unknown': 'The request failed.'
+  'ai_config.queue_error_unknown': 'The request failed.',
+  'ai_config.function_providers_title': 'Provider by function',
+  'ai_config.function_providers_hint': 'Choose which provider handles each part of the app.',
+  'ai_config.function_assistant': 'Assistant',
+  'ai_config.function_recipes': 'Recipes and recommendations',
+  'ai_config.function_planning': 'Planning',
+  'ai_config.function_shopping_pantry': 'Shopping and pantry',
+  'ai_config.function_household_automation': 'Household automation',
+  'ai_config.no_active_provider': 'No active provider',
+  'ai_config.provider_required_title': 'Configure AI',
+  'ai_config.provider_required_body': 'This function needs an active AI provider.',
+  'ai_config.provider_required_function': 'Function: {function}',
+  'ai_config.provider_required_permission':
+    'You need household settings permission to configure it.',
+  'ai_config.open_settings': 'Open settings',
+  'ai_config.provider_in_use_title': 'Provider in use',
+  'ai_config.provider_in_use_message':
+    '{name} is assigned to: {functions}. If you deactivate it, those functions will move to the oldest active provider; if none remains, they will have no provider.',
+  'ai_config.delete_in_use_message':
+    'Deleting {name} affects: {functions}. Those functions will move to the oldest active provider; if none remains, they will have no provider.',
+  'ai_config.provider_assignment_error': 'Could not save this assignment. Refresh and try again.'
 };

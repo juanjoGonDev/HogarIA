@@ -5,7 +5,8 @@ import {
   mealReplacementCandidateSchema,
   replaceMealSchema,
   AI_CONFIG_DEFAULT_MAX_TOKENS,
-  AI_CONFIG_MAX_TIMEOUT_MS
+  AI_CONFIG_MAX_TIMEOUT_MS,
+  testConnectionSchema
 } from './ai.schema.js';
 
 const config = (timeout: number) => ({
@@ -17,12 +18,33 @@ const config = (timeout: number) => ({
 });
 
 describe('createAiConfigSchema timeout', () => {
-  it('allows the four-minute ceiling while staying below the worker lease', () => {
-    expect(AI_CONFIG_MAX_TIMEOUT_MS).toBe(240_000);
+  it('removes the product ceiling and keeps only Node timer technical range', () => {
+    expect(AI_CONFIG_MAX_TIMEOUT_MS).toBe(2_147_483_647);
     expect(createAiConfigSchema.safeParse(config(AI_CONFIG_MAX_TIMEOUT_MS)).success).toBe(true);
     expect(createAiConfigSchema.safeParse(config(AI_CONFIG_MAX_TIMEOUT_MS + 1)).success).toBe(
       false
     );
+    expect(
+      testConnectionSchema.safeParse({
+        configId: 'synthetic-config',
+        timeout: AI_CONFIG_MAX_TIMEOUT_MS
+      }).success
+    ).toBe(true);
+    expect(
+      testConnectionSchema.safeParse({
+        configId: 'synthetic-config',
+        timeout: AI_CONFIG_MAX_TIMEOUT_MS + 1
+      }).success
+    ).toBe(false);
+  });
+
+  it('requires a positive integer when supplied and defaults omitted config timeouts to 30 seconds', () => {
+    for (const timeout of [0, -1, 1.5]) {
+      expect(createAiConfigSchema.safeParse(config(timeout)).success).toBe(false);
+    }
+
+    const { timeout: _timeout, ...withoutTimeout } = config(30_000);
+    expect(createAiConfigSchema.parse(withoutTimeout).timeout).toBe(30_000);
   });
 });
 
@@ -31,6 +53,19 @@ describe('createAiConfigSchema recipe output budget', () => {
     expect(AI_CONFIG_DEFAULT_MAX_TOKENS).toBe(4096);
     expect(createAiConfigSchema.parse(config(30_000)).maxTokens).toBe(4096);
     expect(createAiConfigSchema.parse({ ...config(30_000), maxTokens: 1200 }).maxTokens).toBe(1200);
+  });
+});
+
+describe('createAiConfigSchema API key', () => {
+  it('rejects whitespace-only keys without trimming a valid provider key', () => {
+    expect(createAiConfigSchema.safeParse({ ...config(30_000), apiKey: '   ' }).success).toBe(
+      false
+    );
+
+    const keyWithIntentionalWhitespace = ' synthetic-key ';
+    expect(
+      createAiConfigSchema.parse({ ...config(30_000), apiKey: keyWithIntentionalWhitespace }).apiKey
+    ).toBe(keyWithIntentionalWhitespace);
   });
 });
 

@@ -1,4 +1,4 @@
-import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
 import { signal } from '@angular/core';
 import { provideRouter } from '@angular/router';
 import { of, Subject, throwError } from 'rxjs';
@@ -7,7 +7,12 @@ import { AiService } from '../../core/services/ai.service';
 import { ConfirmService } from '../../core/services/confirm.service';
 import { I18nService } from '../../core/services/i18n.service';
 import { ToastService } from '../../core/services/toast.service';
+import { AiProviderAvailabilityService } from '../../core/services/ai-provider-availability.service';
 import type { AIProviderConfig } from '../../shared/models/ai-config.model';
+import type {
+  AiFunctionKey,
+  AiFunctionProviderAssignment
+} from '../../shared/models/ai-config.model';
 import { aiConfigEn, aiConfigEs } from '../../core/i18n/dict/ai_config';
 
 const CONFIG: AIProviderConfig = {
@@ -39,10 +44,21 @@ describe('AiConfigComponent', () => {
       configs: signal<AIProviderConfig[]>([]),
       configsLoading: signal(false),
       configsError: signal(false),
+      functionProviders: signal<AiFunctionProviderAssignment[]>([]),
       loadConfigs: jasmine.createSpy('loadConfigs'),
+      loadFunctionProviders: jasmine.createSpy('loadFunctionProviders'),
       createConfig: jasmine.createSpy('createConfig').and.returnValue(of(CONFIG)),
       updateConfig: jasmine.createSpy('updateConfig').and.returnValue(of(CONFIG)),
       deleteConfig: jasmine.createSpy('deleteConfig').and.returnValue(of(true)),
+      assignFunctionProvider: jasmine
+        .createSpy('assignFunctionProvider')
+        .and.callFake((functionKey: AiFunctionKey, configId: string) =>
+          of({
+            functionKey,
+            configId,
+            providerName: configId === CONFIG.id ? CONFIG.name : 'Other'
+          })
+        ),
       testConnection: jasmine
         .createSpy('testConnection')
         .and.returnValue(of({ success: true, model: 'gpt-test', latency: 12 }))
@@ -67,6 +83,10 @@ describe('AiConfigComponent', () => {
         { provide: AiService, useValue: service },
         { provide: ToastService, useValue: toast },
         { provide: ConfirmService, useValue: confirm },
+        {
+          provide: AiProviderAvailabilityService,
+          useValue: { load: jasmine.createSpy('load').and.returnValue(of(null)) }
+        },
         { provide: I18nService, useValue: i18n },
         provideRouter([])
       ]
@@ -79,6 +99,7 @@ describe('AiConfigComponent', () => {
 
   it('loads configurations on entry and pluralizes the counter', () => {
     expect(service.loadConfigs).toHaveBeenCalledTimes(1);
+    expect(service.loadFunctionProviders).toHaveBeenCalledTimes(1);
     expect(component.configuracionesLabel()).toBe('ai_config.n_configuraciones_varios');
     service.configs.set([CONFIG]);
     expect(component.configuracionesLabel()).toBe('ai_config.n_configuraciones_uno');
@@ -86,6 +107,65 @@ describe('AiConfigComponent', () => {
     expect(fixture.nativeElement.querySelector('.config-card__name')?.textContent).toContain(
       CONFIG.name
     );
+  });
+
+  it('keeps the unconfigured state focused on one add action', () => {
+    expect(fixture.nativeElement.querySelector('.ai-config__count')).toBeNull();
+    expect(fixture.nativeElement.querySelector('.ai-config__info')).toBeNull();
+    expect(fixture.nativeElement.querySelector('[data-test="ai-function-providers"]')).toBeNull();
+    expect(fixture.nativeElement.querySelectorAll('.ai-config__header app-button').length).toBe(0);
+    expect(fixture.nativeElement.querySelectorAll('.empty-state app-button').length).toBe(1);
+  });
+
+  it('shows the only active provider as fixed text instead of a redundant selector', () => {
+    service.configs.set([CONFIG]);
+    fixture.detectChanges();
+
+    expect(
+      fixture.nativeElement.querySelectorAll('[data-test^="ai-function-provider-"]').length
+    ).toBe(0);
+    expect(fixture.nativeElement.querySelectorAll('.function-provider-row__value').length).toBe(5);
+    expect(
+      fixture.nativeElement.querySelector('[data-test="ai-function-providers"]')
+    ).not.toBeNull();
+  });
+
+  it('uses a lower-level heading and removes standalone spacing when embedded in Hogar', () => {
+    fixture.componentRef.setInput('embedded', true);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('.ai-config--embedded')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('h1.ai-config__title')).toBeNull();
+    expect(fixture.nativeElement.querySelector('h2.ai-config__title')).not.toBeNull();
+  });
+
+  it('shows function-specific selectors only when several providers are active', () => {
+    const second = { ...CONFIG, id: 'synthetic-config-2', name: 'Second provider' };
+    service.configs.set([CONFIG, second]);
+    service.functionProviders.set([
+      { functionKey: 'assistant', configId: CONFIG.id, providerName: CONFIG.name },
+      { functionKey: 'recipes', configId: CONFIG.id, providerName: CONFIG.name },
+      { functionKey: 'planning', configId: CONFIG.id, providerName: CONFIG.name },
+      { functionKey: 'shopping_pantry', configId: CONFIG.id, providerName: CONFIG.name },
+      { functionKey: 'household_automation', configId: CONFIG.id, providerName: CONFIG.name }
+    ]);
+    fixture.detectChanges();
+
+    expect(
+      fixture.nativeElement.querySelectorAll('[data-test^="ai-function-provider-"]').length
+    ).toBe(5);
+    component.assignProvider('recipes', second.id);
+    expect(service.assignFunctionProvider).toHaveBeenCalledOnceWith('recipes', second.id);
+  });
+
+  it('does not show fake selectors when every provider is inactive', () => {
+    service.configs.set([{ ...CONFIG, isActive: false }]);
+    fixture.detectChanges();
+
+    expect(
+      fixture.nativeElement.querySelectorAll('[data-test^="ai-function-provider-"]').length
+    ).toBe(0);
+    expect(fixture.nativeElement.textContent).toContain('ai_config.no_active_provider');
   });
 
   it('starts new provider configs with enough output budget for all recipe detail levels', () => {
@@ -107,6 +187,15 @@ describe('AiConfigComponent', () => {
     expect(service.createConfig).toHaveBeenCalledWith(
       jasmine.objectContaining({ maxTokens: 4096 })
     );
+  });
+
+  it('does not expose a product timeout cap or artificial minimum', () => {
+    component.openAddModal();
+    fixture.detectChanges();
+
+    const timeout = fixture.nativeElement.querySelector('input#timeout') as HTMLInputElement;
+    expect(timeout.max).toBe('');
+    expect(timeout.min).toBe('');
   });
 
   it('keeps queue panels out of the provider list and links only positive caps to their own view', () => {
@@ -144,11 +233,20 @@ describe('AiConfigComponent', () => {
     component.openAddModal();
     expect(component.isModalOpen()).toBeTrue();
     expect(component.formData.name).toBe('');
+    fixture.detectChanges();
+    expect(
+      (fixture.nativeElement.querySelector('#apiKey') as HTMLInputElement).required
+    ).toBeTrue();
 
     component.editConfig(CONFIG);
+    fixture.detectChanges();
     expect(component.editingConfig()).toBe(CONFIG);
     expect(component.formData.apiKey).toBe('');
     expect(component.formData.name).toBe(CONFIG.name);
+    expect(
+      (fixture.nativeElement.querySelector('#apiKey') as HTMLInputElement).required
+    ).toBeFalse();
+    expect(fixture.nativeElement.textContent).toContain('ai_config.api_key_edit_helper');
     component.closeModal();
     expect(component.isModalOpen()).toBeFalse();
     expect(component.editingConfig()).toBeNull();
@@ -226,11 +324,60 @@ describe('AiConfigComponent', () => {
     expect(sent['name']).toBe(updated.name);
     expect(toast.success).toHaveBeenCalled();
 
+    component.editConfig(CONFIG);
+    component.formData.apiKey = '   ';
+    component.saveConfig();
+    const whitespaceKey = service.updateConfig.calls.mostRecent().args[1] as Record<
+      string,
+      unknown
+    >;
+    expect(whitespaceKey['apiKey']).toBeUndefined();
+
+    component.editConfig(CONFIG);
+    component.formData.apiKey = 'sk-rotated-synthetic';
+    component.saveConfig();
+    const replacement = service.updateConfig.calls.mostRecent().args[1] as Record<string, unknown>;
+    expect(replacement['apiKey']).toBe('sk-rotated-synthetic');
+
     service.updateConfig.and.returnValue(of(null));
     component.editConfig(CONFIG);
     component.saveConfig();
     expect(toast.error).toHaveBeenCalled();
     expect(component.isModalOpen()).toBeTrue();
+  });
+
+  it('uses the detailed validation message for save and saved or unsaved test errors', () => {
+    const validationError = {
+      status: 400,
+      validation: true,
+      message: 'timeout: debe ser como máximo 240.000'
+    };
+    service.createConfig.and.returnValue(throwError(() => validationError));
+    component.openAddModal();
+    component.formData = {
+      ...component.formData,
+      name: 'Synthetic provider',
+      baseUrl: CONFIG.baseUrl,
+      apiKey: 'sk-synthetic-only',
+      model: CONFIG.model,
+      timeout: 300000
+    };
+    component.saveConfig();
+    expect(toast.error).toHaveBeenCalledWith('ui.error', 'timeout: debe ser como máximo 240.000');
+    expect(component.isModalOpen()).toBeTrue();
+    expect(component.isSaving()).toBeFalse();
+
+    service.testConnection.and.returnValue(throwError(() => validationError));
+    component.testFromForm();
+    expect(toast.error).toHaveBeenCalledWith('ui.error', 'timeout: debe ser como máximo 240.000');
+    expect(component.isTestResultOpen()).toBeFalse();
+    expect(component.probandoForm()).toBeFalse();
+
+    service.testConnection.and.returnValue(throwError(() => validationError));
+    component.testConfig(CONFIG);
+    expect(toast.error).toHaveBeenCalledWith('ui.error', 'timeout: debe ser como máximo 240.000');
+    expect(component.probandoId()).toBeNull();
+    expect(component.isTestResultOpen()).toBeFalse();
   });
 
   it('validates unsaved test details and displays either provider verdict', () => {
@@ -284,6 +431,26 @@ describe('AiConfigComponent', () => {
     expect(component.isTestResultOpen()).toBeTrue();
   });
 
+  it('polls a persisted test after reload and blocks a duplicate test action', fakeAsync(() => {
+    const testingConfig = { ...CONFIG, testStatus: 'testing' as const };
+    service.configs.set([testingConfig]);
+    fixture.destroy();
+    service.loadConfigs.calls.reset();
+    fixture = TestBed.createComponent(AiConfigComponent);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+
+    component.testConfig(testingConfig);
+    expect(service.testConnection).not.toHaveBeenCalled();
+    expect(
+      (fixture.nativeElement.querySelector(`[data-test="probar-${CONFIG.name}"]`) as HTMLElement)
+        .textContent
+    ).toContain('ai_config.comprobando');
+
+    tick(2000);
+    expect(service.loadConfigs).toHaveBeenCalledTimes(2);
+  }));
+
   it('handles active toggle and failed update without a false success toast', () => {
     service.updateConfig.and.returnValue(of({ ...CONFIG, isActive: false }));
     component.toggleActive(CONFIG);
@@ -294,6 +461,22 @@ describe('AiConfigComponent', () => {
     service.updateConfig.and.returnValue(of(null));
     component.toggleActive({ ...CONFIG, isActive: false });
     expect(toast.error).toHaveBeenCalled();
+  });
+
+  it('names assigned functions before deactivation and preserves the provider when confirmation is declined', async () => {
+    const assigned = { ...CONFIG, assignedFunctions: ['assistant', 'recipes'] as AiFunctionKey[] };
+    confirm.confirm.and.resolveTo(false);
+
+    await component.toggleActive(assigned);
+
+    expect(confirm.confirm).toHaveBeenCalledWith(
+      jasmine.objectContaining({
+        title: 'ai_config.provider_in_use_title',
+        message: 'ai_config.provider_in_use_message',
+        confirmText: 'ai_config.desactivar'
+      })
+    );
+    expect(service.updateConfig).not.toHaveBeenCalled();
   });
 
   it('requires explicit confirmation before deletion and reports a failed delete', async () => {
@@ -309,6 +492,19 @@ describe('AiConfigComponent', () => {
     service.deleteConfig.and.returnValue(of(false));
     await component.deleteConfig(CONFIG);
     expect(toast.error).toHaveBeenCalled();
+  });
+
+  it('names assigned functions in the explicit deletion confirmation', async () => {
+    const assigned = { ...CONFIG, assignedFunctions: ['planning'] as AiFunctionKey[] };
+
+    await component.deleteConfig(assigned);
+
+    expect(confirm.confirm).toHaveBeenCalledWith(
+      jasmine.objectContaining({
+        message: 'ai_config.delete_in_use_message',
+        confirmText: 'common.delete'
+      })
+    );
   });
 
   it('maps every saved test status to a stable label and badge variant', () => {

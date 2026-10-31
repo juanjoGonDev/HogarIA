@@ -41,8 +41,12 @@ test('deadline contract rejects a request layer that can expire before its inner
 test('live recipe limits remain within the server AI configuration schema', async () => {
   const schemaPath = fileURLToPath(new URL('../server/src/schemas/ai.schema.ts', import.meta.url));
   const schema = await readFile(schemaPath, 'utf8');
+  const timeoutPath = fileURLToPath(new URL('../server/src/utils/ai-timeout.ts', import.meta.url));
+  const timeout = await readFile(timeoutPath, 'utf8');
   assert.match(schema, /AI_CONFIG_MAX_TOKENS = 4096/);
   assert.match(schema, /maxTokens:[\s\S]{0,160}\.max\(AI_CONFIG_MAX_TOKENS\)/);
-  assert.match(schema, /AI_CONFIG_MAX_TIMEOUT_MS = 240_000/);
+  assert.match(schema, /AI_CONFIG_MAX_TIMEOUT_MS = AI_TIMEOUT_MAX_MS/);
   assert.match(schema, /timeout:[\s\S]{0,100}\.max\(AI_CONFIG_MAX_TIMEOUT_MS\)/);
+  assert.match(timeout, /AI_TIMEOUT_MAX_MS = 2_147_483_647/);
+  assert.match(timeout, /AI_JOB_LEASE_MARGIN_SECONDS = 60/);
 });

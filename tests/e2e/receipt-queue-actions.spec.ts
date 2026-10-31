@@ -166,6 +166,8 @@ async function configureProvider(page: Page, provider: SyntheticReceiptProvider)
   });
   expect(reply.status, JSON.stringify(reply.body)).toBe(201);
   expect(reply.body.data.id).toBeTruthy();
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Tickets' })).toBeVisible();
 }
 
 async function uploadSyntheticReceipt(page: Page): Promise<string> {

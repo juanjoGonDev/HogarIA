@@ -4,6 +4,7 @@ import { getDatabase } from '../config/database.js';
 import { authMiddleware } from '../middleware/auth.middleware.js';
 import { recipeContentBodyLimit } from '../middleware/recipe-content-body-limit.middleware.js';
 import {
+  aiFunctionProviderAssignmentSchema,
   createAiConfigSchema,
   updateAiConfigSchema,
   testConnectionSchema,
@@ -45,7 +46,9 @@ import {
   activeHouseholdId,
   activeHouseholdMemberCount,
   canManageHouseholdAiSettings,
-  needsActiveHouseholdSelection
+  needsActiveHouseholdSelection,
+  hasActiveHouseholdMemberships,
+  readActiveHouseholdId
 } from '../utils/household-context.js';
 import {
   aiConfigByIdInScope,
@@ -53,6 +56,15 @@ import {
   aiConfigScopeValue,
   aiConfigScopeWhere
 } from '../utils/ai-config-scope.js';
+import {
+  aiFunctionProviderAssignments,
+  assignAiFunctionProvider,
+  fillUnassignedAiFunctions,
+  initializeAiFunctionProviders,
+  isAiFunctionKey,
+  oldestActiveAiConfigId,
+  reassignAiFunctionProvidersForConfig
+} from '../utils/ai-function-providers.js';
 import {
   resolveAiParticipantContext,
   type AiParticipantContext
@@ -67,7 +79,8 @@ import {
 } from '../utils/recipe-replacement.js';
 import {
   cancelarColaDeConfiguracion,
-  cerrarVentanasReintentoConfiguracion
+  cerrarVentanasReintentoConfiguracion,
+  ensureWorker
 } from '../utils/ticket-queue.js';
 import { aiOutputLanguageInstruction, type AiOutputLanguage } from '../utils/ai-output-language.js';
 const aiRoutes = new Hono<AppEnv>();
@@ -96,9 +109,90 @@ function deniedHouseholdAiSettings(c: Context, db: ReturnType<typeof getDatabase
       );
 }
 
+// Read-only, credential-free status used to avoid showing or dispatching unavailable AI actions.
+aiRoutes.get('/availability', async (c) => {
+  const userId = c.get('userId');
+  const db = getDatabase();
+  const householdId = readActiveHouseholdId(db, userId);
+  const scopeAmbiguous = !householdId && hasActiveHouseholdMemberships(db, userId);
+  const assignments = scopeAmbiguous
+    ? []
+    : aiFunctionProviderAssignments(db, { userId, householdId });
+  const functions = Object.fromEntries(
+    assignments.map(({ functionKey, providerName }) => [functionKey, Boolean(providerName)])
+  );
+  return c.json({
+    success: true,
+    data: {
+      hasActiveProvider: assignments.some(({ providerName }) => Boolean(providerName)),
+      functions,
+      requiresHouseholdSelection: scopeAmbiguous
+    }
+  });
+});
+
 // ═══════════════════════════════════════════════════════════════════
 // AI Configurations
 // ═══════════════════════════════════════════════════════════════════
+
+// GET /api/ai/function-providers
+aiRoutes.get('/function-providers', async (c) => {
+  const userId = c.get('userId');
+  const db = getDatabase();
+  const denied = deniedHouseholdAiSettings(c, db, userId);
+  if (denied) return denied;
+  return c.json({
+    success: true,
+    data: aiFunctionProviderAssignments(db, aiConfigScopeForUser(db, userId))
+  });
+});
+
+// PUT /api/ai/function-providers/:functionKey
+aiRoutes.put('/function-providers/:functionKey', async (c) => {
+  const userId = c.get('userId');
+  const db = getDatabase();
+  const denied = deniedHouseholdAiSettings(c, db, userId);
+  if (denied) return denied;
+  const functionKey = c.req.param('functionKey');
+  if (!isAiFunctionKey(functionKey)) {
+    return c.json({ success: false, code: 'AI_FUNCTION_NOT_FOUND' }, 404);
+  }
+  const body = aiFunctionProviderAssignmentSchema.safeParse(await c.req.json().catch(() => null));
+  if (!body.success) {
+    return c.json({ success: false, code: 'INVALID_AI_FUNCTION_PROVIDER' }, 400);
+  }
+
+  const scope = aiConfigScopeForUser(db, userId);
+  const scopeValue = aiConfigScopeValue(scope);
+  const outcome = db
+    .transaction(() => {
+      if (body.data.configId) {
+        const config = aiConfigByIdInScope(db, body.data.configId, scope);
+        if (!config || config.is_active !== 1) return 'unavailable' as const;
+      } else {
+        const active = db
+          .prepare(
+            `SELECT 1 FROM ai_configs WHERE ${aiConfigScopeWhere(scope)} AND is_active = 1 LIMIT 1`
+          )
+          .get(scopeValue);
+        if (active) return 'provider_required' as const;
+      }
+      assignAiFunctionProvider(db, scope, functionKey, body.data.configId);
+      return 'saved' as const;
+    })
+    .immediate();
+
+  if (outcome === 'unavailable') {
+    return c.json({ success: false, code: 'AI_PROVIDER_NOT_AVAILABLE' }, 409);
+  }
+  if (outcome === 'provider_required') {
+    return c.json({ success: false, code: 'AI_PROVIDER_REQUIRED' }, 409);
+  }
+  return c.json({
+    success: true,
+    data: aiFunctionProviderAssignments(db, scope).find((item) => item.functionKey === functionKey)
+  });
+});
 
 // GET /api/ai/configs
 aiRoutes.get('/configs', async (c) => {
@@ -108,13 +202,20 @@ aiRoutes.get('/configs', async (c) => {
   if (denied) return denied;
 
   const scope = aiConfigScopeForUser(db, userId);
+  const assignments = aiFunctionProviderAssignments(db, scope);
   const scopedConfigs = db
     .prepare(`SELECT * FROM ai_configs WHERE ${aiConfigScopeWhere(scope)}`)
     .all(aiConfigScopeValue(scope));
 
   return c.json({
     success: true,
-    data: scopedConfigs.map((row) => toClientConfig(row as Record<string, unknown>))
+    data: scopedConfigs.map((row) => {
+      const id = (row as { id: string }).id;
+      return toClientConfig(
+        row as Record<string, unknown>,
+        assignments.filter((assignment) => assignment.configId === id).map((a) => a.functionKey)
+      );
+    })
   });
 });
 
@@ -126,7 +227,7 @@ aiRoutes.get('/configs', async (c) => {
  * `is_active` —la configuracion estaba activa en la base desde el primer dia, pero la UI no
  * lo veia— y la llave viajaba con cada respuesta.
  */
-function toClientConfig(row: Record<string, unknown>) {
+function toClientConfig(row: Record<string, unknown>, assignedFunctions: string[] = []) {
   return {
     id: row.id as string,
     name: row.name as string,
@@ -142,6 +243,7 @@ function toClientConfig(row: Record<string, unknown>) {
     retryAttempts: row.retry_attempts as number | undefined,
     concurrency: row.concurrency as number,
     isActive: row.is_active === 1,
+    assignedFunctions,
     lastTested: (row.last_tested as string | null) ?? undefined,
     testStatus: (row.test_status as string | null) ?? undefined,
     testError: (row.test_error as string | null) ?? undefined,
@@ -161,47 +263,52 @@ aiRoutes.post('/configs', async (c) => {
   const scopeValue = aiConfigScopeValue(scope);
   const scopeWhere = aiConfigScopeWhere(scope);
   const id = nanoid();
-  const configuracionesActivas = db
-    .prepare(`SELECT id FROM ai_configs WHERE ${scopeWhere} AND is_active = 1`)
-    .all(scopeValue) as { id: string }[];
+  const activeBeforeCreate = db
+    .prepare(`SELECT 1 FROM ai_configs WHERE ${scopeWhere} AND is_active = 1 LIMIT 1`)
+    .get(scopeValue);
 
-  db.prepare(
-    `
+  db.transaction(() => {
+    db.prepare(
+      `
     INSERT INTO ai_configs (id, user_id, household_id, name, provider, base_url, api_key, model, temperature, max_tokens, top_p, frequency_penalty, presence_penalty, timeout, retry_attempts, concurrency)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `
-  ).run(
-    id,
-    userId,
-    scope.householdId,
-    input.name,
-    input.provider,
-    input.baseUrl,
-    input.apiKey,
-    input.model,
-    input.temperature,
-    input.maxTokens,
-    input.topP,
-    input.frequencyPenalty,
-    input.presencePenalty,
-    input.timeout,
-    input.retryAttempts,
-    input.concurrency
-  );
-
-  // La configuracion recien creada es LA activa, y solo hay una. Si no, la primera fila (la
-  // vieja, por rowid) seguia siendo la que contestaba a todas las llamadas y la IA «no se
-  // activaba nunca» por muchas configuraciones nuevas que se guardaran encima.
-  db.prepare(`UPDATE ai_configs SET is_active = 0 WHERE ${scopeWhere} AND id != ?`).run(
-    scopeValue,
-    id
-  );
-  for (const antigua of configuracionesActivas) {
-    cancelarColaDeConfiguracion(db, userId, antigua.id);
-  }
+    ).run(
+      id,
+      userId,
+      scope.householdId,
+      input.name,
+      input.provider,
+      input.baseUrl,
+      input.apiKey,
+      input.model,
+      input.temperature,
+      input.maxTokens,
+      input.topP,
+      input.frequencyPenalty,
+      input.presencePenalty,
+      input.timeout,
+      input.retryAttempts,
+      input.concurrency
+    );
+    if (!activeBeforeCreate) {
+      initializeAiFunctionProviders(db, scope, id);
+      fillUnassignedAiFunctions(db, scope, id);
+    }
+  }).immediate();
 
   const config = db.prepare('SELECT * FROM ai_configs WHERE id = ?').get(id);
-  return c.json({ success: true, data: toClientConfig(config as Record<string, unknown>) }, 201);
+  const assignments = aiFunctionProviderAssignments(db, scope);
+  return c.json(
+    {
+      success: true,
+      data: toClientConfig(
+        config as Record<string, unknown>,
+        assignments.filter((assignment) => assignment.configId === id).map((a) => a.functionKey)
+      )
+    },
+    201
+  );
 });
 
 // PATCH /api/ai/configs/:id
@@ -224,11 +331,6 @@ aiRoutes.patch('/configs/:id', async (c) => {
 
   const updates: string[] = [];
   const values: any[] = [];
-  const configuracionesDesactivadas = input.isActive
-    ? (db
-        .prepare(`SELECT id FROM ai_configs WHERE ${scopeWhere} AND is_active = 1 AND id != ?`)
-        .all(scopeValue, id) as { id: string }[])
-    : [];
 
   if (input.name !== undefined) {
     updates.push('name = ?');
@@ -238,7 +340,8 @@ aiRoutes.patch('/configs/:id', async (c) => {
     updates.push('base_url = ?');
     values.push(input.baseUrl);
   }
-  if (input.apiKey !== undefined) {
+  // Empty form values mean “keep the stored credential”; never write null into the NOT NULL column.
+  if (typeof input.apiKey === 'string' && input.apiKey.trim().length > 0) {
     updates.push('api_key = ?');
     values.push(input.apiKey);
   }
@@ -254,11 +357,6 @@ aiRoutes.patch('/configs/:id', async (c) => {
     updates.push('max_tokens = ?');
     values.push(input.maxTokens);
   }
-  if (input.isActive) {
-    // Activar es elegir: solo una configuracion de la casa responde a la vez, y activar una
-    // apaga las demas. (Desactivar la activa es legitimo: ahi la IA simplemente no esta.)
-    db.prepare(`UPDATE ai_configs SET is_active = 0 WHERE ${scopeWhere}`).run(scopeValue);
-  }
   if (input.isActive !== undefined) {
     updates.push('is_active = ?');
     values.push(input.isActive ? 1 : 0);
@@ -269,18 +367,26 @@ aiRoutes.patch('/configs/:id', async (c) => {
     values.push(input.concurrency);
   }
 
-  if (updates.length > 0) {
-    updates.push('updated_at = CURRENT_TIMESTAMP');
-    values.push(id);
-    db.prepare(`UPDATE ai_configs SET ${updates.join(', ')} WHERE id = ? AND ${scopeWhere}`).run(
-      ...values,
-      scopeValue
-    );
-  }
+  const reassignedFunctions = db
+    .transaction(() => {
+      if (updates.length > 0) {
+        updates.push('updated_at = CURRENT_TIMESTAMP');
+        values.push(id);
+        db.prepare(
+          `UPDATE ai_configs SET ${updates.join(', ')} WHERE id = ? AND ${scopeWhere}`
+        ).run(...values, scopeValue);
+      }
+      if (input.isActive === false && existing.is_active === 1) {
+        return reassignAiFunctionProvidersForConfig(db, scope, id);
+      }
+      if (input.isActive === true) {
+        const oldestActive = oldestActiveAiConfigId(db, scope);
+        if (oldestActive) fillUnassignedAiFunctions(db, scope, oldestActive);
+      }
+      return [];
+    })
+    .immediate();
 
-  for (const desactivada of configuracionesDesactivadas) {
-    cancelarColaDeConfiguracion(db, userId, desactivada.id);
-  }
   if (input.isActive === false) {
     cancelarColaDeConfiguracion(db, userId, id);
   }
@@ -289,7 +395,16 @@ aiRoutes.patch('/configs/:id', async (c) => {
   }
 
   const config = aiConfigByIdInScope(db, id, scope);
-  return c.json({ success: true, data: toClientConfig(config as Record<string, unknown>) });
+  return c.json({
+    success: true,
+    data: toClientConfig(
+      config as Record<string, unknown>,
+      aiFunctionProviderAssignments(db, scope)
+        .filter((assignment) => assignment.configId === id)
+        .map((assignment) => assignment.functionKey)
+    ),
+    reassignedFunctions
+  });
 });
 
 // DELETE /api/ai/configs/:id
@@ -307,13 +422,18 @@ aiRoutes.delete('/configs/:id', async (c) => {
   if (!existe) {
     return c.json({ success: false, message: 'Config not found' }, 404);
   }
-  cancelarColaDeConfiguracion(db, userId, id);
   const result = db
-    .prepare(`DELETE FROM ai_configs WHERE id = ? AND ${scopeWhere}`)
-    .run(id, scopeValue);
+    .transaction(() => {
+      reassignAiFunctionProvidersForConfig(db, scope, id, oldestActiveAiConfigId(db, scope, id));
+      return db
+        .prepare(`DELETE FROM ai_configs WHERE id = ? AND ${scopeWhere}`)
+        .run(id, scopeValue);
+    })
+    .immediate();
   if (result.changes === 0) {
     return c.json({ success: false, message: 'Config not found' }, 404);
   }
+  cancelarColaDeConfiguracion(db, userId, id);
 
   return c.json({ success: true, message: 'Config deleted' });
 });
@@ -352,46 +472,80 @@ aiRoutes.post('/test-connection', async (c) => {
     return c.json({ success: false, message: 'No AI config found' }, 404);
   }
 
+  // Run queue recovery before taking the durable test lock. At production startup this worker is
+  // already initialized; this also keeps in-memory route tests equivalent to a server boot.
+  ensureWorker();
+  if (input.configId) {
+    const claim = db
+      .prepare(
+        `UPDATE ai_configs SET test_status = 'testing', test_error = NULL
+         WHERE id = ? AND ${aiConfigScopeWhere(scope)} AND COALESCE(test_status, '') != 'testing'`
+      )
+      .run(config.id, aiConfigScopeValue(scope));
+    if (claim.changes !== 1) {
+      return c.json(
+        {
+          success: false,
+          code: 'AI_TEST_ALREADY_RUNNING',
+          message: 'Ya hay una prueba en curso para este proveedor.'
+        },
+        409
+      );
+    }
+  }
+
   // La prueba ya no es un «Hello» a ver que contesta: se le pide al modelo un JSON DADO con
   // `response_format` de esquema estricto —el mismo contrato que exige el resto de la app, que
   // parsea JSON en todas sus funciones de IA— y se valida la contestacion. Un proveedor que no
   // sabe responder esto no sirve para la casa, y es mejor saberlo en Ajustes que en un ticket.
-  const veredicto = await pingDeConexion(
-    {
-      base_url: config.base_url,
-      api_key: config.api_key,
-      model: config.model,
-      timeout: config.timeout
-    },
-    {
-      db,
-      userId,
-      config: {
-        id: config.id ?? `ephemeral-${userId}`,
-        name: String(config.name ?? 'Connection test'),
-        provider: String(config.provider ?? 'custom'),
+  let veredicto: Awaited<ReturnType<typeof pingDeConexion>>;
+  try {
+    veredicto = await pingDeConexion(
+      {
         base_url: config.base_url,
         api_key: config.api_key,
         model: config.model,
-        temperature: (config.temperature as number | null) ?? null,
-        max_tokens: (config.max_tokens as number | null) ?? null,
-        top_p: (config.top_p as number | null) ?? null,
-        frequency_penalty: (config.frequency_penalty as number | null) ?? null,
-        presence_penalty: (config.presence_penalty as number | null) ?? null,
-        timeout: (config.timeout as number | null) ?? null,
-        retry_attempts: (config.retry_attempts as number | null) ?? 0,
-        concurrency: (config.concurrency as number | null) ?? 0
-      } satisfies AiConfigRow,
-      configId: input.configId ? String(config.id) : null
-    }
-  );
+        timeout: config.timeout
+      },
+      {
+        db,
+        userId,
+        config: {
+          id: config.id ?? `ephemeral-${userId}`,
+          name: String(config.name ?? 'Connection test'),
+          provider: String(config.provider ?? 'custom'),
+          base_url: config.base_url,
+          api_key: config.api_key,
+          model: config.model,
+          temperature: (config.temperature as number | null) ?? null,
+          max_tokens: (config.max_tokens as number | null) ?? null,
+          top_p: (config.top_p as number | null) ?? null,
+          frequency_penalty: (config.frequency_penalty as number | null) ?? null,
+          presence_penalty: (config.presence_penalty as number | null) ?? null,
+          timeout: (config.timeout as number | null) ?? null,
+          retry_attempts: (config.retry_attempts as number | null) ?? 0,
+          concurrency: (config.concurrency as number | null) ?? 0
+        } satisfies AiConfigRow,
+        configId: input.configId ? String(config.id) : null
+      }
+    );
+  } catch {
+    // Persist only a safe, generic diagnostic; never expose provider credentials or raw errors.
+    veredicto = { ok: false, latency: 0, error: 'No se pudo completar la prueba de conexión.' };
+  }
 
   // El estado de la prueba solo se persiste cuando se prueba una config GUARDADA; la del
   // formulario se ensena y ya.
   if (input.configId) {
     db.prepare(
-      'UPDATE ai_configs SET test_status = ?, test_error = ?, last_tested = CURRENT_TIMESTAMP WHERE id = ?'
-    ).run(veredicto.ok ? 'success' : 'failed', veredicto.ok ? null : veredicto.error, config.id);
+      `UPDATE ai_configs SET test_status = ?, test_error = ?, last_tested = CURRENT_TIMESTAMP
+       WHERE id = ? AND ${aiConfigScopeWhere(scope)} AND test_status = 'testing'`
+    ).run(
+      veredicto.ok ? 'success' : 'failed',
+      veredicto.ok ? null : veredicto.error,
+      config.id,
+      aiConfigScopeValue(scope)
+    );
   }
 
   if (!veredicto.ok) {

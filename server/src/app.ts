@@ -4,7 +4,7 @@ import { prettyJSON } from 'hono/pretty-json';
 import { secureHeaders } from 'hono/secure-headers';
 import { rateLimiter } from 'hono-rate-limiter';
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { isAbsolute, join, resolve, sep } from 'node:path';
+import { basename, isAbsolute, join, resolve, sep } from 'node:path';
 
 import { config } from './config/app.config.js';
 import { errorHandler } from './middleware/error.middleware.js';
@@ -505,12 +505,19 @@ export function createApp(options: AppOptions = {}): Hono {
       if (!file) return next404(c);
       const body = readFileSync(file);
       const immutable = /-[A-Za-z0-9_]{8,}\./.test(path); // hashed chunk de Angular
+      const revalidate = [
+        'index.html',
+        'manifest.json',
+        'ngsw.json',
+        'ngsw-worker.js',
+        'safety-worker.js'
+      ].includes(basename(file).toLowerCase());
       return new Response(body, {
         status: 200,
         headers: {
           'content-type': mimeFor(file),
-          'cache-control': file.endsWith('index.html')
-            ? 'no-cache'
+          'cache-control': revalidate
+            ? 'no-cache, no-store, must-revalidate'
             : immutable
               ? 'public, max-age=31536000, immutable'
               : 'public, max-age=3600'

@@ -44,8 +44,36 @@ test.describe('el binario sirve el proyecto entero', () => {
     expect(meta.status()).toBe(200);
   });
 
+  test('revalida el shell y el manifiesto del service worker en navegador real', async ({
+    request,
+    page
+  }) => {
+    const shell = await request.get('/');
+    expect(shell.status()).toBe(200);
+    expect(shell.headers()['cache-control']).toContain('no-store');
+
+    const manifest = await request.get('/ngsw.json');
+    expect(manifest.status()).toBe(200);
+    expect(manifest.headers()['cache-control']).toContain('no-store');
+
+    const worker = await request.get('/ngsw-worker.js');
+    expect(worker.status()).toBe(200);
+    expect(worker.headers()['cache-control']).toContain('no-store');
+
+    const appManifest = await request.get('/manifest.json');
+    expect(appManifest.status()).toBe(200);
+    expect(appManifest.headers()['cache-control']).toContain('no-store');
+
+    // The shell really boots through the production browser path, not only through APIRequest.
+    const navigation = await page.goto('/');
+    expect(navigation?.status()).toBe(200);
+    await expect(page.locator('app-root')).toBeAttached();
+  });
+
   test('el manifest y el icono tambien salen de disco', async ({ request, page }) => {
-    const href = await page.evaluate(() => document.querySelector('link[rel="manifest"]')?.getAttribute('href') ?? null);
+    const href = await page.evaluate(
+      () => document.querySelector('link[rel="manifest"]')?.getAttribute('href') ?? null
+    );
     test.skip(href === null, 'el index no enlaza un manifest: nada que comprobar aqui');
     expect((await request.get(href as string)).status()).toBe(200);
   });
