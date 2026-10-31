@@ -1,7 +1,7 @@
 # HogarIA: test de conexión, diagnóstico y actualización de la web
 
-**Estado:** Draft — implementación y gates locales verificados; CI remoto del HEAD final pendiente.
-**Rama/PR:** `feat/ai-provider-settings` / Draft PR #56. No mergear.
+**Estado:** Implementación y gates locales verificados; CI remoto del HEAD final pendiente.
+**Rama/PR:** `feat/ai-provider-settings` / PR #56. El usuario controla el estado; no mergear sin permiso.
 **Base:** `origin/master` integrado en `6280148`.
 
 ## Objetivo
@@ -23,7 +23,7 @@ Completar el flujo de prueba de conexión de IA independiente del navegador, mos
 - [x] `index.html`, `manifest.json` y el manifiesto/workers del service worker se revalidan; al detectar una versión nueva, Angular activa la versión y recarga. Los chunks con hash siguen siendo `immutable`; `/api/health` queda fuera del caché de datos del service worker.
 - [x] Actualizar a `https://github.com/juanjoGonDev/HogarIA` los enlaces activos del producto, configuración y agentes HTTP; conservar URLs históricas de runs/PRs.
 - [x] Añadir pruebas unitarias/integración y Playwright con datos sintéticos para los casos anteriores; comprobar escritorio y móvil y guardar capturas ignoradas por Git.
-- [ ] Verificar cobertura, build, typecheck, suite full-stack aislada y **CI remota en el HEAD final**. Mantener el PR Draft. Los gates locales pasan; solo falta CI remoto final.
+- [ ] Verificar cobertura, build, typecheck, suite full-stack aislada y **CI remota en el HEAD final**. Respetar el estado del PR elegido por el usuario y no mergear sin permiso. Los gates locales pasan; solo falta CI remoto final.
 
 ## Evidencia local reproducible
 

@@ -1,6 +1,6 @@
 # Hogar: proveedores de IA y registro
 
-**Estado:** Draft — implementación, gates locales y comparación geométrica verificados; CI del commit de implementación pendiente tras push. PR sigue Draft.
+**Estado:** Implementación, gates locales y comparación geométrica verificados; CI del HEAD final pendiente. El estado del PR lo controla el usuario.
 **Base revalidada:** `origin/master` en `b4bc0c8277ff7090cf709946433932a25e2b49c4` (incluye la reversión solicitada en PR #62; integrada sin reescribir la rama).
 
 ## Objetivo y decisiones
@@ -17,7 +17,7 @@
 - Al editar un proveedor guardado, la API key se mantiene vacía y opcional: omitirla conserva la clave actual; escribir otra la sustituye. Nunca se devuelve la clave guardada al navegador.
 - Una API key con solo espacios se trata como vacía al editar (no sustituye la clave existente) y se rechaza al crear; las claves válidas se guardan sin recortarlas.
 - Los errores de validación Joi/Zod que se muestren en un toast identifican campo y regla incumplida, incluidos límites numéricos. Guardar/probar una configuración no puede convertir un error de validación en un toast genérico; los flujos con error inline propio conservan su comportamiento silencioso.
-- La entrega será **un único PR**, por decisión explícita del usuario aunque el diff supere 400 líneas; documentar esa excepción con la etiqueta `size:exception` y mantener el PR en Draft durante el trabajo.
+- La entrega será **un único PR**, por decisión explícita del usuario aunque el diff supere 400 líneas; documentar esa excepción con la etiqueta `size:exception`. Respetar el estado del PR elegido por el usuario y no mergear sin permiso.
 
 ## Fuente de verdad y discrepancias
 
@@ -71,7 +71,7 @@
 - [x] i18n ES/EN, nombres accesibles y navegación/teclado cubiertos por pruebas y build. Coverage completa: frontend >70 % en statements, ramas, funciones y líneas; servidor >70 % en las cuatro métricas.
 - [x] Comparar geometría calculada entre `/ai-config` y Hogar → Ajustes con tolerancia máxima de 1 CSS px en Chromium de escritorio y móvil: el botón de alta iguala ancho/alto y los 5 selectores igualan altura. La captura específica del panel quedó guardada e inspeccionada.
 - [x] CI de PR conserva los cuatro shards E2E amplios y smoke de imagen `amd64`/`arm64`; el job full-stack de 30 min se limita a flujos críticos de build servido, proveedor por función, registro, rate limit y logs/SSE. No duplica las 178 pruebas full-stack dentro de ese job. En `9ace07e`, todos los checks terminaron verdes; el smoke construye y prueba ambas imágenes sin publicar al registry.
-- [x] Mantener esta checklist ligada a evidencia reproducible. Rama y PR permanecen Draft; no mergear.
+- [x] Mantener esta checklist ligada a evidencia reproducible. No cambiar el estado del PR elegido por el usuario; no mergear sin permiso.
 
 ### Evidencia reproducible
 
@@ -105,4 +105,4 @@
 3. Multi-proveedor: migración, asignaciones, routing y guards.
 4. Hogar/UI: mover gestor, selectores, avisos, flujo sin configuración y E2E.
 
-Cada unidad incluye pruebas y evidencia en el Draft PR #56. Comparación geométrica y CI remoto del commit `9ace07e` están completados. Mantener el PR en Draft; no mergear.
+Cada unidad incluye pruebas y evidencia en el PR #56. Comparación geométrica y CI remoto del commit `9ace07e` están completados. Respetar el estado del PR elegido por el usuario; no mergear sin permiso.
