@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { lstatSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
@@ -70,7 +71,7 @@ function assertOwnedTempDirectory(path, tempRoot) {
   }
 }
 
-async function waitForNginx(baseUrl, containerName) {
+async function waitForNginx(baseUrl, containerId) {
   for (let attempt = 0; attempt < 30; attempt += 1) {
     try {
       const response = await fetch(`${baseUrl}/index.html`, {
@@ -84,7 +85,7 @@ async function waitForNginx(baseUrl, containerName) {
     await delay(500);
   }
 
-  const logs = spawnSync('docker', ['logs', containerName], { encoding: 'utf8' });
+  const logs = spawnSync('docker', ['logs', containerId], { encoding: 'utf8' });
   throw new Error(`Nginx smoke did not become ready. ${logs.stdout ?? ''} ${logs.stderr ?? ''}`);
 }
 
@@ -92,7 +93,8 @@ async function runSmoke() {
   const tempRoot = resolve(tmpdir());
   const runDirectory = mkdtempSync(join(tempRoot, 'hogaria-nginx-static-smoke-'));
   const staticDirectory = join(runDirectory, 'static');
-  const containerName = `hogaria-nginx-static-smoke-${process.pid}`;
+  const containerName = `hogaria-nginx-static-smoke-${process.pid}-${randomUUID()}`;
+  let containerId;
   let containerStarted = false;
   let failure;
 
@@ -111,10 +113,8 @@ async function runSmoke() {
     writeFileSync(join(staticDirectory, 'manifest.json'), '{}\n');
     writeFileSync(join(staticDirectory, 'main-ABCDEFGH.js'), 'globalThis.nginxSmoke = true;\n');
 
-    containerStarted = true;
-    runDocker([
-      'run',
-      '--detach',
+    containerId = runDocker([
+      'create',
       '--name',
       containerName,
       '--add-host',
@@ -129,13 +129,16 @@ async function runSmoke() {
       `type=bind,source=${dockerPath(staticDirectory)},target=/usr/share/nginx/html,readonly`,
       'nginx:alpine'
     ]);
+    if (!containerId) throw new Error('Docker did not return an Nginx smoke container ID.');
+    containerStarted = true;
+    runDocker(['start', containerId]);
 
-    const mapping = runDocker(['port', containerName, '80/tcp']);
+    const mapping = runDocker(['port', containerId, '80/tcp']);
     const port = mapping.match(/:(\d+)\s*$/m)?.[1];
     if (!port) throw new Error('Docker did not expose a host port for the Nginx smoke.');
 
     const baseUrl = `http://127.0.0.1:${port}`;
-    await waitForNginx(baseUrl, containerName);
+    await waitForNginx(baseUrl, containerId);
     const checked = await verifyStaticHeaders(baseUrl);
     console.log(`nginx-static-headers-smoke: ${checked.length} respuestas verificadas.`);
   } catch (error) {
@@ -143,7 +146,7 @@ async function runSmoke() {
   } finally {
     if (containerStarted) {
       try {
-        runDocker(['rm', '--force', containerName]);
+        runDocker(['rm', '--force', containerId]);
       } catch (error) {
         failure ??= error;
       }
