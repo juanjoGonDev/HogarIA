@@ -504,16 +504,13 @@ export function createApp(options: AppOptions = {}): Hono {
       const file = resolveStaticAsset(staticDir, path);
       if (!file) return next404(c);
       const body = readFileSync(file);
-      const immutable = /-[A-Za-z0-9_]{8,}\./.test(path); // hashed chunk de Angular
+      const immutable =
+        /-[A-Za-z0-9_]{8,}\.(?:js|css|png|jpe?g|svg|webp|avif|woff2?)(?:$|\?)/i.test(path);
       return new Response(body, {
         status: 200,
         headers: {
           'content-type': mimeFor(file),
-          'cache-control': file.endsWith('index.html')
-            ? 'no-cache'
-            : immutable
-              ? 'public, max-age=31536000, immutable'
-              : 'public, max-age=3600'
+          'cache-control': immutable ? 'public, max-age=31536000, immutable' : 'no-cache'
         }
       });
     });

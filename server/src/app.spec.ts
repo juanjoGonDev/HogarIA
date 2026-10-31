@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -155,6 +155,9 @@ describe('estaticos', () => {
     mkdirSync(join(dir, 'assets'));
     writeFileSync(join(dir, 'assets', 'logo.svg'), '<svg/>');
     writeFileSync(join(dir, 'main-ABCDEFGH.js'), 'console.log(1)');
+    writeFileSync(join(dir, 'main.js'), 'console.log(1)');
+    writeFileSync(join(dir, 'ngsw.json'), '{}');
+    writeFileSync(join(dir, 'ngsw-worker.js'), 'self.skipWaiting()');
     mkdirSync(join(dir, 'deep'));
     writeFileSync(join(dir, 'deep', 'index.html'), '<html>deep</html>');
   });
@@ -172,6 +175,29 @@ describe('estaticos', () => {
     expect(resolveStaticAsset(dir, '/../etc/passwd')).toBeNull();
     expect(resolveStaticAsset(dir, '/%2e%2e/%2e%2e/etc/passwd')).toBeNull();
     expect(resolveStaticAsset(dir, '/index.html%00.png')).toBeNull();
+  });
+
+  it('revalida el shell/service worker y mantiene cache inmutable solo para bundles con hash', async () => {
+    const app = createApp({ rateLimit: null, staticDir: dir });
+
+    for (const path of ['/index.html', '/ruta-spa', '/ngsw.json', '/ngsw-worker.js', '/main.js']) {
+      const response = await app.request(path);
+      expect(response.status, path).toBe(200);
+      expect(response.headers.get('cache-control'), path).toBe('no-cache');
+    }
+
+    const hashedBundle = await app.request('/main-ABCDEFGH.js');
+    expect(hashedBundle.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+  });
+
+  it('configura Nginx para revalidar shell/worker y reservar immutable a recursos hash', () => {
+    const config = readFileSync(new URL('../../nginx/nginx.conf', import.meta.url), 'utf8');
+
+    expect(config).toMatch(/location\s*=\s*\/index\.html\s*\{[^}]*Cache-Control\s+"no-cache"/s);
+    expect(config).toMatch(/location\s*=\s*\/ngsw\.json\s*\{[^}]*Cache-Control\s+"no-cache"/s);
+    expect(config).toMatch(/location\s*=\s*\/ngsw-worker\.js\s*\{[^}]*Cache-Control\s+"no-cache"/s);
+    expect(config).toContain(String.raw`location ~* "-[a-z0-9_-]{8,}\.(js|css|png`);
+    expect(config).not.toContain(String.raw`location ~* \.(js|css|png`);
   });
 
   it('encuentra el dist donde cada uno lo tiene', () => {
