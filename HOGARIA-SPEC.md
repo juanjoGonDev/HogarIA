@@ -157,27 +157,27 @@ masking of secrets).
 
 Target list for MiCocinAI — every one of these stops being read from `process.env`:
 
-| Key                                                                                     | Default                                     | Bounds                                  |
-| --------------------------------------------------------------------------------------- | ------------------------------------------- | --------------------------------------- |
-| `listenPort`                                                                            | `3000`                                      | 1–65535, applied on restart             |
-| `corsOrigins`                                                                           | same-origin                                 | list, blank disables                    |
-| `jwtSecret`                                                                             | generated on first boot, stored             | never returned to the client            |
-| `jwtExpiresIn`, `refreshTokenExpiresIn`                                                 | `15m`, `30d`                                | duration strings                        |
-| `bcryptRounds`                                                                          | `10`                                        | 8–15                                    |
-| `rateLimitEnabled`, `rateLimitWindowMs`, `rateLimitMax`                                 | on, `60000`, `300`                          | used by CI/e2e via API                  |
-| `aiBaseUrl`, `aiApiKey`, `aiModel`                                                      | empty                                       | validated URLs, key masked (`••••abcd`) |
-| `aiTimeoutMs`, `aiMaxRetries`                                                           | `30000`, `1`                                | 1–10 retries                            |
-| `aiQueueConcurrency`, `aiJobMaxAttempts`, `aiJobBackoffMs`                              | `1`, `3`, `5000`                            | bounded                                 |
-| `ocrEnabled`, `ocrLanguage`                                                             | on, `spa`                                   |                                         |
-| `maxBodyBytes`                                                                          | `32 MiB`                                    | 1 KiB–512 MiB                           |
-| `dbWalMode`, `dbCacheSizeKb`, `dbBusyTimeoutMs`                                         | on, `-64000`, `5000`                        |                                         |
-| `memoryWarnMb`, `memoryCriticalMb`, `memoryCheckMs`                                     | thresholds                                  |                                         |
-| `logMaxLines`, `logMaxBytes`, `logRetentionDays`, `logLevel`                            | `10000`, `40 MiB`, `7`, `info`              |                                         |
-| `syncIntervalMs`, `syncRetryBackoffMs`, `outboxMaxItems`                                | `15000`, `2000`, `500`                      |                                         |
-| `pwaCacheName`                                                                          | derived from version                        | read-only, shown in UI                  |
-| `offlineEnabled`, `featureShopping`, `featureReceipts`, `featurePrices`, `featureTasks` | on                                          | kill-switches                           |
-| `supportRepoUrl`                                                                        | `https://github.com/juanjoGonDev/MiCocinAI` | used by report-a-bug                    |
-| `currency`, `locale`                                                                    | `EUR`, `es-ES`                              |                                         |
+| Key                                                                                     | Default                                   | Bounds                                  |
+| --------------------------------------------------------------------------------------- | ----------------------------------------- | --------------------------------------- |
+| `listenPort`                                                                            | `3000`                                    | 1–65535, applied on restart             |
+| `corsOrigins`                                                                           | same-origin                               | list, blank disables                    |
+| `jwtSecret`                                                                             | generated on first boot, stored           | never returned to the client            |
+| `jwtExpiresIn`, `refreshTokenExpiresIn`                                                 | `15m`, `30d`                              | duration strings                        |
+| `bcryptRounds`                                                                          | `10`                                      | 8–15                                    |
+| `rateLimitEnabled`, `rateLimitWindowMs`, `rateLimitMax`                                 | on, `60000`, `300`                        | used by CI/e2e via API                  |
+| `aiBaseUrl`, `aiApiKey`, `aiModel`                                                      | empty                                     | validated URLs, key masked (`••••abcd`) |
+| `aiTimeoutMs`, `aiMaxRetries`                                                           | `30000`, `1`                              | 1–10 retries                            |
+| `aiQueueConcurrency`, `aiJobMaxAttempts`, `aiJobBackoffMs`                              | `1`, `3`, `5000`                          | bounded                                 |
+| `ocrEnabled`, `ocrLanguage`                                                             | on, `spa`                                 |                                         |
+| `maxBodyBytes`                                                                          | `32 MiB`                                  | 1 KiB–512 MiB                           |
+| `dbWalMode`, `dbCacheSizeKb`, `dbBusyTimeoutMs`                                         | on, `-64000`, `5000`                      |                                         |
+| `memoryWarnMb`, `memoryCriticalMb`, `memoryCheckMs`                                     | thresholds                                |                                         |
+| `logMaxLines`, `logMaxBytes`, `logRetentionDays`, `logLevel`                            | `10000`, `40 MiB`, `7`, `info`            |                                         |
+| `syncIntervalMs`, `syncRetryBackoffMs`, `outboxMaxItems`                                | `15000`, `2000`, `500`                    |                                         |
+| `pwaCacheName`                                                                          | derived from version                      | read-only, shown in UI                  |
+| `offlineEnabled`, `featureShopping`, `featureReceipts`, `featurePrices`, `featureTasks` | on                                        | kill-switches                           |
+| `supportRepoUrl`                                                                        | `https://github.com/juanjoGonDev/HogarIA` | used by report-a-bug                    |
+| `currency`, `locale`                                                                    | `EUR`, `es-ES`                            |                                         |
 
 Only **bootstrap** may come from the environment, and only for values needed before the database can
 be opened: `DATABASE_PATH` (default `./data/hogaria.sqlite` — the existing file is adopted on first
