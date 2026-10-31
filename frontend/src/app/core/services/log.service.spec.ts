@@ -69,6 +69,36 @@ describe('LogService', () => {
     expect(service.paused()).toBeFalse();
     expect(service.sourceFilter()).toBe('all');
     expect(service.levelFilter()).toBe('all');
+    expect(service.runtimeInfo()).toBeNull();
+    expect(service.runtimeInfoStatus()).toBe('idle');
+  });
+
+  it('loads uptime and the exact GHCR image reference from the health endpoint', () => {
+    service.loadRuntimeInfo();
+
+    const request = http.expectOne('/api/health');
+    expect(request.request.method).toBe('GET');
+    request.flush({
+      uptime: 125,
+      imageRef: 'ghcr.io/juanjoGonDev/hogaria:abc123'
+    });
+
+    expect(service.runtimeInfoStatus()).toBe('ready');
+    expect(service.runtimeInfo()).toEqual(
+      jasmine.objectContaining({
+        uptimeSeconds: 125,
+        imageRef: 'ghcr.io/juanjoGonDev/hogaria:abc123'
+      })
+    );
+    expect(service.runtimeInfo()?.observedAt).toBeGreaterThan(0);
+  });
+
+  it('marks runtime metadata unavailable instead of showing invented values', () => {
+    service.loadRuntimeInfo();
+    http.expectOne('/api/health').flush({}, { status: 503, statusText: 'Unavailable' });
+
+    expect(service.runtimeInfo()).toBeNull();
+    expect(service.runtimeInfoStatus()).toBe('unavailable');
   });
 
   it('loads history oldest-first, streams valid entries, ignores malformed data, and pauses live entries', fakeAsync(() => {

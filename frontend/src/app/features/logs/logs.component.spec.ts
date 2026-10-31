@@ -51,8 +51,15 @@ describe('LogsComponent', () => {
       sourceFilter: signal('all'),
       levelFilter: signal('all'),
       onlyErrors: signal(false),
+      runtimeInfo: signal({
+        uptimeSeconds: 90061,
+        imageRef: 'ghcr.io/juanjoGonDev/hogaria:abc123',
+        observedAt: Date.now()
+      }),
+      runtimeInfoStatus: signal<'idle' | 'loading' | 'ready' | 'unavailable'>('ready'),
       isVisible: jasmine.createSpy('isVisible').and.returnValue(true),
       connect: jasmine.createSpy('connect'),
+      loadRuntimeInfo: jasmine.createSpy('loadRuntimeInfo'),
       disconnect: jasmine.createSpy('disconnect'),
       setSourceFilter: jasmine.createSpy('setSourceFilter'),
       setLevelFilter: jasmine.createSpy('setLevelFilter'),
@@ -85,6 +92,7 @@ describe('LogsComponent', () => {
 
   it('connects, exposes localized filter names, forwards selections, and reconnects on request', () => {
     expect(logService.connect).toHaveBeenCalledTimes(1);
+    expect(logService.loadRuntimeInfo).toHaveBeenCalledTimes(1);
     expect(
       fixture.nativeElement.querySelector('[aria-label="logs.fuente_filtro_label"]')
     ).not.toBeNull();
@@ -98,6 +106,43 @@ describe('LogsComponent', () => {
     expect(logService.setSourceFilter).toHaveBeenCalledOnceWith('browser');
     expect(logService.setLevelFilter).toHaveBeenCalledOnceWith('error');
     expect(logService.connect).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows server uptime that advances locally and the GHCR image reference', () => {
+    const observedAt = Date.now();
+    logService.runtimeInfo.set({
+      uptimeSeconds: 90061,
+      imageRef: 'ghcr.io/juanjoGonDev/hogaria:abc123',
+      observedAt
+    });
+    fixture.detectChanges();
+
+    expect(component.runtimeUptimeLabel()).toBe('1d 01:01:01');
+    expect(component.runtimeImageLabel()).toBe('ghcr.io/juanjoGonDev/hogaria:abc123');
+    expect(fixture.nativeElement.querySelector('[data-test="logs-runtime"]')).not.toBeNull();
+    expect(
+      fixture.nativeElement.querySelector('[data-test="logs-image-ref"] code').textContent
+    ).toContain('ghcr.io/juanjoGonDev/hogaria:abc123');
+
+    (component as any).nowMs.set(observedAt + 2000);
+    fixture.detectChanges();
+    expect(component.runtimeUptimeLabel()).toBe('1d 01:01:03');
+  });
+
+  it('labels local builds and unavailable runtime data without inventing a version', () => {
+    logService.runtimeInfo.set({
+      uptimeSeconds: 20,
+      imageRef: 'local-unpublished',
+      observedAt: Date.now()
+    });
+    fixture.detectChanges();
+    expect(component.runtimeImageLabel()).toBe('logs.image_local');
+
+    logService.runtimeInfo.set(null);
+    logService.runtimeInfoStatus.set('unavailable');
+    fixture.detectChanges();
+    expect(component.runtimeUptimeLabel()).toBe('logs.runtime_unavailable');
+    expect(component.runtimeImageLabel()).toBe('logs.runtime_unavailable');
   });
 
   it('renders the accessible only-errors checkbox and forwards its value', () => {

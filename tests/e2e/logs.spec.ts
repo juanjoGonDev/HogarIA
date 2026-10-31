@@ -1,5 +1,9 @@
+import { mkdirSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { test, expect } from './fixtures';
 import { registerAndGoto } from './helpers/auth';
+
+const SCREENSHOT_DIR = resolve(process.env.E2E_SCREENSHOT_DIR ?? '.e2e-screenshots/logs-runtime');
 
 test.describe('Logs page', () => {
   test.beforeEach(async ({ page }) => {
@@ -12,13 +16,66 @@ test.describe('Logs page', () => {
     // El indicador dice en que estado esta el stream, y ahora hay cuatro estados: un
     // booleano «conectado/no» esconda el «reintentando en 5 s», que es el unico que
     // permite distinguir un servidor reiniciandose de uno que no contesta.
-    await expect(page.locator('[data-test="logs-status"]')).toContainText(/En vivo|Conectando|Reintentando|Sin conexion/);
+    await expect(page.locator('[data-test="logs-status"]')).toContainText(
+      /En vivo|Conectando|Reintentando|Sin conexion/
+    );
     // Source/level filters
     await expect(page.locator('select.logs-select').first()).toBeVisible();
     // Pause / autoscroll / clear buttons exist
     await expect(page.getByRole('button', { name: /Pausar|Pause/ })).toBeVisible();
     await expect(page.getByRole('button', { name: /Auto-scroll/ })).toBeVisible();
     await expect(page.getByRole('button', { name: /Limpiar|Clear/ })).toBeVisible();
+  });
+
+  test('shows server uptime and the exact runtime image reference', async ({ page }) => {
+    const viewport =
+      test.info().project.name === 'chromium'
+        ? { width: 1440, height: 900 }
+        : { width: 393, height: 851 };
+    await page.setViewportSize(viewport);
+
+    const runtime = page.locator('[data-test="logs-runtime"]');
+    const uptime = page.locator('[data-test="logs-server-uptime"]');
+    const imageRef = page.locator('[data-test="logs-image-ref"]');
+    await expect(runtime).toBeVisible();
+    await expect(uptime).toHaveText(/\d+d \d{2}:\d{2}:\d{2}|No disponible|Unavailable/);
+    await expect(imageRef).toContainText(
+      /ghcr\.io\/|Build local \(sin etiqueta GHCR\)|Local build \(no GHCR tag\)/
+    );
+    if (process.env.E2E_EXPECTED_IMAGE_REF) {
+      await expect(imageRef).toContainText(process.env.E2E_EXPECTED_IMAGE_REF);
+    }
+
+    for (const size of [
+      { width: 320, height: 720 },
+      { width: 360, height: 800 },
+      { width: 393, height: 851 },
+      { width: 600, height: 800 },
+      { width: 601, height: 800 },
+      { width: 768, height: 900 },
+      { width: 851, height: 393 },
+      { width: 1023, height: 900 },
+      { width: 1024, height: 900 },
+      { width: 1440, height: 900 }
+    ]) {
+      await page.setViewportSize(size);
+      const box = await runtime.boundingBox();
+      expect(box, `runtime metadata visible at ${size.width} × ${size.height}`).not.toBeNull();
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(size.width);
+      expect(
+        await runtime.evaluate((element) => element.scrollWidth <= element.clientWidth),
+        `runtime metadata does not overflow at ${size.width} × ${size.height}`
+      ).toBe(true);
+    }
+
+    await page.setViewportSize(viewport);
+
+    mkdirSync(SCREENSHOT_DIR, { recursive: true });
+    await runtime.screenshot({
+      path: join(SCREENSHOT_DIR, `${test.info().project.name}-runtime-info.png`),
+      animations: 'disabled'
+    });
   });
 
   test('should toggle pause and resume', async ({ page }) => {
@@ -65,8 +122,9 @@ test.describe('Logs page', () => {
 
     await page.reload();
     await expect(page.locator('.terminal__body')).toBeVisible();
-    await expect(page.locator('.terminal__line', { hasText: `${tag} gamma` }))
-      .toBeVisible({ timeout: 20000 });
+    await expect(page.locator('.terminal__line', { hasText: `${tag} gamma` })).toBeVisible({
+      timeout: 20000
+    });
   }
 
   test('copies all the visible lines when nothing is selected', async ({ page, context }) => {
@@ -87,7 +145,10 @@ test.describe('Logs page', () => {
     expect(clipboard).toContain(`${tag} gamma`);
   });
 
-  test('selects lines with click, ctrl and shift and copies just those', async ({ page, context }) => {
+  test('selects lines with click, ctrl and shift and copies just those', async ({
+    page,
+    context
+  }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     const tag = `e2e-${Date.now()}`;
     await pushLogs(page, tag);
