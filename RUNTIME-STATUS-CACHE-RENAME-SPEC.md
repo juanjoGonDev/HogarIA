@@ -11,6 +11,7 @@
 - `/health` ya expone segundos de `process.uptime()`, pero la página Logs no consulta esa ruta y `version` está codificada en `1.0.0`. La imagen GHCR ya etiqueta revisión OCI con `github.sha`; runtime no recibe esa revisión.
 - El servidor Node devuelve `no-cache` para `index.html` y caché larga solo para assets con hash. Nginx da `public, immutable` por siete días a todos los JS/CSS y no define política explícita para shell/service worker. Angular usa service worker en producción y no hay flujo explícito de aviso/recarga de una versión nueva.
 - El nuevo remoto es `https://github.com/juanjoGonDev/HogarIA.git`; la rama predeterminada verificada es `master`. Actualizar referencias activas de soporte y User-Agent, no borrar nombres antiguos de migración ni reescribir evidencia histórica.
+- Preflight local sobre `master` encontró 2 fallos no relacionados del spec del asistente: los fixtures de revisión de compra usaban semana `2026-10-19`–`2026-10-25`, ya pasada el `2026-10-31`; el producto rechaza correctamente ese rango vacío. El fixture ahora calcula una semana futura; spec completo del componente pasó **55/55**.
 
 ### Decisiones de seguridad
 
