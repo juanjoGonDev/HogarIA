@@ -39,6 +39,7 @@ test('builds and smokes both PR image architectures without registry writes or s
   assert.match(smoke, /load:\s*true/);
   assert.match(smoke, /cache-to:.*ignore-error=true/);
   assert.match(smoke, /scripts\/container-smoke\.mjs/);
+  assert.match(smoke, /Smoke Nginx cache and security headers[\s\S]*scripts\/nginx-static-headers-smoke\.mjs/);
   assert.match(smoke, /docker inspect --format='\{\{\.State\.Health\.Status\}\}'/);
 });
 

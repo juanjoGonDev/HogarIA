@@ -200,6 +200,21 @@ describe('estaticos', () => {
     expect(config).not.toContain(String.raw`location ~* \.(js|css|png`);
   });
 
+  it('conserva cabeceras de seguridad en cada location que sobrescribe Cache-Control', () => {
+    const config = readFileSync(new URL('../../nginx/nginx.conf', import.meta.url), 'utf8');
+    const cacheLocations = config
+      .split(/^\s*location\s+/m)
+      .slice(1)
+      .map((location) => location.split(/\n\s*}\s*/)[0] ?? '')
+      .filter((body) => /add_header\s+Cache-Control\b/.test(body));
+
+    expect(cacheLocations).toHaveLength(6);
+    for (const body of cacheLocations) {
+      expect(body).toMatch(/add_header\s+X-Frame-Options\s+"SAMEORIGIN"\s+always;/);
+      expect(body).toMatch(/add_header\s+X-Content-Type-Options\s+"nosniff"\s+always;/);
+    }
+  });
+
   it('encuentra el dist donde cada uno lo tiene', () => {
     const root = mkdtempSync(join(tmpdir(), 'hogaria-layout-'));
     mkdirSync(join(root, 'public', 'browser'), { recursive: true });

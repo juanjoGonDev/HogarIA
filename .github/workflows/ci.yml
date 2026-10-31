@@ -89,6 +89,10 @@ jobs:
       - name: Smoke health, API routing, and bundled frontend
         run: node scripts/container-smoke.mjs http://127.0.0.1:3000
 
+      - name: Smoke Nginx cache and security headers
+        if: matrix.architecture == 'amd64'
+        run: node scripts/nginx-static-headers-smoke.mjs
+
       - name: Verify the image HEALTHCHECK becomes healthy
         run: |
           for attempt in $(seq 1 40); do
