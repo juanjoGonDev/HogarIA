@@ -491,20 +491,34 @@ aiRoutes.delete('/configs/:id', async (c) => {
   const scope = aiConfigScopeForUser(db, userId);
   const scopeWhere = aiConfigScopeWhere(scope);
   const scopeValue = aiConfigScopeValue(scope);
-  const existe = aiConfigByIdInScope(db, id, scope);
-  if (!existe) {
-    return c.json({ success: false, message: 'Config not found' }, 404);
-  }
   const result = db
     .transaction(() => {
+      const current = db
+        .prepare(`SELECT test_status FROM ai_configs WHERE id = ? AND ${scopeWhere}`)
+        .get(id, scopeValue) as { test_status: string | null } | undefined;
+      if (!current) return 'not-found' as const;
+      if (current.test_status === 'testing') return 'test-running' as const;
+
       reassignAiFunctionProvidersForConfig(db, scope, id, oldestActiveAiConfigId(db, scope, id));
-      return db
+      const deleted = db
         .prepare(`DELETE FROM ai_configs WHERE id = ? AND ${scopeWhere}`)
         .run(id, scopeValue);
+      return deleted.changes > 0 ? ('deleted' as const) : ('not-found' as const);
     })
     .immediate();
-  if (result.changes === 0) {
+
+  if (result === 'not-found') {
     return c.json({ success: false, message: 'Config not found' }, 404);
+  }
+  if (result === 'test-running') {
+    return c.json(
+      {
+        success: false,
+        code: 'AI_CONFIG_TEST_RUNNING',
+        message: 'Cannot delete a configuration while its connection test is running'
+      },
+      409
+    );
   }
   cancelarColaDeConfiguracion(db, userId, id);
 

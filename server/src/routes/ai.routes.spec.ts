@@ -298,6 +298,28 @@ describe('proveedores de IA por función', () => {
       )
     ).toMatchObject({ configId: oldest.id, providerName: 'Casa A antigua' });
   });
+
+  it('rejects deletion while the saved connection test is running', async () => {
+    const config = await crearConfig(alice, 'Prueba activa');
+    await call(alice, 'PUT', '/function-providers/assistant', { configId: config.id });
+    db.prepare("UPDATE ai_configs SET test_status = 'testing' WHERE id = ?").run(config.id);
+
+    const response = await call(alice, 'DELETE', `/configs/${config.id}`);
+
+    expect(response.status).toBe(409);
+    expect(await json(response)).toMatchObject({
+      success: false,
+      code: 'AI_CONFIG_TEST_RUNNING'
+    });
+    expect(db.prepare('SELECT test_status FROM ai_configs WHERE id = ?').get(config.id)).toEqual({
+      test_status: 'testing'
+    });
+    expect(
+      (await data(await call(alice, 'GET', '/function-providers'))).find(
+        (item: any) => item.functionKey === 'assistant'
+      )
+    ).toMatchObject({ configId: config.id, providerName: 'Prueba activa' });
+  });
 });
 
 describe('permisos de configuración IA por hogar', () => {

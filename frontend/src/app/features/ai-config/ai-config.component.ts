@@ -245,6 +245,7 @@ const FUNCTION_LABELS: Record<AiFunctionKey, TranslationKey> = {
               variant="ghost"
               size="sm"
               [touchTarget]="true"
+              [disabled]="isDeleteActionDisabled(config)"
               (onClick)="deleteConfig(config)"
             >
               <app-icon name="delete" [size]="16" [label]="null" />
@@ -1145,6 +1146,8 @@ export class AiConfigComponent implements OnInit {
   }
 
   async deleteConfig(config: AIProviderConfig): Promise<void> {
+    if (this.isDeleteActionDisabled(config)) return;
+
     const accepted = await this.confirmService.confirm({
       title: this.i18n.t('ai_config.eliminar_configuracion'),
       message:
@@ -1159,11 +1162,16 @@ export class AiConfigComponent implements OnInit {
     if (!accepted) return;
 
     this.aiService.deleteConfig(config.id).subscribe({
-      next: (deleted) => {
-        if (!deleted) {
+      next: (result) => {
+        if (!result.deleted) {
+          if (result.reason === 'test_running') this.aiService.loadConfigs();
           this.toastService.error(
             this.i18n.t('ui.error'),
-            this.i18n.t('ai_config.no_se_pudo_eliminar')
+            this.i18n.t(
+              result.reason === 'test_running'
+                ? 'ai_config.test_running_delete'
+                : 'ai_config.no_se_pudo_eliminar'
+            )
           );
           return;
         }
@@ -1214,6 +1222,10 @@ export class AiConfigComponent implements OnInit {
     return this.hasRunningTest();
   }
 
+  isDeleteActionDisabled(config: AIProviderConfig): boolean {
+    return config.testStatus === 'testing' || this.probandoId() === config.id;
+  }
+
   private hasRunningTest(): boolean {
     return (
       this.probandoId() !== null ||
@@ -1242,11 +1254,15 @@ export class AiConfigComponent implements OnInit {
     const pendingId = this.probandoId();
     if (!pendingId) return;
     const config = configs.find((candidate) => candidate.id === pendingId);
+    if (!config) {
+      this.probandoId.set(null);
+      this.probandoForm.set(false);
+      return;
+    }
     if (
-      !config ||
-      (config.testStatus !== 'success' &&
-        config.testStatus !== 'failed' &&
-        config.testStatus !== 'interrupted')
+      config.testStatus !== 'success' &&
+      config.testStatus !== 'failed' &&
+      config.testStatus !== 'interrupted'
     ) {
       return;
     }

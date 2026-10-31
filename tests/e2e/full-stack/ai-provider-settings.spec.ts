@@ -216,6 +216,14 @@ test.describe('AI provider settings in household', () => {
         configName,
         `http://127.0.0.1:${providerAddress.port}/v1`
       );
+      const context = page.context();
+      const stalePage = await context.newPage();
+      await stalePage.goto('/household?tab=settings');
+      const staleCard = stalePage.locator('.config-card').filter({ hasText: configName });
+      const staleDeleteButton = staleCard.getByRole('button', { name: 'Eliminar', exact: true });
+      await expect(staleCard).toBeVisible();
+      await expect(staleDeleteButton).toBeEnabled();
+
       const testButton = page.locator(`[data-test="probar-${configName}"]`);
       await expect(testButton).toBeEnabled();
       await testButton.click();
@@ -233,15 +241,34 @@ test.describe('AI provider settings in household', () => {
         'testing'
       );
 
-      const context = page.context();
       await page.close();
-      const observerPage = await context.newPage();
-      await observerPage.goto('/household?tab=settings');
-      const runningCard = observerPage.locator('.config-card').filter({ hasText: configName });
-      const runningTestButton = observerPage.locator(`[data-test="probar-${configName}"]`);
+      await staleDeleteButton.click();
+      const deleteDialog = stalePage.getByRole('dialog', { name: 'Eliminar configuración' });
+      const deleteResponsePromise = stalePage.waitForResponse(
+        (response) =>
+          response.url().endsWith(`/api/ai/configs/${configId}`) &&
+          response.request().method() === 'DELETE'
+      );
+      await deleteDialog.getByRole('button', { name: 'Eliminar', exact: true }).click();
+      const deleteResponse = await deleteResponsePromise;
+      expect(deleteResponse.status()).toBe(409);
+      expect(await deleteResponse.json()).toMatchObject({
+        success: false,
+        code: 'AI_CONFIG_TEST_RUNNING'
+      });
+
+      const runningCard = staleCard;
+      const runningTestButton = stalePage.locator(`[data-test="probar-${configName}"]`);
       await expect(runningCard.locator('app-badge').nth(1)).toContainText('Probando');
       await expect(runningTestButton.locator('button')).toBeDisabled();
-      await observerPage.waitForTimeout(2300);
+      await expect(
+        runningCard.getByRole('button', { name: 'Eliminar', exact: true })
+      ).toBeDisabled();
+      await expect(stalePage.locator('.toast--error')).toContainText(
+        'No se puede eliminar mientras se está probando.'
+      );
+      await captureElement(stalePage, '.config-card', 'running-test-delete-disabled');
+      await stalePage.waitForTimeout(2300);
       expect(postCount).toBe(1);
       expect(providerRequestCount).toBe(1);
 

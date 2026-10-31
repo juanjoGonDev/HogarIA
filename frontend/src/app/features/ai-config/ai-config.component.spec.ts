@@ -52,7 +52,7 @@ describe('AiConfigComponent', () => {
       loadFunctionProviders: jasmine.createSpy('loadFunctionProviders'),
       createConfig: jasmine.createSpy('createConfig').and.returnValue(of(CONFIG)),
       updateConfig: jasmine.createSpy('updateConfig').and.returnValue(of(CONFIG)),
-      deleteConfig: jasmine.createSpy('deleteConfig').and.returnValue(of(true)),
+      deleteConfig: jasmine.createSpy('deleteConfig').and.returnValue(of({ deleted: true })),
       assignFunctionProvider: jasmine
         .createSpy('assignFunctionProvider')
         .and.callFake((functionKey: AiFunctionKey, configId: string) =>
@@ -593,6 +593,28 @@ describe('AiConfigComponent', () => {
     expect(component.getTestStatusLabel('interrupted')).toBe('ai_config.test_interrupted');
   }));
 
+  it('releases the pending state when another tab deletes the tested config', fakeAsync(() => {
+    const runningConfig = { ...CONFIG, testStatus: 'testing' as const };
+    service.testConnection.and.returnValue(of({ status: 'testing', configId: CONFIG.id } as never));
+    service.loadConfigsSnapshot.and.returnValue(of([runningConfig]));
+
+    fixture.destroy();
+    service.loadConfigs.and.stub();
+    service.loadConfigsSnapshot.calls.reset();
+    fixture = TestBed.createComponent(AiConfigComponent);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    component.testConfig(CONFIG);
+
+    expect(component.isDeleteActionDisabled(runningConfig)).toBeTrue();
+    service.loadConfigsSnapshot.and.returnValue(of([]));
+    tick(2000);
+
+    expect(component.probandoId()).toBeNull();
+    expect(component.probandoForm()).toBeFalse();
+    expect(component.isTestResultOpen()).toBeFalse();
+  }));
+
   it('handles active toggle and failed update without a false success toast', () => {
     service.updateConfig.and.returnValue(of({ ...CONFIG, isActive: false }));
     component.toggleActive(CONFIG);
@@ -631,9 +653,18 @@ describe('AiConfigComponent', () => {
     expect(service.deleteConfig).toHaveBeenCalledWith(CONFIG.id);
     expect(toast.success).toHaveBeenCalled();
 
-    service.deleteConfig.and.returnValue(of(false));
+    service.deleteConfig.and.returnValue(of({ deleted: false, reason: 'unknown' } as never));
     await component.deleteConfig(CONFIG);
     expect(toast.error).toHaveBeenCalled();
+  });
+
+  it('explains when the server refuses deletion because another tab is testing the config', async () => {
+    service.deleteConfig.and.returnValue(of({ deleted: false, reason: 'test_running' } as never));
+
+    await component.deleteConfig(CONFIG);
+
+    expect(toast.error).toHaveBeenCalledWith('ui.error', 'ai_config.test_running_delete');
+    expect(service.loadConfigs).toHaveBeenCalledTimes(2);
   });
 
   it('names assigned functions in the explicit deletion confirmation', async () => {

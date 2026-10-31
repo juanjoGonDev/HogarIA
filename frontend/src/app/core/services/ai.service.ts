@@ -1,5 +1,5 @@
 import { Injectable, inject, signal } from '@angular/core';
-import { HttpClient, HttpContext } from '@angular/common/http';
+import { HttpClient, HttpContext, HttpErrorResponse } from '@angular/common/http';
 import { Observable, tap, map, catchError, of, finalize } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { SILENT_TOAST } from '../interceptors/error.interceptor';
@@ -22,6 +22,24 @@ export interface AITestConnectionAccepted {
 }
 
 export type AITestConnectionOutcome = AITestConnectionResponse | AITestConnectionAccepted;
+
+export type AIDeleteConfigOutcome =
+  { deleted: true } | { deleted: false; reason: 'test_running' | 'unknown' };
+
+function isActiveTestDeleteConflict(error: unknown): boolean {
+  if (error === null || typeof error !== 'object') return false;
+  const failure = error as { status?: unknown; error?: unknown; original?: unknown };
+  const original = failure.original instanceof HttpErrorResponse ? failure.original : null;
+  const status = typeof failure.status === 'number' ? failure.status : original?.status;
+  const body = failure.error ?? original?.error;
+  return (
+    status === 409 &&
+    typeof body === 'object' &&
+    body !== null &&
+    'code' in body &&
+    body.code === 'AI_CONFIG_TEST_RUNNING'
+  );
+}
 
 @Injectable({
   providedIn: 'root'
@@ -164,16 +182,25 @@ export class AiService {
       );
   }
 
-  deleteConfig(id: string): Observable<boolean> {
+  deleteConfig(id: string): Observable<AIDeleteConfigOutcome> {
     return this.http
       .delete<any>(`${this.apiUrl}/configs/${id}`, { context: this.silentContext() })
       .pipe(
-        tap(() => {
+        map((response): AIDeleteConfigOutcome =>
+          response?.success === true ? { deleted: true } : { deleted: false, reason: 'unknown' }
+        ),
+        tap((result) => {
+          if (!result.deleted) return;
           this.invalidateConfigLoads();
           this.configsSignal.update((list) => list.filter((c) => c.id !== id));
         }),
-        map(() => true),
-        catchError(() => of(false))
+        catchError((error: unknown) =>
+          of<AIDeleteConfigOutcome>(
+            isActiveTestDeleteConflict(error)
+              ? { deleted: false, reason: 'test_running' }
+              : { deleted: false, reason: 'unknown' }
+          )
+        )
       );
   }
 
