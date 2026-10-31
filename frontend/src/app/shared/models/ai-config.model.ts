@@ -18,6 +18,7 @@ export interface AIProviderConfig {
   /** Máximo de trabajos IA en vuelo por proveedor; 0 = ilimitado. */
   concurrency: number;
   isActive: boolean;
+  assignedFunctions?: AiFunctionKey[];
   lastTested?: Date;
   testStatus?: TestStatus;
   testError?: string;
@@ -25,6 +26,15 @@ export interface AIProviderConfig {
   testLatencyMs?: number;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export type AiFunctionKey =
+  'assistant' | 'recipes' | 'planning' | 'shopping_pantry' | 'household_automation';
+
+export interface AiFunctionProviderAssignment {
+  functionKey: AiFunctionKey;
+  configId: string | null;
+  providerName: string | null;
 }
 
 export type AIProvider = 'openai' | 'custom';

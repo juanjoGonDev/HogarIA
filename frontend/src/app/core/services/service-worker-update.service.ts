@@ -5,7 +5,7 @@ import { SwUpdate } from '@angular/service-worker';
 import { EMPTY, from, switchMap, timer } from 'rxjs';
 import { catchError } from 'rxjs/operators';
 
-const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000;
 
 @Injectable({ providedIn: 'root' })
 export class ServiceWorkerUpdateService {
@@ -45,12 +45,9 @@ export class ServiceWorkerUpdateService {
     if (!this.updateAvailable()) return;
 
     try {
-      const activated = await this.swUpdate.activateUpdate();
-      if (!activated) {
-        this.activationFailed.set(true);
-        return;
-      }
-
+      // `false` means no update remains (for example, another tab already activated it).
+      // Reload anyway so this tab cannot keep a shell with mismatched lazy chunks.
+      await this.swUpdate.activateUpdate();
       this.activationFailed.set(false);
       this.updateAvailable.set(false);
       this.document.defaultView?.location.reload();

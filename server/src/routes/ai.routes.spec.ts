@@ -10,9 +10,7 @@ import { MAX_RECIPE_CONTENT_REQUEST_BYTES } from '../middleware/recipe-content-b
  *   - La prueba va contra una config guardada (`configId`) o contra los datos del formulario
  *     tal cual (baseUrl+apiKey+model), que es lo que permite probar ANTES de guardar; y el
  *     estado (`test_status`) solo se persiste en la primera.
- *   - La configuracion activa es UNA: la recien creada es la activa, y activar otra apaga la
- *     anterior. La queja era «la IA no se activa se queda inactivada»: creabas una config
- *     nueva y la primera fila (la vieja, por rowid) seguia siendo la que contestaba.
+ *   - Puede haber varios proveedores activos; cada función selecciona uno de su propio scope.
  */
 
 process.env.DATABASE_PATH = ':memory:';
@@ -141,20 +139,41 @@ async function crearConfig(
   );
 }
 
-describe('la configuracion activa es UNA', () => {
-  it('la config recien creada es la activa, y apaga la anterior', async () => {
+describe('proveedores de IA por función', () => {
+  it('permite varios activos y mantiene el proveedor inicial asignado hasta una elección explícita', async () => {
     const primera = await crearConfig(alice, 'Vieja');
+    db.prepare('UPDATE ai_configs SET created_at = ? WHERE id = ?').run('2026-01-01', primera.id);
     expect(primera.isActive).toBe(true);
+    const iniciales = await data(await call(alice, 'GET', '/function-providers'));
+    expect(iniciales).toHaveLength(5);
+    expect(iniciales.every((item: any) => item.configId === primera.id)).toBe(true);
 
     const segunda = await crearConfig(alice, 'Nueva');
-    const filas = db
-      .prepare('SELECT name, is_active FROM ai_configs ORDER BY created_at, rowid')
-      .all() as { name: string; is_active: number }[];
-    expect(filas).toEqual([
-      { name: 'Vieja', is_active: 0 },
-      { name: 'Nueva', is_active: 1 }
+    db.prepare('UPDATE ai_configs SET created_at = ? WHERE id = ?').run('2026-02-01', segunda.id);
+    const filas = await data(await call(alice, 'GET', '/configs'));
+    expect(filas.map((row: any) => [row.name, row.isActive])).toEqual([
+      ['Vieja', true],
+      ['Nueva', true]
     ]);
     expect(segunda.isActive).toBe(true);
+    expect((await data(await call(alice, 'GET', '/function-providers')))[0].configId).toBe(
+      primera.id
+    );
+
+    const select = await call(alice, 'PUT', '/function-providers/assistant', {
+      configId: segunda.id
+    });
+    expect(select.status).toBe(200);
+    expect((await json(select)).data).toMatchObject({
+      functionKey: 'assistant',
+      configId: segunda.id,
+      providerName: 'Nueva'
+    });
+    const configs = await data(await call(alice, 'GET', '/configs'));
+    expect(configs.find((row: any) => row.id === segunda.id).assignedFunctions).toEqual([
+      'assistant'
+    ]);
+    expect(JSON.stringify(configs)).not.toContain('sk-x');
   });
 
   it('omite la api_key sin rechazar ids que contienen texto parecido', async () => {
@@ -165,6 +184,7 @@ describe('la configuracion activa es UNA', () => {
       3,
       'fixture-secret-value-not-returned'
     );
+    db.prepare('DELETE FROM ai_function_providers').run();
     db.prepare('UPDATE ai_configs SET id = ? WHERE id = ?').run('fixture-sk-id', config.id);
     const respuesta = await call(alice, 'GET', '/configs');
     const cuerpo = (await respuesta.json()) as { data: Record<string, unknown>[] };
@@ -176,22 +196,107 @@ describe('la configuracion activa es UNA', () => {
     expect(cuerpo.data[0].baseUrl).toBe('http://localhost:9/v1'); // camelCase, lo que la UI lee
   });
 
-  it('activar una config apaga las demas: elegir es exclusivo', async () => {
-    await crearConfig(alice, 'Vieja');
-    const nueva = await crearConfig(alice, 'Nueva');
-    const vieja = db.prepare('SELECT id FROM ai_configs WHERE name = ?').get('Vieja') as {
-      id: string;
-    };
+  it('preserva la API key omitida y reemplaza solo cuando se envía otra', async () => {
+    const config = await crearConfig(alice, 'Con llave', undefined, 3, 'fixture-old-key');
 
-    await call(alice, 'PATCH', `/configs/${vieja.id}`, { isActive: true });
-    const filas = db
-      .prepare('SELECT name, is_active FROM ai_configs ORDER BY created_at, rowid')
-      .all() as { name: string; is_active: number }[];
-    expect(filas).toEqual([
-      { name: 'Vieja', is_active: 1 },
-      { name: 'Nueva', is_active: 0 }
-    ]);
-    expect(nueva.isActive).toBe(true); // lo que devolvio el alta, antes del cambio
+    const unchanged = await call(alice, 'PATCH', `/configs/${config.id}`, { name: 'Sin cambios' });
+    expect(unchanged.status).toBe(200);
+    expect(db.prepare('SELECT api_key FROM ai_configs WHERE id = ?').get(config.id)).toEqual({
+      api_key: 'fixture-old-key'
+    });
+    expect(await unchanged.text()).not.toContain('fixture-old-key');
+
+    const replaced = await call(alice, 'PATCH', `/configs/${config.id}`, {
+      apiKey: 'fixture-new-key'
+    });
+    expect(replaced.status).toBe(200);
+    expect(db.prepare('SELECT api_key FROM ai_configs WHERE id = ?').get(config.id)).toEqual({
+      api_key: 'fixture-new-key'
+    });
+    expect(await replaced.text()).not.toContain('fixture-new-key');
+  });
+
+  it('trata una API key PATCH vacía o con espacios como omitida', async () => {
+    const config = await crearConfig(alice, 'Con llave', undefined, 3, 'fixture-kept-key');
+
+    const whitespace = await call(alice, 'PATCH', `/configs/${config.id}`, { apiKey: '   ' });
+
+    expect(whitespace.status).toBe(200);
+    expect(db.prepare('SELECT api_key FROM ai_configs WHERE id = ?').get(config.id)).toEqual({
+      api_key: 'fixture-kept-key'
+    });
+    expect(await whitespace.text()).not.toContain('fixture-kept-key');
+  });
+
+  it('activar o desactivar solo cambia ese proveedor y reasigna sus funciones al activo más antiguo', async () => {
+    const vieja = await crearConfig(alice, 'Vieja');
+    const nueva = await crearConfig(alice, 'Nueva');
+    db.prepare('UPDATE ai_configs SET created_at = ? WHERE id = ?').run('2026-01-01', vieja.id);
+    db.prepare('UPDATE ai_configs SET created_at = ? WHERE id = ?').run('2026-02-01', nueva.id);
+    await call(alice, 'PUT', '/function-providers/assistant', { configId: nueva.id });
+
+    const activate = await call(alice, 'PATCH', `/configs/${vieja.id}`, { isActive: true });
+    expect(activate.status).toBe(200);
+    expect(db.prepare('SELECT is_active FROM ai_configs WHERE id = ?').get(nueva.id)).toEqual({
+      is_active: 1
+    });
+
+    const deactivate = await call(alice, 'PATCH', `/configs/${nueva.id}`, { isActive: false });
+    expect((await json(deactivate)).reassignedFunctions).toContain('assistant');
+    expect(
+      (await data(await call(alice, 'GET', '/function-providers'))).find(
+        (item: any) => item.functionKey === 'assistant'
+      )
+    ).toMatchObject({ configId: vieja.id, providerName: 'Vieja' });
+    expect(db.prepare('SELECT is_active FROM ai_configs WHERE id = ?').get(vieja.id)).toEqual({
+      is_active: 1
+    });
+  });
+
+  it('clears assignments when no active provider remains and rejects invalid assignments', async () => {
+    const config = await crearConfig(alice, 'Único');
+    expect(
+      (await call(alice, 'PUT', '/function-providers/assistant', { configId: 'missing' })).status
+    ).toBe(409);
+    expect(
+      (await call(alice, 'PUT', '/function-providers/not-a-function', { configId: config.id }))
+        .status
+    ).toBe(404);
+    expect(
+      (await call(alice, 'PUT', '/function-providers/assistant', { configId: null })).status
+    ).toBe(409);
+
+    await call(alice, 'PATCH', `/configs/${config.id}`, { isActive: false });
+    const assignments = await data(await call(alice, 'GET', '/function-providers'));
+    expect(assignments.every((item: any) => item.configId === null)).toBe(true);
+  });
+
+  it('reassigns a deleted provider without using a provider from another household', async () => {
+    selectHousehold(alice, 'assignment-home-a', { settings: true });
+    const oldest = await crearConfig(alice, 'Casa A antigua');
+    const selected = await crearConfig(alice, 'Casa A seleccionada');
+    db.prepare('UPDATE ai_configs SET created_at = ? WHERE id = ?').run('2026-01-01', oldest.id);
+    db.prepare('UPDATE ai_configs SET created_at = ? WHERE id = ?').run('2026-02-01', selected.id);
+    await call(alice, 'PUT', '/function-providers/planning', { configId: selected.id });
+
+    const other = await makeUser('assignment-other@test.local');
+    selectHousehold(other, 'assignment-home-b', { settings: true });
+    const otherHomeProvider = await crearConfig(other, 'Casa B');
+    expect(
+      (
+        await call(alice, 'PUT', '/function-providers/planning', {
+          configId: otherHomeProvider.id
+        })
+      ).status
+    ).toBe(409);
+
+    const remove = await call(alice, 'DELETE', `/configs/${selected.id}`);
+    expect(remove.status).toBe(200);
+    expect(
+      (await data(await call(alice, 'GET', '/function-providers'))).find(
+        (item: any) => item.functionKey === 'planning'
+      )
+    ).toMatchObject({ configId: oldest.id, providerName: 'Casa A antigua' });
   });
 });
 
@@ -231,15 +336,24 @@ describe('permisos de configuración IA por hogar', () => {
       call(alice, 'POST', '/configs'),
       call(alice, 'PATCH', '/configs/not-owned'),
       call(alice, 'DELETE', '/configs/not-owned'),
+      call(alice, 'GET', '/function-providers'),
+      call(alice, 'PUT', '/function-providers/assistant', { configId: null }),
       call(alice, 'POST', '/test-connection')
     ]);
 
-    expect(responses.map((response) => response.status)).toEqual([403, 403, 403, 403, 403]);
+    expect(responses.map((response) => response.status)).toEqual([
+      403, 403, 403, 403, 403, 403, 403
+    ]);
     expect(await json(responses[0])).toMatchObject({
       success: false,
       code: 'HOUSEHOLD_SETTINGS_REQUIRED'
     });
     expect((db.prepare('SELECT COUNT(*) AS n FROM ai_configs').get() as { n: number }).n).toBe(0);
+    const availability = await call(alice, 'GET', '/availability');
+    expect(availability.status).toBe(200);
+    expect(await json(availability)).toMatchObject({
+      data: { hasActiveProvider: false }
+    });
   });
 
   it('aísla configuraciones por hogar y permite usar la de casa sin conceder permiso settings', async () => {
@@ -257,6 +371,9 @@ describe('permisos de configuración IA por hogar', () => {
     addMembership(member, 'ai-home-a', { settings: false });
     db.prepare('UPDATE users SET household_id = ? WHERE id = ?').run('ai-home-a', member.id);
     expect((await call(member, 'GET', '/configs')).status).toBe(403);
+    expect(await json(await call(member, 'GET', '/availability'))).toMatchObject({
+      data: { hasActiveProvider: true, functions: { assistant: true } }
+    });
     expect(activeAiConfig(db, member.id)?.id).toBe(homeA.id);
 
     db.prepare('INSERT INTO households (id, name, invite_code) VALUES (?, ?, ?)').run(
@@ -287,178 +404,279 @@ describe('permisos de configuración IA por hogar', () => {
 });
 
 describe('POST /test-connection', () => {
-  it('acepta la prueba guardada en background, deduplica la carrera y conserva el estado', async () => {
-    const config = await crearConfig(alice, 'Local');
-    let resolveProvider!: (response: Response) => void;
-    let providerCalls = 0;
-    const providerResponse = new Promise<Response>((resolve) => {
-      resolveProvider = resolve;
+  it('acepta timeouts sin límite de producto en alta, edición y prueba; rechaza fuera del rango técnico', async () => {
+    const defaultConfig = await crearConfig(alice, 'Default provider');
+    expect(defaultConfig.timeout).toBe(30000);
+
+    const create = await call(alice, 'POST', '/configs', {
+      name: 'Slow provider',
+      provider: 'custom',
+      baseUrl: 'http://localhost:9/v1',
+      apiKey: 'sk-x',
+      model: 'gpt-5',
+      timeout: 900000
     });
+    expect(create.status).toBe(201);
+    const config = await data(create);
+    expect(config.timeout).toBe(900000);
+
+    const invalidCreate = await call(alice, 'POST', '/configs', {
+      name: 'Too slow',
+      provider: 'custom',
+      baseUrl: 'http://localhost:9/v1',
+      apiKey: 'sk-x',
+      model: 'gpt-5',
+      timeout: 2_147_483_648
+    });
+    expect(invalidCreate.status).toBe(400);
+    const invalidCreateBody = await json(invalidCreate);
+    expect(invalidCreateBody.message).toBe('timeout: debe ser como máximo 2.147.483.647');
+    expect(invalidCreateBody.issues).toContainEqual({
+      field: 'timeout',
+      message: 'debe ser como máximo 2.147.483.647'
+    });
+
+    expect(
+      (await call(alice, 'PATCH', `/configs/${config.id}`, { timeout: 1_800_000 })).status
+    ).toBe(200);
+    expect(
+      (await call(alice, 'PATCH', `/configs/${config.id}`, { timeout: 2_147_483_648 })).status
+    ).toBe(400);
+
+    stubDelProveedor('{"status":"ok","message":"conexión establecida"}');
+    const validTest = await call(alice, 'POST', '/test-connection', {
+      baseUrl: 'http://localhost:9',
+      apiKey: 'sk-x',
+      model: 'gpt-5',
+      timeout: 1_800_000
+    });
+    expect(validTest.status).toBe(200);
+
+    const invalidTest = await call(alice, 'POST', '/test-connection', {
+      baseUrl: 'http://localhost:9',
+      apiKey: 'sk-x',
+      model: 'gpt-5',
+      timeout: 2_147_483_648
+    });
+    expect(invalidTest.status).toBe(400);
+    for (const timeout of [0, -1, 1.5]) {
+      const invalidTimeout = await call(alice, 'POST', '/test-connection', {
+        baseUrl: 'http://localhost:9',
+        apiKey: 'sk-x',
+        model: 'gpt-5',
+        timeout
+      });
+      expect(invalidTimeout.status).toBe(400);
+    }
+
+    const oneMillisecondTest = await call(alice, 'POST', '/test-connection', {
+      baseUrl: 'http://localhost:9',
+      apiKey: 'sk-x',
+      model: 'gpt-5',
+      timeout: 1
+    });
+    expect(oneMillisecondTest.status).toBe(200);
+  });
+
+  it('persiste el estado antes del proveedor, deduplica pruebas activas y devuelve 202', async () => {
+    const config = await crearConfig(alice, 'Slow provider');
+    let releaseProvider!: (response: Response) => void;
+    let markProviderStarted!: () => void;
+    let providerCalls = 0;
+    const providerStarted = new Promise<void>((resolve) => (markProviderStarted = resolve));
+    const providerResponse = new Promise<Response>((resolve) => (releaseProvider = resolve));
     vi.stubGlobal(
       'fetch',
       vi.fn(() => {
         providerCalls += 1;
+        markProviderStarted();
         return providerResponse;
       }) as unknown as typeof fetch
     );
 
-    const requests = [
-      call(alice, 'POST', '/test-connection', { configId: config.id }),
-      call(alice, 'POST', '/test-connection', { configId: config.id })
-    ];
-    const timedOut = Symbol('saved connection test did not return in background');
-    let timer: NodeJS.Timeout | undefined;
-    const accepted = await Promise.race([
-      Promise.all(requests),
-      new Promise<typeof timedOut>((resolve) => {
-        timer = setTimeout(() => resolve(timedOut), 100);
-      })
-    ]);
-    if (timer) clearTimeout(timer);
-    if (accepted === timedOut) {
-      resolveProvider(
-        new Response(
-          JSON.stringify({
-            choices: [{ message: { content: '{"status":"ok","message":"conexión establecida"}' } }]
-          }),
-          { status: 200, headers: { 'content-type': 'application/json' } }
-        )
-      );
-      await Promise.all(requests);
-    }
-    expect(accepted).not.toBe(timedOut);
-
-    const acceptedResponses = accepted as Response[];
-    for (const response of acceptedResponses) {
-      expect(response.status).toBe(202);
-      expect(await data(response)).toMatchObject({ status: 'testing', configId: config.id });
-    }
-
-    const initial = db
-      .prepare(
-        'SELECT test_status, test_error, test_started_at, test_latency_ms FROM ai_configs WHERE id = ?'
-      )
-      .get(config.id) as {
-      test_status: string | null;
-      test_error: string | null;
-      test_started_at: string | null;
-      test_latency_ms: number | null;
-    };
-    expect(initial).toMatchObject({
-      test_status: 'testing',
-      test_error: null,
-      test_latency_ms: null
-    });
-    expect(initial.test_started_at).toBeTruthy();
-
-    const duringTestConfigs = await data(await call(alice, 'GET', '/configs'));
-    expect(duringTestConfigs[0]).toMatchObject({
-      id: config.id,
-      testStatus: 'testing',
-      testError: null,
-      testLatencyMs: null
-    });
-    expect(duringTestConfigs[0].testStartedAt).toBeTruthy();
-    expect(duringTestConfigs[0]).not.toHaveProperty('api_key');
-
-    const repeated = await call(alice, 'POST', '/test-connection', { configId: config.id });
-    expect(repeated.status).toBe(202);
-    expect(await data(repeated)).toMatchObject({ status: 'testing', configId: config.id });
-
-    // Ensure the background task actually reaches the provider before resolving the held response.
-    const deadline = Date.now() + 1000;
-    while (providerCalls === 0 && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    expect(providerCalls).toBe(1);
-    resolveProvider(
+    const successfulResponse = () =>
       new Response(
         JSON.stringify({
           choices: [{ message: { content: '{"status":"ok","message":"conexión establecida"}' } }]
         }),
         { status: 200, headers: { 'content-type': 'application/json' } }
-      )
-    );
+      );
 
-    const finalDeadline = Date.now() + 1500;
-    let final:
-      | { test_status: string | null; test_error: string | null; test_latency_ms: number | null }
-      | undefined;
-    while (Date.now() < finalDeadline) {
-      final = db
-        .prepare('SELECT test_status, test_error, test_latency_ms FROM ai_configs WHERE id = ?')
-        .get(config.id) as typeof final;
-      if (final?.test_status === 'success') break;
-      await new Promise((resolve) => setTimeout(resolve, 10));
+    try {
+      const responses = await Promise.all([
+        call(alice, 'POST', '/test-connection', { configId: config.id }),
+        call(alice, 'POST', '/test-connection', { configId: config.id })
+      ]);
+      expect(responses.map((response) => response.status)).toEqual([202, 202]);
+      for (const response of responses) {
+        expect(await data(response)).toMatchObject({ status: 'testing', configId: config.id });
+      }
+
+      const initial = db
+        .prepare(
+          'SELECT test_status, test_error, test_started_at, test_latency_ms FROM ai_configs WHERE id = ?'
+        )
+        .get(config.id) as {
+        test_status: string | null;
+        test_error: string | null;
+        test_started_at: string | null;
+        test_latency_ms: number | null;
+      };
+      expect(initial).toMatchObject({
+        test_status: 'testing',
+        test_error: null,
+        test_latency_ms: null
+      });
+      expect(initial.test_started_at).toBeTruthy();
+
+      const refreshedConfig = (await data(await call(alice, 'GET', '/configs')))[0];
+      expect(refreshedConfig).toMatchObject({
+        id: config.id,
+        testStatus: 'testing',
+        testError: null,
+        testLatencyMs: null
+      });
+      expect(refreshedConfig.testStartedAt).toBeTruthy();
+      expect(refreshedConfig).not.toHaveProperty('apiKey');
+      expect(refreshedConfig).not.toHaveProperty('api_key');
+
+      await providerStarted;
+      const repeated = await call(alice, 'POST', '/test-connection', { configId: config.id });
+      expect(repeated.status).toBe(202);
+      expect(await data(repeated)).toMatchObject({ status: 'testing', configId: config.id });
+      expect(providerCalls).toBe(1);
+      expect(
+        (
+          db
+            .prepare(
+              "SELECT COUNT(*) AS n FROM ai_jobs WHERE config_id = ? AND kind = 'connection_test'"
+            )
+            .get(config.id) as { n: number }
+        ).n
+      ).toBe(1);
+    } finally {
+      releaseProvider(successfulResponse());
     }
-    expect(final?.test_status).toBe('success');
-    expect(final?.test_error).toBeNull();
-    expect(typeof final?.test_latency_ms).toBe('number');
-    expect(providerCalls).toBe(1);
 
-    const completedConfig = (await data(await call(alice, 'GET', '/configs')))[0];
-    expect(completedConfig).toMatchObject({
-      id: config.id,
-      testStatus: 'success',
-      testError: null,
-      testLatencyMs: final?.test_latency_ms,
-      testStartedAt: null
+    await vi.waitFor(() => {
+      const final = db
+        .prepare(
+          'SELECT test_status, test_error, test_started_at, test_latency_ms FROM ai_configs WHERE id = ?'
+        )
+        .get(config.id) as {
+        test_status: string | null;
+        test_error: string | null;
+        test_started_at: string | null;
+        test_latency_ms: number | null;
+      };
+      expect(final).toMatchObject({
+        test_status: 'success',
+        test_error: null,
+        test_started_at: null
+      });
+      expect(typeof final.test_latency_ms).toBe('number');
     });
+    expect(providerCalls).toBe(1);
+    const completedConfig = (await data(await call(alice, 'GET', '/configs')))[0];
+    expect(completedConfig.testStatus).toBe('success');
+    expect(completedConfig.testLatencyMs).toEqual(expect.any(Number));
+    expect(completedConfig.testStartedAt).toBeNull();
   });
 
-  it('persiste un fallo terminal sin guardar una credencial repetida por el proveedor', async () => {
+  it('no inicia una prueba para una configuración fuera del scope del usuario', async () => {
+    const other = await makeUser('other-ai-owner@test.local');
+    const otherConfig = await crearConfig(other, 'Private provider');
+    const response = await call(alice, 'POST', '/test-connection', { configId: otherConfig.id });
+
+    expect(response.status).toBe(404);
+    expect(
+      await db.prepare('SELECT test_status FROM ai_configs WHERE id = ?').get(otherConfig.id)
+    ).toEqual({ test_status: null });
+  });
+
+  it('persiste un fallo terminal sin guardar credenciales repetidas por el proveedor', async () => {
     const config = await crearConfig(alice, 'Local');
     const secret = 'fixture-secret-not-to-persist';
     db.prepare('UPDATE ai_configs SET api_key = ? WHERE id = ?').run(secret, config.id);
     vi.stubGlobal(
       'fetch',
-      (async () =>
-        new Response(`Invalid API key: ${secret}`, { status: 401 })) as unknown as typeof fetch
+      (async () => new Response(`Invalid API key: ${secret}`, { status: 401 })) as typeof fetch
     );
 
-    const respuesta = await call(alice, 'POST', '/test-connection', { configId: config.id });
-    expect(respuesta.status).toBe(202);
-    expect(await data(respuesta)).toMatchObject({ status: 'testing', configId: config.id });
+    const response = await call(alice, 'POST', '/test-connection', { configId: config.id });
+    expect(response.status).toBe(202);
+    const responseText = await response.text();
+    expect(responseText).toContain('testing');
+    expect(responseText).not.toContain(secret);
 
-    const deadline = Date.now() + 1500;
-    let fila:
-      | { test_status: string | null; test_error: string | null; test_latency_ms: number | null }
-      | undefined;
-    while (Date.now() < deadline) {
-      fila = db
+    await vi.waitFor(() => {
+      const row = db
         .prepare('SELECT test_status, test_error, test_latency_ms FROM ai_configs WHERE id = ?')
-        .get(config.id) as typeof fila;
-      if (fila?.test_status === 'failed') break;
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    expect(fila?.test_status).toBe('failed');
-    expect(fila?.test_error).toBeTruthy();
-    expect(fila?.test_error).not.toContain(secret);
-    expect(typeof fila?.test_latency_ms).toBe('number');
+        .get(config.id) as {
+        test_status: string | null;
+        test_error: string | null;
+        test_latency_ms: number | null;
+      };
+      expect(row.test_status).toBe('failed');
+      expect(row.test_error).toBe(
+        'No se pudo completar la prueba de conexión. Revisa URL, modelo y credenciales.'
+      );
+      expect(row.test_error).not.toContain(secret);
+      expect(typeof row.test_latency_ms).toBe('number');
+    });
   });
 
-  it('se puede probar desde el formulario (sin guardar): el veredicto si, la fila no', async () => {
+  it('recovery de la cola libera el estado testing interrumpido', async () => {
+    const config = await crearConfig(alice, 'Interrupted provider');
+    db.prepare("UPDATE ai_configs SET test_status = 'testing', test_error = NULL WHERE id = ?").run(
+      config.id
+    );
+
+    const { barrerArranque } = await import('../utils/ticket-queue.js');
+    barrerArranque(db);
+
+    const state = db
+      .prepare('SELECT test_status, test_error FROM ai_configs WHERE id = ?')
+      .get(config.id) as { test_status: string; test_error: string };
+    expect(state.test_status).toBe('failed');
+    expect(state.test_error).toMatch(/interrump/i);
+  });
+
+  it('prueba el formulario sin guardar y no persiste su configuración', async () => {
     stubDelProveedor('{"status":"ok","message":"conexión establecida"}');
 
-    const respuesta = await call(alice, 'POST', '/test-connection', {
+    const response = await call(alice, 'POST', '/test-connection', {
       baseUrl: 'http://localhost:9',
       apiKey: 'sk-x',
       model: 'gpt-5'
     });
-    expect(respuesta.status).toBe(200);
-    const cuerpo = await data(respuesta);
-    expect(cuerpo.success).toBe(true);
-
-    // Sin configId no hay fila que tocar: la casa aun no ha guardado nada.
+    expect(response.status).toBe(200);
+    expect((await data(response)).success).toBe(true);
     expect((db.prepare('SELECT COUNT(*) AS n FROM ai_configs').get() as { n: number }).n).toBe(0);
   });
 
-  it('sin configId y sin datos de formulario no hay prueba que hacer', async () => {
-    const respuesta = await call(alice, 'POST', '/test-connection', {});
-    expect(respuesta.status).toBe(400);
+  it('devuelve un error seguro si falla el proveedor al probar desde el formulario', async () => {
+    const secret = 'fixture-error-secret';
+    vi.stubGlobal('fetch', (async () => {
+      throw new Error(`provider failure containing ${secret}`);
+    }) as typeof fetch);
+
+    const response = await call(alice, 'POST', '/test-connection', {
+      baseUrl: 'http://localhost:9',
+      apiKey: secret,
+      model: 'gpt-5'
+    });
+    expect(response.status).toBe(200);
+    const text = await response.text();
+    expect(text).toContain('No se pudo conectar con el proveedor');
+    expect(text).not.toContain(secret);
+  });
+
+  it('sin configId ni datos de formulario no hay prueba que hacer', async () => {
+    const response = await call(alice, 'POST', '/test-connection', {});
+    expect(response.status).toBe(400);
   });
 });
-
 const recetaGenerada = {
   name: 'Lentejas de prueba',
   description: 'Una receta determinista de prueba.',
@@ -1738,6 +1956,70 @@ describe('POST /replace-meal', () => {
 });
 
 describe('POST /recommendations y /plan-week', () => {
+  it('mantiene fijo el proveedor de un trabajo admitido si después cambia la asignación', async () => {
+    const original = await crearConfig(alice, 'Proveedor inicial', 'http://first.test/v1', 0);
+    const next = await crearConfig(alice, 'Proveedor nuevo', 'http://second.test/v1', 0);
+    let notifyStarted!: () => void;
+    let finishProvider!: (response: Response) => void;
+    const started = new Promise<void>((resolve) => (notifyStarted = resolve));
+    const providerResponse = new Promise<Response>((resolve) => (finishProvider = resolve));
+    const requests: string[] = [];
+    vi.stubGlobal('fetch', (async (input: string | URL | Request): Promise<Response> => {
+      requests.push(String(input));
+      notifyStarted();
+      return providerResponse;
+    }) as typeof fetch);
+
+    const pending = call(alice, 'POST', '/recommendations', { count: 1 });
+    await started;
+    await call(alice, 'PUT', '/function-providers/recipes', { configId: next.id });
+    expect(
+      db.prepare("SELECT config_id FROM ai_jobs WHERE kind = 'recommendations'").get()
+    ).toEqual({
+      config_id: original.id
+    });
+
+    finishProvider(
+      new Response(
+        JSON.stringify({ choices: [{ message: { content: '{"recommendations":[]}' } }] }),
+        { status: 200 }
+      )
+    );
+    expect((await pending).status).toBe(200);
+    expect(requests).toEqual(['http://first.test/v1/chat/completions']);
+  });
+
+  it('envía recomendaciones al proveedor asignado a recetas y no al asistente', async () => {
+    const assistant = await crearConfig(alice, 'Asistente', 'http://assistant.test/v1', 0);
+    const recipes = await crearConfig(alice, 'Recetas', 'http://recipes.test/v1', 0);
+    const recommendations = [
+      { name: 'Sopa', reason: 'Fixture sintético', ingredients: ['tomate'], estimatedTime: 10 }
+    ];
+    await call(alice, 'PUT', '/function-providers/recipes', { configId: recipes.id });
+    const requests = stubRecipeProvider(
+      () =>
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: JSON.stringify({ recommendations }) } }]
+          }),
+          { status: 200 }
+        )
+    );
+
+    const response = await call(alice, 'POST', '/recommendations', {
+      availableIngredients: ['tomate'],
+      count: 1
+    });
+
+    expect(response.status).toBe(200);
+    expect(requests).toHaveLength(1);
+    expect(requests[0].url).toBe('http://recipes.test/v1/chat/completions');
+    expect(
+      db.prepare("SELECT config_id FROM ai_jobs WHERE kind = 'recommendations'").get()
+    ).toEqual({ config_id: recipes.id });
+    expect(requests[0].url).not.toContain(assistant.id);
+  });
+
   it('rechaza intolerancias libres no verificables antes de llamar al proveedor o guardar', async () => {
     await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
     const requests = stubRecipeProvider();

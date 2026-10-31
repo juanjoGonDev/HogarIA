@@ -1,6 +1,6 @@
 # HogarIA — prueba de IA en segundo plano, runtime y actualización web
 
-**Estado:** #56 integrado; reconciliación de #63 con `master` y verificación final pendientes.
+**Estado:** código #63 reconciliado con #56; gates locales verdes; CI remoto final pendiente. PR #63 sigue Ready por decisión del usuario.
 **Base vigente:** `origin/master` en `b2e3de8` (squash de #56; rama predeterminada: `master`).
 **Rama:** `feat/runtime-operations-ui`.
 **PR funcional:** [#63](https://github.com/juanjoGonDev/HogarIA/pull/63), Ready por decisión del usuario. El usuario autorizó integrar/mergear #56 y después #63; conservar Ready y no mergear hasta que la rama esté reconciliada y CI esté verde. #56 ya está mergeado.
@@ -26,6 +26,7 @@ La fuente de verdad para la prueba guardada es `AI-PROVIDER-SETTINGS-SPEC.md`, a
 
 - Una prueba de configuración **guardada** se reclama atómicamente por configuración, persiste `testing` antes de aceptar el trabajo y continúa independientemente de la petición HTTP o pestaña. Mientras está activa, repetir la acción devuelve/consulta el mismo estado; no lanza un segundo ping.
 - Recargar o abrir Ajustes de nuevo recupera `testing` desde la API y mantiene la indicación hasta resultado terminal. Cerrar la pestaña no cancela el trabajo. Si el proceso muere, el siguiente arranque cierra como interrumpido cualquier estado activo obsoleto; nunca relanza una llamada externa implícitamente.
+- `interrupted` también es terminal en la UI: muestra etiqueta traducida, cierra el spinner/polling y presenta resultado de recuperación; no deja una tarjeta «Probando» para siempre.
 - El test del formulario sin guardar conserva su flujo efímero y no persiste credenciales. No guardar claves en jobs, respuestas de estado, logs, URLs, `localStorage` ni telemetría; redactar los errores.
 - La revisión mostrada en Logs procede del mismo SHA inyectado en runtime que `org.opencontainers.image.revision`; local/dev muestra un valor explícito. No se inspecciona Docker ni otros contenedores.
 - El shell y manifiestos/worker de Angular se revalidan; solo recursos con nombre hash conservan caché larga e inmutable. Si Angular detecta una versión nueva, muestra una acción de recarga explícita y no descarta formularios automáticamente.
@@ -35,21 +36,21 @@ La fuente de verdad para la prueba guardada es `AI-PROVIDER-SETTINGS-SPEC.md`, a
 ### Integración con #56 (nueva base)
 
 - [ ] Integrar `origin/master` (`b2e3de8`) mediante merge commit regular; no rebase/force-push. Resolver conflictos sin perder proveedores/asignaciones, token opcional, validación de mensajes, timeout ilimitado de producto, `imageRef`, Logs, headers no-cache ni cambios de soporte ya mergeados.
-- [ ] Mantener exactamente un flujo de actualización web: aviso accesible y acción explícita; no recargar automáticamente con formularios sin guardar. Preservar `/health` y `APP_IMAGE_REF` como contrato de runtime.
-- [ ] Portar/ajustar el test guardado desacoplado a la API multi-proveedor de #56: respuesta `202`, claim único por config/hogar, consulta de estado autorizada, prueba efímera sin persistir secretos, timeout/reintentos coherentes y recuperación segura tras reinicio.
-- [ ] Revisar migraciones/DB de `test_started_at` y `test_latency_ms`, `Dockerfile`, workflow, `app.ts`, logs y el smoke de Nginx/contenedor con los contratos ya presentes en `master`.
-- [ ] Repetir pruebas enfocadas, suites aisladas, Playwright desktop/móvil, smoke HTTP real y todos los gates remotos sobre el merge commit final; el CI del HEAD anterior dejó de ser evidencia suficiente tras mergear #56.
+- [x] Mantener exactamente un flujo de actualización web: aviso accesible y acción explícita; no recargar automáticamente con formularios sin guardar. Preservar `/health` y `APP_IMAGE_REF` como contrato de runtime. Polling cada 5 min; E2E de actualización incluido en gate full-stack.
+- [x] Portar/ajustar el test guardado desacoplado a la API multi-proveedor de #56: respuesta `202`, claim único por config/hogar, consulta de estado autorizada, prueba efímera sin persistir secretos, timeout/reintentos coherentes y recuperación segura tras reinicio. La UI presenta `interrupted` como estado terminal.
+- [x] Revisar migraciones/DB de `test_started_at` y `test_latency_ms`, `Dockerfile`, workflow, `app.ts`, logs y smoke HTTP real de Nginx con los contratos ya presentes en `master`.
+- [ ] Completar verificación remota sobre el merge commit final; el CI del HEAD anterior dejó de ser evidencia suficiente tras mergear #56.
 
 ## Criterios de aceptación
 
-> Las casillas de la ejecución anterior documentan resultados del HEAD pre-#56. No son evidencia del merge actualizado: las casillas nuevas de «Integración con #56» quedan abiertas hasta repetir los gates pertinentes sobre el HEAD final.
+> Las casillas de la ejecución anterior documentan resultados del HEAD pre-#56. La sección «Revisión integrada» registra la evidencia local posterior a #56; queda pendiente solo el merge commit/push y su CI remoto final.
 
 ### Test de IA guardado — único y en segundo plano
 
 - [x] La API persiste el estado `testing` antes de responder; la ejecución no espera al proveedor dentro de la petición HTTP. `POST` devuelve `202` y el test guardado corre en una promesa desacoplada de la petición.
 - [x] Claim atómico evita duplicados concurrentes y repetición mientras exista una ejecución activa por configuración.
 - [x] Navegar, cerrar pestaña o recargar no detiene la ejecución; al volver, la tarjeta muestra que sigue probando y después presenta el estado terminal. E2E cierra la pestaña, reabre con la misma sesión y verifica una sola llamada al proveedor sintético.
-- [x] Éxito, error, timeout y caída/reinicio dejan un estado terminal recuperable; no se relanza una prueba real automáticamente ni se mantiene `testing` para siempre.
+- [x] Éxito, error, timeout y caída/reinicio dejan un estado terminal recuperable; la UI traduce `interrupted`, libera spinner/polling y no relanza una prueba real automáticamente.
 - [x] El formulario sin guardar sigue sin persistir ni reintentar credenciales. Pruebas cubren deduplicación/carrera, refresh, salida del cliente, reinicio, error redactado y ausencia de secretos.
 
 ### Logs — uptime y revisión de imagen
@@ -69,9 +70,9 @@ La fuente de verdad para la prueba guardada es `AI-PROVIDER-SETTINGS-SPEC.md`, a
 
 - [x] Referencias activas en código y contrato apuntan al remoto nuevo; enlaces a PRs/ejecuciones históricas permanecen. Búsqueda final no encontró URL antigua en código activo.
 - [x] TDD con DB temporal (`DATABASE_PATH=:memory:` en Vitest/E2E aislado) y proveedor sintético; suites afectadas, tipos y build pasan. Coverage cliente: 90.61/80.99/91.71/93.20 % (S/B/F/L); servidor: 89.55/81.70/95.68/92.50 %.
-- [ ] Lint no ejecutable en este checkout: Angular no encuentra `@angular-eslint/builder`; lint del servidor invoca `eslint --ext` incompatible con ESLint 9 y no hay config de servidor; ejecución directa de Angular ESLint no encuentra `@angular-eslint/eslint-plugin`. No añadí dependencias ni cambié gates.
+- [x] Limitación de lint confirmada: `pnpm run lint` falla porque no está instalado `@angular-eslint/builder`. No añadí dependencias; `check:ui` sí pasa. El workflow CI no ejecuta este lint.
 - [x] Playwright real contra frontend/backend con datos sintéticos: escritorio/móvil, refresh/cierre durante prueba, oferta de actualización, teclado/foco y breakpoints (320 px, móvil apaisado 852×393, escritorio 1024/1440). Capturas PC/móvil ignoradas por Git guardadas y revisadas en `.e2e-screenshots/ai-test-running-*`, `.e2e-screenshots/logs-runtime-*` y `.e2e-screenshots/app-update-*`.
-- [ ] Registrar comandos, resultados y limitaciones de la revisión integrada aquí. Conservar Ready tal como pidió el usuario; mergear #63 solo después de review final y CI verde (autorización explícita ya concedida).
+- [ ] Registrar resultado del CI remoto final y merge. Conservar Ready tal como pidió el usuario; mergear #63 solo tras review final y CI verde (autorización explícita concedida).
 
 ## Unidades revisables
 
@@ -101,7 +102,21 @@ El tamaño total supera 400 líneas revisadas. El usuario eligió explícitament
 - `pnpm --filter @hogaria/server exec vitest run src/utils/recipe-step-photos.spec.ts src/utils/recipe-step-videos.spec.ts`: 46/46; Wikimedia User-Agent points to renamed repo.
 - `docker run --rm --add-host app:127.0.0.1 --mount "type=bind,source=D:/projects/MiCocinAI/nginx/nginx.conf,target=/etc/nginx/nginx.conf,readonly" --mount "type=bind,source=D:/projects/MiCocinAI/nginx/proxy-api-common.conf,target=/etc/nginx/proxy-api-common.conf,readonly" nginx:alpine nginx -t`: syntax/test OK.
 - Smoke Nginx con assets reales montados desde `frontend/dist/browser`: `HEAD` a `/index.html`, `/ngsw.json`, `/ngsw-worker.js`, `/calendar-feature.css` devolvió `200 no-cache`; `/styles-GRZCEKI2.css` y `/main-ZL5QEV7E.js` devolvieron `200 public, max-age=31536000, immutable`. Contenedor temporal detenido y puerto liberado.
-- `node scripts/nginx-static-headers-smoke.mjs`: 5/5 respuestas HTTP reales desde `nginx:alpine` con fixtures sintéticos; verificó `Cache-Control`, `X-Frame-Options` y `X-Content-Type-Options` en shell/manifiestos/bundle. Contenedor/fixtures temporales eliminados. El test de config falló antes del arreglo y pasó después.
+- `node scripts/nginx-static-headers-smoke.mjs`: 5/5 respuestas HTTP reales desde `nginx:alpine` con fixtures sintéticos; verificó `Cache-Control`, `X-Frame-Options` y `X-Content-Type-Options` en shell/manifiestos/bundle. Contenedor/fixtures temporales eliminados. El test de config falló antes del arreglo y pasó después. (La revisión integrada amplió el smoke a 6 respuestas.)
 - Workflow/container smoke: 12/12.
 - `pnpm run lint`: no pasa por herramienta/configuración existente (detalle arriba); no es un fallo de lint de los cambios.
-- El run remoto `41218712834` del HEAD `77f3728` falló solo en shard 1 porque `ai-provider-queue.spec.ts` trataba el test de conexión guardada como un job genérico; los otros jobs y tres shards pasaron. Tras corregir el E2E, el run `41220436428` del código/test actualizado en `c95e0a6` pasó completamente: build, tipos, tests de servidor, E2E (4 shards + full-stack), smoke de imágenes amd64/arm64 y CodeQL. La actualización posterior de esta evidencia no cambia código; el PR sigue Draft y no se mergea.
+- El run remoto `41218712834` del HEAD `77f3728` falló solo en shard 1 porque `ai-provider-queue.spec.ts` trataba el test de conexión guardada como un job genérico. Tras corregir el E2E, `41220436428` del código en `c95e0a6` pasó build, tipos, tests de servidor, E2E, smoke amd64/arm64 y CodeQL. Ese CI es histórico y no sustituye el CI nuevo tras integrar #56.
+
+### Revisión integrada tras #56 (antes del merge commit)
+
+- `pnpm run check:ui`: **271 ficheros, 21 reglas**; pasó con la etiqueta traducida `interrupted` ya conectada a la UI.
+- `pnpm run typecheck:e2e`: pasó.
+- `pnpm run test:config`: **118/118**.
+- `pnpm run test:client:coverage`: **1774/1774**; coverage S/B/F/L **90.54/80.98/91.83/93.13 %**.
+- `DATABASE_PATH=:memory: pnpm run test:server:coverage`: **2130 pasan, 1 omitido**; coverage S/B/F/L **89.69/81.90/95.56/92.66 %**.
+- `pnpm run build`: pasa; conserva warnings Angular/SCSS preexistentes.
+- Unit tests focales: servidor rutas/health/static/timeout/schema **117/117**; servicio/componente IA + service worker/update notice **50/50**.
+- Playwright aislado: full-stack AI provider **6/6**; prueba guardada tras cerrar/reabrir **2/2** (desktop/móvil); Logs uptime/imageRef **2/2**; aviso service worker **2/2**; cola de receta **3/3**; geometría/settings IA hogar **8/8**.
+- `node scripts/nginx-static-headers-smoke.mjs`: **6/6 respuestas** desde Nginx real; caché y cabeceras de seguridad verificadas.
+- Capturas sintéticas PC/móvil revisadas en `.e2e-screenshots/merge-review/` (ignorado por Git); usan datos sintéticos, DB efímera y proveedor HTTP local.
+- CI remoto final pendiente del merge commit/push. No se ejecutó ningún proveedor externo. El test de geometría corregido solo exige overlay realmente oculto: el elemento existe intencionadamente en DOM en móvil para permitir cerrar el drawer.

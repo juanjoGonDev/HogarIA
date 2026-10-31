@@ -4,12 +4,8 @@ import os from 'os';
 
 const healthRoutes = new Hono();
 
-function imageRevision(): string {
-  const revision = process.env.HOGARIA_IMAGE_REVISION?.trim();
-  return revision || 'dev';
-}
-
 healthRoutes.get('/', (c) => {
+  c.header('Cache-Control', 'no-store');
   const memUsage = process.memoryUsage();
   const freeMem = os.freemem();
   const totalMem = os.totalmem();
@@ -17,10 +13,17 @@ healthRoutes.get('/', (c) => {
 
   const status = usagePercent > 90 ? 'critical' : usagePercent > 80 ? 'warning' : 'ok';
 
+  const configuredImageRef = process.env.APP_IMAGE_REF?.trim();
+  const imageRef =
+    configuredImageRef && /^ghcr\.io\/[a-z0-9._/-]+:[a-z0-9._-]+$/i.test(configuredImageRef)
+      ? configuredImageRef
+      : 'local-unpublished';
+
   return c.json({
     status,
     timestamp: new Date().toISOString(),
     uptime: Math.round(process.uptime()),
+    imageRef,
     memory: {
       heapUsed: Math.round(memUsage.heapUsed / 1024 / 1024) + 'MB',
       heapTotal: Math.round(memUsage.heapTotal / 1024 / 1024) + 'MB',
@@ -29,12 +32,12 @@ healthRoutes.get('/', (c) => {
       systemTotal: Math.round(totalMem / 1024 / 1024) + 'MB',
       systemUsage: usagePercent + '%'
     },
-    version: '1.0.0',
-    imageRevision: imageRevision()
+    version: '1.0.0'
   });
 });
 
 healthRoutes.get('/detailed', (c) => {
+  c.header('Cache-Control', 'no-store');
   const stats = memoryMonitor.getStats();
   const cpus = os.cpus();
 
@@ -53,8 +56,7 @@ healthRoutes.get('/detailed', (c) => {
       version: process.version,
       platform: process.platform,
       arch: process.arch
-    },
-    imageRevision: imageRevision()
+    }
   });
 });
 

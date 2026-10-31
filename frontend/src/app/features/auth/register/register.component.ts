@@ -15,9 +15,11 @@ import {
   registerEmailIssue,
   registerNameIssue,
   registerPasswordIssue,
+  registerConfirmPasswordIssue,
   type RegisterEmailIssue,
   type RegisterNameIssue,
-  type RegisterPasswordIssue
+  type RegisterPasswordIssue,
+  type RegisterConfirmPasswordIssue
 } from './register-form.validation';
 
 const NAME_ERROR_KEYS: Record<RegisterNameIssue, TranslationKey> = {
@@ -37,6 +39,11 @@ const PASSWORD_ERROR_KEYS: Record<RegisterPasswordIssue, TranslationKey> = {
   uppercaseRequired: 'auth.la_contrasena_necesita_mayuscula',
   numberRequired: 'auth.la_contrasena_necesita_numero',
   tooLongBytes: 'auth.password_max_72_bytes'
+};
+
+const CONFIRM_PASSWORD_ERROR_KEYS: Record<RegisterConfirmPasswordIssue, TranslationKey> = {
+  required: 'auth.confirm_password_required',
+  mismatch: 'auth.confirm_password_mismatch'
 };
 
 @Component({
@@ -81,6 +88,18 @@ const PASSWORD_ERROR_KEYS: Record<RegisterPasswordIssue, TranslationKey> = {
         [maxLength]="passwordMaxLength"
         [error]="passwordError()"
         [helper]="'auth.requisitos_de_contrasena' | t"
+      ></app-input>
+
+      <app-input
+        id="confirm-password"
+        name="confirmPassword"
+        type="password"
+        [label]="'auth.confirm_password' | t"
+        placeholder="••••••••"
+        [(ngModel)]="confirmPassword"
+        [required]="true"
+        [maxLength]="passwordMaxLength"
+        [error]="confirmPasswordError()"
       ></app-input>
 
       <p class="register-form__note">
@@ -171,10 +190,12 @@ export class RegisterComponent {
   name = '';
   email = '';
   password = '';
+  confirmPassword = '';
   isLoading = signal(false);
   nameError = signal('');
   emailError = signal('');
   passwordError = signal('');
+  confirmPasswordError = signal('');
   readonly passwordMaxLength = MAX_BCRYPT_PASSWORD_BYTES;
 
   private redirectAfterAuth(): void {
@@ -206,6 +227,7 @@ export class RegisterComponent {
     this.nameError.set('');
     this.emailError.set('');
     this.passwordError.set('');
+    this.confirmPasswordError.set('');
 
     const nameIssue = registerNameIssue(this.name);
     if (nameIssue) {
@@ -222,6 +244,12 @@ export class RegisterComponent {
     const passwordIssue = registerPasswordIssue(this.password);
     if (passwordIssue) {
       this.passwordError.set(this.i18n.t(PASSWORD_ERROR_KEYS[passwordIssue]));
+      return;
+    }
+
+    const confirmPasswordIssue = registerConfirmPasswordIssue(this.confirmPassword, this.password);
+    if (confirmPasswordIssue) {
+      this.confirmPasswordError.set(this.i18n.t(CONFIRM_PASSWORD_ERROR_KEYS[confirmPasswordIssue]));
       return;
     }
 

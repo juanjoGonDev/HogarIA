@@ -33,7 +33,11 @@ test('rejects a static response that drops security headers', async () => {
   await assert.rejects(
     verifyStaticHeaders(
       'http://127.0.0.1:8080',
-      async () => new Response('', { status: 200, headers: { 'cache-control': 'no-cache' } })
+      async () =>
+        new Response('', {
+          status: 200,
+          headers: { 'cache-control': 'no-cache, no-store, must-revalidate' }
+        })
     ),
     /expected x-frame-options: SAMEORIGIN, received missing/
   );
@@ -51,7 +55,7 @@ test('rejects a static response with the wrong cache policy or status', async ()
         }
       })
     ),
-    /expected cache-control: no-cache/
+    /expected cache-control: no-cache, no-store, must-revalidate/
   );
 
   await assert.rejects(

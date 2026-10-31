@@ -107,6 +107,7 @@ test.describe('límite de bytes UTF-8 para contraseñas nuevas', () => {
         await page.locator('#name').fill('QA límite bcrypt');
         await page.locator('#email').fill(email);
         await page.locator('#password').fill(PASSWORD_AT_73_UTF8_BYTES);
+        await page.locator('#confirm-password').fill(PASSWORD_AT_73_UTF8_BYTES);
         await page.locator('#password').press('Enter');
 
         const passwordError = page.locator('#password-error');
@@ -126,6 +127,7 @@ test.describe('límite de bytes UTF-8 para contraseñas nuevas', () => {
     }
 
     await page.locator('#password').fill(PASSWORD_AT_72_UTF8_BYTES);
+    await page.locator('#confirm-password').fill(PASSWORD_AT_72_UTF8_BYTES);
     const responsePromise = page.waitForResponse(
       (response) =>
         response.request().method() === 'POST' && response.url().includes('/api/auth/register')

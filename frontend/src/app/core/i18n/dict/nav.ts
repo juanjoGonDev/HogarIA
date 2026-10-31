@@ -8,7 +8,6 @@
  */
 export const navEs = {
   'app.name': 'HogarIA',
-  'nav.ai-config': 'IA Config',
   'nav.calendar': 'Calendario',
   'nav.dashboard': 'Inicio',
   'nav.guest': 'Tu cuenta',
@@ -20,12 +19,11 @@ export const navEs = {
   'nav.recipes': 'Recetas',
   'nav.receipts': 'Tickets',
   'nav.settings': 'Configuración',
-  'nav.shopping': 'Compra',
+  'nav.shopping': 'Compra'
 } as const;
 
 export const navEn: Record<keyof typeof navEs, string> = {
   'app.name': 'HogarIA',
-  'nav.ai-config': 'AI Config',
   'nav.calendar': 'Calendar',
   'nav.dashboard': 'Home',
   'nav.guest': 'Your account',
@@ -37,5 +35,5 @@ export const navEn: Record<keyof typeof navEs, string> = {
   'nav.recipes': 'Recipes',
   'nav.receipts': 'Receipts',
   'nav.settings': 'Settings',
-  'nav.shopping': 'Shopping',
+  'nav.shopping': 'Shopping'
 };

@@ -3,6 +3,7 @@ import Database from 'better-sqlite3';
 import { resolve } from 'node:path';
 import { expect, test } from './fixtures';
 import { registerAndGoto } from './helpers/auth';
+import { mockAiFunctionAvailable } from './helpers/ai';
 
 declare global {
   interface Window {
@@ -51,6 +52,7 @@ function ticketState(receiptId: string) {
 test('arrastrar un PNG a la zona visible lo acepta una sola vez', async ({ page }, testInfo) => {
   const pageErrors: string[] = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
+  await mockAiFunctionAvailable(page, 'shopping_pantry');
   await registerAndGoto(page, '/receipts');
 
   const mobile = testInfo.project.name === 'mobile-chrome';

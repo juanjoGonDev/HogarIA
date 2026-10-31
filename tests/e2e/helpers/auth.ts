@@ -62,6 +62,7 @@ async function submitRegister(
   await form.fill(name);
   await page.fill('input#email', email);
   await page.fill('input#password', TEST_PASSWORD);
+  await page.fill('input#confirm-password', TEST_PASSWORD);
   await page.click('button[type="submit"]');
 
   const response = await pending;

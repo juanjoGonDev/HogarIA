@@ -26,6 +26,7 @@ async function fillValidRegistration(page: Page, name: string, email: string, pa
   await page.locator('#name').fill(name);
   await page.locator('#email').fill(email);
   await page.locator('#password').fill(password);
+  await page.locator('#confirm-password').fill(password);
 }
 
 function fieldError(page: Page, id: string) {

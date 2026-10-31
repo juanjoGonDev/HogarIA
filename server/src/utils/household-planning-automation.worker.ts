@@ -9,7 +9,7 @@ import type {
 } from '../schemas/household-planning-automation.schema.js';
 import type { HouseholdTaskOccurrence } from '../schemas/household-task.schema.js';
 import type { AiConfigRow, AiMessage } from './ai-client.js';
-import { AiCallError, activeAiConfigForScope, callAIWithConfig } from './ai-client.js';
+import { AiCallError, aiConfigForFunctionInScope, callAIWithConfig } from './ai-client.js';
 import {
   AutomatedHouseholdMealProposalError,
   generateAutomatedHouseholdMealProposal,
@@ -299,7 +299,7 @@ async function processClaimedRun(
       }
       const config = dependencies.provider
         ? undefined
-        : activeAiConfigForScope(db, authorizer, run.householdId);
+        : aiConfigForFunctionInScope(db, authorizer, run.householdId, 'household_automation');
       if (!dependencies.provider && !config) {
         throw new AiCallError(
           'NO_CONFIG',

@@ -45,11 +45,12 @@ export const logsEs = {
   'logs.estado_reintentando': 'Reintentando',
   'logs.estado_reintentando_en': 'Reintentando en {seconds} s',
   'logs.estado_sinConexion': 'Sin conexion',
-  'logs.runtime_uptime_label': 'Servidor encendido',
-  'logs.runtime_image_revision_label': 'Imagen GHCR',
-  'logs.runtime_loading': 'Cargando estado del servidor…',
-  'logs.runtime_unavailable': 'No se pudieron cargar los datos del servidor.',
-  'logs.runtime_retry': 'Reintentar'
+  'logs.runtime_info': 'Estado del servidor',
+  'logs.server_uptime': 'Tiempo encendido',
+  'logs.image_ref': 'Imagen GHCR',
+  'logs.runtime_loading': 'Cargando…',
+  'logs.runtime_unavailable': 'No disponible',
+  'logs.image_local': 'Build local (sin etiqueta GHCR)'
 } as const;
 
 export const logsEn: Record<keyof typeof logsEs, string> = {
@@ -90,9 +91,10 @@ export const logsEn: Record<keyof typeof logsEs, string> = {
   'logs.estado_reintentando': 'Retrying',
   'logs.estado_reintentando_en': 'Retrying in {seconds} s',
   'logs.estado_sinConexion': 'Offline',
-  'logs.runtime_uptime_label': 'Server uptime',
-  'logs.runtime_image_revision_label': 'GHCR image',
-  'logs.runtime_loading': 'Loading server status…',
-  'logs.runtime_unavailable': 'Could not load server details.',
-  'logs.runtime_retry': 'Retry'
+  'logs.runtime_info': 'Server status',
+  'logs.server_uptime': 'Server uptime',
+  'logs.image_ref': 'GHCR image',
+  'logs.runtime_loading': 'Loading…',
+  'logs.runtime_unavailable': 'Unavailable',
+  'logs.image_local': 'Local build (no GHCR tag)'
 };

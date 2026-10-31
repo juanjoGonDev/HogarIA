@@ -13,6 +13,7 @@ test.describe('Household sharing & invite flow', () => {
     await page.fill('input#name', 'Homeowner');
     await page.fill('input#email', email);
     await page.fill('input#password', 'Test1234');
+    await page.fill('input#confirm-password', 'Test1234');
     await page.click('button[type="submit"]');
     await skipOnboarding(page);
 
@@ -224,6 +225,7 @@ test.describe('Household sharing & invite flow', () => {
     await ownerPage.fill('input#name', 'Owner');
     await ownerPage.fill('input#email', email);
     await ownerPage.fill('input#password', 'Test1234');
+    await ownerPage.fill('input#confirm-password', 'Test1234');
     await ownerPage.click('button[type="submit"]');
     await skipOnboarding(ownerPage);
     await ownerPage.goto('/household');

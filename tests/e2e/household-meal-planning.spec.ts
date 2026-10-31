@@ -321,6 +321,7 @@ async function registerWithoutAssumingOnboarding(
   await page.locator('input#name').fill(name);
   await page.locator('input#email').fill(`meal-proposal-${randomUUID()}@example.test`);
   await page.locator('input#password').fill('Test1234');
+  await page.locator('input#confirm-password').fill('Test1234');
   const responsePromise = page.waitForResponse((response) =>
     response.url().includes('/api/auth/register')
   );

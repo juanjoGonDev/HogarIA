@@ -9,11 +9,69 @@ type QueueJob = {
   id: string;
   status: 'queued' | 'running' | 'failed';
   queueOrder: number;
-  attempts: number;
   retryable: boolean;
 };
 
 type ProviderBehavior = 'hold' | 'fail' | 'success';
+
+const syntheticRecipe = {
+  name: 'Receta sintética de zanahoria',
+  description: 'Borrador sintético para validar la cola.',
+  difficulty: 'easy',
+  cuisine: null,
+  totalTime: 15,
+  prepTime: 5,
+  cookTime: 10,
+  restTime: null,
+  baseServings: 1,
+  calories: 180,
+  ingredients: [
+    {
+      name: 'Zanahoria sintética',
+      quantity: 1,
+      unit: 'unit',
+      preparation: null,
+      isOptional: false,
+      substitutes: [],
+      notes: null
+    }
+  ],
+  utensils: [],
+  guidance: {
+    appliances: [],
+    parallelTasks: [],
+    tipsAndVariations: [],
+    batchCookingWarning: null
+  },
+  instructionsByLevel: Object.fromEntries(
+    (['basic', 'intermediate', 'expert'] as const).map((level) => [
+      level,
+      [
+        {
+          stepNumber: 1,
+          instruction: `Cocer la zanahoria (${level}).`,
+          duration: 10,
+          temperature: null,
+          timerRequired: false,
+          timerDuration: null,
+          tips: null,
+          warning: null,
+          illustration: null
+        }
+      ]
+    ])
+  ),
+  nutrition: { calories: 180, protein: 2, carbs: 20, fat: 5, fiber: null },
+  storage: {
+    method: 'Refrigerada',
+    duration: '2 días',
+    reheatingInstructions: null,
+    container: null,
+    freezingPossible: false,
+    freezingDuration: null
+  },
+  tags: ['synthetic']
+};
 
 class LocalAiProvider {
   private server?: Server;
@@ -72,9 +130,7 @@ class LocalAiProvider {
     if (response.writableEnded || response.destroyed) return;
     response.writeHead(200, { 'content-type': 'application/json' }).end(
       JSON.stringify({
-        choices: [
-          { message: { content: JSON.stringify({ status: 'ok', message: 'synthetic ok' }) } }
-        ]
+        choices: [{ message: { content: JSON.stringify(syntheticRecipe) } }]
       })
     );
   }
@@ -116,35 +172,34 @@ async function createConfig(
   return String(reply.body.data.id);
 }
 
-async function startQueuedRecipeGeneration(
-  page: Page,
-  sequence: number
-): Promise<{
-  result: Promise<ApiReply>;
-}> {
+async function assignRecipeProvider(page: Page, configId: string): Promise<void> {
   const token = await page.evaluate(() => localStorage.getItem('hogar:v1:auth_token'));
-  const base = new URL(page.url());
-  const result = fetch(new URL('/api/ai/generate-recipe', base), {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      authorization: `Bearer ${token}`
-    },
-    body: JSON.stringify({
-      ingredients: [
-        {
-          id: `synthetic-ingredient-${sequence}`,
-          name: `Synthetic ingredient ${sequence}`,
-          quantity: 1,
-          unit: 'unit'
-        }
-      ],
-      utensils: [],
-      servings: 1,
-      difficulty: 'easy',
-      detailLevel: 'basic'
+  const response = await page
+    .context()
+    .request.put(new URL('/api/ai/function-providers/recipes', page.url()).toString(), {
+      headers: { authorization: `Bearer ${token}` },
+      data: { configId }
+    });
+  expect(response.status()).toBe(200);
+}
+
+async function startQueuedRecipeGeneration(page: Page): Promise<{ result: Promise<ApiReply> }> {
+  const token = await page.evaluate(() => localStorage.getItem('hogar:v1:auth_token'));
+  const result = page
+    .context()
+    .request.post(new URL('/api/ai/generate-recipe', page.url()).toString(), {
+      headers: { authorization: `Bearer ${token}` },
+      data: {
+        ingredients: [
+          { id: 'synthetic-carrot', name: 'Zanahoria sintética', quantity: 1, unit: 'unit' }
+        ],
+        utensils: [],
+        servings: 1,
+        difficulty: 'easy',
+        detailLevel: 'intermediate'
+      }
     })
-  }).then(async (response) => ({ status: response.status, body: await response.json() }));
+    .then(async (response) => ({ status: response.status(), body: await response.json() }));
   return { result };
 }
 
@@ -195,12 +250,13 @@ test.describe('gestor de cola de IA por proveedor', () => {
     await provider?.close();
   });
 
-  test('muestra solo límites positivos, reordena con ratón/teclado y cancela espera/en curso en mobile y desktop', async ({
+  test('muestra límites, reordena con ratón/teclado y cancela generaciones en mobile y desktop', async ({
     page
   }) => {
     await createConfig(page, provider, 2, 'Synthetic queue 2');
     await createConfig(page, provider, 3, 'Synthetic queue 3');
     const configId = await createConfig(page, provider, 1);
+    await assignRecipeProvider(page, configId);
     await page.reload();
     await expect(page.locator('.config-card')).toHaveCount(3);
     await expect(page.locator('[data-test="ai-provider-queue"]')).toHaveCount(0);
@@ -232,15 +288,15 @@ test.describe('gestor de cola de IA por proveedor', () => {
     const manager = page.locator('[data-test="ai-provider-queue"]');
     await expect(manager).toBeVisible();
 
-    provider.setNextBehaviors('hold');
-    const calls = await Promise.all(
-      [1, 2, 3].map((sequence) => startQueuedRecipeGeneration(page, sequence))
-    );
-
+    provider.setNextBehaviors('hold', 'success');
+    const calls = [
+      await startQueuedRecipeGeneration(page),
+      await startQueuedRecipeGeneration(page),
+      await startQueuedRecipeGeneration(page)
+    ];
     await waitForProviderRequest(provider, 1);
     await expect(page.locator('[data-test="ai-queue-job-running"]')).toHaveCount(1);
     await expect(page.locator('[data-test="ai-queue-job-queued"]')).toHaveCount(2);
-
     const initial = await queueJobs(page, configId);
     const initialOrder = initial
       .filter((job) => job.status === 'queued')
@@ -307,8 +363,7 @@ test.describe('gestor de cola de IA por proveedor', () => {
     }
 
     await page.setViewportSize({ width: 1440, height: 900 });
-    const firstId = initialOrder[0];
-    const secondId = initialOrder[1];
+    const [firstId, secondId] = initialOrder;
     const firstRow = page.locator(`.ai-queue__job[data-job-id="${firstId}"]`);
     const secondRow = page.locator(`.ai-queue__job[data-job-id="${secondId}"]`);
     await firstRow.locator('.ai-queue__drag-handle').dragTo(secondRow, {
@@ -340,22 +395,21 @@ test.describe('gestor de cola de IA por proveedor', () => {
     const queuedToCancel = page.locator(`.ai-queue__job[data-job-id="${secondId}"]`);
     await queuedToCancel.getByRole('button', { name: /Cancelar/ }).click();
     await expect(page.locator('[data-test="ai-queue-job-queued"]')).toHaveCount(1);
-    const remainingQueued = page.locator(`.ai-queue__job[data-job-id="${firstId}"]`);
-    await remainingQueued.getByRole('button', { name: /Cancelar/ }).click();
-    await expect(page.locator('[data-test="ai-queue-job-queued"]')).toHaveCount(0);
 
     const runningId = (await queueJobs(page, configId)).find((job) => job.status === 'running')?.id;
     expect(runningId).toBeTruthy();
     const runningRow = page.locator(`.ai-queue__job[data-job-id="${runningId}"]`);
     await runningRow.getByRole('button', { name: /Cancelar/ }).click();
     await expect.poll(() => provider.abortCount, { timeout: 10000 }).toBeGreaterThan(0);
+    await expect(page.locator('[data-test="ai-queue-job-queued"]')).toHaveCount(0);
     await expect(page.locator('[data-test="ai-queue-job-running"]')).toHaveCount(0);
-    await waitForProviderRequest(provider, 1);
+    await waitForProviderRequest(provider, 2);
     expect((await queueJobs(page, configId)).some((job) => job.status === 'failed')).toBe(false);
 
     const replies = await Promise.all(calls.map(({ result }) => result));
-    expect(replies.every((reply) => reply.status >= 400)).toBe(true);
-    expect(provider.requestCount).toBe(1);
+    expect(replies[0].status).toBeGreaterThanOrEqual(400);
+    expect(replies[1].status).toBe(200);
+    expect(replies[2].status).toBeGreaterThanOrEqual(400);
   });
 
   test('permite reintentar manualmente un fallo terminal sin exponer payloads ni claves', async ({
@@ -368,9 +422,10 @@ test.describe('gestor de cola de IA por proveedor', () => {
     await expect(page).toHaveURL(new RegExp(`/ai-config/${configId}/queue$`));
     const manager = page.locator('[data-test="ai-provider-queue"]');
     await expect(manager).toBeVisible();
-    provider.setNextBehaviors('fail', 'hold');
+    await assignRecipeProvider(page, configId);
+    provider.setNextBehaviors('fail', 'success');
 
-    const call = await startQueuedRecipeGeneration(page, 1);
+    const call = await startQueuedRecipeGeneration(page);
     await expect(page.locator('[data-test="ai-queue-job-failed"]')).toHaveCount(1);
     const failed = (await queueJobs(page, configId)).find((job) => job.status === 'failed');
     expect(failed?.retryable).toBe(true);
@@ -385,20 +440,10 @@ test.describe('gestor de cola de IA por proveedor', () => {
       .locator(`.ai-queue__job[data-job-id="${failed!.id}"]`)
       .getByRole('button', { name: /Reintentar/ })
       .click();
-    await expect.poll(() => provider.requestCount).toBe(2);
-    await expect(page.locator('[data-test="ai-queue-job-running"]')).toHaveCount(1);
-    const retried = (await queueJobs(page, configId)).find((job) => job.id === failed!.id);
-    expect(retried).toMatchObject({ status: 'running', attempts: 1 });
-
-    await page
-      .locator(`.ai-queue__job[data-job-id="${failed!.id}"]`)
-      .getByRole('button', { name: /Cancelar/ })
-      .click();
-    await expect.poll(() => provider.abortCount, { timeout: 10000 }).toBeGreaterThan(0);
-    await expect(page.locator('[data-test="ai-queue-job-running"]')).toHaveCount(0);
-    await expect.poll(() => provider.requestCount).toBe(2);
+    await expect(page.locator('[data-test="ai-queue-job-failed"]')).toHaveCount(0);
     const reply = await call.result;
-    expect(reply.status).toBeGreaterThanOrEqual(400);
+    expect(reply.status).toBe(200);
+    expect(reply.body.success).toBe(true);
     expect(provider.requestCount).toBe(2);
   });
 

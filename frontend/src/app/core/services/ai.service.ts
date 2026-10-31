@@ -5,14 +5,23 @@ import { environment } from '../../../environments/environment';
 import { SILENT_TOAST } from '../interceptors/error.interceptor';
 import {
   AIProviderConfig,
+  AiFunctionKey,
+  AiFunctionProviderAssignment,
   AIRecipeRequest,
   AIRecipeImproveRequest,
   AIRecipeImproveResponse,
   AIRecipeResponse,
-  AITestConnectionOutcome,
+  AITestConnectionResponse,
   AIReplacementCandidate,
   AIReplacementGuest
 } from '../../shared/models/ai-config.model';
+
+export interface AITestConnectionAccepted {
+  status: 'testing';
+  configId: string;
+}
+
+export type AITestConnectionOutcome = AITestConnectionResponse | AITestConnectionAccepted;
 
 @Injectable({
   providedIn: 'root'
@@ -30,6 +39,8 @@ export class AiService {
   private isImprovingRecipeSignal = signal(false);
   private generatedRecipeSignal = signal<AIRecipeResponse | null>(null);
   private generatedRecipesSignal = signal<AIRecipeResponse[]>([]);
+  private functionProvidersSignal = signal<AiFunctionProviderAssignment[]>([]);
+  private functionAssignmentGeneration = new Map<AiFunctionKey, number>();
 
   readonly configs = this.configsSignal.asReadonly();
   readonly configsLoading = this.configsLoadingSignal.asReadonly();
@@ -38,6 +49,7 @@ export class AiService {
   readonly isImprovingRecipe = this.isImprovingRecipeSignal.asReadonly();
   readonly generatedRecipe = this.generatedRecipeSignal.asReadonly();
   readonly generatedRecipes = this.generatedRecipesSignal.asReadonly();
+  readonly functionProviders = this.functionProvidersSignal.asReadonly();
 
   // ═══════════════════════════════════════════════════════════════
   // Configurations
@@ -45,6 +57,52 @@ export class AiService {
 
   loadConfigs(): void {
     this.loadConfigsSnapshot().subscribe();
+  }
+
+  loadFunctionProviders(): void {
+    this.loadFunctionProvidersSnapshot().subscribe();
+  }
+
+  loadFunctionProvidersSnapshot(): Observable<AiFunctionProviderAssignment[] | null> {
+    return this.http
+      .get<{ data?: AiFunctionProviderAssignment[] }>(`${this.apiUrl}/function-providers`, {
+        context: this.silentContext()
+      })
+      .pipe(
+        map((response) => (Array.isArray(response?.data) ? response.data : [])),
+        tap((assignments) => {
+          this.functionProvidersSignal.set(assignments);
+          this.syncConfigAssignments(assignments);
+        }),
+        catchError(() => of(null))
+      );
+  }
+
+  assignFunctionProvider(
+    functionKey: AiFunctionKey,
+    configId: string | null
+  ): Observable<AiFunctionProviderAssignment | null> {
+    const generation = (this.functionAssignmentGeneration.get(functionKey) ?? 0) + 1;
+    this.functionAssignmentGeneration.set(functionKey, generation);
+    return this.http
+      .put<{ data?: AiFunctionProviderAssignment }>(
+        `${this.apiUrl}/function-providers/${functionKey}`,
+        { configId },
+        { context: this.silentContext() }
+      )
+      .pipe(
+        map((response) => response?.data ?? null),
+        tap((assignment) => {
+          if (!assignment || this.functionAssignmentGeneration.get(functionKey) !== generation)
+            return;
+          this.functionProvidersSignal.update((items) => [
+            ...items.filter((item) => item.functionKey !== functionKey),
+            assignment
+          ]);
+          this.syncConfigAssignments(this.functionProvidersSignal());
+        }),
+        catchError(() => of(null))
+      );
   }
 
   /** Return the scoped provider list to callers that must sequence work after its authorization. */
@@ -87,8 +145,7 @@ export class AiService {
             this.invalidateConfigLoads();
             this.configsSignal.update((list) => [...list, created]);
           }
-        }),
-        catchError(() => of(null))
+        })
       );
   }
 
@@ -103,8 +160,7 @@ export class AiService {
           this.configsSignal.update((list) =>
             list.map((current) => (current.id === id ? updated : current))
           );
-        }),
-        catchError(() => of(null))
+        })
       );
   }
 
@@ -136,10 +192,7 @@ export class AiService {
   }): Observable<AITestConnectionOutcome | null> {
     return this.http
       .post<any>(`${this.apiUrl}/test-connection`, params, { context: this.silentContext() })
-      .pipe(
-        map((response) => (response as { data?: AITestConnectionOutcome })?.data ?? null),
-        catchError(() => of(null))
-      );
+      .pipe(map((response) => (response as { data?: AITestConnectionOutcome })?.data ?? null));
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -238,5 +291,19 @@ export class AiService {
   private invalidateConfigLoads(): void {
     this.configLoadGeneration += 1;
     this.configsLoadingSignal.set(false);
+  }
+
+  private syncConfigAssignments(assignments: AiFunctionProviderAssignment[]): void {
+    const byConfig = new Map<string, AiFunctionKey[]>();
+    for (const assignment of assignments) {
+      if (!assignment.configId) continue;
+      byConfig.set(assignment.configId, [
+        ...(byConfig.get(assignment.configId) ?? []),
+        assignment.functionKey
+      ]);
+    }
+    this.configsSignal.update((configs) =>
+      configs.map((config) => ({ ...config, assignedFunctions: byConfig.get(config.id) ?? [] }))
+    );
   }
 }

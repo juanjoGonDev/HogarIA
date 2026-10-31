@@ -8,6 +8,9 @@ const publish = readFileSync(
   'utf8'
 );
 const dockerfile = readFileSync(new URL('../Dockerfile', import.meta.url), 'utf8');
+const ngswConfig = JSON.parse(
+  readFileSync(new URL('../frontend/ngsw-config.json', import.meta.url), 'utf8')
+);
 
 function block(source, startPattern, nextTopLevelPattern) {
   const start = source.search(startPattern);
@@ -52,8 +55,6 @@ test('compiles once natively and installs native production modules for the imag
   );
   assert.match(dockerfile, /pnpm --filter @hogaria\/server --prod deploy --legacy/);
   assert.match(dockerfile, /COPY --from=runtime-deps \/prod\/server\/node_modules/);
-  assert.match(dockerfile, /ARG HOGARIA_IMAGE_REVISION=dev/);
-  assert.match(dockerfile, /ENV HOGARIA_IMAGE_REVISION=\$HOGARIA_IMAGE_REVISION/);
   assert.match(dockerfile, /HEALTHCHECK[\s\S]*curl -f http:\/\/localhost:3000\/health/);
 });
 
@@ -74,7 +75,11 @@ test('publishes GHCR manifests from native architecture builds on the default br
   assert.match(build, /docker\/login-action@v4/);
   assert.match(build, /docker\/build-push-action@v7/);
   assert.match(build, /platforms:\s*\$\{\{ matrix\.platform \}\}/);
-  assert.match(build, /HOGARIA_IMAGE_REVISION=\$\{\{ github\.sha \}\}/);
+  assert.match(
+    build,
+    /APP_IMAGE_REF=\$\{\{ steps\.image\.outputs\.name \}\}:\$\{\{ github\.sha \}\}/
+  );
+  assert.match(build, /org\.opencontainers\.image\.version=\$\{\{ github\.sha \}\}/);
   assert.match(build, /:\$\{\{ github\.sha \}\}-\$\{\{ matrix\.arch \}\}/);
   assert.match(build, /org\.opencontainers\.image\.revision=\$\{\{ github\.sha \}\}/);
   assert.match(build, /push:\s*true/);
@@ -113,8 +118,25 @@ test('publishes GHCR manifests from native architecture builds on the default br
   assert.match(smoke, /runs-on:\s*\$\{\{ matrix\.runner \}\}/);
   assert.match(smoke, /packages:\s*read/);
   assert.match(smoke, /docker pull --platform "\$PLATFORM"/);
-  assert.match(smoke, /EXPECTED_IMAGE_REVISION:\s*\$\{\{ github\.sha \}\}/);
+  assert.match(
+    smoke,
+    /EXPECTED_IMAGE_REF:\s*\$\{\{ steps\.image\.outputs\.name \}\}:\$\{\{ github\.sha \}\}/
+  );
   assert.match(smoke, /scripts\/container-smoke\.mjs/);
   assert.match(smoke, /docker inspect --format='\{\{\.State\.Health\.Status\}\}'/);
   assert.doesNotMatch(publish, /pull_request_target/);
+});
+
+test('builds local images with an explicit unpublished runtime image reference', () => {
+  assert.match(dockerfile, /^ARG APP_IMAGE_REF=local-unpublished$/m);
+  assert.match(dockerfile, /^ENV APP_IMAGE_REF=\$\{APP_IMAGE_REF\}$/m);
+  assert.match(dockerfile, /^LABEL org\.opencontainers\.image\.version=\$\{APP_IMAGE_REF\}$/m);
+});
+
+test('does not service-worker-cache live health metadata', () => {
+  const apiReads = ngswConfig.dataGroups.find((group) => group.name === 'api-reads');
+
+  assert.ok(apiReads, 'api-reads data group exists');
+  assert.ok(apiReads.urls.includes('/api/preferences'));
+  assert.ok(!apiReads.urls.includes('/api/health'));
 });

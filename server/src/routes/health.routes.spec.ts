@@ -1,34 +1,32 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { healthRoutes } from './health.routes.js';
 
-describe('health runtime metadata', () => {
-  afterEach(() => vi.unstubAllEnvs());
+const originalImageRef = process.env.APP_IMAGE_REF;
 
-  it('exposes the container image revision separately from the app version', async () => {
-    vi.stubEnv('HOGARIA_IMAGE_REVISION', '0123456789abcdef');
+afterEach(() => {
+  if (originalImageRef === undefined) delete process.env.APP_IMAGE_REF;
+  else process.env.APP_IMAGE_REF = originalImageRef;
+});
+
+describe('health route runtime metadata', () => {
+  it('returns process uptime and the exact published image ref without caching it', async () => {
+    process.env.APP_IMAGE_REF = 'ghcr.io/juanjoGonDev/hogaria:abc123';
 
     const response = await healthRoutes.request('/');
-    const body = (await response.json()) as {
-      version: string;
-      imageRevision: string;
-      uptime: number;
-    };
+    const body = (await response.json()) as { uptime: number; imageRef: string };
 
     expect(response.status).toBe(200);
-    expect(body).toMatchObject({
-      version: '1.0.0',
-      imageRevision: '0123456789abcdef'
-    });
-    expect(body.uptime).toEqual(expect.any(Number));
+    expect(response.headers.get('cache-control')).toBe('no-store');
     expect(body.uptime).toBeGreaterThanOrEqual(0);
+    expect(body.imageRef).toBe('ghcr.io/juanjoGonDev/hogaria:abc123');
   });
 
-  it('uses an explicit dev revision when the image build arg is absent or blank', async () => {
-    vi.stubEnv('HOGARIA_IMAGE_REVISION', '   ');
+  it('labels an unset image ref as local and unpublished', async () => {
+    delete process.env.APP_IMAGE_REF;
 
     const response = await healthRoutes.request('/');
-    const body = (await response.json()) as { imageRevision: string };
+    const body = (await response.json()) as { imageRef: string };
 
-    expect(body.imageRevision).toBe('dev');
+    expect(body.imageRef).toBe('local-unpublished');
   });
 });

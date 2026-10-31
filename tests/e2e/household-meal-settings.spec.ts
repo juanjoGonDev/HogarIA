@@ -11,6 +11,7 @@ async function registerForHousehold(page: Page): Promise<void> {
   await page.locator('input#name').fill('Miembro sintético planificación');
   await page.locator('input#email').fill(`meal-planning-${randomUUID()}@example.test`);
   await page.locator('input#password').fill('Test1234');
+  await page.locator('input#confirm-password').fill('Test1234');
   const registration = page.waitForResponse((response) =>
     response.url().includes('/api/auth/register')
   );

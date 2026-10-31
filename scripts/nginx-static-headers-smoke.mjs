@@ -9,10 +9,11 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 export const STATIC_HEADER_CASES = [
-  { path: '/index.html', cacheControl: 'no-cache' },
-  { path: '/ngsw.json', cacheControl: 'no-cache' },
-  { path: '/ngsw-worker.js', cacheControl: 'no-cache' },
-  { path: '/manifest.json', cacheControl: 'no-cache' },
+  { path: '/index.html', cacheControl: 'no-cache, no-store, must-revalidate' },
+  { path: '/ngsw.json', cacheControl: 'no-cache, no-store, must-revalidate' },
+  { path: '/ngsw-worker.js', cacheControl: 'no-cache, no-store, must-revalidate' },
+  { path: '/safety-worker.js', cacheControl: 'no-cache, no-store, must-revalidate' },
+  { path: '/manifest.json', cacheControl: 'no-cache, no-store, must-revalidate' },
   { path: '/main-ABCDEFGH.js', cacheControl: 'public, max-age=31536000, immutable' }
 ];
 
@@ -110,6 +111,7 @@ async function runSmoke() {
     writeFileSync(join(staticDirectory, 'index.html'), '<!doctype html><html></html>\n');
     writeFileSync(join(staticDirectory, 'ngsw.json'), '{}\n');
     writeFileSync(join(staticDirectory, 'ngsw-worker.js'), '/* synthetic worker */\n');
+    writeFileSync(join(staticDirectory, 'safety-worker.js'), '/* synthetic safety worker */\n');
     writeFileSync(join(staticDirectory, 'manifest.json'), '{}\n');
     writeFileSync(join(staticDirectory, 'main-ABCDEFGH.js'), 'globalThis.nginxSmoke = true;\n');
 

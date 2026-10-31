@@ -198,7 +198,7 @@ export function describeIssues(error: z.ZodError): {
     field: issue.path.length ? issue.path.join('.') : '',
     // Los mensajes de los helpers de arriba ya estan en espanol; solo se traducen los que zod
     // pone por su cuenta (los de `.min()`/`.max()` sin mensaje propio y los de tipo).
-    message: translate(issue.message)
+    message: translateIssue(issue)
   }));
   const first = issues[0];
   return {
@@ -221,6 +221,52 @@ const TRANSLATIONS: [RegExp, string][] = [
   [/Invalid email/, 'el correo no tiene formato valido'],
   [/unrecognized_keys/i, 'hay campos que no van aqui']
 ];
+
+function translateIssue(issue: z.ZodIssue): string {
+  // Zod 4 conserva el límite como dato estructurado. No reducir «<= 600000» a «demasiado
+  // largo»: ese mensaje no permite corregir el formulario sin adivinar el valor admitido.
+  if (issue.code === 'too_big' && /^Too big/i.test(issue.message)) {
+    const maximum = new Intl.NumberFormat('es-ES').format(issue.maximum);
+    if (issue.origin === 'number' || issue.origin === 'int') {
+      return issue.inclusive === false
+        ? `debe ser menor que ${maximum}`
+        : `debe ser como máximo ${maximum}`;
+    }
+    if (issue.origin === 'string') {
+      return issue.inclusive === false
+        ? `debe tener menos de ${maximum} caracteres`
+        : `no puede superar ${maximum} caracteres`;
+    }
+    if (issue.origin === 'array' || issue.origin === 'set') {
+      return issue.inclusive === false
+        ? `debe contener menos de ${maximum} elementos`
+        : `no puede contener más de ${maximum} elementos`;
+    }
+    return `no puede superar ${maximum}`;
+  }
+
+  if (issue.code === 'too_small' && /^Too small/i.test(issue.message)) {
+    const minimum = new Intl.NumberFormat('es-ES').format(issue.minimum);
+    if (issue.origin === 'number' || issue.origin === 'int') {
+      return issue.inclusive === false
+        ? `debe ser mayor que ${minimum}`
+        : `debe ser como mínimo ${minimum}`;
+    }
+    if (issue.origin === 'string') {
+      return issue.inclusive === false
+        ? `debe tener más de ${minimum} caracteres`
+        : `debe tener al menos ${minimum} caracteres`;
+    }
+    if (issue.origin === 'array' || issue.origin === 'set') {
+      return issue.inclusive === false
+        ? `debe contener más de ${minimum} elementos`
+        : `debe contener al menos ${minimum} elementos`;
+    }
+    return `debe ser como mínimo ${minimum}`;
+  }
+
+  return translate(issue.message);
+}
 
 function translate(message: string): string {
   for (const [pattern, replacement] of TRANSLATIONS) {

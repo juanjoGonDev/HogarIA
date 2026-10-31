@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { expect } from '@playwright/test';
 import type { Page, TestInfo } from '@playwright/test';
 import { test } from './fixtures';
+import { mockAiFunctionAvailable } from './helpers/ai';
 import { registerAndGoto } from './helpers/auth';
 
 /**
@@ -270,12 +271,23 @@ test.describe('las caducidades de la despensa (## 12ak)', () => {
     await page.locator('[data-test="cad-orden-nombre"]').click();
     await expect(filaDe(page).nth(0)).toContainText('Yogur natural');
 
-    // «Estimar» sin IA configurada: la quinoa no esta en el catalogo, asi que el server dice
-    // NO_CONFIG y la pantalla lo traduce —configura la IA—, no un error generico.
+    // Sin proveedor, la petición se detiene en cliente y abre el acceso a ajustes.
+    let estimateRequests = 0;
+    page.on('request', (request) => {
+      if (request.url().endsWith('/api/pantry/expiry/estimate') && request.method() === 'POST') {
+        estimateRequests += 1;
+      }
+    });
     await page.locator('[data-test="cad-estimar"]').click();
-    await expect(page.locator('[data-test="cad-error"]')).toContainText('Falta configurar la IA');
+    const setupDialog = page.getByRole('dialog', { name: 'Configura la IA' });
+    await expect(setupDialog).toBeVisible();
+    await expect(setupDialog).toContainText('Compra y despensa');
+    expect(estimateRequests).toBe(0);
+    await setupDialog.getByRole('button', { name: 'Cancelar' }).click();
 
     // El aviso del planificador (## 12ak en /calendar): lo que caduca en 7 dias, a la vista.
+    await mockAiFunctionAvailable(page, 'planning');
+    await page.reload();
     await page.goto('/calendar');
     await page.getByRole('button', { name: /Planificar IA/ }).click();
     await expect(page.locator('[data-test="gen-caducidades"]')).toContainText('Yogur natural');

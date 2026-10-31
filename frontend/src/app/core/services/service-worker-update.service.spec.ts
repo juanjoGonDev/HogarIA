@@ -95,7 +95,7 @@ describe('ServiceWorkerUpdateService', () => {
     expect(service.updateAvailable()).toBeTrue();
   });
 
-  it('keeps the update notice when the worker declines activation', async () => {
+  it('reloads if another tab already activated the latest version', async () => {
     const service = TestBed.inject(ServiceWorkerUpdateService);
     versionEvents.next({
       type: 'VERSION_READY',
@@ -106,9 +106,9 @@ describe('ServiceWorkerUpdateService', () => {
 
     await service.activateUpdateAndReload();
 
-    expect(reload).not.toHaveBeenCalled();
-    expect(service.updateAvailable()).toBeTrue();
-    expect(service.activationFailed()).toBeTrue();
+    expect(reload).toHaveBeenCalledOnceWith();
+    expect(service.updateAvailable()).toBeFalse();
+    expect(service.activationFailed()).toBeFalse();
   });
 
   it('does not notify when service workers are disabled', () => {

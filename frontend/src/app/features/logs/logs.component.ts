@@ -9,10 +9,8 @@ import {
   ViewChild,
   computed
 } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { catchError, finalize, map, of } from 'rxjs';
 import { clientTimeZone, formatTimePrecise, timeZoneLabel } from '../../core/time';
 import { ClipboardService } from '../../core/services/clipboard.service';
 import { LogService, LogEntry, LogLevel, LogSource } from '../../core/services/log.service';
@@ -28,11 +26,6 @@ interface FilterOption<T extends string> {
   value: T;
   /** Clave del diccionario: lo que se pinta depende del idioma, y el catalogo no lo puede saber. */
   labelKey: TranslationKey;
-}
-
-interface RuntimeMetadata {
-  uptime: number;
-  imageRevision: string;
 }
 
 @Component({
@@ -148,37 +141,16 @@ interface RuntimeMetadata {
         </div>
       </div>
 
-      <section class="logs-runtime" [attr.aria-busy]="runtimeLoading()" data-test="logs-runtime">
-        @if (runtimeLoading()) {
-          <p role="status" data-test="logs-runtime-loading">{{ 'logs.runtime_loading' | t }}</p>
-        }
-        @if (runtimeError()) {
-          <div class="logs-runtime__error" role="alert">
-            <span>{{ 'logs.runtime_unavailable' | t }}</span>
-            <app-button
-              variant="ghost"
-              size="sm"
-              type="button"
-              (onClick)="loadRuntimeMetadata()"
-              data-test="logs-runtime-retry"
-            >
-              {{ 'logs.runtime_retry' | t }}
-            </app-button>
-          </div>
-        }
-        @if (runtimeInfo(); as runtime) {
-          <dl class="logs-runtime__items">
-            <div class="logs-runtime__item">
-              <dt>{{ 'logs.runtime_uptime_label' | t }}</dt>
-              <dd data-test="logs-runtime-uptime">{{ formatUptime(runtime.uptime) }}</dd>
-            </div>
-            <div class="logs-runtime__item">
-              <dt>{{ 'logs.runtime_image_revision_label' | t }}</dt>
-              <dd data-test="logs-runtime-revision"><code [title]="runtime.imageRevision">{{ runtime.imageRevision }}</code></dd>
-            </div>
-          </dl>
-        }
-      </section>
+      <dl class="logs-runtime" [attr.aria-label]="'logs.runtime_info' | t" data-test="logs-runtime">
+        <div class="logs-runtime__item">
+          <dt>{{ 'logs.server_uptime' | t }}</dt>
+          <dd data-test="logs-server-uptime" aria-live="off">{{ runtimeUptimeLabel() }}</dd>
+        </div>
+        <div class="logs-runtime__item">
+          <dt>{{ 'logs.image_ref' | t }}</dt>
+          <dd data-test="logs-image-ref"><code>{{ runtimeImageLabel() }}</code></dd>
+        </div>
+      </dl>
 
       <!-- Terminal -->
       <div class="terminal" #terminalEl>
@@ -285,43 +257,38 @@ interface RuntimeMetadata {
     .logs-runtime {
       display: flex;
       flex-wrap: wrap;
-      align-items: center;
-      gap: var(--space-3);
-      padding: var(--space-2) var(--space-3);
-      border: 1px solid var(--border-default);
-      border-radius: var(--radius-md);
-      background: var(--bg-secondary);
-      color: var(--text-secondary);
-      font-size: var(--text-sm);
-    }
-
-    .logs-runtime p { margin: 0; }
-
-    .logs-runtime__items {
-      display: flex;
-      flex-wrap: wrap;
-      gap: var(--space-4);
+      gap: var(--space-2);
       margin: 0;
     }
 
     .logs-runtime__item {
       display: flex;
-      flex-wrap: wrap;
+      flex: 1 1 15rem;
       align-items: baseline;
       gap: var(--space-2);
       min-width: 0;
+      padding: var(--space-2) var(--space-3);
+      border: 1px solid var(--border-default);
+      border-radius: var(--radius-md);
+      background: var(--bg-secondary);
+      font-size: var(--text-xs);
     }
 
-    .logs-runtime__item dt { color: var(--text-tertiary); }
-    .logs-runtime__item dd { margin: 0; color: var(--text-primary); }
-    .logs-runtime__item code { overflow-wrap: anywhere; }
+    .logs-runtime__item dt {
+      flex: 0 0 auto;
+      color: var(--text-tertiary);
+    }
 
-    .logs-runtime__error {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: var(--space-2);
-      color: var(--error);
+    .logs-runtime__item dd {
+      min-width: 0;
+      margin: 0;
+      color: var(--text-primary);
+      font-weight: var(--font-medium);
+      overflow-wrap: anywhere;
+    }
+
+    .logs-runtime__item code {
+      font: inherit;
     }
 
     .logs-only-errors {
@@ -567,17 +534,35 @@ interface RuntimeMetadata {
 export class LogsComponent implements OnInit, OnDestroy, AfterViewChecked {
   private readonly i18n = inject(I18nService);
   private readonly clipboardService = inject(ClipboardService);
-  private readonly http = inject(HttpClient);
   logService = inject(LogService);
   private toastService = inject(ToastService);
   private confirmService = inject(ConfirmService);
 
-  runtimeInfo = signal<RuntimeMetadata | null>(null);
-  runtimeLoading = signal(false);
-  runtimeError = signal(false);
-  private runtimeRefreshTimer: ReturnType<typeof setInterval> | null = null;
-
   @ViewChild('bodyEl') bodyEl!: ElementRef<HTMLDivElement>;
+
+  private readonly nowMs = signal(Date.now());
+  private uptimeTimer?: number;
+  private lastRuntimeRefresh = 0;
+
+  runtimeUptimeLabel = computed(() => {
+    const runtime = this.logService.runtimeInfo();
+    if (!runtime) {
+      return this.i18n.t(
+        this.logService.runtimeInfoStatus() === 'loading'
+          ? 'logs.runtime_loading'
+          : 'logs.runtime_unavailable'
+      );
+    }
+
+    const elapsed = Math.max(0, Math.floor((this.nowMs() - runtime.observedAt) / 1000));
+    return this.formatUptime(runtime.uptimeSeconds + elapsed);
+  });
+
+  runtimeImageLabel = computed(() => {
+    const imageRef = this.logService.runtimeInfo()?.imageRef;
+    if (!imageRef) return this.i18n.t('logs.runtime_unavailable');
+    return imageRef === 'local-unpublished' ? this.i18n.t('logs.image_local') : imageRef;
+  });
 
   /**
    * Los dos filtros de la barra. `labelKey`, no `label`: un catalogo con la frase dentro se pinta tal cual en
@@ -738,66 +723,23 @@ export class LogsComponent implements OnInit, OnDestroy, AfterViewChecked {
     this.logService.connect();
   }
 
-  loadRuntimeMetadata(): void {
-    if (this.runtimeLoading()) return;
-    this.runtimeLoading.set(true);
-    this.runtimeError.set(false);
-
-    this.http
-      .get<unknown>('/health')
-      .pipe(
-        map((payload): RuntimeMetadata => {
-          if (
-            !payload ||
-            typeof payload !== 'object' ||
-            !Number.isFinite((payload as { uptime?: unknown }).uptime) ||
-            typeof (payload as { imageRevision?: unknown }).imageRevision !== 'string' ||
-            !(payload as { imageRevision: string }).imageRevision.trim()
-          ) {
-            throw new Error('Invalid health metadata');
-          }
-          return {
-            uptime: Math.max(0, Math.floor((payload as { uptime: number }).uptime)),
-            imageRevision: (payload as { imageRevision: string }).imageRevision.trim()
-          };
-        }),
-        catchError(() => {
-          this.runtimeError.set(true);
-          return of(null);
-        }),
-        finalize(() => this.runtimeLoading.set(false))
-      )
-      .subscribe((runtime) => {
-        if (runtime) this.runtimeInfo.set(runtime);
-      });
-  }
-
-  formatUptime(seconds: number): string {
-    let remaining = Math.max(0, Math.floor(Number.isFinite(seconds) ? seconds : 0));
-    const days = Math.floor(remaining / 86_400);
-    remaining %= 86_400;
-    const hours = Math.floor(remaining / 3_600);
-    remaining %= 3_600;
-    const minutes = Math.floor(remaining / 60);
-    const secondsPart = remaining % 60;
-    const parts = [
-      days > 0 ? `${days}d` : '',
-      hours > 0 ? `${hours}h` : '',
-      minutes > 0 ? `${minutes}m` : '',
-      secondsPart > 0 ? `${secondsPart}s` : ''
-    ].filter(Boolean);
-    return parts.length ? parts.join(' ') : '0s';
-  }
-
   ngOnInit(): void {
     this.logService.connect();
-    this.loadRuntimeMetadata();
-    this.runtimeRefreshTimer = setInterval(() => this.loadRuntimeMetadata(), 60_000);
+    this.logService.loadRuntimeInfo();
+    this.lastRuntimeRefresh = Date.now();
+    this.uptimeTimer = window.setInterval(() => {
+      const now = Date.now();
+      this.nowMs.set(now);
+      if (now - this.lastRuntimeRefresh >= 30_000) {
+        this.lastRuntimeRefresh = now;
+        this.logService.loadRuntimeInfo();
+      }
+    }, 1000);
   }
 
   ngOnDestroy(): void {
     this.logService.disconnect();
-    if (this.runtimeRefreshTimer) clearInterval(this.runtimeRefreshTimer);
+    if (this.uptimeTimer !== undefined) window.clearInterval(this.uptimeTimer);
   }
 
   ngAfterViewChecked(): void {
@@ -853,5 +795,15 @@ export class LogsComponent implements OnInit, OnDestroy, AfterViewChecked {
 
   levelTag(level: string): string {
     return level.toUpperCase().slice(0, 5);
+  }
+
+  formatUptime(totalSeconds: number): string {
+    const safeSeconds = Math.max(0, Math.floor(totalSeconds));
+    const days = Math.floor(safeSeconds / 86_400);
+    const hours = Math.floor((safeSeconds % 86_400) / 3_600);
+    const minutes = Math.floor((safeSeconds % 3_600) / 60);
+    const seconds = safeSeconds % 60;
+    const pad = (value: number) => String(value).padStart(2, '0');
+    return `${days}d ${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
   }
 }

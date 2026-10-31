@@ -24,6 +24,7 @@ import { PageContainerComponent } from '../../shared/components/page-container/p
 import { HouseholdSwitcherComponent } from '../../shared/components/household-switcher.component';
 import { HouseholdPlanningAutomationNoticeComponent } from '../../shared/components/household-planning-automation-notice.component';
 import { AiActionAssistantLauncherComponent } from '../../shared/components/ai-action-assistant-launcher.component';
+import { AiProviderRequiredDialogComponent } from '../../shared/components/ai-provider-required-dialog.component';
 import { HouseholdService } from '../../core/services/household.service';
 import type { DrawerGestureSource } from './mobile-drawer-gesture.controller';
 import type { TranslationKey } from '../../core/i18n';
@@ -57,7 +58,8 @@ interface NavItem {
     PageContainerComponent,
     HouseholdSwitcherComponent,
     HouseholdPlanningAutomationNoticeComponent,
-    AiActionAssistantLauncherComponent
+    AiActionAssistantLauncherComponent,
+    AiProviderRequiredDialogComponent
   ],
   template: `
     <div class="layout">
@@ -210,6 +212,7 @@ interface NavItem {
     />
 
     <app-ai-action-assistant-launcher [householdId]="activeHouseholdId()" />
+    <app-ai-provider-required-dialog />
 
     <app-toast></app-toast>
     <app-confirm-dialog></app-confirm-dialog>
@@ -620,7 +623,6 @@ export class MainLayoutComponent implements OnInit, OnDestroy {
     { path: '/receipts', labelKey: 'nav.receipts', icon: 'receipt_long' },
     { path: '/household', labelKey: 'nav.household', icon: 'group' },
     { path: '/preferences', labelKey: 'nav.preferences', icon: 'person' },
-    { path: '/ai-config', labelKey: 'nav.ai-config', icon: 'smart_toy' },
     { path: '/logs', labelKey: 'nav.logs', icon: 'description' }
   ];
 
@@ -647,27 +649,12 @@ export class MainLayoutComponent implements OnInit, OnDestroy {
     );
   });
 
-  /** Personal mode stays available; inside a home, configuration requires that home's settings permission. */
-  readonly canManageAiSettings = computed(() => {
-    if (this.householdService.membershipsFailed()) return false;
-    const memberships = this.householdService.memberships();
-    if (memberships.length === 0) return true;
-    const activeId = this.householdService.activeHouseholdId();
-    return memberships.some(
-      (membership) => membership.id === activeId && membership.permissions?.settings === true
-    );
-  });
-
   /**
    * La navegacion deriva de los modulos: al activar o apagar uno en
    * Configuracion se repinta sola, sin recargar la pagina.
    */
   readonly visibleNavItems = computed(() =>
-    this.navItems.filter(
-      (item) =>
-        this.modules.isPathVisible(item.path) &&
-        (item.path !== '/ai-config' || this.canManageAiSettings())
-    )
+    this.navItems.filter((item) => this.modules.isPathVisible(item.path))
   );
   toggleSidebar(event: MouseEvent): void {
     const opening = !this.isSidebarOpen();

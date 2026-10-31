@@ -32,6 +32,18 @@ const outputDir = process.env.E2E_OUTPUT_DIR ?? join(isolation.runDir, 'artifact
 
 export default defineConfig({
   testDir: './tests/e2e/full-stack',
+  // The broad E2E suite runs in four dev-server shards. Keep this production-process
+  // gate focused on the build, provider routing, registration, rate limit, and SSE.
+  // Running all 178 desktop/mobile cases here exceeded the CI job's 30-minute limit.
+  testMatch: [
+    '**/ai-provider-settings.spec.ts',
+    '**/register-contract.spec.ts',
+    '**/rate-limit.spec.ts',
+    '**/request-budget.spec.ts',
+    '**/served-app.spec.ts',
+    '**/logs-live.spec.ts',
+    '**/service-worker-update.spec.ts'
+  ],
   // La misma semilla del run: el reporter y el backend tienen que ver lo mismo.
   globalSetup: './tests/e2e/global-setup.ts',
   fullyParallel: true,

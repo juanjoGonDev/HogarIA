@@ -510,7 +510,9 @@ export function createApp(options: AppOptions = {}): Hono {
         status: 200,
         headers: {
           'content-type': mimeFor(file),
-          'cache-control': immutable ? 'public, max-age=31536000, immutable' : 'no-cache'
+          'cache-control': immutable
+            ? 'public, max-age=31536000, immutable'
+            : 'no-cache, no-store, must-revalidate'
         }
       });
     });

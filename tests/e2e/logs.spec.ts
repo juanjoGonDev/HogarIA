@@ -1,7 +1,9 @@
+import { mkdirSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { test, expect } from './fixtures';
 import { registerAndGoto } from './helpers/auth';
-import { mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+
+const SCREENSHOT_DIR = resolve(process.env.E2E_SCREENSHOT_DIR ?? '.e2e-screenshots/logs-runtime');
 
 test.describe('Logs page', () => {
   test.beforeEach(async ({ page }) => {
@@ -25,52 +27,55 @@ test.describe('Logs page', () => {
     await expect(page.getByRole('button', { name: /Limpiar|Clear/ })).toBeVisible();
   });
 
-  test('shows synthetic server uptime and GHCR image revision accessibly', async ({
-    page
-  }, testInfo) => {
-    await page.route('**/health', (route) =>
-      route.fulfill({
-        json: {
-          status: 'ok',
-          timestamp: '2026-10-31T12:00:00.000Z',
-          uptime: 93_784,
-          version: '1.1.0',
-          imageRevision: '0123456789abcdef0123456789abcdef01234567'
-        }
-      })
-    );
-    await page.reload();
+  test('shows server uptime and the exact runtime image reference', async ({ page }) => {
+    const viewport =
+      test.info().project.name === 'chromium'
+        ? { width: 1440, height: 900 }
+        : { width: 393, height: 851 };
+    await page.setViewportSize(viewport);
 
-    await expect(page.locator('[data-test="logs-runtime-uptime"]')).toHaveText('1d 2h 3m 4s');
-    await expect(page.locator('[data-test="logs-runtime-revision"]')).toContainText(
-      '0123456789abcdef0123456789abcdef01234567'
+    const runtime = page.locator('[data-test="logs-runtime"]');
+    const uptime = page.locator('[data-test="logs-server-uptime"]');
+    const imageRef = page.locator('[data-test="logs-image-ref"]');
+    await expect(runtime).toBeVisible();
+    await expect(uptime).toHaveText(/\d+d \d{2}:\d{2}:\d{2}|No disponible|Unavailable/);
+    await expect(imageRef).toContainText(
+      /ghcr\.io\/|Build local \(sin etiqueta GHCR\)|Local build \(no GHCR tag\)/
     );
-    await expect(page.locator('[data-test="logs-runtime"]')).toHaveAttribute('aria-busy', 'false');
-
-    const screenshotDirectory = process.env.E2E_SCREENSHOT_DIR;
-    if (screenshotDirectory) {
-      const isMobile = testInfo.project.name === 'mobile-chrome';
-      mkdirSync(screenshotDirectory, { recursive: true });
-      await page.setViewportSize(
-        isMobile ? { width: 393, height: 852 } : { width: 1440, height: 900 }
-      );
-      await page.screenshot({
-        path: join(screenshotDirectory, `logs-runtime-${isMobile ? 'mobile' : 'desktop'}.png`),
-        animations: 'disabled'
-      });
+    if (process.env.E2E_EXPECTED_IMAGE_REF) {
+      await expect(imageRef).toContainText(process.env.E2E_EXPECTED_IMAGE_REF);
     }
 
-    if (testInfo.project.name === 'mobile-chrome') {
-      for (const viewport of [
-        { width: 320, height: 568 },
-        { width: 852, height: 393 }
-      ]) {
-        await page.setViewportSize(viewport);
-        const documentWidth = await page.evaluate(() => document.documentElement.scrollWidth);
-        expect(documentWidth).toBeLessThanOrEqual(viewport.width + 1);
-        await expect(page.locator('[data-test="logs-runtime-revision"]')).toBeVisible();
-      }
+    for (const size of [
+      { width: 320, height: 720 },
+      { width: 360, height: 800 },
+      { width: 393, height: 851 },
+      { width: 600, height: 800 },
+      { width: 601, height: 800 },
+      { width: 768, height: 900 },
+      { width: 851, height: 393 },
+      { width: 1023, height: 900 },
+      { width: 1024, height: 900 },
+      { width: 1440, height: 900 }
+    ]) {
+      await page.setViewportSize(size);
+      const box = await runtime.boundingBox();
+      expect(box, `runtime metadata visible at ${size.width} × ${size.height}`).not.toBeNull();
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(size.width);
+      expect(
+        await runtime.evaluate((element) => element.scrollWidth <= element.clientWidth),
+        `runtime metadata does not overflow at ${size.width} × ${size.height}`
+      ).toBe(true);
     }
+
+    await page.setViewportSize(viewport);
+
+    mkdirSync(SCREENSHOT_DIR, { recursive: true });
+    await runtime.screenshot({
+      path: join(SCREENSHOT_DIR, `${test.info().project.name}-runtime-info.png`),
+      animations: 'disabled'
+    });
   });
 
   test('should toggle pause and resume', async ({ page }) => {

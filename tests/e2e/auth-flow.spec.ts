@@ -10,6 +10,7 @@ test.describe('Authentication flow', () => {
     await page.fill('input#name', 'Auth Tester');
     await page.fill('input#email', email);
     await page.fill('input#password', 'Test1234');
+    await page.fill('input#confirm-password', 'Test1234');
     await page.click('button[type="submit"]');
     await skipOnboarding(page);
     await createHousehold(page, 'Hogar sintético de auth flow');
@@ -45,6 +46,7 @@ test.describe('Authentication flow', () => {
     await page.fill('input#name', 'Bad');
     await page.fill('input#email', email);
     await page.fill('input#password', 'Test1234');
+    await page.fill('input#confirm-password', 'Test1234');
     await page.click('button[type="submit"]');
     await skipOnboarding(page);
     await expect(page).toHaveURL(/\/household$/);

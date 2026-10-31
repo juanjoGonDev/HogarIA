@@ -31,6 +31,9 @@ describe('authMiddleware household setup gate', () => {
       await next();
     });
     app.get('/api/protected', authMiddleware, (context) => context.json({ success: true }));
+    app.get('/api/ai/availability', authMiddleware, (context) =>
+      context.json({ success: true, data: { hasActiveProvider: false } })
+    );
     app.get('/api/household/memberships', authMiddleware, (context) =>
       context.json({ success: true })
     );
@@ -98,6 +101,7 @@ describe('authMiddleware household setup gate', () => {
     const membershipsResponse = await productionApp.request('/api/household/memberships', {
       headers
     });
+    const availabilityResponse = await productionApp.request('/api/ai/availability', { headers });
 
     expect(protectedResponse.status).toBe(409);
     expect(await protectedResponse.json()).toMatchObject({
@@ -105,11 +109,17 @@ describe('authMiddleware household setup gate', () => {
       code: 'HOUSEHOLD_REQUIRED'
     });
     expect(membershipsResponse.status).toBe(200);
+    expect(availabilityResponse.status).toBe(200);
+    expect(await availabilityResponse.json()).toMatchObject({
+      success: true,
+      data: { hasActiveProvider: false, requiresHouseholdSelection: false }
+    });
   });
 
-  it('allows only household discovery/create/join endpoints during setup', async () => {
+  it('allows only household discovery, AI availability, create/join endpoints during setup', async () => {
     for (const [method, path] of [
       ['GET', '/api/household/memberships'],
+      ['GET', '/api/ai/availability'],
       ['POST', '/api/household'],
       ['POST', '/api/household/join']
     ]) {

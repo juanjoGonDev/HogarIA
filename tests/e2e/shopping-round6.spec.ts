@@ -587,25 +587,25 @@ test.describe('Cesta: iconos, oferta y descuento', () => {
     await page
       .locator('input[name="photoFile"]')
       .setInputFiles({ name: 'ticket.png', mimeType: 'image/png', buffer: png });
-    const photoResponsePromise = page.waitForResponse(
-      (response) =>
-        response.url().includes('/photo/analyze') && response.request().method() === 'POST'
-    );
+    let analyzeRequests = 0;
+    page.on('request', (request) => {
+      if (request.url().includes('/photo/analyze') && request.method() === 'POST') {
+        analyzeRequests += 1;
+      }
+    });
     await page.locator('[data-test="photo-analyze"]').click();
 
-    const photoResponse = await photoResponsePromise;
-    const photoBody = (await photoResponse.json()) as {
-      message?: string;
-      data?: { redirect?: string };
-    };
-    expect(photoResponse.status(), `photo error code: ${String(photoBody.message)}`).toBe(409);
-    expect(photoBody.message).toBe('AI_NOT_CONFIGURED');
-    expect(photoBody.data?.redirect).toBe('/ai-config');
-    await expect(page.locator('[data-test="photo-error"]')).toContainText(
-      /Falta configurar la IA/i
+    const setupDialog = page.getByRole('dialog', { name: 'Configura la IA' });
+    await expect(setupDialog).toBeVisible();
+    await expect(setupDialog).toContainText('Compra y despensa');
+    await expect(setupDialog.getByRole('link', { name: 'Abrir ajustes' })).toHaveAttribute(
+      'href',
+      '/household?tab=settings'
     );
-    await expect(page.locator('[data-test="photo-error"] a')).toHaveAttribute('href', '/ai-config');
     await expect(page.locator('[data-test="item-row"]')).toHaveCount(0);
+    expect(analyzeRequests).toBe(0);
+    await setupDialog.getByRole('button', { name: 'Cancelar' }).click();
+    await expect(setupDialog).toHaveCount(0);
   });
 });
 

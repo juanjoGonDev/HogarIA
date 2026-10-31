@@ -95,6 +95,55 @@ beforeEach(async () => {
 });
 
 describe('AI provider queue dispatcher', () => {
+  it('derives each job lease from its effective timeout plus a 60-second margin', async () => {
+    const { submitAiTask } = await import('./ticket-queue.js');
+    const { AI_JOB_LEASE_MARGIN_SECONDS, aiJobLeaseSeconds } = await import('./ai-timeout.js');
+    const timeoutMs = 900_123;
+    db.prepare('UPDATE ai_configs SET timeout = ? WHERE id = ?').run(timeoutMs, config.id);
+    config = db.prepare('SELECT * FROM ai_configs WHERE id = ?').get(config.id) as AiConfig;
+    const response = deferred<string>();
+    const job = submitAiTask({
+      db,
+      userId,
+      config,
+      kind: 'lease-boundary-test',
+      run: () => response.promise
+    });
+    await waitFor(() => jobRow(job.id).status === 'running');
+
+    const lease = db
+      .prepare(
+        'SELECT ROUND((julianday(lease_until) - julianday(started_at)) * 86400) AS seconds FROM ai_jobs WHERE id = ?'
+      )
+      .get(job.id) as { seconds: number };
+    expect(AI_JOB_LEASE_MARGIN_SECONDS).toBe(60);
+    expect(aiJobLeaseSeconds(timeoutMs)).toBe(Math.ceil(timeoutMs / 1000) + 60);
+    expect(lease.seconds).toBe(aiJobLeaseSeconds(timeoutMs));
+
+    response.resolve('done');
+    await expect(job.result).resolves.toBe('done');
+
+    const unsavedTimeoutMs = 1_800_123;
+    const unsavedResponse = deferred<string>();
+    const unsavedJob = submitAiTask({
+      db,
+      userId,
+      config: { ...config, id: 'unsaved-config', timeout: unsavedTimeoutMs },
+      configId: null,
+      kind: 'unsaved-lease-boundary-test',
+      run: () => unsavedResponse.promise
+    });
+    await waitFor(() => jobRow(unsavedJob.id).status === 'running');
+    const unsavedLease = db
+      .prepare(
+        'SELECT ROUND((julianday(lease_until) - julianday(started_at)) * 86400) AS seconds FROM ai_jobs WHERE id = ?'
+      )
+      .get(unsavedJob.id) as { seconds: number };
+    expect(unsavedLease.seconds).toBe(aiJobLeaseSeconds(unsavedTimeoutMs));
+    unsavedResponse.resolve('done');
+    await expect(unsavedJob.result).resolves.toBe('done');
+  });
+
   it('does not poll the idle database more than once in a short interval', async () => {
     const { ensureWorker, stopWorker } = await import('./ticket-queue.js');
     const prepare = vi.spyOn(db, 'prepare');
@@ -1118,6 +1167,13 @@ describe('AI provider queue dispatcher', () => {
       const jobId = encolarTicket(db, userId, receiptId);
       await providerStarted.promise;
       expect(jobRow(jobId)).toMatchObject({ status: 'running', attempts: 2 });
+      const { aiJobLeaseSeconds } = await import('./ai-timeout.js');
+      const receiptLease = db
+        .prepare(
+          'SELECT ROUND((julianday(lease_until) - julianday(started_at)) * 86400) AS seconds FROM ai_jobs WHERE id = ?'
+        )
+        .get(jobId) as { seconds: number };
+      expect(receiptLease.seconds).toBe(aiJobLeaseSeconds(config.timeout, 'receipt'));
       expect(db.prepare('SELECT status FROM receipts WHERE id = ?').get(receiptId)).toEqual({
         status: 'analyzing'
       });

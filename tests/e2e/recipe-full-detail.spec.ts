@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { expect, test } from './fixtures';
 import { registerWithHousehold } from './helpers/auth';
+import { mockAiFunctionAvailable } from './helpers/ai';
 import {
   createSyntheticRecipe,
   deleteSyntheticRecipe,
@@ -166,11 +167,14 @@ test('la ficha completa presenta detalle, ajusta raciones solo en pantalla y no 
       ? { width: 1440, height: 980 }
       : { width: 390, height: 844 };
   await page.setViewportSize(viewport);
+  await mockAiFunctionAvailable(page, 'assistant');
   await registerWithHousehold(page, '/recipes', 'recipe-full-detail');
   const recipe = await createSyntheticRecipe(page, fullRecipe);
   const aiRequests: string[] = [];
   page.on('request', (request) => {
-    if (request.url().includes('/api/ai/')) aiRequests.push(request.url());
+    if (request.method() === 'POST' && request.url().includes('/api/ai/')) {
+      aiRequests.push(request.url());
+    }
   });
 
   try {

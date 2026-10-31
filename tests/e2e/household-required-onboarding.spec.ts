@@ -52,6 +52,7 @@ async function registerAccount(page: Page, baseURL: string, inviteCode?: string)
   await page.fill('input#name', 'Usuario de pruebas');
   await page.fill('input#email', seededEmail());
   await page.fill('input#password', TEST_PASSWORD);
+  await page.fill('input#confirm-password', TEST_PASSWORD);
   await page.locator('button[type="submit"]').click();
 
   const response = await registrationResponse;
@@ -379,6 +380,7 @@ test.describe('Mandatory household setup after registration', () => {
     await page.locator('input#name').fill('Usuario de pruebas');
     await page.locator('input#email').fill(seededEmail());
     await page.locator('input#password').fill(TEST_PASSWORD);
+    await page.locator('input#confirm-password').fill(TEST_PASSWORD);
     const submit = page.locator('button[type="submit"]');
     const registrationResponse = page.waitForResponse(
       (response) =>
@@ -474,6 +476,7 @@ test.describe('Mandatory household setup after registration', () => {
       await memberPage.locator('input#name').fill('Invitado de pruebas');
       await memberPage.locator('input#email').fill(seededEmail());
       await memberPage.locator('input#password').fill(TEST_PASSWORD);
+      await memberPage.locator('input#confirm-password').fill(TEST_PASSWORD);
       await memberPage.locator('button[type="submit"]').click();
 
       expect((await registrationResponse).status()).toBe(201);

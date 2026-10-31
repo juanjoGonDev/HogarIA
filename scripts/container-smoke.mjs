@@ -29,7 +29,7 @@ async function request(fetcher, origin, pathname, init = {}) {
   });
 }
 
-async function assertHealthResponse(response, pathname, expectedImageRevision) {
+async function assertHealthResponse(response, pathname, expectedImageRef) {
   if (!response.ok) throw new Error(`GET ${pathname} returned HTTP ${response.status}`);
 
   let body;
@@ -45,19 +45,19 @@ async function assertHealthResponse(response, pathname, expectedImageRevision) {
     !['ok', 'warning', 'critical'].includes(body.status) ||
     !Number.isFinite(body.uptime) ||
     typeof body.version !== 'string' ||
-    typeof body.imageRevision !== 'string' ||
-    body.imageRevision.trim().length === 0
+    typeof body.imageRef !== 'string' ||
+    body.imageRef.trim().length === 0
   ) {
     throw new Error(`GET ${pathname} returned an invalid health payload`);
   }
-  if (expectedImageRevision && body.imageRevision !== expectedImageRevision) {
-    throw new Error(`GET ${pathname} image revision does not match the expected build revision`);
+  if (expectedImageRef && body.imageRef !== expectedImageRef) {
+    throw new Error(`GET ${pathname} image reference does not match the expected image ref`);
   }
 }
 
 async function waitForHealth(
   origin,
-  { fetcher, timeoutMs, pollIntervalMs, sleep, expectedImageRevision }
+  { fetcher, timeoutMs, pollIntervalMs, sleep, expectedImageRef }
 ) {
   const deadline = Date.now() + timeoutMs;
   let lastFailure = 'no response';
@@ -68,7 +68,7 @@ async function waitForHealth(
         headers: { accept: 'application/json' }
       });
       if (response.ok) {
-        await assertHealthResponse(response, '/health', expectedImageRevision);
+        await assertHealthResponse(response, '/health', expectedImageRef);
         return;
       }
       lastFailure = `HTTP ${response.status}`;
@@ -93,7 +93,7 @@ export async function verifyContainerSmoke(
     fetcher = globalThis.fetch,
     timeoutMs = DEFAULT_TIMEOUT_MS,
     pollIntervalMs = 500,
-    expectedImageRevision,
+    expectedImageRef,
     sleep = (durationMs) => new Promise((resolve) => setTimeout(resolve, durationMs))
   } = {}
 ) {
@@ -103,9 +103,9 @@ export async function verifyContainerSmoke(
   if (!Number.isFinite(pollIntervalMs) || pollIntervalMs < 0) {
     throw new Error('pollIntervalMs must be non-negative');
   }
-  const expectedRevision = expectedImageRevision?.trim();
-  if (expectedImageRevision !== undefined && !expectedRevision) {
-    throw new Error('expectedImageRevision must not be blank');
+  const expectedRef = expectedImageRef?.trim();
+  if (expectedImageRef !== undefined && !expectedRef) {
+    throw new Error('expectedImageRef must not be blank');
   }
 
   await waitForHealth(origin, {
@@ -113,14 +113,14 @@ export async function verifyContainerSmoke(
     timeoutMs,
     pollIntervalMs,
     sleep,
-    expectedImageRevision: expectedRevision
+    expectedImageRef: expectedRef
   });
   const checked = ['/health'];
 
   const apiHealth = await request(fetcher, origin, '/api/health', {
     headers: { accept: 'application/json' }
   });
-  await assertHealthResponse(apiHealth, '/api/health', expectedRevision);
+  await assertHealthResponse(apiHealth, '/api/health', expectedRef);
   checked.push('/api/health');
 
   const frontend = await request(fetcher, origin, '/', { headers: { accept: 'text/html' } });
@@ -155,7 +155,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   } else {
     try {
       const result = await verifyContainerSmoke(baseUrl, {
-        expectedImageRevision: process.env.EXPECTED_IMAGE_REVISION
+      expectedImageRef: process.env.EXPECTED_IMAGE_REF
       });
       console.log(`Container smoke passed: ${result.checked.join(', ')}`);
     } catch (error) {

@@ -285,11 +285,13 @@ Done in steps so nothing breaks under review:
 - **P2**: npm workspace package names (`@hogaria/web`, `@hogaria/server`) **together with**
   `.github/workflows/ci.yml` (`pnpm --filter …`), `Makefile`, `scripts/*`, `playwright.config.ts`
   and `Dockerfile*` — one atomic commit, because CI filters break silently.
-- **P3**: repo rename is the user's click (GitHub settings); the app must not assume its own URL —
-  `supportRepoUrl` in Settings covers it, and `gh` in CI is the only thing that needs the new name.
+- **P3 (complete)**: the repository was renamed to `HogarIA` by the user in GitHub settings;
+  active support links and Wikimedia User-Agent values now use the canonical URL, while CI derives
+  the GHCR owner/repository from `GITHUB_REPOSITORY`.
 
-The GitHub repo keeps `MiCocinAI` until P3; nothing in code hardcodes the owner/repo except the
-`supportRepoUrl` default.
+The GitHub repository is now `https://github.com/juanjoGonDev/HogarIA`. Historical `MiCocinAI`
+references remain only where they describe the migration/product history; active runtime links use
+the renamed repository.
 
 ## 8b. From a cooking level to a household profile
 

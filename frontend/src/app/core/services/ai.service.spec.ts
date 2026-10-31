@@ -3,7 +3,11 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { TestBed } from '@angular/core/testing';
 import { SILENT_TOAST } from '../interceptors/error.interceptor';
 import { AiService } from './ai.service';
-import type { AIProviderConfig, AIRecipeResponse } from '../../shared/models/ai-config.model';
+import type {
+  AIProviderConfig,
+  AiFunctionProviderAssignment,
+  AIRecipeResponse
+} from '../../shared/models/ai-config.model';
 
 const CONFIG: AIProviderConfig = {
   id: 'synthetic-config',
@@ -67,6 +71,74 @@ describe('AiService', () => {
     expect(service.configsError()).toBeTrue();
     // A transient refresh error does not destroy already-loaded records.
     expect(service.configs()).toEqual([CONFIG]);
+  });
+
+  it('loads function assignments and syncs an assignment update into provider summaries', () => {
+    const second = { ...CONFIG, id: 'synthetic-config-2', name: 'Second provider' };
+    service.loadConfigs();
+    http.expectOne('/api/ai/configs').flush({ data: [CONFIG, second] });
+
+    const assignments: AiFunctionProviderAssignment[] = [
+      { functionKey: 'assistant', configId: CONFIG.id, providerName: CONFIG.name },
+      { functionKey: 'recipes', configId: CONFIG.id, providerName: CONFIG.name }
+    ];
+    service
+      .loadFunctionProvidersSnapshot()
+      .subscribe((value) => expect(value).toEqual(assignments));
+    const load = http.expectOne('/api/ai/function-providers');
+    expect(load.request.method).toBe('GET');
+    expect(load.request.context.get(SILENT_TOAST)).toBeTrue();
+    load.flush({ data: assignments });
+    expect(service.functionProviders()).toEqual(assignments);
+    expect(service.configs()[0].assignedFunctions).toEqual(['assistant', 'recipes']);
+
+    let result: AiFunctionProviderAssignment | null | undefined;
+    service.assignFunctionProvider('recipes', second.id).subscribe((value) => (result = value));
+    const update = http.expectOne('/api/ai/function-providers/recipes');
+    expect(update.request.method).toBe('PUT');
+    expect(update.request.body).toEqual({ configId: second.id });
+    expect(update.request.context.get(SILENT_TOAST)).toBeTrue();
+    const updated = {
+      functionKey: 'recipes' as const,
+      configId: second.id,
+      providerName: second.name
+    };
+    update.flush({ data: updated });
+
+    expect(result).toEqual(updated);
+    expect(service.functionProviders()).toContain(updated);
+    expect(service.configs()[0].assignedFunctions).toEqual(['assistant']);
+    expect(service.configs()[1].assignedFunctions).toEqual(['recipes']);
+  });
+
+  it('ignores late responses from superseded assignments for the same function', () => {
+    service.assignFunctionProvider('assistant', 'first-provider').subscribe();
+    const first = http.expectOne('/api/ai/function-providers/assistant');
+    service.assignFunctionProvider('assistant', 'second-provider').subscribe();
+    const second = http.expectOne('/api/ai/function-providers/assistant');
+
+    second.flush({
+      data: {
+        functionKey: 'assistant',
+        configId: 'second-provider',
+        providerName: 'Second provider'
+      }
+    });
+    first.flush({
+      data: {
+        functionKey: 'assistant',
+        configId: 'first-provider',
+        providerName: 'First provider'
+      }
+    });
+
+    expect(service.functionProviders()).toEqual([
+      {
+        functionKey: 'assistant',
+        configId: 'second-provider',
+        providerName: 'Second provider'
+      }
+    ]);
   });
 
   it('returns the scoped config snapshot and uses null only when its request fails', async () => {
@@ -239,6 +311,17 @@ describe('AiService', () => {
   });
 
   it('creates and updates configurations only when the server confirms them', () => {
+    let createFailure: unknown;
+    service.createConfig(CONFIG).subscribe({ error: (error) => (createFailure = error) });
+    http.expectOne('/api/ai/configs').flush(
+      {
+        error: 'Validation Error',
+        issues: [{ field: 'timeout', message: 'debe ser como máximo 600.000' }]
+      },
+      { status: 400, statusText: 'Bad request' }
+    );
+    expect(createFailure).toEqual(jasmine.objectContaining({ status: 400 }));
+
     let created: AIProviderConfig | null | undefined;
     service.createConfig(CONFIG).subscribe((result) => {
       created = result;
@@ -266,14 +349,18 @@ describe('AiService', () => {
     expect(saved).toEqual(updated);
     expect(service.configs()).toEqual([updated, other]);
 
-    let failed: AIProviderConfig | null | undefined;
-    service.updateConfig(CONFIG.id, { name: 'Not saved' }).subscribe((result) => {
-      failed = result;
-    });
-    http
-      .expectOne(`/api/ai/configs/${CONFIG.id}`)
-      .flush({}, { status: 500, statusText: 'Server error' });
-    expect(failed).toBeNull();
+    let failed: unknown;
+    service
+      .updateConfig(CONFIG.id, { name: 'Not saved' })
+      .subscribe({ error: (error) => (failed = error) });
+    http.expectOne(`/api/ai/configs/${CONFIG.id}`).flush(
+      {
+        error: 'Validation Error',
+        issues: [{ field: 'timeout', message: 'debe ser como máximo 600.000' }]
+      },
+      { status: 400, statusText: 'Bad request' }
+    );
+    expect(failed).toEqual(jasmine.objectContaining({ status: 400 }));
     expect(service.configs()).toEqual([updated, other]);
   });
 
@@ -332,7 +419,7 @@ describe('AiService', () => {
     expect(service.configs()).toEqual([CONFIG]);
   });
 
-  it('tests saved or unsaved connection details and normalizes HTTP errors', () => {
+  it('tests saved or unsaved connection details and propagates HTTP errors', () => {
     let result: unknown;
     service.testConnection({ configId: CONFIG.id }).subscribe((value) => {
       result = value;
@@ -341,9 +428,18 @@ describe('AiService', () => {
     expect(savedRequest.request.method).toBe('POST');
     expect(savedRequest.request.context.get(SILENT_TOAST)).toBeTrue();
     expect(savedRequest.request.body).toEqual({ configId: CONFIG.id });
-    const accepted = { status: 'testing', configId: CONFIG.id };
-    savedRequest.flush({ success: true, data: accepted }, { status: 202, statusText: 'Accepted' });
-    expect(result).toEqual(accepted);
+    savedRequest.flush({ data: { success: true, model: 'gpt-test', latency: 10 } });
+    expect(result).toEqual({ success: true, model: 'gpt-test', latency: 10 });
+
+    service.testConnection({ configId: CONFIG.id }).subscribe((value) => {
+      result = value;
+    });
+    const acceptedRequest = http.expectOne('/api/ai/test-connection');
+    acceptedRequest.flush(
+      { data: { status: 'testing', configId: CONFIG.id } },
+      { status: 202, statusText: 'Accepted' }
+    );
+    expect(result).toEqual({ status: 'testing', configId: CONFIG.id });
 
     service
       .testConnection({
@@ -367,11 +463,18 @@ describe('AiService', () => {
       error: 'Synthetic failure'
     });
 
-    service.testConnection({ configId: CONFIG.id }).subscribe((value) => {
-      result = value;
-    });
-    http.expectOne('/api/ai/test-connection').flush({}, { status: 502, statusText: 'Bad gateway' });
-    expect(result).toBeNull();
+    let failure: unknown;
+    service
+      .testConnection({ configId: CONFIG.id })
+      .subscribe({ error: (error) => (failure = error) });
+    http.expectOne('/api/ai/test-connection').flush(
+      {
+        error: 'Validation Error',
+        issues: [{ field: 'timeout', message: 'debe ser como máximo 600.000' }]
+      },
+      { status: 400, statusText: 'Bad request' }
+    );
+    expect(failure).toEqual(jasmine.objectContaining({ status: 400 }));
   });
 
   it('preserves usable drafts after a failed retry and clears the opposite result on success', () => {

@@ -2,6 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { expect, test, type Page } from './fixtures';
+import { mockAiFunctionAvailable } from './helpers/ai';
 import { createHousehold } from './helpers/auth';
 import { tapSvgPolygonInterior } from './helpers/plan-geometry';
 import { assertSwitchGeometry, assertSwitchHitArea } from './helpers/switch-geometry';
@@ -16,6 +17,7 @@ async function registerForHousehold(page: Page, name: string): Promise<void> {
   await page.locator('input#name').fill(name);
   await page.locator('input#email').fill(`household-tasks-${randomUUID()}@example.test`);
   await page.locator('input#password').fill('Test1234');
+  await page.locator('input#confirm-password').fill('Test1234');
   const registration = page.waitForResponse((response) =>
     response.url().includes('/api/auth/register')
   );
@@ -967,6 +969,7 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   const mobile = testInfo.project.name.startsWith('mobile-');
   const viewport = mobile ? { width: 390, height: 950 } : { width: 1280, height: 970 };
 
+  await mockAiFunctionAvailable(page, ['planning', 'assistant']);
   await registerForHousehold(page, 'Ana');
   await createHousehold(page, 'Hogar sintético de plano y tareas');
   const inviteUrl = (await page.locator('.invite-card__code').innerText()).trim();

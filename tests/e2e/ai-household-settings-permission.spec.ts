@@ -30,6 +30,7 @@ test('la configuración IA del hogar respeta settings en navegación directa y l
     await memberPage.goto('/ai-config');
     await expect(memberPage).toHaveURL(/\/household\?tab=settings$/);
     await expect(memberPage.locator('.sidebar__nav a[href="/ai-config"]')).toHaveCount(0);
+    await expect(memberPage.locator('[data-test="household-ai-config"]')).toHaveCount(0);
 
     await page.goto('/household?tab=permissions');
     const memberPicker = page.locator('[data-test="permissions-member-select"]');
@@ -42,10 +43,14 @@ test('la configuración IA del hogar respeta settings en navegación directa y l
     await expect(page.locator('.toast--success')).toBeVisible();
 
     await memberPage.reload();
-    await memberPage.goto('/ai-config');
-    await expect(memberPage).toHaveURL(/\/ai-config$/);
-    await expect(memberPage.locator('.sidebar__nav a[href="/ai-config"]')).toBeVisible();
-    await expect(memberPage.getByRole('heading', { name: 'Configuración IA' })).toBeVisible();
+    await memberPage.goto('/household?tab=settings');
+    const embeddedConfig = memberPage.locator('[data-test="household-ai-config"]');
+    await expect(embeddedConfig).toBeVisible();
+    await expect(
+      embeddedConfig.getByRole('heading', { name: 'Configuración IA', level: 2 })
+    ).toBeVisible();
+    await expect(embeddedConfig.locator('h1.ai-config__title')).toHaveCount(0);
+    await expect(memberPage.locator('.sidebar__nav a[href="/ai-config"]')).toHaveCount(0);
 
     const viewport =
       test.info().project.name === 'chromium'
@@ -56,13 +61,54 @@ test('la configuración IA del hogar respeta settings en navegación directa y l
       .poll(() => memberPage.evaluate(() => document.documentElement.scrollWidth))
       .toBeLessThanOrEqual(viewport.width);
     const screenshotPath = resolve(
-      `.e2e-screenshots/ai-household-settings/${test.info().project.name}-permitted.png`
+      `.e2e-screenshots/ai-household-settings/${test.info().project.name}-embedded.png`
     );
     await mkdir(dirname(screenshotPath), { recursive: true });
     await memberPage.screenshot({
       path: screenshotPath,
       fullPage: false,
       animations: 'disabled'
+    });
+
+    const createProvider = async (name: string) => {
+      await memberPage.getByRole('button', { name: 'Agregar configuración' }).first().click();
+      await memberPage.locator('input#name').fill(name);
+      await memberPage.locator('input#model').fill('fixture-model');
+      await memberPage.locator('input#baseUrl').fill('http://127.0.0.1:9/v1');
+      await memberPage.locator('input#apiKey').fill('fixture-only-not-a-secret');
+      const saved = memberPage.waitForResponse(
+        (response) =>
+          response.url().endsWith('/api/ai/configs') && response.request().method() === 'POST'
+      );
+      await memberPage.locator('app-modal button[type="submit"]').click();
+      expect((await saved).status()).toBe(201);
+    };
+    await createProvider('Geometría 1');
+    await createProvider('Geometría 2');
+    await expect(memberPage.locator('.function-provider-row select')).toHaveCount(5);
+    const householdAction = await memberPage
+      .locator('.ai-config__header app-button button')
+      .boundingBox();
+    const householdSelectHeights = await memberPage
+      .locator('.function-provider-row select')
+      .evaluateAll((selects) => selects.map((select) => select.getBoundingClientRect().height));
+
+    await memberPage.goto('/ai-config');
+    await expect(memberPage).toHaveURL(/\/ai-config$/);
+    await expect(memberPage.locator('.function-provider-row select')).toHaveCount(5);
+    const directAction = await memberPage
+      .locator('.ai-config__header app-button button')
+      .boundingBox();
+    const directSelectHeights = await memberPage
+      .locator('.function-provider-row select')
+      .evaluateAll((selects) => selects.map((select) => select.getBoundingClientRect().height));
+    expect(householdAction).not.toBeNull();
+    expect(directAction).not.toBeNull();
+    expect(Math.abs(householdAction!.width - directAction!.width)).toBeLessThanOrEqual(1);
+    expect(Math.abs(householdAction!.height - directAction!.height)).toBeLessThanOrEqual(1);
+    expect(directSelectHeights).toHaveLength(householdSelectHeights.length);
+    householdSelectHeights.forEach((height, index) => {
+      expect(Math.abs(height - directSelectHeights[index])).toBeLessThanOrEqual(1);
     });
   } finally {
     await memberContext.close();

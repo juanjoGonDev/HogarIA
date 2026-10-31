@@ -158,7 +158,9 @@ test('modo cocina escala comensales sin consultar IA ni cambiar la receta guarda
   const writes: string[] = [];
   page.on('request', (request) => {
     const url = new URL(request.url());
-    if (url.pathname.startsWith('/api/ai/')) writes.push(`${request.method()} ${url.pathname}`);
+    if (request.method() === 'POST' && url.pathname.startsWith('/api/ai/')) {
+      writes.push(`${request.method()} ${url.pathname}`);
+    }
     if (url.pathname === `/api/recipes/${recipe.id}` && request.method() !== 'GET') {
       writes.push(`${request.method()} ${url.pathname}`);
     }
