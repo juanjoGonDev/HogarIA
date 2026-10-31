@@ -55,7 +55,7 @@ const SEARCH_QUERY: Record<RecipeStepPhotoScene, string> = {
 };
 
 const USER_AGENT =
-  'HogarIA/1.0 (+https://github.com/juanjoGonDev/MiCocinAI; local cooking recipe photo search)';
+  'HogarIA/1.0 (+https://github.com/juanjoGonDev/HogarIA; local cooking recipe photo search)';
 const API_URL = 'https://commons.wikimedia.org/w/api.php';
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const EMPTY_CACHE_TTL_MS = 15 * 60 * 1000;
@@ -127,17 +127,20 @@ function decodeHtmlEntities(value: string): string {
     apos: "'",
     nbsp: ' '
   };
-  return value.replace(/&(#x[\da-f]{1,6}|#\d{1,7}|amp|lt|gt|quot|apos|nbsp);/gi, (entity, code: string) => {
-    if (code[0] !== '#') return named[code.toLowerCase()] ?? entity;
-    const hex = code[1]?.toLowerCase() === 'x';
-    const parsed = Number.parseInt(code.slice(hex ? 2 : 1), hex ? 16 : 10);
-    if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 0x10ffff) return '';
-    try {
-      return String.fromCodePoint(parsed);
-    } catch {
-      return '';
+  return value.replace(
+    /&(#x[\da-f]{1,6}|#\d{1,7}|amp|lt|gt|quot|apos|nbsp);/gi,
+    (entity, code: string) => {
+      if (code[0] !== '#') return named[code.toLowerCase()] ?? entity;
+      const hex = code[1]?.toLowerCase() === 'x';
+      const parsed = Number.parseInt(code.slice(hex ? 2 : 1), hex ? 16 : 10);
+      if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 0x10ffff) return '';
+      try {
+        return String.fromCodePoint(parsed);
+      } catch {
+        return '';
+      }
     }
-  });
+  );
 }
 
 function plainMetadata(value: unknown, maxLength: number): string {
@@ -197,7 +200,11 @@ function asExtMetadata(value: unknown): Record<string, CommonsExtMetadata> {
   return value as Record<string, CommonsExtMetadata>;
 }
 
-function safePhotoFromApi(value: unknown, pageTitle: string, id: string): {
+function safePhotoFromApi(
+  value: unknown,
+  pageTitle: string,
+  id: string
+): {
   photo: RecipeStepPhoto;
   sourceImage: CachedSourceImage;
 } | null {
@@ -252,7 +259,10 @@ function checkImageMime(value: string | null): RecipeStepPhotoImage['mimeType'] 
   return mime && RASTER_MIME_TYPES.has(mime) ? (mime as RecipeStepPhotoImage['mimeType']) : null;
 }
 
-function hasRasterSignature(bytes: Uint8Array, mimeType: RecipeStepPhotoImage['mimeType']): boolean {
+function hasRasterSignature(
+  bytes: Uint8Array,
+  mimeType: RecipeStepPhotoImage['mimeType']
+): boolean {
   if (mimeType === 'image/jpeg') {
     return bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
   }
@@ -369,7 +379,10 @@ export function createRecipeStepPhotoProvider(
 
   function normalizeQuery(value: string): string {
     if (typeof value !== 'string') throw new Error('Invalid recipe photo query');
-    const query = value.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
+    const query = value
+      .replace(/[\u0000-\u001f\u007f]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
     if (query.length < 2 || query.length > MAX_SEARCH_QUERY_LENGTH) {
       throw new Error('Invalid recipe photo query');
     }
@@ -407,7 +420,10 @@ export function createRecipeStepPhotoProvider(
     }
   }
 
-  async function searchByQuery(queryValue: string, signal?: AbortSignal): Promise<RecipeStepPhoto[]> {
+  async function searchByQuery(
+    queryValue: string,
+    signal?: AbortSignal
+  ): Promise<RecipeStepPhoto[]> {
     const query = normalizeQuery(queryValue);
     if (signal?.aborted) return [];
     const result = await searchCommons(query, MAX_QUERY_RESULTS, signal);
@@ -451,7 +467,8 @@ export function createRecipeStepPhotoProvider(
   async function getImage(id: string): Promise<RecipeStepPhotoImage | null> {
     if (!/^[a-f0-9]{24}$/.test(id)) return null;
     const cached = imageBytes.get(id);
-    if (cached && cached.expiresAt > now()) return { bytes: cached.bytes, mimeType: cached.mimeType };
+    if (cached && cached.expiresAt > now())
+      return { bytes: cached.bytes, mimeType: cached.mimeType };
     if (cached) imageBytes.delete(id);
 
     let pending = pendingImageBytes.get(id);

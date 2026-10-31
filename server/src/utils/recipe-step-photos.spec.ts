@@ -92,11 +92,13 @@ describe('recipe step photo search', () => {
     const request = fetcher.mock.calls[0];
     const apiUrl = new URL(String(request[0]));
     expect(apiUrl.origin).toBe('https://commons.wikimedia.org');
-    expect(apiUrl.searchParams.get('gsrsearch')).toBe('photo chopping vegetables cutting board knife');
+    expect(apiUrl.searchParams.get('gsrsearch')).toBe(
+      'photo chopping vegetables cutting board knife'
+    );
     expect(apiUrl.searchParams.get('gsrlimit')).toBe('5');
     expect(request[1]?.headers).toMatchObject({
-      'Api-User-Agent': expect.stringContaining('HogarIA/'),
-      'User-Agent': expect.stringContaining('HogarIA/')
+      'Api-User-Agent': expect.stringContaining('https://github.com/juanjoGonDev/HogarIA'),
+      'User-Agent': expect.stringContaining('https://github.com/juanjoGonDev/HogarIA')
     });
     expect(request[1]?.redirect).toBe('error');
     expect(JSON.stringify(request)).not.toContain('Ana & Luis');
@@ -128,7 +130,10 @@ describe('recipe step photo search', () => {
     if ('mime' in change) imageInfo.mime = change.mime;
     if ('ObjectName' in change) imageInfo.extmetadata.ObjectName = change.ObjectName;
     const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(
-      new Response(JSON.stringify(base), { status: 200, headers: { 'content-type': 'application/json' } })
+      new Response(JSON.stringify(base), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      })
     );
 
     const photo = await createRecipeStepPhotoProvider({ fetcher }).search('cut');
@@ -138,10 +143,14 @@ describe('recipe step photo search', () => {
   });
 
   it('returns empty for malformed or empty responses and normalizes upstream failures', async () => {
-    const malformed = vi.fn<typeof fetch>().mockResolvedValueOnce(
-      new Response('{bad json', { status: 200, headers: { 'content-type': 'application/json' } })
-    );
-    await expect(createRecipeStepPhotoProvider({ fetcher: malformed }).search('wash')).rejects.toThrow();
+    const malformed = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response('{bad json', { status: 200, headers: { 'content-type': 'application/json' } })
+      );
+    await expect(
+      createRecipeStepPhotoProvider({ fetcher: malformed }).search('wash')
+    ).rejects.toThrow();
 
     const empty = vi.fn<typeof fetch>().mockResolvedValueOnce(
       new Response(JSON.stringify({ query: { pages: [] } }), {
@@ -149,12 +158,16 @@ describe('recipe step photo search', () => {
         headers: { 'content-type': 'application/json' }
       })
     );
-    await expect(createRecipeStepPhotoProvider({ fetcher: empty }).search('wash')).resolves.toBeNull();
+    await expect(
+      createRecipeStepPhotoProvider({ fetcher: empty }).search('wash')
+    ).resolves.toBeNull();
 
-    const unavailable = vi.fn<typeof fetch>().mockResolvedValueOnce(
-      new Response('unavailable', { status: 429 })
-    );
-    await expect(createRecipeStepPhotoProvider({ fetcher: unavailable }).search('wash')).rejects.toThrow();
+    const unavailable = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response('unavailable', { status: 429 }));
+    await expect(
+      createRecipeStepPhotoProvider({ fetcher: unavailable }).search('wash')
+    ).rejects.toThrow();
   });
 
   it('rejects oversized or non-raster image responses', async () => {
@@ -172,9 +185,11 @@ describe('recipe step photo search', () => {
 
   it('fetches a persisted thumbnail only from the allowed Wikimedia raster hosts', async () => {
     const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1]);
-    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
-      new Response(png, { status: 200, headers: { 'content-type': 'image/png' } })
-    );
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        new Response(png, { status: 200, headers: { 'content-type': 'image/png' } })
+      );
     const provider = createRecipeStepPhotoProvider({ fetcher });
 
     const image = await provider.getImageFromUrl?.('https://upload.wikimedia.org/thumbs/photo.png');
@@ -201,10 +216,11 @@ describe('recipe step photo search', () => {
   });
 
   it('aborts an upstream request on timeout', async () => {
-    const fetcher = vi.fn<typeof fetch>((_input, init) =>
-      new Promise((_resolve, reject) => {
-        init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
-      })
+    const fetcher = vi.fn<typeof fetch>(
+      (_input, init) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+        })
     );
 
     await expect(
@@ -240,7 +256,10 @@ describe('recipe step photo search', () => {
       ]
     });
     const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(
-      new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } })
+      new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      })
     );
     const provider = createRecipeStepPhotoProvider({ fetcher });
 
@@ -268,15 +287,20 @@ describe('recipe step photo search', () => {
       const imageInfo = payload.query.pages[0].imageinfo[0];
       return {
         title: `File:Photo_${index}.jpg`,
-        imageinfo: [{
-          ...imageInfo,
-          thumburl: `https://thumb.wikimedia.org/thumbs/photo-${index}.jpg`,
-          descriptionurl: `https://commons.wikimedia.org/wiki/File:Photo_${index}.jpg`
-        }]
+        imageinfo: [
+          {
+            ...imageInfo,
+            thumburl: `https://thumb.wikimedia.org/thumbs/photo-${index}.jpg`,
+            descriptionurl: `https://commons.wikimedia.org/wiki/File:Photo_${index}.jpg`
+          }
+        ]
       };
     });
     const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(
-      new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } })
+      new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      })
     );
     const provider = createRecipeStepPhotoProvider({ fetcher });
 
@@ -285,7 +309,9 @@ describe('recipe step photo search', () => {
     const photos = await provider.searchByQuery('  pollo\n al horno  ');
 
     expect(photos).toHaveLength(10);
-    expect(new URL(String(fetcher.mock.calls[0][0])).searchParams.get('gsrsearch')).toBe('pollo al horno');
+    expect(new URL(String(fetcher.mock.calls[0][0])).searchParams.get('gsrsearch')).toBe(
+      'pollo al horno'
+    );
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 });
