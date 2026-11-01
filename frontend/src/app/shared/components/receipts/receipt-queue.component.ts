@@ -16,7 +16,7 @@ import { ReceiptsService } from '../../../core/services/receipts.service';
 import { IconComponent } from '../ui/icon/icon.component';
 import { ButtonComponent } from '../ui/button/button.component';
 import { TranslatePipe } from '../../../core/pipes/translate.pipe';
-import type { ReceiptJob } from '../../../shared/models/receipt.model';
+import type { ReceiptQueueJob } from '../../../shared/models/receipt.model';
 import {
   computeReceiptQueuePanelPosition,
   type ReceiptQueuePanelPosition
@@ -499,13 +499,13 @@ export class ReceiptQueueComponent implements OnInit, OnDestroy {
     await firstValueFrom(this.service.refreshQueue());
   }
 
-  async pararUno(trabajo: ReceiptJob): Promise<void> {
+  async pararUno(trabajo: ReceiptQueueJob): Promise<void> {
     if (!trabajo.receipt_id) return;
     await this.service.stopJob(trabajo.receipt_id);
     await firstValueFrom(this.service.refreshQueue());
   }
 
-  async reintentarUno(trabajo: ReceiptJob): Promise<void> {
+  async reintentarUno(trabajo: ReceiptQueueJob): Promise<void> {
     if (!trabajo.receipt_id) return;
     await this.service.retryJob(trabajo.receipt_id);
     await firstValueFrom(this.service.refreshQueue());

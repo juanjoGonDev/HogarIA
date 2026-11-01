@@ -8,7 +8,8 @@ import { PantryService } from '../../core/services/pantry.service';
 import { ToastService } from '../../core/services/toast.service';
 import { ConfirmService } from '../../core/services/confirm.service';
 import { I18nService } from '../../core/services/i18n.service';
-import type { ReceiptDetail, ReceiptItem } from '../../shared/models/receipt.model';
+import { ClipboardService } from '../../core/services/clipboard.service';
+import type { ReceiptDetail, ReceiptItem, ReceiptJob } from '../../shared/models/receipt.model';
 
 const RECEIPT_ID = 'receipt-test-1';
 
@@ -23,6 +24,18 @@ function makeLine(overrides: Partial<ReceiptItem> = {}): ReceiptItem {
     offer: null,
     note: null,
     confidence: 0.9,
+    ...overrides
+  };
+}
+
+function makeJob(overrides: Partial<ReceiptJob> = {}): ReceiptJob {
+  return {
+    id: 'job-receipt-17',
+    status: 'failed',
+    attempts: 4,
+    max_attempts: 4,
+    error_code: 'PROVIDER',
+    created_at: '2026-11-01T17:34:59.000Z',
     ...overrides
   };
 }
@@ -59,6 +72,7 @@ describe('ReceiptDetailComponent', () => {
   let pantry: { categories: typeof categories; loadCategories: jasmine.Spy };
   let toast: jasmine.SpyObj<ToastService>;
   let confirm: jasmine.SpyObj<ConfirmService>;
+  let clipboard: jasmine.SpyObj<ClipboardService>;
   let i18n: { changeTick: ReturnType<typeof signal<number>>; t: jasmine.Spy };
   let router: Router;
 
@@ -97,6 +111,8 @@ describe('ReceiptDetailComponent', () => {
     toast = jasmine.createSpyObj<ToastService>('ToastService', ['info', 'success']);
     confirm = jasmine.createSpyObj<ConfirmService>('ConfirmService', ['confirm']);
     confirm.confirm.and.resolveTo(true);
+    clipboard = jasmine.createSpyObj<ClipboardService>('ClipboardService', ['copy']);
+    clipboard.copy.and.resolveTo();
     i18n = { changeTick: signal(0), t: jasmine.createSpy('t').and.callFake(i18nKey) };
 
     await TestBed.configureTestingModule({
@@ -106,6 +122,7 @@ describe('ReceiptDetailComponent', () => {
         { provide: PantryService, useValue: pantry },
         { provide: ToastService, useValue: toast },
         { provide: ConfirmService, useValue: confirm },
+        { provide: ClipboardService, useValue: clipboard },
         { provide: I18nService, useValue: i18n },
         provideRouter([
           { path: 'receipts', children: [] },
@@ -274,6 +291,126 @@ describe('ReceiptDetailComponent', () => {
     expect(component.textoDeError('TIMEOUT')).toBe('receipts.error.TIMEOUT');
     expect(component.textoDeError('PROVIDER')).toBe('receipts.error.PROVIDER');
     expect(component.textoDeError('UNRECOGNIZED')).toBe('receipts.error.PROVIDER');
+  });
+
+  it('explains a missing ticket file and provider HTTP authentication, quota and server errors', () => {
+    expect(component.textoDeError('FILE_MISSING')).toBe('receipts.error.FILE_MISSING');
+    expect(component.textoDeError('TIMEOUT')).toBe('receipts.error.TIMEOUT');
+
+    const textoDeError = component.textoDeError.bind(component) as (
+      codigo: string,
+      job?: ReceiptJob | null
+    ) => string;
+    const diagnostics = (providerHttpStatus: number) =>
+      ({ provider_http_status: providerHttpStatus }) as unknown as ReceiptJob;
+    expect(textoDeError('PROVIDER', diagnostics(401))).toBe('receipts.error.PROVIDER_AUTH');
+    expect(textoDeError('PROVIDER', diagnostics(403))).toBe('receipts.error.PROVIDER_AUTH');
+    expect(textoDeError('PROVIDER', diagnostics(429))).toBe('receipts.error.PROVIDER_RATE_LIMIT');
+    expect(textoDeError('PROVIDER', diagnostics(503))).toBe('receipts.error.PROVIDER_SERVER');
+  });
+
+  it('shows a per-ticket diagnostic copy action only for a failed ticket with a job', () => {
+    service.receipt.set(makeReceipt({ status: 'failed', error: 'PROVIDER', job: makeJob() }));
+    fixture.detectChanges();
+
+    const action = fixture.nativeElement.querySelector(
+      '[data-test="receipt-copy-diagnostic"]'
+    ) as HTMLElement | null;
+    const button = action?.matches('button')
+      ? (action as HTMLButtonElement)
+      : (action?.querySelector('button') as HTMLButtonElement | null);
+    expect(button).not.toBeNull();
+    expect(button?.textContent).toContain('receipts.copy_diagnostic');
+
+    service.receipt.set(makeReceipt({ status: 'failed', error: 'PROVIDER', job: null }));
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('[data-test="receipt-copy-diagnostic"]')).toBeNull();
+  });
+
+  it('copies only the allowlisted diagnostic for this ticket and announces success accessibly', async () => {
+    const job = {
+      ...makeJob(),
+      provider_response_id: 'resp_synthetic123',
+      provider_transport: 'responses_background',
+      provider_http_status: 401,
+      elapsed_ms: 451,
+      diagnostic_stage: 'failed',
+      error_detail: 'raw provider body and synthetic-secret-sentinel',
+      provider_url: 'https://private.invalid/v1',
+      api_key: 'synthetic-secret-sentinel',
+      prompt: 'private prompt sentinel',
+      output: 'private output sentinel'
+    } as unknown as ReceiptJob;
+    service.receipt.set(makeReceipt({ status: 'failed', error: 'PROVIDER', job }));
+    fixture.detectChanges();
+
+    const action = fixture.nativeElement.querySelector(
+      '[data-test="receipt-copy-diagnostic"]'
+    ) as HTMLElement | null;
+    const button = action?.matches('button')
+      ? (action as HTMLButtonElement)
+      : (action?.querySelector('button') as HTMLButtonElement | null);
+    const feedback = fixture.nativeElement.querySelector(
+      '[role="status"][aria-live="polite"]'
+    ) as HTMLElement | null;
+    expect(feedback).not.toBeNull();
+    expect(feedback?.textContent?.trim()).toBe('');
+    button?.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(clipboard.copy).toHaveBeenCalledOnceWith(jasmine.any(String));
+    const copied = clipboard.copy.calls.argsFor(0)[0] as string;
+    expect(JSON.parse(copied)).toEqual({
+      jobId: 'job-receipt-17',
+      kind: 'receipt',
+      status: 'failed',
+      attempts: 4,
+      maxAttempts: 4,
+      createdAt: '2026-11-01T17:34:59.000Z',
+      error: 'PROVIDER',
+      diagnosticStage: 'failed',
+      providerResponseId: 'resp_synthetic123',
+      providerTransport: 'responses_background',
+      providerHttpStatus: 401,
+      elapsedMs: 451
+    });
+    expect(copied).not.toContain(RECEIPT_ID);
+    expect(copied).not.toContain('synthetic-secret-sentinel');
+    expect(copied).not.toContain('private.invalid');
+    expect(copied).not.toContain('private prompt sentinel');
+    expect(copied).not.toContain('private output sentinel');
+    expect(feedback?.textContent).toContain('receipts.copy_diagnostic_success');
+  });
+
+  it('announces clipboard rejection without exposing the browser error', async () => {
+    clipboard.copy.and.rejectWith(new Error('synthetic clipboard permission detail'));
+    service.receipt.set(
+      makeReceipt({
+        status: 'failed',
+        error: 'FILE_MISSING',
+        job: makeJob({ error_code: 'FILE_MISSING' })
+      })
+    );
+    fixture.detectChanges();
+
+    const action = fixture.nativeElement.querySelector(
+      '[data-test="receipt-copy-diagnostic"]'
+    ) as HTMLElement | null;
+    const button = action?.matches('button')
+      ? (action as HTMLButtonElement)
+      : (action?.querySelector('button') as HTMLButtonElement | null);
+    button?.click();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const feedback = fixture.nativeElement.querySelector(
+      '[role="status"][aria-live="polite"]'
+    ) as HTMLElement | null;
+    expect(feedback?.textContent).toContain('receipts.copy_diagnostic_failed');
+    expect(fixture.nativeElement.textContent).not.toContain(
+      'synthetic clipboard permission detail'
+    );
   });
 
   it('resolves category names with a key fallback and exposes category picker options', () => {

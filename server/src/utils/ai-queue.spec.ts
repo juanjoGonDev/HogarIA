@@ -1634,8 +1634,11 @@ describe('AI provider queue dispatcher', () => {
        VALUES ('legacy-retry', ?, 'failed', '/uploads/legacy.png', 'png', 'PROVIDER', 'en')`
     ).run(userId);
     db.prepare(
-      `INSERT INTO ai_jobs (id, user_id, config_id, kind, receipt_id, status, attempts, max_attempts, error_code)
-       VALUES ('legacy-retry-job', ?, ?, 'receipt', 'legacy-retry', 'failed', 2, 2, 'PROVIDER')`
+      `INSERT INTO ai_jobs
+        (id, user_id, config_id, kind, receipt_id, status, attempts, max_attempts, error_code,
+         provider_response_id, provider_transport, provider_http_status, elapsed_ms, diagnostic_stage)
+       VALUES ('legacy-retry-job', ?, ?, 'receipt', 'legacy-retry', 'failed', 2, 2, 'PROVIDER',
+         'resp_old_attempt', 'responses_background', 429, 1234, 'failed')`
     ).run(userId, config.id);
 
     expect(reencolar('legacy-retry-job')).toBe(true);
@@ -1646,7 +1649,12 @@ describe('AI provider queue dispatcher', () => {
     expect(jobRow('legacy-retry-job')).toMatchObject({
       status: 'queued',
       attempts: 0,
-      max_attempts: 2
+      max_attempts: 2,
+      provider_response_id: null,
+      provider_transport: null,
+      provider_http_status: null,
+      elapsed_ms: null,
+      diagnostic_stage: null
     });
     expect(
       db.prepare('SELECT status, error_code FROM receipts WHERE id = ?').get('legacy-retry')

@@ -236,6 +236,18 @@ async function screenshotQueue(page: Page): Promise<void> {
   });
 }
 
+async function screenshotReceiptDiagnostic(page: Page): Promise<void> {
+  const directory = join(process.cwd(), '.e2e-screenshots', 'receipt-queue-actions-qa');
+  await mkdir(directory, { recursive: true });
+  // Restore the top before a full-page capture so the sticky mobile header does not sit midway
+  // through the tall image at the scroll offset reached by focusing the copy button.
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({
+    path: join(directory, `receipt-diagnostic-${test.info().project.name}.png`),
+    fullPage: true
+  });
+}
+
 function queueIcon(page: Page) {
   return (page.viewportSize()?.width ?? 0) >= 1024
     ? page.locator('.sidebar [data-test="receipt-queue-icon"]')
@@ -269,7 +281,7 @@ test.describe('acciones reales del gestor de cola de tickets', () => {
 
   test.beforeEach(async ({ page }) => {
     browserErrors = [];
-    page.on('pageerror', (error) => browserErrors.push(error.message));
+    page.on('pageerror', (error) => browserErrors.push(error.stack ?? error.message));
     page.on('console', (message) => {
       if (
         message.type() === 'error' &&
@@ -288,7 +300,12 @@ test.describe('acciones reales del gestor de cola de tickets', () => {
     });
     page.on('requestfailed', (request) => {
       const failure = request.failure()?.errorText ?? '';
-      if (!failure.includes('ERR_ABORTED')) browserErrors.push(`${request.url()} ${failure}`);
+      const expectedNavigationCancellation = failure
+        .toLowerCase()
+        .includes('load request cancelled');
+      if (!failure.includes('ERR_ABORTED') && !expectedNavigationCancellation) {
+        browserErrors.push(`${request.url()} ${failure}`);
+      }
     });
     await page.route(/^https:\/\/fonts\.googleapis\.com\/.*/, (route) =>
       route.fulfill({ status: 200, contentType: 'text/css', body: '' })
@@ -408,5 +425,61 @@ test.describe('acciones reales del gestor de cola de tickets', () => {
     await expect.poll(() => provider.abortCount).toBe(1);
     expect((await receiptDetail(page, runningReceiptId)).lines).toEqual([]);
     expect((await receiptDetail(page, queuedReceiptId)).lines).toEqual([]);
+  });
+
+  test('copia solo el diagnóstico seguro del ticket fallido desde su ficha', async ({ page }) => {
+    provider.setNextBehaviors('failure');
+    const receiptId = await uploadSyntheticReceipt(page);
+
+    await expect
+      .poll(async () => (await receiptDetail(page, receiptId)).job?.status)
+      .toBe('failed');
+    const panel = await openQueue(page);
+    await panel
+      .locator('[data-test="queue-job-failed"]')
+      .getByRole('button', { name: 'Abrir', exact: true })
+      .click();
+    await expect(page).toHaveURL(new RegExp(`/receipts/${receiptId}$`));
+    await expect(page.locator('[data-test="ticket-error"]')).toBeVisible();
+
+    const copyButton = page.locator('[data-test="receipt-copy-diagnostic"] button');
+    await expect(copyButton).toBeVisible();
+    await copyButton.focus();
+    await expect(copyButton).toBeFocused();
+    const bounds = await copyButton.boundingBox();
+    expect(bounds?.width).toBeGreaterThanOrEqual(44);
+    expect(bounds?.height).toBeGreaterThanOrEqual(44);
+
+    await page.evaluate(() => {
+      const state = window as Window & { __copiedReceiptDiagnostic?: string };
+      Object.defineProperty(window.navigator, 'clipboard', {
+        configurable: true,
+        value: {
+          writeText: async (value: string) => {
+            state.__copiedReceiptDiagnostic = value;
+          }
+        }
+      });
+    });
+    await copyButton.click();
+    await expect(page.getByText('Diagnóstico copiado.')).toBeVisible();
+
+    const copied = await page.evaluate(
+      () => (window as Window & { __copiedReceiptDiagnostic?: string }).__copiedReceiptDiagnostic
+    );
+    expect(copied).toBeTruthy();
+    const diagnostic = JSON.parse(copied!) as Record<string, unknown>;
+    expect(diagnostic).toMatchObject({
+      kind: 'receipt',
+      status: 'failed',
+      error: 'PROVIDER',
+      providerHttpStatus: 503
+    });
+    expect(copied).not.toContain('synthetic-key-not-for-display');
+    expect(copied).not.toContain('synthetic provider failure');
+    expect(copied).not.toContain(provider.baseUrl);
+    expect(provider.requestCount).toBe(1);
+
+    await screenshotReceiptDiagnostic(page);
   });
 });

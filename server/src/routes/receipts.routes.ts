@@ -29,6 +29,126 @@ import { encolarTicket, pararTrabajo, reencolar, registrarTienda } from '../util
 const receiptsRoutes = new Hono<AppEnv>();
 receiptsRoutes.use('*', authMiddleware);
 
+const RECEIPT_JOB_STATUSES = new Set(['queued', 'running', 'done', 'failed', 'stopped']);
+const RECEIPT_JOB_ERROR_CODES = new Set([
+  'NO_CONFIG',
+  'PROVIDER',
+  'BAD_JSON',
+  'TIMEOUT',
+  'FILE_MISSING',
+  'CANCELLED',
+  'INPUT_EXPIRED',
+  'RECEIPT_NOT_FOUND',
+  'CONFIG_UNAVAILABLE',
+  'CONFIG_DISABLED',
+  'JOB_SCOPE_MISMATCH'
+]);
+const PROVIDER_TRANSPORTS = new Set(['responses_background', 'chat_completions']);
+const PROVIDER_DIAGNOSTIC_STAGES = new Set([
+  'submitting',
+  'queued',
+  'polling',
+  'completed',
+  'failed',
+  'timed_out',
+  'cancelled',
+  'fallback'
+]);
+
+type ReceiptJobStatus = 'queued' | 'running' | 'done' | 'failed' | 'stopped';
+
+interface ReceiptJobRow {
+  id: unknown;
+  status: unknown;
+  attempts: unknown;
+  max_attempts: unknown;
+  error_code: unknown;
+  created_at: unknown;
+  provider_response_id: unknown;
+  provider_transport: unknown;
+  provider_http_status: unknown;
+  elapsed_ms: unknown;
+  diagnostic_stage: unknown;
+}
+
+function receiptJobForResponse(row: ReceiptJobRow | undefined) {
+  if (!row) return null;
+  if (
+    typeof row.id !== 'string' ||
+    !/^[-A-Za-z0-9_.:]{1,128}$/.test(row.id) ||
+    typeof row.status !== 'string' ||
+    !RECEIPT_JOB_STATUSES.has(row.status)
+  ) {
+    return null;
+  }
+
+  const attempts =
+    typeof row.attempts === 'number' &&
+    Number.isSafeInteger(row.attempts) &&
+    row.attempts >= 0 &&
+    row.attempts <= 1000
+      ? row.attempts
+      : null;
+  const maxAttempts =
+    typeof row.max_attempts === 'number' &&
+    Number.isSafeInteger(row.max_attempts) &&
+    row.max_attempts >= 1 &&
+    row.max_attempts <= 1000
+      ? row.max_attempts
+      : null;
+  const errorCode =
+    typeof row.error_code === 'string' && RECEIPT_JOB_ERROR_CODES.has(row.error_code)
+      ? row.error_code
+      : row.error_code == null
+        ? null
+        : 'PROVIDER';
+  const createdAt =
+    typeof row.created_at === 'string' &&
+    row.created_at.length <= 64 &&
+    /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})?$/.test(
+      row.created_at
+    ) &&
+    !Number.isNaN(Date.parse(row.created_at))
+      ? row.created_at
+      : null;
+
+  return {
+    id: row.id,
+    status: row.status as ReceiptJobStatus,
+    attempts,
+    max_attempts: maxAttempts,
+    error_code: errorCode,
+    created_at: createdAt,
+    provider_response_id:
+      typeof row.provider_response_id === 'string' &&
+      /^resp_[A-Za-z0-9_-]{1,128}$/.test(row.provider_response_id)
+        ? row.provider_response_id
+        : null,
+    provider_transport:
+      typeof row.provider_transport === 'string' && PROVIDER_TRANSPORTS.has(row.provider_transport)
+        ? row.provider_transport
+        : null,
+    provider_http_status:
+      typeof row.provider_http_status === 'number' &&
+      Number.isInteger(row.provider_http_status) &&
+      row.provider_http_status >= 100 &&
+      row.provider_http_status <= 599
+        ? row.provider_http_status
+        : null,
+    elapsed_ms:
+      typeof row.elapsed_ms === 'number' &&
+      Number.isSafeInteger(row.elapsed_ms) &&
+      row.elapsed_ms >= 0
+        ? row.elapsed_ms
+        : null,
+    diagnostic_stage:
+      typeof row.diagnostic_stage === 'string' &&
+      PROVIDER_DIAGNOSTIC_STAGES.has(row.diagnostic_stage)
+        ? row.diagnostic_stage
+        : null
+  };
+}
+
 /** El techo de un ticket subido: diez megas, que un PDF escaneado pesa. */
 const MAX_TICKET_BYTES = 10 * 1024 * 1024;
 
@@ -231,9 +351,11 @@ receiptsRoutes.get('/:id', async (c) => {
     .all(String(recibo.id)) as any[];
   const trabajo = db
     .prepare(
-      `SELECT id, status, attempts, max_attempts, error_code, error_detail FROM ai_jobs WHERE receipt_id = ? ORDER BY created_at DESC LIMIT 1`
+      `SELECT id, status, attempts, max_attempts, error_code, created_at, provider_response_id,
+              provider_transport, provider_http_status, elapsed_ms, diagnostic_stage
+       FROM ai_jobs WHERE receipt_id = ? ORDER BY created_at DESC LIMIT 1`
     )
-    .get(String(recibo.id)) as any | undefined;
+    .get(String(recibo.id)) as ReceiptJobRow | undefined;
   return c.json({
     success: true,
     data: {
@@ -252,7 +374,7 @@ receiptsRoutes.get('/:id', async (c) => {
         note: linea.note,
         confidence: linea.confidence
       })),
-      job: trabajo ?? null
+      job: receiptJobForResponse(trabajo)
     }
   });
 });

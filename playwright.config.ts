@@ -12,7 +12,7 @@ export default defineConfig({
   // Los specs de `full-stack/` piden el stack de produccion (build servido por el binario, limits ON):
   // el dev shard no se los puede cargar sin pintar rojos estructurales —los cinco del run de la ## 12af
   // eran eso, no codigo roto—, y los corre su propio job con su config (`playwright.full-stack.config.ts`).
-  testIgnore: ['**/full-stack/**', '**/ai-real-smoke.spec.ts'],
+  testIgnore: ['**/full-stack/**', '**/ai-real-smoke.spec.ts', '**/receipt-queue-actions.spec.ts'],
   // Fija la semilla del run antes que nada: la ven workers, reporter y backend.
   globalSetup: './tests/e2e/global-setup.ts',
   fullyParallel: true,

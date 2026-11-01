@@ -31,9 +31,10 @@ const resultsFile = process.env.E2E_RESULTS_FILE ?? join(isolation.runDir, 'resu
 const outputDir = process.env.E2E_OUTPUT_DIR ?? join(isolation.runDir, 'artifacts');
 
 export default defineConfig({
-  testDir: './tests/e2e/full-stack',
+  testDir: './tests/e2e',
   // The broad E2E suite runs in four dev-server shards. Keep this production-process
-  // gate focused on the build, provider routing, registration, rate limit, and SSE.
+  // gate focused on the build, provider routing, registration, rate limit, SSE, and
+  // receipt queue actions, whose browser requests are flaky through the Angular dev proxy.
   // Running all 178 desktop/mobile cases here exceeded the CI job's 30-minute limit.
   testMatch: [
     '**/ai-provider-settings.spec.ts',
@@ -43,7 +44,8 @@ export default defineConfig({
     '**/request-budget.spec.ts',
     '**/served-app.spec.ts',
     '**/logs-live.spec.ts',
-    '**/service-worker-update.spec.ts'
+    '**/service-worker-update.spec.ts',
+    '**/receipt-queue-actions.spec.ts'
   ],
   // La misma semilla del run: el reporter y el backend tienen que ver lo mismo.
   globalSetup: './tests/e2e/global-setup.ts',
