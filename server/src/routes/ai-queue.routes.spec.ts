@@ -55,11 +55,17 @@ function createJob(input: {
   householdId?: string | null;
   errorCode?: string | null;
   errorDetail?: string | null;
+  providerResponseId?: string | null;
+  providerTransport?: string | null;
+  providerHttpStatus?: number | null;
+  elapsedMs?: number | null;
+  diagnosticStage?: string | null;
 }): void {
   db.prepare(
     `INSERT INTO ai_jobs
-       (id, user_id, household_id, config_id, kind, status, queue_order, error_code, error_detail)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       (id, user_id, household_id, config_id, kind, status, queue_order, error_code, error_detail,
+        provider_response_id, provider_transport, provider_http_status, elapsed_ms, diagnostic_stage)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     input.id,
     input.userId,
@@ -69,7 +75,12 @@ function createJob(input: {
     input.status ?? 'queued',
     input.queueOrder ?? 0,
     input.errorCode ?? null,
-    input.errorDetail ?? null
+    input.errorDetail ?? null,
+    input.providerResponseId ?? null,
+    input.providerTransport ?? null,
+    input.providerHttpStatus ?? null,
+    input.elapsedMs ?? null,
+    input.diagnosticStage ?? null
   );
 }
 
@@ -201,8 +212,15 @@ describe('AI queue API', () => {
       id: 'queued-a',
       userId: alice.id,
       configId,
+      kind: 'connection_test',
+      status: 'failed',
       errorCode: 'PROVIDER',
-      errorDetail: 'provider body with household prompt must not escape'
+      errorDetail: 'provider body with household prompt must not escape',
+      providerResponseId: 'resp_1234567',
+      providerTransport: 'responses_background',
+      providerHttpStatus: 200,
+      elapsedMs: 45000,
+      diagnosticStage: 'failed'
     });
     const foreignConfig = createConfig(bob.id);
     createJob({ id: 'foreign', userId: bob.id, configId: foreignConfig });
@@ -211,7 +229,17 @@ describe('AI queue API', () => {
     expect(own.status).toBe(200);
     expect(own.payload.data).toMatchObject({
       configId,
-      jobs: [{ id: 'queued-a', retryable: false }]
+      jobs: [
+        {
+          id: 'queued-a',
+          retryable: false,
+          providerResponseId: 'resp_1234567',
+          providerTransport: 'responses_background',
+          providerHttpStatus: 200,
+          elapsedMs: 45000,
+          diagnosticStage: 'failed'
+        }
+      ]
     });
     const serialized = JSON.stringify(own.payload);
     expect(serialized).not.toContain('never-return-this-key');

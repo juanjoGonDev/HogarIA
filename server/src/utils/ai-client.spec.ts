@@ -913,6 +913,202 @@ describe('callAI: el cuerpo lleva solo lo configurado', () => {
 describe('pingDeConexion', () => {
   const respuesta = (content: unknown, status = 200) =>
     new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status });
+  const respuestaResponses = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { 'content-type': 'application/json' }
+    });
+
+  it('crea un Responses background y consulta hasta recibir la salida terminal', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        respuestaResponses({ id: 'resp_1234567', status: 'queued', output: [] }, 202)
+      )
+      .mockResolvedValueOnce(
+        respuestaResponses({ id: 'resp_1234567', status: 'in_progress', output: [] })
+      )
+      .mockResolvedValueOnce(
+        respuestaResponses({
+          id: 'resp_1234567',
+          status: 'completed',
+          output: [
+            {
+              type: 'message',
+              content: [
+                {
+                  type: 'output_text',
+                  text: '{"status":"ok","message":"conexión establecida"}'
+                }
+              ]
+            }
+          ]
+        })
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    const diagnostics: Array<Record<string, unknown>> = [];
+
+    const veredicto = await pingDeConexionTransport({
+      base_url: 'http://x:8000',
+      api_key: 'synthetic-key',
+      model: 'gpt-5',
+      jobId: 'job-123',
+      onDiagnostic: (diagnostic) => diagnostics.push({ ...diagnostic })
+    });
+
+    expect(veredicto).toMatchObject({ ok: true, message: 'conexión establecida' });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(new URL(String(fetchMock.mock.calls[0][0])).pathname).toBe('/v1/responses');
+    expect(new URL(String(fetchMock.mock.calls[1][0])).pathname).toBe('/v1/responses/resp_1234567');
+    expect(new URL(String(fetchMock.mock.calls[2][0])).pathname).toBe('/v1/responses/resp_1234567');
+    const createHeaders = fetchMock.mock.calls[0][1]?.headers as Record<string, string>;
+    expect(createHeaders.Authorization).toBe('Bearer synthetic-key');
+    expect(createHeaders['Idempotency-Key']).toBe('hogaria-connection-test-job-123');
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({
+      model: 'gpt-5',
+      background: true,
+      store: true,
+      input: expect.stringContaining('Prueba de conexión'),
+      text: {
+        format: {
+          type: 'json_schema',
+          name: 'connection_test',
+          strict: true,
+          schema: expect.any(Object)
+        }
+      }
+    });
+    expect(diagnostics.some((item) => item.providerResponseId === 'resp_1234567')).toBe(true);
+  });
+
+  it('usa Chat Completions solo ante rechazo explícito de endpoint Responses', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('not found', { status: 404 }))
+      .mockResolvedValueOnce(respuesta('{"status":"ok","message":"fallback"}'));
+    vi.stubGlobal('fetch', fetchMock);
+    const diagnostics: Array<Record<string, unknown>> = [];
+
+    const veredicto = await pingDeConexionTransport({
+      base_url: 'http://x/v1',
+      api_key: 'synthetic-key',
+      model: 'm',
+      jobId: 'fallback-job',
+      onDiagnostic: (diagnostic) => diagnostics.push({ ...diagnostic })
+    });
+
+    expect(veredicto).toMatchObject({ ok: true, message: 'fallback' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(new URL(String(fetchMock.mock.calls[0][0])).pathname).toBe('/v1/responses');
+    expect(new URL(String(fetchMock.mock.calls[1][0])).pathname).toBe('/v1/chat/completions');
+    expect(diagnostics.at(-1)).toMatchObject({ providerTransport: 'chat_completions' });
+  });
+
+  it.each([400, 401, 429, 500, 503])(
+    'no duplica una ejecución ante el rechazo ambiguo HTTP %i del POST background',
+    async (status) => {
+      const fetchMock = vi.fn().mockResolvedValue(new Response('upstream unavailable', { status }));
+      vi.stubGlobal('fetch', fetchMock);
+
+      const veredicto = await pingDeConexionTransport({
+        base_url: 'http://x/v1',
+        api_key: 'synthetic-key',
+        model: 'm',
+        jobId: `ambiguous-${status}`
+      });
+
+      expect(veredicto.ok).toBe(false);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(new URL(String(fetchMock.mock.calls[0][0])).pathname).toBe('/v1/responses');
+    }
+  );
+
+  it.each(['failed', 'incomplete', 'cancelled'] as const)(
+    'trata el estado terminal Responses %s como error seguro sin exponer el cuerpo del proveedor',
+    async (status) => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        respuestaResponses(
+          {
+            id: 'resp_1234567',
+            status,
+            error: { message: 'synthetic provider body secret sentinel' }
+          },
+          200
+        )
+      );
+      vi.stubGlobal('fetch', fetchMock);
+
+      const veredicto = await pingDeConexionTransport({
+        base_url: 'http://x/v1',
+        api_key: 'synthetic-key',
+        model: 'm',
+        jobId: `terminal-${status}`
+      });
+
+      expect(veredicto.ok).toBe(false);
+      expect(veredicto).not.toHaveProperty('message');
+      if (!veredicto.ok) {
+        expect(veredicto.error).not.toContain('synthetic provider body secret sentinel');
+      }
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it('rechaza una respuesta completed sin texto JSON con un error de forma seguro', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        respuestaResponses({ id: 'resp_1234567', status: 'completed', output: [] })
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const veredicto = await pingDeConexionTransport({
+      base_url: 'http://x/v1',
+      api_key: 'synthetic-key',
+      model: 'm',
+      jobId: 'malformed-response'
+    });
+
+    expect(veredicto).toMatchObject({
+      ok: false,
+      error: 'La respuesta del proveedor no tiene la forma esperada (output[].content[].text)'
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancela el Responses aceptado solo cuando se cancela explícitamente el job', async () => {
+    const controller = new AbortController();
+    const calls: Array<{ url: string; method: string }> = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const method = String(init?.method ?? 'GET');
+      calls.push({ url, method });
+      if (url.endsWith('/responses/resp_1234567/cancel')) {
+        return respuestaResponses({ id: 'resp_1234567', status: 'cancelled' });
+      }
+      if (method === 'POST') {
+        return respuestaResponses({ id: 'resp_1234567', status: 'in_progress', output: [] }, 202);
+      }
+      controller.abort();
+      throw new Error('aborted');
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const veredicto = await pingDeConexionTransport({
+      base_url: 'http://x/v1',
+      api_key: 'synthetic-key',
+      model: 'm',
+      jobId: 'cancelled-job',
+      signal: controller.signal
+    });
+
+    expect(veredicto).toMatchObject({ ok: false, error: 'Prueba cancelada' });
+    expect(calls).toEqual([
+      { url: 'http://x/v1/responses', method: 'POST' },
+      { url: 'http://x/v1/responses/resp_1234567', method: 'GET' },
+      { url: 'http://x/v1/responses/resp_1234567/cancel', method: 'POST' }
+    ]);
+  });
 
   it('pide el JSON dado con response_format de esquema estricto, y lo valida', async () => {
     let cuerpo: any;

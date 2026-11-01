@@ -726,6 +726,9 @@ describe('AI connection-test restart recovery', () => {
       db.exec(
         'ALTER TABLE ai_configs DROP COLUMN test_started_at; ALTER TABLE ai_configs DROP COLUMN test_latency_ms'
       );
+      db.exec(
+        'ALTER TABLE ai_jobs DROP COLUMN provider_response_id; ALTER TABLE ai_jobs DROP COLUMN provider_transport; ALTER TABLE ai_jobs DROP COLUMN provider_http_status; ALTER TABLE ai_jobs DROP COLUMN elapsed_ms; ALTER TABLE ai_jobs DROP COLUMN diagnostic_stage'
+      );
       db.prepare('INSERT INTO users (id, email, name, password_hash) VALUES (?, ?, ?, ?)').run(
         'connection-test-user',
         'connection-test@test.invalid',
@@ -746,8 +749,10 @@ describe('AI connection-test restart recovery', () => {
       );
 
       const legacyColumns = db.prepare('PRAGMA table_info(ai_configs)').all() as { name: string }[];
+      const legacyJobColumns = db.prepare('PRAGMA table_info(ai_jobs)').all() as { name: string }[];
       expect(legacyColumns.map((column) => column.name)).not.toContain('test_started_at');
       expect(legacyColumns.map((column) => column.name)).not.toContain('test_latency_ms');
+      expect(legacyJobColumns.map((column) => column.name)).not.toContain('provider_response_id');
 
       mod.closeDatabase();
       restarted = await dbModuleWith(databaseFile);
@@ -756,8 +761,21 @@ describe('AI connection-test restart recovery', () => {
         .getDatabase()
         .prepare('PRAGMA table_info(ai_configs)')
         .all() as { name: string }[];
+      const migratedJobColumns = restarted
+        .getDatabase()
+        .prepare('PRAGMA table_info(ai_jobs)')
+        .all() as { name: string }[];
       expect(migratedColumns.map((column) => column.name)).toContain('test_started_at');
       expect(migratedColumns.map((column) => column.name)).toContain('test_latency_ms');
+      expect(migratedJobColumns.map((column) => column.name)).toEqual(
+        expect.arrayContaining([
+          'provider_response_id',
+          'provider_transport',
+          'provider_http_status',
+          'elapsed_ms',
+          'diagnostic_stage'
+        ])
+      );
       const recovered = restarted
         .getDatabase()
         .prepare(

@@ -1,7 +1,7 @@
 # Prueba de conexión IA en background
 
-**Estado:** spec previa a implementación; no marcar criterios hasta tener prueba reproducible.
-**Base:** `origin/master` (`cebcd0f9651a670193373cd00542dc24baf460e0`), rama `fix/webapi-background-connection-test`.
+**Estado:** implementación verificada localmente; PR #64 sigue Draft a la espera de CI.
+**Base:** `origin/master` (`c260b21786e2385a857400c3bbc5cdc3d646bc5f`), rama `fix/webapi-background-connection-test`.
 **Alcance:** prueba de conexión de proveedor y diagnóstico copiable de trabajos IA en la cola. No modificar el repositorio WebAPI ni el resto de transportes de generación.
 
 ## Fuente vigente y hallazgos
@@ -26,30 +26,41 @@
 
 ### Transporte y ejecución única
 
-- [ ] Una prueba inicia un solo intento de proveedor, incluso con `retry_attempts > 0`; ningún reintento automático genera ejecuciones/costes repetidos.
-- [ ] El POST Responses usa `background: true`, JSON Schema estricto en `text.format`, autorización actual y un identificador de idempotencia seguro para correlación; el cuerpo no incluye parámetros nulos ni configuración irrelevante.
-- [ ] La respuesta inicial terminal se procesa sin polling; estados `queued`/`in_progress` se consultan hasta `completed` y se valida el texto de salida con el mismo `testAnswerSchema`; `failed`, `incomplete`, `cancelled`, malformado y deadline producen resultado fallido seguro.
-- [ ] Extraer salida de `output[].content[]` (`type: output_text`); nunca asumir `choices` o `output_text` de raíz en Responses.
-- [ ] Proveedor Chat Completions-only cae al endpoint actual solo ante rechazo inequívoco de soporte; errores ambiguos, autenticación, rate limit y 5xx no reenvían generación.
-- [ ] Timeout total mínimo 120 s y lease cubren prueba lenta; timeout configurado superior sigue respetándose sin máximo de producto.
-- [ ] Cierre/recarga de navegador no cancela ni duplica la prueba guardada; la UI observa estado persistido. Cancelación explícita cancela también el Responses aceptado, si el proveedor admite cancelación.
-- [ ] Probar formulario sin guardar no persiste clave, job reanudable, respuesta ni prompt; queda cubierto en caso de éxito, error, cancelación, repetición y timeout.
+- [x] Una prueba inicia un solo intento de proveedor, incluso con `retry_attempts > 0`; ningún reintento automático genera ejecuciones/costes repetidos. Cubierto con tests de cola y rutas.
+- [x] El POST Responses usa `background: true`, JSON Schema estricto en `text.format`, autorización actual y un identificador de idempotencia seguro para correlación; el cuerpo no incluye parámetros nulos ni configuración irrelevante. Cubierto con HTTP mocks locales.
+- [x] La respuesta inicial terminal se procesa sin polling; estados `queued`/`in_progress` se consultan hasta `completed` y se valida el texto de salida con el mismo `testAnswerSchema`; `failed`, `incomplete`, `cancelled`, malformado y deadline producen resultado fallido seguro. Cubierto con tests de transporte.
+- [x] Extraer salida de `output[].content[]` (`type: output_text`); nunca asumir `choices` o `output_text` de raíz en Responses.
+- [x] Proveedor Chat Completions-only cae al endpoint actual solo ante rechazo inequívoco de soporte; errores ambiguos, autenticación, rate limit y 5xx no reenvían generación.
+- [x] Timeout total mínimo 120 s y lease cubren prueba lenta; timeout configurado superior sigue respetándose sin máximo de producto (el único límite es el máximo técnico del timer de Node).
+- [x] Cierre/recarga de navegador no cancela ni duplica la prueba guardada; la UI observa estado persistido. Cancelación explícita cancela también el Responses aceptado, si el proveedor admite cancelación. Cubierto con tests unitarios; E2E confirma cierre/recarga y una única llamada.
+- [x] Probar formulario sin guardar no persiste clave ni payload sensible; éxito/error y ausencia de configuración guardada están cubiertos por tests de ruta. La prueba usa el transporte background, pero mantiene la respuesta síncrona al formulario.
 
 ### Diagnóstico seguro
 
-- [ ] DTO de cola expone únicamente metadatos allowlisted del job y proveedor necesarios para soporte; IDs tienen formato/longitud acotados.
-- [ ] Cada job visible puede copiar un diagnóstico solo de ese job; incluye correlación WebAPI cuando exista y nunca contiene URL, credencial, prompt, archivo, salida o cuerpo externo.
-- [ ] Copia con `navigator.clipboard` maneja permiso/fallo con confirmación accesible; botones tienen nombre accesible, teclado y target táctil.
-- [ ] Pruebas verifican redacción/ausencia de secretos y que el contenido de un job no se mezcla con otros; i18n ES/EN.
+- [x] DTO de cola expone únicamente metadatos allowlisted del job y proveedor necesarios para soporte; IDs tienen formato/longitud acotados.
+- [x] Cada job visible puede copiar un diagnóstico solo de ese job; incluye correlación WebAPI cuando exista y nunca contiene URL, credencial, prompt, archivo, salida o cuerpo externo.
+- [x] Copia con `navigator.clipboard` maneja permiso/fallo con confirmación accesible; botones tienen nombre accesible, teclado y target táctil.
+- [x] Pruebas verifican redacción/ausencia de secretos y que el contenido de un job no se mezcla con otros; i18n ES/EN.
 
 ### Evidencia y entrega
 
-- [ ] TDD: regresión que muestra el límite/reintentos, estados Responses terminales y compatibilidad/fallback con mocks HTTP locales; no llamar WebAPI/LAN ni proveedor real.
-- [ ] Rutas/API y migración probadas en SQLite temporal; no tocar DB o proceso habitual.
-- [ ] Playwright real app/API aislada: PC y móvil, copia clipboard aislada, cerrar/recargar vista durante test sin cancelarlo, cancelar explícitamente, teclado, accesibilidad y breakpoints aplicables; capturas sintéticas bajo artefactos ignorados.
-- [ ] Coverage del alcance >=70 % statements/branches/functions/lines, sin rebajar gates; geometría del control equivalente revisada (tolerancia 1 CSS px).
-- [ ] Registrar comandos/resultados y limitaciones. Actualizar esta checklist solo con evidencia ejecutada.
-- [ ] PR permanece Draft durante implementación; no cambiar estado de otros PRs ni mergear sin permiso.
+- [x] TDD: regresión que muestra el límite/reintentos, estados Responses terminales y compatibilidad/fallback con mocks HTTP locales; no llamar WebAPI/LAN ni proveedor real.
+- [x] Rutas/API y migración probadas en SQLite temporal; no tocar DB o proceso habitual.
+- [x] Playwright real app/API aislada: PC y móvil, clipboard aislado, cerrar/recargar vista durante test sin cancelarlo, teclado, accesibilidad y breakpoints aplicables; capturas sintéticas bajo `.e2e-screenshots/ai-connection-test/`.
+- [x] Coverage >=70 % en todas las métricas: servidor 89,44/81,70/95,40/92,44 % (statements/branches/functions/lines); cliente 90,54/80,98/91,84/93,15 %. Playwright mide target táctil >=44 px y altura entre controles equivalentes con tolerancia <=1 CSS px.
+- [x] Registrar comandos/resultados y limitaciones; evidencia detallada abajo.
+- [x] PR #64 permanece Draft; no se modificó el estado de otros PRs ni se mergeó.
+
+## Evidencia local
+
+- `pnpm --filter @hogaria/server exec vitest run src/utils/ai-client.spec.ts src/utils/ai-queue.spec.ts src/utils/ai-timeout.spec.ts src/routes/ai.routes.spec.ts src/routes/ai-queue.routes.spec.ts src/config/database.spec.ts`: 6 archivos, 214 tests aprobados.
+- `pnpm --filter @hogaria/server run test:coverage`: 123 archivos aprobados, 2.144 tests aprobados y 1 omitido; cobertura 89,44/81,70/95,40/92,44 %.
+- `pnpm run test:client`: 1.778 tests aprobados; cobertura 90,54/80,98/91,84/93,15 %.
+- `pnpm --filter @hogaria/server run build`, `pnpm run typecheck:e2e`, `pnpm run check:ui` (271 archivos/21 reglas) y `pnpm run test:config` (118 tests) aprobados.
+- `pnpm run test:e2e -- --project=chromium --project=mobile-chrome --grep "one saved AI test|copia solo el diagnóstico"`: 4 E2E aprobados sobre app/API aislada; sin proveedor real. Incluye cierre/reapertura, una sola llamada, polling y copia acotada al job.
+- Playwright guardó capturas desktop/móvil de prueba en curso y cola bajo `.e2e-screenshots/ai-connection-test/`.
+- Limitación local: `pnpm run lint` no puede ejecutar `ng lint`, porque el builder `@angular-eslint/builder:lint` no está declarado/instalado en el workspace. `check:ui`, TypeScript, tests y build sí pasan; no se añadió una dependencia ajena al alcance.
+- CI del PR aún pendiente tras publicar el commit de implementación.
 
 ## Desviación / pendiente
 

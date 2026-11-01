@@ -100,6 +100,11 @@ export const aiConfigEs = {
   'ai_config.queue_move_down': 'Mover {job} abajo',
   'ai_config.queue_cancel_job': 'Cancelar {job}',
   'ai_config.queue_cancel': 'Cancelar',
+  'ai_config.queue_copy_diagnostic_job': 'Copiar diagnóstico de {job}',
+  'ai_config.queue_copy_diagnostic': 'Copiar diagnóstico',
+  'ai_config.queue_copy_diagnostic_success': 'Diagnóstico copiado.',
+  'ai_config.queue_copy_diagnostic_failed':
+    'No se pudo copiar el diagnóstico. Comprueba el permiso del portapapeles.',
   'ai_config.queue_retry_job': 'Reintentar {job}',
   'ai_config.queue_retry': 'Reintentar',
   'ai_config.queue_refreshed': 'Cola actualizada.',
@@ -243,6 +248,11 @@ export const aiConfigEn: Record<keyof typeof aiConfigEs, string> = {
   'ai_config.queue_move_down': 'Move {job} down',
   'ai_config.queue_cancel_job': 'Cancel {job}',
   'ai_config.queue_cancel': 'Cancel',
+  'ai_config.queue_copy_diagnostic_job': 'Copy diagnostics for {job}',
+  'ai_config.queue_copy_diagnostic': 'Copy diagnostics',
+  'ai_config.queue_copy_diagnostic_success': 'Diagnostics copied.',
+  'ai_config.queue_copy_diagnostic_failed':
+    'Could not copy diagnostics. Check clipboard permission.',
   'ai_config.queue_retry_job': 'Retry {job}',
   'ai_config.queue_retry': 'Retry',
   'ai_config.queue_refreshed': 'Queue refreshed.',

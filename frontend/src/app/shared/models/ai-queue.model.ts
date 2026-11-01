@@ -23,6 +23,20 @@ export interface AiQueueJob {
   retryable: boolean;
   createdAt: string;
   queueOrder: number;
+  providerResponseId?: string | null;
+  providerTransport?: 'responses_background' | 'chat_completions' | null;
+  providerHttpStatus?: number | null;
+  elapsedMs?: number | null;
+  diagnosticStage?:
+    | 'submitting'
+    | 'queued'
+    | 'polling'
+    | 'completed'
+    | 'failed'
+    | 'timed_out'
+    | 'cancelled'
+    | 'fallback'
+    | null;
 }
 
 export interface AiQueueSnapshot {

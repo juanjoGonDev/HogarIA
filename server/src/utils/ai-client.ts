@@ -17,7 +17,7 @@ import {
   readActiveHouseholdId
 } from './household-context.js';
 import { resolveAiFunctionProvider, type AiFunctionKey } from './ai-function-providers.js';
-import { effectiveAiTimeoutMs } from './ai-timeout.js';
+import { connectionTestTimeoutMs, effectiveAiTimeoutMs } from './ai-timeout.js';
 import type { AiCallResponseFormat, AiResponseFormat } from '../schemas/ai-response-format.js';
 
 export type AiMessagePart =
@@ -473,6 +473,138 @@ export const testAnswerSchema = z.object({
   message: z.string().min(1)
 });
 
+export type AiConnectionTestDiagnostic = Readonly<{
+  providerResponseId: string | null;
+  providerTransport: 'responses_background' | 'chat_completions';
+  providerHttpStatus: number | null;
+  elapsedMs: number;
+  diagnosticStage:
+    | 'submitting'
+    | 'queued'
+    | 'polling'
+    | 'completed'
+    | 'failed'
+    | 'timed_out'
+    | 'cancelled'
+    | 'fallback';
+}>;
+
+function notifyConnectionTestDiagnostic(
+  callback: ((diagnostic: AiConnectionTestDiagnostic) => void) | undefined,
+  diagnostic: AiConnectionTestDiagnostic
+): void {
+  try {
+    callback?.(diagnostic);
+  } catch {
+    // Diagnostic persistence is best-effort and must never prevent the provider request.
+  }
+}
+
+const CONNECTION_TEST_POLL_INITIAL_MS = 500;
+const CONNECTION_TEST_POLL_MAX_MS = 2_000;
+const CONNECTION_TEST_CANCEL_TIMEOUT_MS = 5_000;
+const SAFE_RESPONSES_ID = /^resp_[A-Za-z0-9_-]{1,128}$/;
+
+function responsesEndpoint(baseUrl: string): string {
+  const base = String(baseUrl).trim().replace(/\/+$/, '');
+  if (/\/responses$/i.test(base)) return base;
+  const root = base.replace(/\/chat\/completions$/i, '');
+  return /\/v\d+[a-z]*$/i.test(root) ? `${root}/responses` : `${root}/v1/responses`;
+}
+
+function validResponsesId(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= 133 && SAFE_RESPONSES_ID.test(value);
+}
+
+function jsonFromResponsesOutput(payload: any): string | undefined {
+  if (!Array.isArray(payload?.output)) return undefined;
+  const chunks: string[] = [];
+  for (const item of payload.output) {
+    if (!Array.isArray(item?.content)) continue;
+    for (const content of item.content) {
+      if (content?.type === 'output_text' && typeof content.text === 'string') {
+        chunks.push(content.text);
+      }
+    }
+  }
+  return chunks.length ? chunks.join('') : undefined;
+}
+
+function responsesCapabilityUnsupported(status: number, payload: any): boolean {
+  if ([404, 405, 501].includes(status)) return true;
+  if (status !== 400) return false;
+  const code = String(payload?.error?.code ?? payload?.code ?? '').toLowerCase();
+  const parameter = String(payload?.error?.param ?? payload?.param ?? '').toLowerCase();
+  return (
+    [
+      'responses_not_supported',
+      'responses_endpoint_not_supported',
+      'background_not_supported'
+    ].includes(code) ||
+    (code === 'unsupported_parameter' &&
+      ['background', 'text.format', 'text.format.type'].includes(parameter))
+  );
+}
+
+function connectionTestVerdictFromContent(
+  content: unknown,
+  apiKey: string,
+  latency: number,
+  expectedShape: string
+): { ok: true; latency: number; message: string } | { ok: false; latency: number; error: string } {
+  if (typeof content !== 'string') {
+    return {
+      ok: false,
+      latency,
+      error: `La respuesta del proveedor no tiene la forma esperada (${expectedShape})`
+    };
+  }
+  try {
+    const result = testAnswerSchema.safeParse(extractJsonObject(content));
+    if (!result.success) {
+      return {
+        ok: false,
+        latency,
+        error: 'El modelo no devolvió el JSON pedido (respuesta no válida)'
+      };
+    }
+    return {
+      ok: true,
+      latency,
+      message: redactarSecreto(result.data.message, apiKey)
+    };
+  } catch {
+    return {
+      ok: false,
+      latency,
+      error: 'El modelo no devolvió el JSON pedido (respuesta no válida)'
+    };
+  }
+}
+
+function esperarConCancelacion(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      const error = new Error('Aborted');
+      error.name = 'AbortError';
+      reject(error);
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', cancelar);
+      resolve();
+    }, ms);
+    const cancelar = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', cancelar);
+      const error = new Error('Aborted');
+      error.name = 'AbortError';
+      reject(error);
+    };
+    signal?.addEventListener('abort', cancelar, { once: true });
+  });
+}
+
 /**
  * La prueba: una llamada real con `response_format` de esquema estricto (el mismo contrato que
  * usa el resto de la app) y validacion de que la contestacion ES el JSON pedido. Devuelve el
@@ -501,21 +633,341 @@ export async function pingDeConexionTransport(config: {
   model: string;
   timeout?: number | null;
   signal?: AbortSignal;
+  /** Job ID selects the asynchronous Responses path used by the production dispatcher. */
+  jobId?: string;
+  onDiagnostic?: (diagnostic: AiConnectionTestDiagnostic) => void;
 }): Promise<
   { ok: true; latency: number; message: string } | { ok: false; latency: number; error: string }
 > {
   const startTime = Date.now();
+  let apiKey: string;
   try {
-    const apiKey = resolveProviderApiKey(config.base_url, config.api_key);
+    apiKey = resolveProviderApiKey(config.base_url, config.api_key);
+  } catch (error) {
+    const latency = Date.now() - startTime;
+    const mensaje = error instanceof Error ? error.message : String(error);
+    const timedOut = /timeout|abort/i.test(mensaje);
+    notifyConnectionTestDiagnostic(config.onDiagnostic, {
+      providerResponseId: null,
+      providerTransport: config.jobId ? 'responses_background' : 'chat_completions',
+      providerHttpStatus: null,
+      elapsedMs: latency,
+      diagnosticStage: 'failed'
+    });
+    return {
+      ok: false,
+      latency,
+      error: timedOut ? 'Tiempo de espera agotado' : 'No se pudo conectar con el proveedor'
+    };
+  }
+
+  const jobId = config.jobId;
+  if (jobId) return pingDeConexionResponsesBackground({ ...config, jobId }, apiKey, startTime);
+  return pingDeConexionChatCompletions(config, apiKey, startTime, false);
+}
+
+async function pingDeConexionResponsesBackground(
+  config: {
+    base_url: string;
+    api_key: string;
+    model: string;
+    timeout?: number | null;
+    signal?: AbortSignal;
+    jobId: string;
+    onDiagnostic?: (diagnostic: AiConnectionTestDiagnostic) => void;
+  },
+  apiKey: string,
+  startTime: number
+): Promise<
+  { ok: true; latency: number; message: string } | { ok: false; latency: number; error: string }
+> {
+  const url = responsesEndpoint(config.base_url);
+  const operationTimeoutMs = connectionTestTimeoutMs(config.timeout);
+  const requestTimeoutMs = effectiveAiTimeoutMs(config.timeout);
+  const deadline = startTime + operationTimeoutMs;
+  let providerResponseId: string | null = null;
+  let providerHttpStatus: number | null = null;
+  let providerTransport: AiConnectionTestDiagnostic['providerTransport'] = 'responses_background';
+  const diagnostic = (
+    diagnosticStage: AiConnectionTestDiagnostic['diagnosticStage'],
+    httpStatus = providerHttpStatus
+  ) => {
+    providerHttpStatus = httpStatus;
+    notifyConnectionTestDiagnostic(config.onDiagnostic, {
+      providerResponseId,
+      providerTransport,
+      providerHttpStatus,
+      elapsedMs: Math.max(0, Date.now() - startTime),
+      diagnosticStage
+    });
+  };
+  const fallBack = async (httpStatus: number) => {
+    providerTransport = 'chat_completions';
+    providerHttpStatus = httpStatus;
+    diagnostic('fallback');
+    return pingDeConexionChatCompletions(
+      config,
+      apiKey,
+      startTime,
+      true,
+      diagnostic,
+      Math.max(1, Math.min(requestTimeoutMs, deadline - Date.now()))
+    );
+  };
+  const cancel = async () => {
+    if (providerResponseId) {
+      await cancelarResponsesBackground(url, providerResponseId, apiKey);
+    }
+    diagnostic('cancelled');
+    return { ok: false as const, latency: Date.now() - startTime, error: 'Prueba cancelada' };
+  };
+  const timedOut = async () => {
+    if (providerResponseId) await cancelarResponsesBackground(url, providerResponseId, apiKey);
+    diagnostic('timed_out');
+    return {
+      ok: false as const,
+      latency: Date.now() - startTime,
+      error: 'Tiempo de espera agotado'
+    };
+  };
+
+  diagnostic('submitting');
+  let created: Response;
+  try {
+    created = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+        'Idempotency-Key': `hogaria-connection-test-${config.jobId}`
+      },
+      body: JSON.stringify({
+        model: config.model,
+        background: true,
+        store: true,
+        input:
+          'Prueba de conexión. Devuelve exactamente este JSON y nada más: {"status":"ok","message":"conexión establecida"}',
+        text: {
+          format: {
+            type: 'json_schema',
+            name: 'connection_test',
+            strict: true,
+            schema: TEST_ANSWER_SCHEMA
+          }
+        }
+      }),
+      signal: señalConTimeout(
+        config.signal,
+        Math.max(1, Math.min(requestTimeoutMs, deadline - Date.now()))
+      )
+    });
+  } catch (error) {
+    if (config.signal?.aborted) return cancel();
+    const message = error instanceof Error ? error.message : String(error);
+    const requestTimedOut = Date.now() >= deadline || /timeout|abort/i.test(message);
+    diagnostic(requestTimedOut ? 'timed_out' : 'failed');
+    return {
+      ok: false,
+      latency: Date.now() - startTime,
+      error: requestTimedOut ? 'Tiempo de espera agotado' : 'No se pudo conectar con el proveedor'
+    };
+  }
+
+  providerHttpStatus = created.status;
+  const initialPayload = (await created.json().catch(() => null)) as any;
+  if (!created.ok) {
+    if (responsesCapabilityUnsupported(created.status, initialPayload)) {
+      if (Date.now() >= deadline) return timedOut();
+      return fallBack(created.status);
+    }
+    diagnostic('failed');
+    return { ok: false, latency: Date.now() - startTime, error: `HTTP ${created.status}` };
+  }
+
+  if (!validResponsesId(initialPayload?.id)) {
+    diagnostic('failed');
+    return {
+      ok: false,
+      latency: Date.now() - startTime,
+      error: 'La respuesta del proveedor no tiene la forma esperada (Responses id)'
+    };
+  }
+  providerResponseId = initialPayload.id;
+  const acceptedResponseId: string = initialPayload.id;
+
+  const terminal = (payload: any) => {
+    const status = String(payload?.status ?? '');
+    if (status === 'completed') {
+      const content = jsonFromResponsesOutput(payload);
+      const result = connectionTestVerdictFromContent(
+        content,
+        apiKey,
+        Date.now() - startTime,
+        'output[].content[].text'
+      );
+      diagnostic(result.ok ? 'completed' : 'failed');
+      return result;
+    }
+    if (status === 'failed' || status === 'incomplete' || status === 'cancelled') {
+      diagnostic(status === 'cancelled' ? 'cancelled' : 'failed');
+      return {
+        ok: false as const,
+        latency: Date.now() - startTime,
+        error:
+          status === 'cancelled'
+            ? 'La prueba fue cancelada por el proveedor'
+            : 'La ejecución del proveedor terminó sin completar la prueba'
+      };
+    }
+    return null;
+  };
+
+  const immediate = terminal(initialPayload);
+  if (immediate) return immediate;
+  let state = String(initialPayload?.status ?? '');
+  if (state !== 'queued' && state !== 'in_progress') {
+    diagnostic('failed');
+    return {
+      ok: false,
+      latency: Date.now() - startTime,
+      error: 'La respuesta del proveedor no tiene un estado válido'
+    };
+  }
+  diagnostic(state === 'queued' ? 'queued' : 'polling');
+
+  let delayMs = CONNECTION_TEST_POLL_INITIAL_MS;
+  while (Date.now() < deadline) {
+    if (config.signal?.aborted) return cancel();
+    const remainingMs = deadline - Date.now();
+    try {
+      await esperarConCancelacion(Math.min(delayMs, remainingMs), config.signal);
+    } catch {
+      if (config.signal?.aborted) return cancel();
+      return timedOut();
+    }
+    if (Date.now() >= deadline) return timedOut();
+
+    let current: Response;
+    try {
+      current = await fetch(`${url}/${encodeURIComponent(acceptedResponseId)}`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${apiKey}` },
+        signal: señalConTimeout(
+          config.signal,
+          Math.max(1, Math.min(requestTimeoutMs, deadline - Date.now()))
+        )
+      });
+    } catch {
+      if (config.signal?.aborted) return cancel();
+      if (Date.now() >= deadline) return timedOut();
+      diagnostic('polling');
+      delayMs = Math.min(delayMs * 2, CONNECTION_TEST_POLL_MAX_MS);
+      continue;
+    }
+
+    providerHttpStatus = current.status;
+    if (!current.ok) {
+      await current.body?.cancel().catch(() => undefined);
+      if (current.status >= 500 || current.status === 429) {
+        diagnostic('polling');
+        delayMs = Math.min(delayMs * 2, CONNECTION_TEST_POLL_MAX_MS);
+        continue;
+      }
+      diagnostic('failed');
+      return { ok: false, latency: Date.now() - startTime, error: `HTTP ${current.status}` };
+    }
+
+    const payload = (await current.json().catch(() => null)) as any;
+    if (payload?.id !== acceptedResponseId) {
+      diagnostic('failed');
+      return {
+        ok: false,
+        latency: Date.now() - startTime,
+        error: 'La respuesta del proveedor no coincide con la prueba iniciada'
+      };
+    }
+    const result = terminal(payload);
+    if (result) return result;
+    state = String(payload?.status ?? '');
+    if (state !== 'queued' && state !== 'in_progress') {
+      diagnostic('failed');
+      return {
+        ok: false,
+        latency: Date.now() - startTime,
+        error: 'La respuesta del proveedor no tiene un estado válido'
+      };
+    }
+    diagnostic(state === 'queued' ? 'queued' : 'polling');
+    delayMs = Math.min(delayMs * 2, CONNECTION_TEST_POLL_MAX_MS);
+  }
+  return timedOut();
+}
+
+async function cancelarResponsesBackground(
+  url: string,
+  responseId: string,
+  apiKey: string
+): Promise<void> {
+  try {
+    await fetch(`${url}/${encodeURIComponent(responseId)}/cancel`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(CONNECTION_TEST_CANCEL_TIMEOUT_MS)
+    });
+  } catch {
+    // A best-effort cancellation must not replace the original timeout/cancel result.
+  }
+}
+
+async function pingDeConexionChatCompletions(
+  config: {
+    base_url: string;
+    api_key: string;
+    model: string;
+    timeout?: number | null;
+    signal?: AbortSignal;
+    onDiagnostic?: (diagnostic: AiConnectionTestDiagnostic) => void;
+  },
+  apiKey: string,
+  startTime: number,
+  backgroundFallback: boolean,
+  report?: (stage: AiConnectionTestDiagnostic['diagnosticStage'], status: number | null) => void,
+  timeoutRemainingMs?: number
+): Promise<
+  { ok: true; latency: number; message: string } | { ok: false; latency: number; error: string }
+> {
+  const timeoutMs = backgroundFallback
+    ? Math.max(
+        1,
+        Math.min(
+          effectiveAiTimeoutMs(config.timeout),
+          timeoutRemainingMs ?? connectionTestTimeoutMs(config.timeout)
+        )
+      )
+    : effectiveAiTimeoutMs(config.timeout);
+  const diagnostic = (
+    diagnosticStage: AiConnectionTestDiagnostic['diagnosticStage'],
+    status: number | null
+  ) => {
+    if (report) {
+      report(diagnosticStage, status);
+      return;
+    }
+    notifyConnectionTestDiagnostic(config.onDiagnostic, {
+      providerResponseId: null,
+      providerTransport: 'chat_completions',
+      providerHttpStatus: status,
+      elapsedMs: Math.max(0, Date.now() - startTime),
+      diagnosticStage
+    });
+  };
+  try {
     const response = await fetch(endpoint(config.base_url), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${apiKey}`
       },
-      // El cuerpo es el minimo del contrato del proveedor: modelo, mensajes y el formato. Nada
-      // de `max_tokens` ni `temperature`, que los modelos de razonamiento rechazan y no aportan
-      // nada a una prueba de un segundo.
       body: JSON.stringify({
         model: config.model,
         messages: [
@@ -534,56 +986,36 @@ export async function pingDeConexionTransport(config: {
           }
         }
       }),
-      signal: señalConTimeout(config.signal, effectiveAiTimeoutMs(config.timeout))
+      signal: señalConTimeout(config.signal, timeoutMs)
     });
-
-    const latency = Date.now() - startTime;
 
     if (!response.ok) {
       await response.body?.cancel().catch(() => undefined);
-      return { ok: false, latency, error: `HTTP ${response.status}` };
+      diagnostic('failed', response.status);
+      return { ok: false, latency: Date.now() - startTime, error: `HTTP ${response.status}` };
     }
 
     const payload = (await response.json().catch(() => null)) as any;
-    const content = payload?.choices?.[0]?.message?.content;
-    if (typeof content !== 'string') {
-      return {
-        ok: false,
-        latency,
-        error: 'La respuesta del proveedor no tiene la forma esperada (choices[0].message.content)'
-      };
-    }
-    type Veredicto = ReturnType<typeof testAnswerSchema.safeParse>;
-    let contestacion: Veredicto;
-    try {
-      contestacion = testAnswerSchema.safeParse(extractJsonObject(content));
-    } catch {
-      return {
-        ok: false,
-        latency,
-        error: 'El modelo no devolvió el JSON pedido (respuesta no válida)'
-      };
-    }
-    if (!contestacion.success) {
-      return {
-        ok: false,
-        latency,
-        error: 'El modelo no devolvió el JSON pedido (respuesta no válida)'
-      };
-    }
-    return {
-      ok: true,
-      latency,
-      message: redactarSecreto(contestacion.data.message, apiKey)
-    };
+    const result = connectionTestVerdictFromContent(
+      payload?.choices?.[0]?.message?.content,
+      apiKey,
+      Date.now() - startTime,
+      'choices[0].message.content'
+    );
+    diagnostic(result.ok ? 'completed' : 'failed', response.status);
+    return result;
   } catch (error) {
-    const latency = Date.now() - startTime;
-    const mensaje = error instanceof Error ? error.message : String(error);
-    const timedOut = /timeout|abort/i.test(mensaje);
+    const message = error instanceof Error ? error.message : String(error);
+    const timedOut = /timeout|abort/i.test(message);
+    diagnostic(config.signal?.aborted ? 'cancelled' : timedOut ? 'timed_out' : 'failed', null);
     return {
       ok: false,
-      latency,
-      error: timedOut ? 'Tiempo de espera agotado' : 'No se pudo conectar con el proveedor'
+      latency: Date.now() - startTime,
+      error: config.signal?.aborted
+        ? 'Prueba cancelada'
+        : timedOut
+          ? 'Tiempo de espera agotado'
+          : 'No se pudo conectar con el proveedor'
     };
   }
 }
