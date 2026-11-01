@@ -75,13 +75,19 @@ const data = async (response: Response): Promise<any> => (await json(response)).
 
 /** El proveedor contesta lo que se le diga: aqui se decide si la prueba pasa o no. */
 function stubDelProveedor(content: string, status = 200): void {
-  vi.stubGlobal(
-    'fetch',
-    (async (): Promise<Response> =>
-      new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
-        status
-      })) as unknown as typeof fetch
-  );
+  vi.stubGlobal('fetch', (async (input: string | URL | Request): Promise<Response> => {
+    if (new URL(String(input)).pathname.endsWith('/responses')) {
+      return new Response(
+        JSON.stringify({
+          id: 'resp_1234567',
+          status: 'completed',
+          output: [{ type: 'message', content: [{ type: 'output_text', text: content }] }]
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      );
+    }
+    return new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status });
+  }) as unknown as typeof fetch);
 }
 
 let alice: User;
@@ -519,7 +525,19 @@ describe('POST /test-connection', () => {
     const successfulResponse = () =>
       new Response(
         JSON.stringify({
-          choices: [{ message: { content: '{"status":"ok","message":"conexión establecida"}' } }]
+          id: 'resp_1234567',
+          status: 'completed',
+          output: [
+            {
+              type: 'message',
+              content: [
+                {
+                  type: 'output_text',
+                  text: '{"status":"ok","message":"conexión establecida"}'
+                }
+              ]
+            }
+          ]
         }),
         { status: 200, headers: { 'content-type': 'application/json' } }
       );

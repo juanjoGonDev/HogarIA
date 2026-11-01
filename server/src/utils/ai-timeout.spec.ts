@@ -4,6 +4,7 @@ import {
   AI_TIMEOUT_DEFAULT_MS,
   AI_TIMEOUT_MAX_MS,
   aiJobLeaseSeconds,
+  connectionTestTimeoutMs,
   effectiveAiTimeoutMs
 } from './ai-timeout.js';
 
@@ -35,5 +36,14 @@ describe('AI timeout runtime limits', () => {
   it('reserves a second timeout window for receipt streaming fallback', () => {
     expect(aiJobLeaseSeconds(900_123, 'receipt')).toBe(2 * Math.ceil(900_123 / 1000) + 60);
     expect(aiJobLeaseSeconds(900_123, 'recipe')).toBe(Math.ceil(900_123 / 1000) + 60);
+  });
+
+  it('gives connection tests at least two minutes without imposing a product maximum', () => {
+    expect(connectionTestTimeoutMs(null)).toBe(120_000);
+    expect(connectionTestTimeoutMs(30_000)).toBe(120_000);
+    expect(connectionTestTimeoutMs(120_000)).toBe(120_000);
+    expect(connectionTestTimeoutMs(300_000)).toBe(300_000);
+    expect(connectionTestTimeoutMs(AI_TIMEOUT_MAX_MS)).toBe(AI_TIMEOUT_MAX_MS);
+    expect(aiJobLeaseSeconds(30_000, 'connection_test')).toBe(180);
   });
 });

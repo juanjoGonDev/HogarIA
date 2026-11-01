@@ -41,7 +41,13 @@ import {
   pingDeConexionTransport
 } from './ai-client.js';
 import { aiFunctionForJobKind } from './ai-function-providers.js';
-import type { AiConfigRow, AiJobKind, AiMessage, AiMessagePart } from './ai-client.js';
+import type {
+  AiConfigRow,
+  AiConnectionTestDiagnostic,
+  AiJobKind,
+  AiMessage,
+  AiMessagePart
+} from './ai-client.js';
 import type { AiResponseFormat } from '../schemas/ai-response-format.js';
 import {
   buildInventarioJson,
@@ -143,7 +149,8 @@ function liberarRuntime(jobId: string, borrar: boolean): void {
   trabajosEnMemoria.delete(jobId);
 }
 
-function maxIntentos(config: AiConfigRow | null): number {
+function maxIntentos(config: AiConfigRow | null, kind?: string): number {
+  if (kind === 'connection_test') return 1;
   const retries = Number(config?.retry_attempts ?? 3);
   return (Number.isInteger(retries) && retries >= 0 ? Math.min(retries, 5) : 3) + 1;
 }
@@ -210,7 +217,7 @@ export function submitAiTask<T>(input: SubmitAiTask<T>): AiJobHandle<T> {
     householdId,
     configId,
     input.kind.slice(0, 64),
-    maxIntentos(input.config),
+    maxIntentos(input.config, input.kind),
     siguienteOrden(db, configId)
   );
   trabajosEnMemoria.set(id, runtime);
@@ -295,15 +302,66 @@ export function dispatchPingDeConexion(
 ): Promise<
   { ok: true; latency: number; message: string } | { ok: false; latency: number; error: string }
 > {
+  const jobId = nanoid();
   return submitAiTask({
     db: context.db,
+    id: jobId,
     userId: context.userId,
     config: context.config,
     configId: context.configId,
     kind: 'connection_test',
-    run: (_fixedConfig, signal) => pingDeConexionTransport({ ...probe, signal }),
+    run: (_fixedConfig, signal) =>
+      pingDeConexionTransport({
+        ...probe,
+        jobId,
+        signal,
+        onDiagnostic: (diagnostic) => persistConnectionTestDiagnostic(context.db, jobId, diagnostic)
+      }),
     failureCode: (result) => (result.ok ? null : 'PROVIDER')
   }).result;
+}
+
+function persistConnectionTestDiagnostic(
+  db: SqlDb,
+  jobId: string,
+  diagnostic: AiConnectionTestDiagnostic
+): void {
+  const responseId =
+    diagnostic.providerResponseId &&
+    /^resp_[A-Za-z0-9_-]{1,128}$/.test(diagnostic.providerResponseId)
+      ? diagnostic.providerResponseId
+      : null;
+  const transport =
+    diagnostic.providerTransport === 'responses_background' ||
+    diagnostic.providerTransport === 'chat_completions'
+      ? diagnostic.providerTransport
+      : null;
+  const status =
+    Number.isInteger(diagnostic.providerHttpStatus) &&
+    Number(diagnostic.providerHttpStatus) >= 100 &&
+    Number(diagnostic.providerHttpStatus) <= 599
+      ? diagnostic.providerHttpStatus
+      : null;
+  const elapsedMs = Number.isSafeInteger(diagnostic.elapsedMs)
+    ? Math.max(0, diagnostic.elapsedMs)
+    : 0;
+  const stage = new Set([
+    'submitting',
+    'queued',
+    'polling',
+    'completed',
+    'failed',
+    'timed_out',
+    'cancelled',
+    'fallback'
+  ]).has(diagnostic.diagnosticStage)
+    ? diagnostic.diagnosticStage
+    : 'failed';
+  db.prepare(
+    `UPDATE ai_jobs SET provider_response_id = ?, provider_transport = ?, provider_http_status = ?,
+       elapsed_ms = ?, diagnostic_stage = ?, updated_at = CURRENT_TIMESTAMP
+     WHERE id = ? AND kind = 'connection_test'`
+  ).run(responseId, transport, status, elapsedMs, stage, jobId);
 }
 
 /** Tickets keep their durable file/receipt reference while sharing the same provider scheduler. */
@@ -655,6 +713,7 @@ async function correr(
       jobId,
       metadata.config_id,
       metadata.household_id,
+      metadata.kind,
       señal.signal,
       claimGeneration
     );
@@ -887,6 +946,7 @@ async function correrTrabajoGenerico(
   jobId: string,
   configId: string | null,
   householdId: string | null,
+  kind: string,
   signal: AbortSignal,
   claimGeneration: number
 ): Promise<void> {
@@ -950,7 +1010,10 @@ async function correrTrabajoGenerico(
     if (!errorCode) {
       resolver(runtime, result);
       liberarRuntime(jobId, true);
-    } else if (!esperarReintentoManual(db, jobId, runtime, null, result)) {
+    } else if (
+      kind === 'connection_test' ||
+      !esperarReintentoManual(db, jobId, runtime, null, result)
+    ) {
       resolver(runtime, result);
       liberarRuntime(jobId, true);
     }
@@ -967,7 +1030,7 @@ async function correrTrabajoGenerico(
 
     const errorCode = error instanceof AiCallError ? error.code : 'PROVIDER';
     const reintentable = errorCode !== 'NO_CONFIG' && errorCode !== 'BAD_JSON';
-    if (reintentable && row.attempts < row.max_attempts) {
+    if (kind !== 'connection_test' && reintentable && row.attempts < row.max_attempts) {
       db.prepare(
         `UPDATE ai_jobs SET status = 'queued', error_code = NULL, error_detail = NULL,
            queue_order = ?, lease_until = NULL, updated_at = CURRENT_TIMESTAMP
@@ -980,7 +1043,7 @@ async function correrTrabajoGenerico(
          finished_at = CURRENT_TIMESTAMP, lease_until = NULL, updated_at = CURRENT_TIMESTAMP
        WHERE id = ? AND status = 'running' AND claim_generation = ?`
     ).run(errorCode, jobId, claimGeneration);
-    if (!esperarReintentoManual(db, jobId, runtime, error)) {
+    if (kind === 'connection_test' || !esperarReintentoManual(db, jobId, runtime, error)) {
       rechazar(runtime, error);
       liberarRuntime(jobId, true);
     }
@@ -1108,6 +1171,11 @@ export type AiQueueJobDto = {
   retryable: boolean;
   createdAt: string;
   queueOrder: number;
+  providerResponseId: string | null;
+  providerTransport: 'responses_background' | 'chat_completions' | null;
+  providerHttpStatus: number | null;
+  elapsedMs: number | null;
+  diagnosticStage: AiConnectionTestDiagnostic['diagnosticStage'] | null;
 };
 
 /** DTO whitelist: no key, prompts, attachments, result, or provider error body. */
@@ -1123,7 +1191,8 @@ export function queueForConfig(db: SqlDb, userId: string, configId: string): AiQ
   return (
     db
       .prepare(
-        `SELECT id, config_id, kind, status, attempts, max_attempts, error_code, created_at, queue_order
+        `SELECT id, config_id, kind, status, attempts, max_attempts, error_code, created_at, queue_order,
+           provider_response_id, provider_transport, provider_http_status, elapsed_ms, diagnostic_stage
          FROM ai_jobs WHERE user_id = ? AND household_id IS ? AND config_id = ?
            AND status IN ('queued', 'running', 'failed')
          ORDER BY CASE status WHEN 'queued' THEN 0 WHEN 'running' THEN 1 ELSE 2 END,
@@ -1145,10 +1214,50 @@ export function queueForConfig(db: SqlDb, userId: string, configId: string): AiQ
       error: (row.error_code as string | null) ?? null,
       retryable:
         status === 'failed' &&
+        kind !== 'connection_test' &&
         managerEnabled &&
         (kind === 'receipt' || Boolean(runtime?.retryWindowTimer)),
       createdAt: String(row.created_at),
-      queueOrder: Number(row.queue_order)
+      queueOrder: Number(row.queue_order),
+      providerResponseId:
+        kind === 'connection_test' &&
+        typeof row.provider_response_id === 'string' &&
+        /^resp_[A-Za-z0-9_-]{1,128}$/.test(row.provider_response_id)
+          ? row.provider_response_id
+          : null,
+      providerTransport:
+        kind === 'connection_test' &&
+        (row.provider_transport === 'responses_background' ||
+          row.provider_transport === 'chat_completions')
+          ? row.provider_transport
+          : null,
+      providerHttpStatus:
+        kind === 'connection_test' &&
+        Number.isInteger(row.provider_http_status) &&
+        Number(row.provider_http_status) >= 100 &&
+        Number(row.provider_http_status) <= 599
+          ? Number(row.provider_http_status)
+          : null,
+      elapsedMs:
+        kind === 'connection_test' &&
+        Number.isSafeInteger(row.elapsed_ms) &&
+        Number(row.elapsed_ms) >= 0
+          ? Number(row.elapsed_ms)
+          : null,
+      diagnosticStage:
+        kind === 'connection_test' &&
+        [
+          'submitting',
+          'queued',
+          'polling',
+          'completed',
+          'failed',
+          'timed_out',
+          'cancelled',
+          'fallback'
+        ].includes(String(row.diagnostic_stage))
+          ? (row.diagnostic_stage as AiConnectionTestDiagnostic['diagnosticStage'])
+          : null
     };
   });
 }
@@ -1315,7 +1424,7 @@ export function reintentarTrabajo(
          WHERE id = ? AND user_id = ? AND household_id IS ? AND config_id = ? AND status = 'failed'`
         )
         .run(
-          maxIntentos({ retry_attempts: config.retry_attempts } as AiConfigRow),
+          maxIntentos({ retry_attempts: config.retry_attempts } as AiConfigRow, row.kind),
           siguienteOrden(db, configId),
           jobId,
           userId,
@@ -1376,7 +1485,7 @@ export function reencolar(jobId: string): boolean {
        WHERE id = ? AND status IN ('failed', 'stopped', 'done')`
     )
     .run(
-      config ? maxIntentos({ retry_attempts: config.retry_attempts } as AiConfigRow) : 1,
+      config ? maxIntentos({ retry_attempts: config.retry_attempts } as AiConfigRow, row.kind) : 1,
       siguienteOrden(db, row.config_id),
       jobId
     ).changes;

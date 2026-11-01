@@ -352,6 +352,8 @@ test.describe('gestor de cola de IA por proveedor', () => {
           })
         );
       expect(touchTargets.every((target) => target.width >= 44 && target.height >= 44)).toBe(true);
+      const actionHeights = touchTargets.map((target) => target.height);
+      expect(Math.max(...actionHeights) - Math.min(...actionHeights)).toBeLessThanOrEqual(1);
       if (size.width === 1440 || size.width === 393) {
         await manager.scrollIntoViewIfNeeded();
         if (size.width === 393) {
@@ -412,10 +414,21 @@ test.describe('gestor de cola de IA por proveedor', () => {
     expect(replies[2].status).toBeGreaterThanOrEqual(400);
   });
 
-  test('permite reintentar manualmente un fallo terminal sin exponer payloads ni claves', async ({
+  test('copia solo el diagnóstico del job elegido y permite reintentar un fallo terminal', async ({
     page
-  }) => {
+  }, testInfo) => {
     const configId = await createConfig(page, provider, 1);
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: {
+          writeText: async (text: string) => {
+            (window as Window & { __hogariaCopiedDiagnostic?: string }).__hogariaCopiedDiagnostic =
+              text;
+          }
+        }
+      });
+    });
     await page.reload();
     const providerCard = page.locator('.config-card').filter({ hasText: 'Synthetic queue 1' });
     await providerCard.getByRole('link', { name: 'Gestionar cola' }).click();
@@ -423,12 +436,19 @@ test.describe('gestor de cola de IA por proveedor', () => {
     const manager = page.locator('[data-test="ai-provider-queue"]');
     await expect(manager).toBeVisible();
     await assignRecipeProvider(page, configId);
-    provider.setNextBehaviors('fail', 'success');
+    provider.setNextBehaviors('fail', 'hold', 'success');
 
     const call = await startQueuedRecipeGeneration(page);
     await expect(page.locator('[data-test="ai-queue-job-failed"]')).toHaveCount(1);
-    const failed = (await queueJobs(page, configId)).find((job) => job.status === 'failed');
+    const otherCall = await startQueuedRecipeGeneration(page);
+    await waitForProviderRequest(provider, 2);
+    await expect(page.locator('[data-test="ai-queue-job-running"]')).toHaveCount(1);
+
+    const jobsBeforeCopy = await queueJobs(page, configId);
+    const failed = jobsBeforeCopy.find((job) => job.status === 'failed');
+    const other = jobsBeforeCopy.find((job) => job.status === 'running');
     expect(failed?.retryable).toBe(true);
+    expect(other).toBeTruthy();
     expect(JSON.stringify(await queueJobs(page, configId))).not.toContain(
       'synthetic-key-not-for-display'
     );
@@ -436,15 +456,45 @@ test.describe('gestor de cola de IA por proveedor', () => {
       'synthetic provider failure'
     );
 
+    const failedRow = page.locator(`.ai-queue__job[data-job-id="${failed!.id}"]`);
+    const copyButton = failedRow.getByRole('button', { name: /Copiar diagnóstico/ });
+    const copyBounds = await copyButton.boundingBox();
+    expect(copyBounds?.height).toBeGreaterThanOrEqual(44);
+    await copyButton.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('[role="status"][aria-live="polite"]')).toContainText(
+      'Diagnóstico copiado.'
+    );
+    const copiedText = await page.evaluate(
+      () => (window as Window & { __hogariaCopiedDiagnostic?: string }).__hogariaCopiedDiagnostic
+    );
+    expect(copiedText).toBeTruthy();
+    const copied = JSON.parse(copiedText!) as Record<string, unknown>;
+    expect(copied).toMatchObject({ jobId: failed!.id, kind: 'recipe', status: 'failed' });
+    expect(copiedText).not.toContain(other!.id);
+    expect(copiedText).not.toContain('synthetic-key-not-for-display');
+    expect(copiedText).not.toContain(provider.baseUrl);
+    expect(copiedText).not.toContain('synthetic provider failure');
+
+    if (process.env.E2E_SCREENSHOT_DIR) {
+      const width = testInfo.project.name === 'chromium' ? 1440 : 393;
+      await page.setViewportSize({ width, height: width === 393 ? 851 : 900 });
+      await captureQueueUi(page, 'manager', width);
+    }
+
     await page
-      .locator(`.ai-queue__job[data-job-id="${failed!.id}"]`)
-      .getByRole('button', { name: /Reintentar/ })
+      .locator(`.ai-queue__job[data-job-id="${other!.id}"]`)
+      .getByRole('button', { name: /Cancelar/ })
       .click();
+    await expect.poll(() => provider.abortCount, { timeout: 10000 }).toBeGreaterThan(0);
+    expect((await otherCall.result).status).toBeGreaterThanOrEqual(400);
+
+    await failedRow.getByRole('button', { name: /Reintentar/ }).click();
     await expect(page.locator('[data-test="ai-queue-job-failed"]')).toHaveCount(0);
     const reply = await call.result;
     expect(reply.status).toBe(200);
     expect(reply.body.success).toBe(true);
-    expect(provider.requestCount).toBe(2);
+    expect(provider.requestCount).toBe(3);
   });
 
   test('traduce formulario y gestor al inglés y oculta la cola en límite cero', async ({

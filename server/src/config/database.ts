@@ -822,6 +822,11 @@ async function runMigrations(db: Database.Database): Promise<void> {
       lease_until DATETIME,
       error_code TEXT,
       error_detail TEXT,
+      provider_response_id TEXT,
+      provider_transport TEXT,
+      provider_http_status INTEGER,
+      elapsed_ms INTEGER,
+      diagnostic_stage TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       started_at DATETIME,
@@ -1079,6 +1084,11 @@ async function runMigrations(db: Database.Database): Promise<void> {
   addColumnIfMissing('ai_jobs', 'receipt_id', 'TEXT');
   addColumnIfMissing('ai_jobs', 'queue_order', 'INTEGER NOT NULL DEFAULT 0');
   addColumnIfMissing('ai_jobs', 'claim_generation', 'INTEGER NOT NULL DEFAULT 0');
+  addColumnIfMissing('ai_jobs', 'provider_response_id', 'TEXT');
+  addColumnIfMissing('ai_jobs', 'provider_transport', 'TEXT');
+  addColumnIfMissing('ai_jobs', 'provider_http_status', 'INTEGER');
+  addColumnIfMissing('ai_jobs', 'elapsed_ms', 'INTEGER');
+  addColumnIfMissing('ai_jobs', 'diagnostic_stage', 'TEXT');
   // Existing durable receipt jobs get their original home from the receipt itself. Generic jobs
   // remain unscoped because their input only lives in RAM; never infer a home from current selection.
   db.prepare(

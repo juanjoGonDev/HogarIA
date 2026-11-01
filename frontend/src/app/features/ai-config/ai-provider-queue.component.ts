@@ -47,6 +47,28 @@ const ERROR_KEYS: Record<string, TranslationKey> = {
   CONFIG_UNAVAILABLE: 'ai_config.queue_error_config_unavailable'
 };
 
+const SAFE_DIAGNOSTIC_KINDS = new Set(Object.keys(KIND_KEYS));
+const SAFE_DIAGNOSTIC_ERRORS = new Set(Object.keys(ERROR_KEYS));
+const SAFE_DIAGNOSTIC_TRANSPORTS = new Set(['responses_background', 'chat_completions']);
+const SAFE_DIAGNOSTIC_STAGES = new Set([
+  'submitting',
+  'queued',
+  'polling',
+  'completed',
+  'failed',
+  'timed_out',
+  'cancelled',
+  'fallback'
+]);
+
+type QueueJobDiagnosticMetadata = {
+  providerResponseId?: unknown;
+  providerTransport?: unknown;
+  providerHttpStatus?: unknown;
+  elapsedMs?: unknown;
+  diagnosticStage?: unknown;
+};
+
 @Component({
   selector: 'app-ai-provider-queue',
   standalone: true,
@@ -89,6 +111,16 @@ const ERROR_KEYS: Record<string, TranslationKey> = {
         <div class="ai-queue__live" role="status" aria-live="polite" aria-atomic="true">
           {{ announcement() }}
         </div>
+
+        @if (diagnosticCopyStatus()) {
+          <p
+            class="ai-queue__copy-feedback"
+            [class.ai-queue__copy-feedback--error]="diagnosticCopyStatus() === 'failed'"
+            aria-hidden="true"
+          >
+            {{ diagnosticCopyFeedback() }}
+          </p>
+        }
 
         @if (queueState().loadError) {
           <div class="ai-queue__alert" role="alert" aria-atomic="true">
@@ -146,6 +178,19 @@ const ERROR_KEYS: Record<string, TranslationKey> = {
                       </span>
                     </span>
                     <div class="ai-queue__job-actions">
+                      <button
+                        class="ai-queue__action-button"
+                        type="button"
+                        [attr.aria-label]="
+                          'ai_config.queue_copy_diagnostic_job' | t: { job: kindLabel(job.kind) }
+                        "
+                        [attr.data-job-id]="job.id"
+                        data-action="copy-diagnostic"
+                        (click)="copyDiagnostic(job)"
+                      >
+                        <app-icon name="content_copy" [size]="16" [label]="null" />
+                        {{ 'ai_config.queue_copy_diagnostic' | t }}
+                      </button>
                       <button
                         class="ai-queue__icon-button"
                         type="button"
@@ -214,19 +259,34 @@ const ERROR_KEYS: Record<string, TranslationKey> = {
                       <span class="ai-queue__job-title">{{ kindLabel(job.kind) }}</span>
                       <span class="ai-queue__job-meta">{{ statusLabel(job.status) }}</span>
                     </span>
-                    <button
-                      class="ai-queue__action-button"
-                      type="button"
-                      [disabled]="queueState().mutating || queueState().loadError"
-                      [attr.aria-label]="
-                        'ai_config.queue_cancel_job' | t: { job: kindLabel(job.kind) }
-                      "
-                      [attr.data-job-id]="job.id"
-                      (click)="cancel(job)"
-                    >
-                      <app-icon name="close" [size]="16" [label]="null" />
-                      {{ 'ai_config.queue_cancel' | t }}
-                    </button>
+                    <div class="ai-queue__job-actions">
+                      <button
+                        class="ai-queue__action-button"
+                        type="button"
+                        [attr.aria-label]="
+                          'ai_config.queue_copy_diagnostic_job' | t: { job: kindLabel(job.kind) }
+                        "
+                        [attr.data-job-id]="job.id"
+                        data-action="copy-diagnostic"
+                        (click)="copyDiagnostic(job)"
+                      >
+                        <app-icon name="content_copy" [size]="16" [label]="null" />
+                        {{ 'ai_config.queue_copy_diagnostic' | t }}
+                      </button>
+                      <button
+                        class="ai-queue__action-button"
+                        type="button"
+                        [disabled]="queueState().mutating || queueState().loadError"
+                        [attr.aria-label]="
+                          'ai_config.queue_cancel_job' | t: { job: kindLabel(job.kind) }
+                        "
+                        [attr.data-job-id]="job.id"
+                        (click)="cancel(job)"
+                      >
+                        <app-icon name="close" [size]="16" [label]="null" />
+                        {{ 'ai_config.queue_cancel' | t }}
+                      </button>
+                    </div>
                   </li>
                 }
               </ul>
@@ -260,21 +320,36 @@ const ERROR_KEYS: Record<string, TranslationKey> = {
                         <span class="ai-queue__job-error">{{ errorLabel(job.error) }}</span>
                       }
                     </span>
-                    @if (job.retryable) {
+                    <div class="ai-queue__job-actions">
                       <button
-                        class="ai-queue__action-button ai-queue__action-button--retry"
+                        class="ai-queue__action-button"
                         type="button"
-                        [disabled]="queueState().mutating || queueState().loadError"
                         [attr.aria-label]="
-                          'ai_config.queue_retry_job' | t: { job: kindLabel(job.kind) }
+                          'ai_config.queue_copy_diagnostic_job' | t: { job: kindLabel(job.kind) }
                         "
                         [attr.data-job-id]="job.id"
-                        (click)="retry(job)"
+                        data-action="copy-diagnostic"
+                        (click)="copyDiagnostic(job)"
                       >
-                        <app-icon name="refresh" [size]="16" [label]="null" />
-                        {{ 'ai_config.queue_retry' | t }}
+                        <app-icon name="content_copy" [size]="16" [label]="null" />
+                        {{ 'ai_config.queue_copy_diagnostic' | t }}
                       </button>
-                    }
+                      @if (job.retryable) {
+                        <button
+                          class="ai-queue__action-button ai-queue__action-button--retry"
+                          type="button"
+                          [disabled]="queueState().mutating || queueState().loadError"
+                          [attr.aria-label]="
+                            'ai_config.queue_retry_job' | t: { job: kindLabel(job.kind) }
+                          "
+                          [attr.data-job-id]="job.id"
+                          (click)="retry(job)"
+                        >
+                          <app-icon name="refresh" [size]="16" [label]="null" />
+                          {{ 'ai_config.queue_retry' | t }}
+                        </button>
+                      }
+                    </div>
                   </li>
                 }
               </ul>
@@ -389,6 +464,16 @@ const ERROR_KEYS: Record<string, TranslationKey> = {
       .ai-queue__job-actions {
         flex: none;
         gap: 2px;
+      }
+
+      .ai-queue__copy-feedback {
+        margin: var(--space-2) 0 0;
+        color: var(--success);
+        font-size: var(--text-xs);
+      }
+
+      .ai-queue__copy-feedback--error {
+        color: var(--error);
       }
 
       .ai-queue__icon-button,
@@ -511,6 +596,7 @@ const ERROR_KEYS: Record<string, TranslationKey> = {
         }
 
         .ai-queue__job-actions {
+          flex-wrap: wrap;
           justify-content: flex-end;
           width: 100%;
         }
@@ -539,6 +625,7 @@ export class AiProviderQueueComponent implements OnChanges, OnDestroy {
   );
   readonly announcement = signal('');
   readonly draggedJobId = signal<string | null>(null);
+  readonly diagnosticCopyStatus = signal<'copied' | 'failed' | null>(null);
 
   private readonly configId = signal('');
   private stopWatching?: () => void;
@@ -574,6 +661,30 @@ export class AiProviderQueueComponent implements OnChanges, OnDestroy {
 
   errorLabel(code: string | null): string {
     return this.i18n.t(ERROR_KEYS[code ?? ''] ?? 'ai_config.queue_error_unknown');
+  }
+
+  diagnosticCopyFeedback(): string {
+    return this.i18n.t(
+      this.diagnosticCopyStatus() === 'copied'
+        ? 'ai_config.queue_copy_diagnostic_success'
+        : 'ai_config.queue_copy_diagnostic_failed'
+    );
+  }
+
+  async copyDiagnostic(job: AiQueueJob): Promise<void> {
+    const serialized = JSON.stringify(this.safeDiagnosticFor(job), null, 2);
+    this.diagnosticCopyStatus.set(null);
+    try {
+      if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
+        throw new Error('Clipboard unavailable');
+      }
+      await navigator.clipboard.writeText(serialized);
+      this.diagnosticCopyStatus.set('copied');
+      this.announcement.set(this.i18n.t('ai_config.queue_copy_diagnostic_success'));
+    } catch {
+      this.diagnosticCopyStatus.set('failed');
+      this.announcement.set(this.i18n.t('ai_config.queue_copy_diagnostic_failed'));
+    }
   }
 
   statusLabel(status: AiQueueJobStatus): string {
@@ -659,6 +770,72 @@ export class AiProviderQueueComponent implements OnChanges, OnDestroy {
       );
       if (success) this.restoreFocus(job.id);
     });
+  }
+
+  private safeDiagnosticFor(job: AiQueueJob): Record<string, unknown> {
+    const metadata = job as AiQueueJob & QueueJobDiagnosticMetadata;
+    const diagnostic: Record<string, unknown> = {
+      jobId: this.safeIdentifier(job.id),
+      kind: SAFE_DIAGNOSTIC_KINDS.has(job.kind) ? job.kind : 'unknown',
+      status: job.status,
+      attempts: this.safeCount(job.attempts),
+      maxAttempts: this.safeCount(job.maxAttempts),
+      createdAt: this.safeTimestamp(job.createdAt),
+      error: SAFE_DIAGNOSTIC_ERRORS.has(job.error ?? '') ? job.error : null
+    };
+
+    if (
+      typeof metadata.diagnosticStage === 'string' &&
+      SAFE_DIAGNOSTIC_STAGES.has(metadata.diagnosticStage)
+    ) {
+      diagnostic['diagnosticStage'] = metadata.diagnosticStage;
+    }
+
+    const providerResponseId = this.safeIdentifier(metadata.providerResponseId);
+    if (providerResponseId) diagnostic['providerResponseId'] = providerResponseId;
+
+    if (
+      typeof metadata.providerTransport === 'string' &&
+      SAFE_DIAGNOSTIC_TRANSPORTS.has(metadata.providerTransport)
+    ) {
+      diagnostic['providerTransport'] = metadata.providerTransport;
+    }
+
+    if (
+      typeof metadata.providerHttpStatus === 'number' &&
+      Number.isInteger(metadata.providerHttpStatus) &&
+      metadata.providerHttpStatus >= 100 &&
+      metadata.providerHttpStatus <= 599
+    ) {
+      diagnostic['providerHttpStatus'] = metadata.providerHttpStatus;
+    }
+
+    if (
+      typeof metadata.elapsedMs === 'number' &&
+      Number.isSafeInteger(metadata.elapsedMs) &&
+      metadata.elapsedMs >= 0
+    ) {
+      diagnostic['elapsedMs'] = metadata.elapsedMs;
+    }
+
+    return diagnostic;
+  }
+
+  private safeIdentifier(value: unknown): string | null {
+    if (typeof value !== 'string' || value.length > 128) return null;
+    return /^[A-Za-z0-9._:-]+$/.test(value) ? value : null;
+  }
+
+  private safeCount(value: unknown): number | null {
+    return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= 1000
+      ? value
+      : null;
+  }
+
+  private safeTimestamp(value: unknown): string | null {
+    if (typeof value !== 'string') return null;
+    const timestamp = Date.parse(value);
+    return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
   }
 
   private saveOrder(jobIds: string[], focusJobId: string): void {

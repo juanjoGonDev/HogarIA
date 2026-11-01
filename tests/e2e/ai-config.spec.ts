@@ -718,7 +718,7 @@ test.describe('AI Config', () => {
       page
         .locator('.toast--error')
         .filter({ hasText: 'timeout: debe ser como máximo 2.147.483.647' })
-    ).toBeVisible();
+    ).toHaveCount(2);
     await expect(
       page.locator('.toast--error').filter({ hasText: 'No se pudo guardar la configuración' })
     ).toHaveCount(0);
@@ -901,16 +901,56 @@ test.describe('AI Config', () => {
     context
   }, testInfo) => {
     let providerCalls = 0;
-    const provider = createServer((_request, response) => {
-      providerCalls += 1;
-      setTimeout(() => {
-        response.writeHead(200, { 'content-type': 'application/json' });
-        response.end(
-          JSON.stringify({
-            choices: [{ message: { content: '{"status":"ok","message":"synthetic success"}' } }]
-          })
+    let pollingCalls = 0;
+    let completesAt = 0;
+    const provider = createServer(async (request, response) => {
+      const url = new URL(request.url ?? '/', 'http://127.0.0.1');
+      for await (const _chunk of request) {
+        // Consume the synthetic request without retaining its test-only credential or prompt.
+      }
+
+      if (request.method === 'POST' && url.pathname === '/v1/responses') {
+        providerCalls += 1;
+        completesAt = Date.now() + 8000;
+        response
+          .writeHead(202, { 'content-type': 'application/json' })
+          .end(
+            JSON.stringify({ id: 'resp_synthetic_connection_test', status: 'queued', output: [] })
+          );
+        return;
+      }
+
+      if (
+        request.method === 'GET' &&
+        url.pathname === '/v1/responses/resp_synthetic_connection_test'
+      ) {
+        pollingCalls += 1;
+        const completed = Date.now() >= completesAt;
+        response.writeHead(200, { 'content-type': 'application/json' }).end(
+          JSON.stringify(
+            completed
+              ? {
+                  id: 'resp_synthetic_connection_test',
+                  status: 'completed',
+                  output: [
+                    {
+                      type: 'message',
+                      content: [
+                        {
+                          type: 'output_text',
+                          text: '{"status":"ok","message":"synthetic success"}'
+                        }
+                      ]
+                    }
+                  ]
+                }
+              : { id: 'resp_synthetic_connection_test', status: 'queued', output: [] }
+          )
         );
-      }, 8000);
+        return;
+      }
+
+      response.writeHead(404, { 'content-type': 'application/json' }).end('{}');
     });
     await new Promise<void>((resolve, reject) => {
       provider.once('error', reject);
@@ -987,6 +1027,7 @@ test.describe('AI Config', () => {
         { timeout: 15000 }
       );
       expect(providerCalls).toBe(1);
+      expect(pollingCalls).toBeGreaterThan(0);
       await reopened.close();
     } finally {
       await new Promise<void>((resolve, reject) => {

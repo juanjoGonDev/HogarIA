@@ -746,7 +746,21 @@ describe('AI provider queue dispatcher', () => {
     ).resolves.toBe('chunk');
     expect(deltas).toEqual(['chunk']);
 
-    fakeFetch.mockResolvedValueOnce(json('{"status":"ok","message":"synthetic ok"}'));
+    fakeFetch.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          id: 'resp_1234567',
+          status: 'completed',
+          output: [
+            {
+              type: 'message',
+              content: [{ type: 'output_text', text: '{"status":"ok","message":"synthetic ok"}' }]
+            }
+          ]
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )
+    );
     await expect(
       dispatchPingDeConexion(
         { base_url: config.base_url, api_key: config.api_key, model: config.model },
@@ -756,6 +770,17 @@ describe('AI provider queue dispatcher', () => {
     expect(
       db.prepare('SELECT kind, status FROM ai_jobs WHERE kind = ?').get('connection_test')
     ).toMatchObject({ kind: 'connection_test', status: 'done' });
+    expect(
+      db
+        .prepare(
+          'SELECT max_attempts, provider_response_id, provider_transport FROM ai_jobs WHERE kind = ?'
+        )
+        .get('connection_test')
+    ).toMatchObject({
+      max_attempts: 1,
+      provider_response_id: 'resp_1234567',
+      provider_transport: 'responses_background'
+    });
   });
 
   it('rejects normal and streaming AI calls when the user has no active provider', async () => {
@@ -1221,42 +1246,49 @@ describe('AI provider queue dispatcher', () => {
     }
   });
 
-  it('keeps a failed connection check available for a manual retry after automatic attempts', async () => {
-    const { dispatchPingDeConexion, queueForConfig, reintentarTrabajo } =
-      await import('./ticket-queue.js');
+  it('runs a failed connection check once and requires a new test action to retry', async () => {
+    const {
+      dispatchPingDeConexion,
+      queueForConfig,
+      reintentarTrabajo,
+      cerrarVentanasReintentoConfiguracion
+    } = await import('./ticket-queue.js');
     const fakeFetch = vi.mocked(fetch);
-    fakeFetch.mockResolvedValueOnce(new Response('synthetic unavailable', { status: 503 }));
-    fakeFetch.mockResolvedValueOnce(new Response('synthetic unavailable', { status: 503 }));
-    fakeFetch.mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          choices: [{ message: { content: '{"status":"ok","message":"recovered"}' } }]
-        }),
-        { status: 200, headers: { 'content-type': 'application/json' } }
-      )
-    );
+    fakeFetch.mockResolvedValue(new Response('synthetic unavailable', { status: 503 }));
 
     const result = dispatchPingDeConexion(
       { base_url: config.base_url, api_key: config.api_key, model: config.model },
       { db, userId, config, configId: config.id }
     );
-    await waitFor(() => {
-      const row = db.prepare('SELECT status FROM ai_jobs WHERE kind = ?').get('connection_test') as
-        { status: string } | undefined;
-      return row?.status === 'failed';
-    });
+    await waitFor(
+      () =>
+        jobRow(
+          String(
+            (
+              db.prepare('SELECT id FROM ai_jobs WHERE kind = ?').get('connection_test') as {
+                id: string;
+              }
+            ).id
+          )
+        ).status === 'failed'
+    );
 
     const failedId = String(
       (db.prepare('SELECT id FROM ai_jobs WHERE kind = ?').get('connection_test') as { id: string })
         .id
     );
+    cerrarVentanasReintentoConfiguracion(db, userId, config.id);
+    await expect(result).resolves.toMatchObject({ ok: false });
+    expect(fakeFetch).toHaveBeenCalledTimes(1);
+    expect(jobRow(failedId)).toMatchObject({
+      status: 'failed',
+      attempts: 1,
+      max_attempts: 1
+    });
     expect(
       queueForConfig(db, userId, config.id).find((job) => job.id === failedId)?.retryable
-    ).toBe(true);
-    expect(reintentarTrabajo(db, userId, config.id, failedId)).toBe('queued');
-    await expect(result).resolves.toMatchObject({ ok: true, message: 'recovered' });
-    expect(fakeFetch).toHaveBeenCalledTimes(3);
-    expect(jobRow(failedId)).toMatchObject({ status: 'done', attempts: 1 });
+    ).toBe(false);
+    expect(reintentarTrabajo(db, userId, config.id, failedId)).toBe('input-expired');
   });
 
   it('settles a failed connection check with its last verdict when its manager closes', async () => {

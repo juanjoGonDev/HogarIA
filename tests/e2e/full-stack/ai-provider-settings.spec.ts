@@ -177,20 +177,43 @@ test.describe('AI provider settings in household', () => {
       resolveProviderRequest = resolveReleased;
     });
     let providerRequestCount = 0;
+    const providerResponseId = 'resp_synthetic_connection_test';
     const provider = createServer((request, response) => {
       void (async () => {
         for await (const _chunk of request) {
-          // Consume the synthetic OpenAI-compatible request body without persisting it.
+          // Consume the synthetic request body without persisting it.
         }
-        providerRequestCount += 1;
-        markProviderRequestStarted();
-        await providerRequestReleased;
-        response.writeHead(200, { 'content-type': 'application/json' });
-        response.end(
-          JSON.stringify({
-            choices: [{ message: { content: '{"status":"ok","message":"conexión establecida"}' } }]
-          })
-        );
+        const url = new URL(request.url ?? '/', 'http://127.0.0.1');
+        if (request.method === 'POST' && url.pathname === '/v1/responses') {
+          providerRequestCount += 1;
+          markProviderRequestStarted();
+          response.writeHead(202, { 'content-type': 'application/json' });
+          response.end(JSON.stringify({ id: providerResponseId, status: 'queued', output: [] }));
+          return;
+        }
+        if (request.method === 'GET' && url.pathname === `/v1/responses/${providerResponseId}`) {
+          await providerRequestReleased;
+          response.writeHead(200, { 'content-type': 'application/json' });
+          response.end(
+            JSON.stringify({
+              id: providerResponseId,
+              status: 'completed',
+              output: [
+                {
+                  type: 'message',
+                  content: [
+                    {
+                      type: 'output_text',
+                      text: '{"status":"ok","message":"conexión establecida"}'
+                    }
+                  ]
+                }
+              ]
+            })
+          );
+          return;
+        }
+        response.writeHead(404, { 'content-type': 'application/json' }).end('{}');
       })().catch(() => {
         if (!response.headersSent) response.writeHead(500);
         response.end();
