@@ -48,4 +48,36 @@ Explicar por qué falla un intento de lectura de ticket y permitir copiar única
 ## Fuera de alcance
 
 - Cambiar el transporte/background de solicitudes de IA, modificar otros flujos de IA o recuperar logs históricos que no se correlacionaron con este trabajo.
-- Inferir una causa concreta del job aportado: el log compartido no incluye evidencia suficiente.
+- Afirmar el código/param exacto del último `HTTP 400`: el diagnóstico recibido no incluye el cuerpo ni el campo `param` del proveedor.
+
+## Seguimiento: HTTP 400 y quitar de la cola
+
+### Evidencia vigente
+
+- El último intento terminó en `responses_background`, HTTP `400`, en `123 ms`; el servidor aún conserva solo el status y descarta el código/parámetro del error remoto.
+- Antes de llamar al proveedor, el worker lee el fichero local y, si falta, termina como `FILE_MISSING`. Si existe, incluye la imagen como `input_image` o el PDF como `input_file` y adjunta `inventario.json` en la petición (`server/src/utils/ticket-queue.ts`). Por tanto, el dato aportado no apunta a que falte el fichero local; el proveedor todavía puede rechazar el formato o algún parámetro.
+- La captura previa de configuración mostraba modelo `gpt-5` y temperatura `0.7`; el contrato añade `temperature` configurada al request aunque el modelo use reasoning por defecto. La guía oficial de GPT-5 indica retirar `temperature` y `top_p` cuando reasoning effort no es `none`: [GPT-5 API guide](https://developers.openai.com/api/docs/guides/latest-model?model=gpt-5). La guía de archivos confirma que Responses admite `file_data` y `.json`: [File inputs](https://developers.openai.com/api/docs/guides/file-inputs).
+- La incompatibilidad de parámetros es hipótesis fuerte, no causa confirmada del intento ya terminado: falta el `code`/`param` que devolvió el proveedor.
+
+### Decisiones
+
+- Para los modelos GPT-5 con reasoning por defecto, omitir `temperature` y `top_p` del payload (salvo que el request solicite explícitamente `reasoning.effort: 'none'`). Mantener el request en background y preservar imagen/PDF, inventario y salida estructurada.
+- Persistir y copiar solo `error.type`, `error.code` y `error.param` si pasan allowlist estricta. Nunca guardar ni devolver el mensaje/cuerpo remoto, porque puede repetir prompts, adjuntos, URLs o datos sensibles.
+- Quitar una lectura de la cola debe ocultar solo su entrada terminal `failed`/`stopped`; conservar el ticket, trabajo y diagnóstico en su ficha. No reutilizar `DELETE /receipts/:id`, que borra el ticket.
+- Rechazar quitar trabajos `queued`/`running`; al reintentar, limpiar la marca de ocultación para que vuelva a la cola.
+
+### Criterios de aceptación
+
+- [ ] Los requests GPT-5 no envían `temperature`/`top_p` por defecto; tests verifican que sí adjuntan el ticket y el inventario y que los demás modelos conservan controles compatibles.
+- [ ] Para HTTP 400 se guardan/copian solo `type`/`code`/`param` validados; jamás mensaje/body remoto. La UI explica `unsupported_parameter` para `temperature`/`top_p`.
+- [ ] El botón accesible «Quitar de la cola» oculta trabajos `failed`/`stopped` y mantiene intactos ticket, líneas, ficha y diagnóstico.
+- [ ] El backend protege el scope usuario/hogar, devuelve 409 para trabajos activos, y reintentar restaura el trabajo en la cola.
+- [ ] Pruebas API/UI cubren migración desde BD existente, repetición, carrera con reintento, aislamiento, y no borrado del ticket; E2E sintético valida escritorio y móvil.
+- [ ] Coverage de los ficheros afectados ≥70 % statements/branches/functions/lines; build, lint, typecheck, CI y capturas PC/móvil verificadas.
+
+### Plan de verificación
+
+- [ ] Unit/API con 400 sintético `unsupported_parameter` para `temperature` y parámetros no permitidos; ningún proveedor real.
+- [ ] Rutas/worker/SQLite temporal: dismiss terminal, 409 activo, 404 fuera de scope, ticket/job conservados y retry vuelve a mostrarlo.
+- [ ] Angular unit tests para petición, feedback y estados de cola; Playwright contra stack full-stack y DB aislada en escritorio/móvil.
+- [ ] `pnpm run check:ui`, `pnpm run typecheck:e2e`, build y cobertura requerida.
