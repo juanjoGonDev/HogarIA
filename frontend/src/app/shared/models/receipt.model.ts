@@ -66,9 +66,31 @@ export type ReceiptJobStatus = 'queued' | 'running' | 'done' | 'failed' | 'stopp
 export interface ReceiptJob {
   id: string;
   status: ReceiptJobStatus;
+  attempts: number | null;
+  max_attempts: number | null;
+  error_code: string | null;
+  created_at: string | null;
+  /** Allowlisted provider diagnostics for the latest background attempt. */
+  provider_response_id?: string | null;
+  provider_transport?: 'responses_background' | 'chat_completions' | null;
+  provider_http_status?: number | null;
+  elapsed_ms?: number | null;
+  diagnostic_stage?:
+    | 'submitting'
+    | 'queued'
+    | 'polling'
+    | 'completed'
+    | 'failed'
+    | 'timed_out'
+    | 'cancelled'
+    | 'fallback'
+    | null;
+}
+
+/** Campos adicionales que devuelve la cola global; no forman parte del GET de detalle. */
+export interface ReceiptQueueJob extends ReceiptJob {
   attempts: number;
   max_attempts: number;
-  error_code: string | null;
   created_at: string;
   receipt_id: string | null;
   store: string | null;
@@ -78,7 +100,7 @@ export interface ReceiptJob {
 }
 
 export interface ReceiptQueueSnapshot {
-  jobs: ReceiptJob[];
+  jobs: ReceiptQueueJob[];
   counts: { queued: number; running: number; failed: number };
 }
 

@@ -9,6 +9,7 @@ import { PantryService } from '../../core/services/pantry.service';
 import { ToastService } from '../../core/services/toast.service';
 import { ConfirmService } from '../../core/services/confirm.service';
 import { I18nService } from '../../core/services/i18n.service';
+import { ClipboardService } from '../../core/services/clipboard.service';
 import { IconComponent } from '../../shared/components/ui/icon/icon.component';
 import { ButtonComponent } from '../../shared/components/ui/button/button.component';
 import { BadgeComponent } from '../../shared/components/ui/badge/badge.component';
@@ -17,7 +18,7 @@ import { PickerComponent } from '../../shared/components/ui/picker/picker.compon
 import { LoadingComponent } from '../../shared/components/ui/loading/loading.component';
 import { TranslatePipe } from '../../core/pipes/translate.pipe';
 import type { TranslationKey } from '../../core/i18n';
-import type { ReceiptItem, ReceiptStatus } from '../../shared/models/receipt.model';
+import type { ReceiptItem, ReceiptJob, ReceiptStatus } from '../../shared/models/receipt.model';
 import { revisable, sumaDeLineas } from '../../shared/models/receipt.model';
 
 /**
@@ -51,6 +52,32 @@ interface LineaEnPantalla extends ReceiptItem {
   precioTexto: string;
   cantidadTexto: string;
 }
+
+const SAFE_DIAGNOSTIC_ERRORS = new Set([
+  'NO_CONFIG',
+  'BAD_JSON',
+  'TIMEOUT',
+  'PROVIDER',
+  'FILE_MISSING',
+  'CANCELLED',
+  'INPUT_EXPIRED',
+  'JOB_SCOPE_MISMATCH',
+  'CONFIG_DISABLED',
+  'CONFIG_UNAVAILABLE',
+  'RECEIPT_NOT_FOUND'
+]);
+const SAFE_DIAGNOSTIC_STAGES = new Set([
+  'submitting',
+  'queued',
+  'polling',
+  'completed',
+  'failed',
+  'timed_out',
+  'cancelled',
+  'fallback'
+]);
+const SAFE_DIAGNOSTIC_TRANSPORTS = new Set(['responses_background', 'chat_completions']);
+const SAFE_JOB_STATUSES = new Set(['queued', 'running', 'done', 'failed', 'stopped']);
 
 @Component({
   selector: 'app-receipt-detail',
@@ -120,10 +147,37 @@ interface LineaEnPantalla extends ReceiptItem {
           </div>
         </header>
 
-        @if (t.error) {
+        @if (t.error || t.job?.error_code) {
           <div class="ficha__error" data-test="ticket-error">
             <app-icon name="error_outline" [size]="18" [label]="null" />
-            <span>{{ textoDeError(t.error) }}</span>
+            <div class="ficha__error-content">
+              <p class="ficha__error-message">
+                {{ textoDeError(t.job?.error_code || t.error, t.job) }}
+              </p>
+              @if (t.status === 'failed' && t.job) {
+                <app-button
+                  variant="outline"
+                  size="sm"
+                  [touchTarget]="true"
+                  type="button"
+                  data-test="receipt-copy-diagnostic"
+                  (onClick)="copyDiagnostic(t.job)"
+                >
+                  <app-icon name="content_copy" [size]="16" [label]="null" />
+                  {{ 'receipts.copy_diagnostic' | t }}
+                </app-button>
+                <span
+                  class="ficha__error-feedback"
+                  role="status"
+                  aria-live="polite"
+                  aria-atomic="true"
+                >
+                  @if (diagnosticCopyStatus()) {
+                    {{ diagnosticCopyFeedback() | t }}
+                  }
+                </span>
+              }
+            </div>
           </div>
         }
 
@@ -555,13 +609,39 @@ interface LineaEnPantalla extends ReceiptItem {
 
       .ficha__error {
         display: flex;
-        align-items: center;
+        align-items: flex-start;
         gap: var(--space-2, 8px);
         padding: var(--space-3, 12px);
         border-radius: var(--radius-md, 10px);
         background: color-mix(in srgb, var(--danger, #d64545) 10%, transparent);
         color: var(--danger, #d64545);
         font-size: var(--text-sm, 14px);
+      }
+
+      .ficha__error-content {
+        display: flex;
+        flex: 1;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: var(--space-2, 8px) var(--space-3, 12px);
+        min-width: 0;
+      }
+
+      .ficha__error-message {
+        flex: 1 1 220px;
+        min-width: 0;
+        margin: 0;
+      }
+
+      .ficha__error-content app-button {
+        display: inline-flex;
+        flex: 0 0 auto;
+      }
+
+      .ficha__error-feedback {
+        flex: 1 0 100%;
+        color: var(--text-secondary, #5b6470);
+        font-size: var(--text-xs, 12px);
       }
 
       .ficha__avisos {
@@ -922,6 +1002,7 @@ export class ReceiptDetailComponent implements OnInit, OnDestroy {
   private readonly toast = inject(ToastService);
   private readonly confirm = inject(ConfirmService);
   private readonly i18n = inject(I18nService);
+  private readonly clipboard = inject(ClipboardService);
 
   readonly confirmando = signal(false);
   readonly tiendaDraft = signal('');
@@ -935,6 +1016,7 @@ export class ReceiptDetailComponent implements OnInit, OnDestroy {
     pantryMerged: number;
   } | null>(null);
   readonly ultimaNueva = signal<string | null>(null);
+  readonly diagnosticCopyStatus = signal<'copied' | 'failed' | null>(null);
 
   readonly ticket = this.service.receipt;
   readonly lineas = computed<LineaEnPantalla[]>(() =>
@@ -1017,14 +1099,107 @@ export class ReceiptDetailComponent implements OnInit, OnDestroy {
     return claves[estado];
   }
 
-  textoDeError(codigo: string): string {
+  textoDeError(codigo: string | null | undefined, job?: ReceiptJob | null): string {
+    if (codigo === 'FILE_MISSING') return this.i18n.t('receipts.error.FILE_MISSING');
+    if (codigo === 'TIMEOUT' || job?.diagnostic_stage === 'timed_out') {
+      return this.i18n.t('receipts.error.TIMEOUT');
+    }
+    if (codigo === 'PROVIDER') {
+      const status = job?.provider_http_status;
+      if (status === 401 || status === 403) {
+        return this.i18n.t('receipts.error.PROVIDER_AUTH');
+      }
+      if (status === 429) return this.i18n.t('receipts.error.PROVIDER_RATE_LIMIT');
+      if (typeof status === 'number' && status >= 500 && status <= 599) {
+        return this.i18n.t('receipts.error.PROVIDER_SERVER');
+      }
+    }
     const claves: Record<string, TranslationKey> = {
       NO_CONFIG: 'receipts.error.NO_CONFIG',
       BAD_JSON: 'receipts.error.BAD_JSON',
       TIMEOUT: 'receipts.error.TIMEOUT',
       PROVIDER: 'receipts.error.PROVIDER'
     };
-    return this.i18n.t(claves[codigo] ?? 'receipts.error.PROVIDER');
+    return this.i18n.t(claves[codigo ?? ''] ?? 'receipts.error.PROVIDER');
+  }
+
+  diagnosticCopyFeedback(): TranslationKey {
+    return this.diagnosticCopyStatus() === 'copied'
+      ? 'receipts.copy_diagnostic_success'
+      : 'receipts.copy_diagnostic_failed';
+  }
+
+  async copyDiagnostic(job: ReceiptJob | null | undefined): Promise<void> {
+    if (!job) return;
+    this.diagnosticCopyStatus.set(null);
+    try {
+      await this.clipboard.copy(JSON.stringify(this.safeDiagnosticFor(job), null, 2));
+      this.diagnosticCopyStatus.set('copied');
+    } catch {
+      this.diagnosticCopyStatus.set('failed');
+    }
+  }
+
+  private safeDiagnosticFor(job: ReceiptJob): Record<string, unknown> {
+    const diagnostic: Record<string, unknown> = {
+      jobId: this.safeIdentifier(job.id),
+      kind: 'receipt',
+      status: SAFE_JOB_STATUSES.has(job.status) ? job.status : 'unknown',
+      attempts: this.safeCount(job.attempts),
+      maxAttempts: this.safeCount(job.max_attempts),
+      createdAt: this.safeTimestamp(job.created_at),
+      error: SAFE_DIAGNOSTIC_ERRORS.has(job.error_code ?? '') ? job.error_code : null
+    };
+
+    if (job.diagnostic_stage && SAFE_DIAGNOSTIC_STAGES.has(job.diagnostic_stage)) {
+      diagnostic['diagnosticStage'] = job.diagnostic_stage;
+    }
+
+    const responseId = this.safeResponseId(job.provider_response_id);
+    if (responseId) diagnostic['providerResponseId'] = responseId;
+
+    if (job.provider_transport && SAFE_DIAGNOSTIC_TRANSPORTS.has(job.provider_transport)) {
+      diagnostic['providerTransport'] = job.provider_transport;
+    }
+
+    if (
+      Number.isInteger(job.provider_http_status) &&
+      Number(job.provider_http_status) >= 100 &&
+      Number(job.provider_http_status) <= 599
+    ) {
+      diagnostic['providerHttpStatus'] = job.provider_http_status;
+    }
+
+    if (Number.isSafeInteger(job.elapsed_ms) && Number(job.elapsed_ms) >= 0) {
+      diagnostic['elapsedMs'] = job.elapsed_ms;
+    }
+
+    return diagnostic;
+  }
+
+  private safeIdentifier(value: unknown): string | null {
+    return typeof value === 'string' && value.length <= 128 && /^[-A-Za-z0-9._:]+$/.test(value)
+      ? value
+      : null;
+  }
+
+  private safeResponseId(value: unknown): string | null {
+    return typeof value === 'string' && /^resp_[A-Za-z0-9_-]{1,128}$/.test(value) ? value : null;
+  }
+
+  private safeCount(value: unknown): number | null {
+    return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= 1000
+      ? value
+      : null;
+  }
+
+  private safeTimestamp(value: unknown): string | null {
+    return typeof value === 'string' &&
+      value.length <= 40 &&
+      /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:?\d{2})?$/.test(value) &&
+      !Number.isNaN(Date.parse(value))
+      ? value
+      : null;
   }
 
   revisable = revisable;

@@ -10,7 +10,6 @@ import {
   ReceiptConfirmResult,
   ReceiptDetail,
   ReceiptItem,
-  ReceiptJob,
   ReceiptHistoryPage,
   ReceiptQueueSnapshot
 } from '../../shared/models/receipt.model';

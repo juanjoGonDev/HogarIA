@@ -287,6 +287,123 @@ describe('POST / (subir)', () => {
 });
 
 describe('la cola', () => {
+  it('returns only allowlisted diagnostics for the caller ticket job', async () => {
+    const receiptId = 'receipt-job-diagnostics';
+    const jobId = 'receipt-job-diagnostics-id';
+    const secret = 'synthetic raw provider body and bearer secret';
+    db.prepare(
+      `INSERT INTO receipts (id, user_id, status, file_url, file_kind)
+       VALUES (?, ?, 'failed', '/api/uploads/receipts/synthetic.png', 'png')`
+    ).run(receiptId, alice.id);
+    db.prepare(
+      `INSERT INTO ai_jobs
+        (id, user_id, kind, receipt_id, status, attempts, max_attempts, error_code, error_detail,
+         provider_response_id, provider_transport, provider_http_status, elapsed_ms,
+         diagnostic_stage)
+       VALUES (?, ?, 'receipt', ?, 'failed', 4, 4, 'PROVIDER', ?, 'resp_diagnostic_123',
+         'responses_background', 429, 1234, 'failed')`
+    ).run(jobId, alice.id, receiptId, secret);
+
+    const ownDetail = await call('GET', `/${receiptId}`);
+    const other = await makeUser(
+      `diagnostic-other-${Math.random().toString(36).slice(2)}@test.local`
+    );
+    const otherDetail = await call('GET', `/${receiptId}`, undefined, other.token);
+
+    expect(ownDetail.status).toBe(200);
+    expect(ownDetail.payload.data.job).toMatchObject({
+      id: jobId,
+      status: 'failed',
+      attempts: 4,
+      max_attempts: 4,
+      error_code: 'PROVIDER',
+      provider_response_id: 'resp_diagnostic_123',
+      provider_transport: 'responses_background',
+      provider_http_status: 429,
+      elapsed_ms: 1234,
+      diagnostic_stage: 'failed'
+    });
+    expect(ownDetail.payload.data.job.created_at).toBeTruthy();
+    expect(Object.keys(ownDetail.payload.data.job).sort()).toEqual(
+      [
+        'attempts',
+        'created_at',
+        'diagnostic_stage',
+        'elapsed_ms',
+        'error_code',
+        'id',
+        'max_attempts',
+        'provider_http_status',
+        'provider_response_id',
+        'provider_transport',
+        'status'
+      ].sort()
+    );
+    expect(JSON.stringify(ownDetail.payload.data.job)).not.toContain(secret);
+    expect(ownDetail.payload.data.job.error_detail).toBeUndefined();
+    expect(otherDetail.status).toBe(404);
+    expect(JSON.stringify(otherDetail.payload)).not.toContain(secret);
+  });
+
+  it('classifies a missing ticket file separately and does not spend provider retries', async () => {
+    const { ensureWorker, stopWorker } = await import('../utils/ticket-queue.js');
+    const configId = 'receipt-missing-file-config';
+    const receiptId = 'receipt-missing-file';
+    const jobId = 'receipt-missing-file-job';
+    const fakeFetch = vi.fn(async () => new Response('must not reach provider', { status: 500 }));
+    stopWorker();
+    vi.stubGlobal('fetch', fakeFetch);
+    db.prepare(
+      `INSERT INTO ai_configs
+        (id, user_id, name, provider, base_url, api_key, model, retry_attempts, concurrency, is_active)
+       VALUES (?, ?, 'Synthetic provider', 'custom', 'https://provider.invalid/v1',
+         'synthetic-key', 'synthetic-model', 3, 1, 1)`
+    ).run(configId, alice.id);
+    db.prepare(
+      `INSERT INTO receipts (id, user_id, status, file_url, file_kind)
+       VALUES (?, ?, 'queued', '/api/uploads/receipts/intentionally-missing.png', 'png')`
+    ).run(receiptId, alice.id);
+    db.prepare(
+      `INSERT INTO ai_jobs
+        (id, user_id, config_id, kind, receipt_id, status, max_attempts, queue_order,
+         provider_response_id, provider_transport, provider_http_status, elapsed_ms, diagnostic_stage)
+       VALUES (?, ?, ?, 'receipt', ?, 'queued', 4, 1, 'resp_stale_attempt',
+         'responses_background', 429, 987, 'failed')`
+    ).run(jobId, alice.id, configId, receiptId);
+
+    try {
+      // Restart a clean worker so it sees this durable synthetic queued job immediately.
+      ensureWorker();
+      const inicio = Date.now();
+      let job: any;
+      while (Date.now() - inicio < 3000) {
+        job = db
+          .prepare(
+            `SELECT status, attempts, error_code, provider_response_id, provider_transport,
+                    provider_http_status, elapsed_ms, diagnostic_stage
+             FROM ai_jobs WHERE id = ?`
+          )
+          .get(jobId);
+        if (job?.status === 'failed') break;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+
+      expect(job).toEqual({
+        status: 'failed',
+        attempts: 1,
+        error_code: 'FILE_MISSING',
+        provider_response_id: null,
+        provider_transport: null,
+        provider_http_status: null,
+        elapsed_ms: null,
+        diagnostic_stage: null
+      });
+      expect(fakeFetch).not.toHaveBeenCalled();
+    } finally {
+      stopWorker();
+    }
+  });
+
   it('GET /queue cuenta lo que hay, y stop-all deja los tickets en stopped', async () => {
     await subirTicket();
     const b = await subirTicket();

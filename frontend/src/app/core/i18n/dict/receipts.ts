@@ -45,6 +45,18 @@ export const receiptsEs = {
   'receipts.error.BAD_JSON': 'El modelo no contestó con una estructura válida',
   'receipts.error.TIMEOUT': 'El proveedor tardó demasiado en contestar',
   'receipts.error.PROVIDER': 'El proveedor de IA falló',
+  'receipts.error.FILE_MISSING':
+    'No encontramos el archivo original en el servidor. Vuelve a subir el ticket para leerlo.',
+  'receipts.error.PROVIDER_AUTH':
+    'El proveedor rechazó la autenticación. Revisa la clave y la configuración en Ajustes → IA.',
+  'receipts.error.PROVIDER_RATE_LIMIT':
+    'El proveedor limitó las solicitudes (HTTP 429). Espera un poco y revisa tu cuota.',
+  'receipts.error.PROVIDER_SERVER':
+    'El proveedor devolvió un error del servidor (HTTP 5xx). Inténtalo más tarde.',
+  'receipts.copy_diagnostic': 'Copiar diagnóstico',
+  'receipts.copy_diagnostic_success': 'Diagnóstico copiado.',
+  'receipts.copy_diagnostic_failed':
+    'No se pudo copiar el diagnóstico. Revisa el permiso del portapapeles.',
 
   // ── la revisión ──
   'receipts.tienda': 'Tienda',
@@ -141,6 +153,17 @@ export const receiptsEn: Record<keyof typeof receiptsEs, string> = {
   'receipts.error.BAD_JSON': "The model didn't answer with a valid structure",
   'receipts.error.TIMEOUT': 'The provider took too long to answer',
   'receipts.error.PROVIDER': 'The AI provider failed',
+  'receipts.error.FILE_MISSING':
+    'The original file is no longer available on the server. Upload the receipt again to read it.',
+  'receipts.error.PROVIDER_AUTH':
+    'The provider rejected authentication. Check the key and configuration in Settings → AI.',
+  'receipts.error.PROVIDER_RATE_LIMIT':
+    'The provider rate-limited the request (HTTP 429). Wait and check your quota.',
+  'receipts.error.PROVIDER_SERVER':
+    'The provider returned a server error (HTTP 5xx). Try again later.',
+  'receipts.copy_diagnostic': 'Copy diagnostics',
+  'receipts.copy_diagnostic_success': 'Diagnostics copied.',
+  'receipts.copy_diagnostic_failed': 'Could not copy diagnostics. Check clipboard permission.',
 
   'receipts.tienda': 'Store',
   'receipts.tienda_no_detectada': 'Store not detected',

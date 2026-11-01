@@ -2,11 +2,11 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { signal } from '@angular/core';
 import { NavigationEnd, Router } from '@angular/router';
 import { of, Subject } from 'rxjs';
-import type { ReceiptJob, ReceiptQueueSnapshot } from '../../../shared/models/receipt.model';
+import type { ReceiptQueueJob, ReceiptQueueSnapshot } from '../../../shared/models/receipt.model';
 import { ReceiptsService } from '../../../core/services/receipts.service';
 import { ReceiptQueueComponent } from './receipt-queue.component';
 
-const snapshot = (jobs: ReceiptJob[] = []): ReceiptQueueSnapshot => ({
+const snapshot = (jobs: ReceiptQueueJob[] = []): ReceiptQueueSnapshot => ({
   jobs,
   counts: {
     queued: jobs.filter((job) => job.status === 'queued').length,
@@ -15,7 +15,10 @@ const snapshot = (jobs: ReceiptJob[] = []): ReceiptQueueSnapshot => ({
   }
 });
 
-const job = (status: ReceiptJob['status'], receiptId: string | null = 'receipt-1'): ReceiptJob => ({
+const job = (
+  status: ReceiptQueueJob['status'],
+  receiptId: string | null = 'receipt-1'
+): ReceiptQueueJob => ({
   id: `job-${status}`,
   status,
   attempts: 1,

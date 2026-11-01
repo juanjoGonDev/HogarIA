@@ -665,6 +665,8 @@ function reclamarTrabajo(db: SqlDb, jobId: string, leaseSeconds: number): number
       const changed = db
         .prepare(
           `UPDATE ai_jobs SET status = 'running', attempts = attempts + 1, claim_generation = ?,
+           provider_response_id = NULL, provider_transport = NULL, provider_http_status = NULL,
+           elapsed_ms = NULL, diagnostic_stage = NULL,
            started_at = CURRENT_TIMESTAMP, lease_until = datetime('now', ?),
            updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'queued'`
         )
@@ -868,7 +870,14 @@ async function correr(
     })();
   } catch (error) {
     const cancelado = señal.signal.aborted;
-    const codigo = cancelado ? 'CANCELLED' : error instanceof AiCallError ? error.code : 'PROVIDER';
+    const ficheroAusente = error instanceof AiCallError && error.detail === 'FILE_MISSING';
+    const codigo = cancelado
+      ? 'CANCELLED'
+      : ficheroAusente
+        ? 'FILE_MISSING'
+        : error instanceof AiCallError
+          ? error.code
+          : 'PROVIDER';
     const detalle = cancelado
       ? 'Parado por la persona'
       : String((error as Error)?.message ?? error).slice(0, 300);
@@ -889,7 +898,8 @@ async function correr(
       !cancelado &&
       fila.attempts < fila.max_attempts &&
       codigo !== 'BAD_JSON' &&
-      codigo !== 'NO_CONFIG';
+      codigo !== 'NO_CONFIG' &&
+      codigo !== 'FILE_MISSING';
     const actualizado = db
       .prepare(
         `UPDATE ai_jobs SET status = ?, error_code = ?, error_detail = ?, updated_at = CURRENT_TIMESTAMP,
@@ -1451,7 +1461,9 @@ export function reintentarTrabajo(
       const changed = db
         .prepare(
           `UPDATE ai_jobs SET status = 'queued', attempts = 0, max_attempts = ?, error_code = NULL,
-           error_detail = NULL, finished_at = NULL, lease_until = NULL, queue_order = ?,
+           error_detail = NULL, provider_response_id = NULL, provider_transport = NULL,
+           provider_http_status = NULL, elapsed_ms = NULL, diagnostic_stage = NULL,
+           finished_at = NULL, lease_until = NULL, queue_order = ?,
            updated_at = CURRENT_TIMESTAMP
          WHERE id = ? AND user_id = ? AND household_id IS ? AND config_id = ? AND status = 'failed'`
         )
@@ -1513,7 +1525,9 @@ export function reencolar(jobId: string): boolean {
   const changed = db
     .prepare(
       `UPDATE ai_jobs SET status = 'queued', attempts = 0, max_attempts = ?, error_code = NULL,
-         error_detail = NULL, finished_at = NULL, queue_order = ?, updated_at = CURRENT_TIMESTAMP
+         error_detail = NULL, provider_response_id = NULL, provider_transport = NULL,
+         provider_http_status = NULL, elapsed_ms = NULL, diagnostic_stage = NULL,
+         finished_at = NULL, queue_order = ?, updated_at = CURRENT_TIMESTAMP
        WHERE id = ? AND status IN ('failed', 'stopped', 'done')`
     )
     .run(

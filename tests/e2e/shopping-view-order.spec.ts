@@ -243,16 +243,28 @@ test('switching homes hides a shopping list from the previous home and restores 
 
     await ensureMobileSidebarOpen(page);
     const staleDetailReads: string[] = [];
+    let householdSwitchConfirmed = false;
     const recordPreviousHomeReads = (request: import('@playwright/test').Request) => {
       const url = new URL(request.url());
       if (
+        householdSwitchConfirmed &&
         request.method() === 'GET' &&
         url.pathname === `/api/shopping/lists/${previousHomeListId}`
       ) {
         staleDetailReads.push(request.url());
       }
     };
+    const isActiveHouseholdSwitch = (response: import('@playwright/test').Response) =>
+      response.request().method() === 'POST' &&
+      new URL(response.url()).pathname === '/api/household/active';
+    const confirmHouseholdSwitch = (response: import('@playwright/test').Response) => {
+      if (isActiveHouseholdSwitch(response) && response.status() === 200) {
+        householdSwitchConfirmed = true;
+      }
+    };
     page.on('request', recordPreviousHomeReads);
+    page.on('response', confirmHouseholdSwitch);
+    const householdSwitchResponse = page.waitForResponse(isActiveHouseholdSwitch);
     const homeTwoListsLoaded = page.waitForResponse(
       (response) =>
         response.request().method() === 'GET' &&
@@ -261,12 +273,14 @@ test('switching homes hides a shopping list from the previous home and restores 
     await activeHomePicker.click();
     await page.getByRole('option', { name: 'Casa compra sintética dos' }).click();
     await expect(page).toHaveURL(/\/shopping$/);
+    expect((await householdSwitchResponse).status()).toBe(200);
     expect((await homeTwoListsLoaded).status()).toBe(200);
     await expect(page.getByText('Lista casa sintética dos', { exact: true })).toBeVisible();
     await expect(page.getByText('Lista casa sintética uno', { exact: true })).toHaveCount(0);
     await expect(page.getByText('Garbanzos casa uno', { exact: true })).toHaveCount(0);
     expect(staleDetailReads).toEqual([]);
     page.off('request', recordPreviousHomeReads);
+    page.off('response', confirmHouseholdSwitch);
 
     if (test.info().project.name === 'mobile-chrome') {
       const sidebar = page.locator('.sidebar');
