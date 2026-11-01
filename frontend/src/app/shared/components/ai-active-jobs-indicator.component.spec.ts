@@ -53,7 +53,7 @@ describe('AiActiveJobsIndicatorComponent', () => {
     expect(
       fixture.nativeElement.querySelector('[data-test="ai-active-jobs-indicator"]')
     ).toBeNull();
-    expect(fixture.nativeElement.querySelector('[role="status"]')?.textContent?.trim()).toBe('');
+    expect(fixture.nativeElement.querySelectorAll('[role="status"]').length).toBe(0);
 
     fixture.destroy();
     expect(stopWatching).toHaveBeenCalledTimes(1);
@@ -93,7 +93,7 @@ describe('AiActiveJobsIndicatorComponent', () => {
     expect(
       fixture.nativeElement.querySelector('[data-test="ai-active-jobs-indicator"]')
     ).toBeNull();
-    expect(fixture.nativeElement.querySelector('[role="status"]')?.textContent?.trim()).toBe('');
+    expect(fixture.nativeElement.querySelectorAll('[role="status"]').length).toBe(0);
   });
 
   it('does not mislabel a connection test as an assistant job', () => {

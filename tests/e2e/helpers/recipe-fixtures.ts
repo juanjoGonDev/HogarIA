@@ -120,7 +120,12 @@ export async function waitForStableView(page: Page): Promise<void> {
       })
   );
   await page.waitForFunction(() => {
-    if (document.getAnimations().some((animation) => animation.playState !== 'finished'))
+    if (
+      document.getAnimations().some((animation) => {
+        const iterations = animation.effect?.getTiming().iterations ?? 1;
+        return iterations !== Infinity && animation.playState !== 'finished';
+      })
+    )
       return false;
     const overlay = document.querySelector<HTMLElement>('.modal-overlay');
     const modal = document.querySelector<HTMLElement>('.modal');

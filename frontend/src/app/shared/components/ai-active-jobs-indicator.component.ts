@@ -20,7 +20,12 @@ import { IconComponent } from './ui/icon/icon.component';
           </span>
         </span>
       }
-      <span class="visually-hidden" role="status" aria-live="polite" aria-atomic="true">
+      <span
+        class="visually-hidden"
+        [attr.role]="activeCount() > 0 ? 'status' : null"
+        aria-live="polite"
+        aria-atomic="true"
+      >
         @if (activeCount() > 0) {
           {{ accessibleLabel() }}
         }

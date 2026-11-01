@@ -24,6 +24,9 @@ test.describe('filtros y borrado de Logs', () => {
     await page.reload();
     const markerLines = page.locator('[data-test="logs-line"]').filter({ hasText: tag });
     await expect(markerLines).toHaveCount(3);
+    await page.getByRole('button', { name: 'Pausar' }).click();
+    await expect(page.getByRole('button', { name: 'Reanudar' })).toBeVisible();
+    await expect(markerLines).toHaveCount(3);
 
     const sourceFilter = page.getByRole('combobox', { name: 'Filtrar por fuente' });
     const levelFilter = page.getByRole('combobox', { name: 'Filtrar por nivel' });
