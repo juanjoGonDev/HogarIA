@@ -55,9 +55,11 @@
 
 - `pnpm --filter @hogaria/server exec vitest run src/utils/ai-client.spec.ts src/utils/ai-queue.spec.ts src/utils/ai-timeout.spec.ts src/routes/ai.routes.spec.ts src/routes/ai-queue.routes.spec.ts src/config/database.spec.ts`: 6 archivos, 214 tests aprobados.
 - `pnpm --filter @hogaria/server run test:coverage`: 123 archivos aprobados, 2.144 tests aprobados y 1 omitido; cobertura 89,44/81,70/95,40/92,44 %.
+- Un primer hook `pre-push` local tuvo timeouts transitorios en dos pruebas de SQLite no relacionadas; la repetición `DATABASE_PATH=:memory: pnpm run test:server` pasó: 123 archivos, 2.144 aprobados y 1 omitido.
 - `pnpm run test:client`: 1.778 tests aprobados; cobertura 90,54/80,98/91,84/93,15 %.
 - `pnpm --filter @hogaria/server run build`, `pnpm run typecheck:e2e`, `pnpm run check:ui` (271 archivos/21 reglas) y `pnpm run test:config` (118 tests) aprobados.
 - `pnpm run test:e2e -- --project=chromium --project=mobile-chrome --grep "one saved AI test|copia solo el diagnóstico"`: 4 E2E aprobados sobre app/API aislada; sin proveedor real. Incluye cierre/reapertura, una sola llamada, polling y copia acotada al job.
+- El primer CI detectó una fixture full-stack que aún simulaba solo Chat Completions; se actualizó al contrato Responses background y `pnpm run test:e2e:full-stack -- --project=chromium --project=mobile-chrome --grep "keeps a saved connection test running"` pasó 2/2 en el build de producción.
 - Playwright guardó capturas desktop/móvil de prueba en curso y cola bajo `.e2e-screenshots/ai-connection-test/`.
 - Limitación local: `pnpm run lint` no puede ejecutar `ng lint`, porque el builder `@angular-eslint/builder:lint` no está declarado/instalado en el workspace. `check:ui`, TypeScript, tests y build sí pasan; no se añadió una dependencia ajena al alcance.
 - CI del PR aún pendiente tras publicar el commit de implementación.
