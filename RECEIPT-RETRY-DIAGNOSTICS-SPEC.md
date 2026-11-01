@@ -78,7 +78,7 @@ Explicar por qué falla un intento de lectura de ticket y permitir copiar única
 - [x] Coverage de todos los ficheros ejecutables afectados ≥70 % en statements/branches/functions/lines; server incluye test propio para el sanitizador de diagnósticos.
 - [x] Build de producción, `check:ui`, `typecheck:e2e` y pruebas de configuración completados.
 - [x] E2E sintético tras el último ajuste de foco en Chromium escritorio y Chrome móvil; capturas revisadas.
-- [ ] CI del commit actualizado en PR #67 (pendiente de push).
+- [x] CI del commit funcional `61db37c` en PR #67: todos los jobs pasaron; el test de retry se hizo determinista después del primer CI.
 - [ ] Lint local: scripts actuales no ejecutables en este checkout (`ng lint` requiere `@angular-eslint/builder`, no declarado/instalado; ESLint server rechaza `--ext` y no encuentra config flat). No se cambió tooling fuera del alcance.
 
 ### Plan de verificación
@@ -90,4 +90,5 @@ Explicar por qué falla un intento de lectura de ticket y permitir copiar única
 - [x] UI dirigida: 55/55; su comando con coverage específico devuelve código 1 solo porque el runner evalúa el gate global de 80 % usando únicamente tres specs. La suite completa de coverage pasa.
 - [x] `pnpm run check:ui`, `pnpm run typecheck:e2e`, `pnpm run test:config` y `pnpm run build`.
 - [x] `pnpm run test:e2e:full-stack -- --grep "quita un fallo de la cola sin borrar el ticket" --project=chromium --project=mobile-chrome`: 2/2; stack de producción con SQLite aislada y proveedor sintético.
+- [x] GitHub CI del commit funcional `61db37c`: server tests, typecheck, build, smokes de imagen amd64/arm64, 4 shards E2E y full-stack E2E pasaron. El run previo falló solo por una aserción de estado `queued` transitorio; `test(queue): make provider retry test deterministic` lo corrigió.
 - [x] `git diff --check`; ningún proveedor real ni datos de producción.
