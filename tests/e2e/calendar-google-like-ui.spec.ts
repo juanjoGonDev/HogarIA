@@ -179,7 +179,13 @@ test('la mini agenda cambia de mes y fecha, enlaza el estado y conserva hoy tras
 
   await mini.locator('.mini__nav button').nth(1).click();
   await expect(miniMonth).toHaveText('noviembre de 2026');
-  await expect(page).toHaveURL(/view=month.*date=2026-11-01/);
+  const expectedDateParam = await page.evaluate(() => {
+    const now = new Date();
+    const novemberFirstIsToday =
+      now.getFullYear() === 2026 && now.getMonth() === 10 && now.getDate() === 1;
+    return novemberFirstIsToday ? null : '2026-11-01';
+  });
+  await expect.poll(() => new URL(page.url()).searchParams.get('date')).toBe(expectedDateParam);
 
   const selectedDate = mini.locator('.mini__day[aria-label="Ver el día 2026-11-15"]');
   await selectedDate.click();

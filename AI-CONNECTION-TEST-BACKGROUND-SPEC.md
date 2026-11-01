@@ -63,7 +63,7 @@
 - La suite local completa `ai-config.spec.ts` mostró 54/56 aprobados; los dos fallos eran el mismo selector estricto al conservar dos toasts de validación idénticos. Se cambió a verificar ambos; el caso pasó en Chromium y móvil (2/2).
 - Playwright guardó capturas desktop/móvil de prueba en curso y cola bajo `.e2e-screenshots/ai-connection-test/`.
 - Limitación local: `pnpm run lint` no puede ejecutar `ng lint`, porque el builder `@angular-eslint/builder:lint` no está declarado/instalado en el workspace. `check:ui`, TypeScript, tests y build sí pasan; no se añadió una dependencia ajena al alcance.
-- CI del PR aún pendiente tras publicar el commit de implementación.
+- CI run `41323420464` detectó un E2E de calendario preexistente que esperaba `date=2026-11-01` justo el 1 de noviembre, aunque la ruta omite intencionadamente el parámetro cuando la fecha seleccionada es hoy. Se ajustó solo esa expectativa; el test aislado pasa 1/1 y CI post-corrección queda pendiente. `calendar-google-like-ui.spec.ts` está fuera de la implementación AI.
 
 ## Desviación / pendiente
 
