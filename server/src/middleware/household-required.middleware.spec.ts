@@ -116,6 +116,40 @@ describe('authMiddleware household setup gate', () => {
     });
   });
 
+  it('allows active AI job discovery without a selected household', async () => {
+    for (const [id, inviteCode] of [
+      ['pending-home-one', 'PENDING01'],
+      ['pending-home-two', 'PENDING02']
+    ]) {
+      db.prepare('INSERT INTO households (id, name, invite_code) VALUES (?, ?, ?)').run(
+        id,
+        id,
+        inviteCode
+      );
+      db.prepare(
+        `INSERT INTO household_members (id, household_id, user_id, role, permissions)
+         VALUES (?, ?, 'pending-user', 'member', '{}')`
+      ).run(`membership-${id}`, id);
+    }
+    db.prepare('INSERT INTO ai_jobs (id, user_id, kind, status) VALUES (?, ?, ?, ?)').run(
+      'active-pending-user-job',
+      'pending-user',
+      'assistant',
+      'running'
+    );
+
+    const response = await productionApp.request('/api/ai/queue/active', {
+      headers: { authorization: `Bearer ${token}` }
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toContain('no-store');
+    expect(await response.json()).toMatchObject({
+      success: true,
+      data: { jobs: [{ id: 'active-pending-user-job', status: 'running' }] }
+    });
+  });
+
   it('allows only household discovery, AI availability, create/join endpoints during setup', async () => {
     for (const [method, path] of [
       ['GET', '/api/household/memberships'],

@@ -37,6 +37,7 @@ export default defineConfig({
   // Running all 178 desktop/mobile cases here exceeded the CI job's 30-minute limit.
   testMatch: [
     '**/ai-provider-settings.spec.ts',
+    '**/ai-background-request.spec.ts',
     '**/register-contract.spec.ts',
     '**/rate-limit.spec.ts',
     '**/request-budget.spec.ts',

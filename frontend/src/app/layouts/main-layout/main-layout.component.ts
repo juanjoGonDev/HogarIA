@@ -20,6 +20,7 @@ import { IconButtonComponent } from '../../shared/components/ui/icon-button/icon
 import { TranslatePipe } from '../../core/pipes/translate.pipe';
 import { ConfirmDialogComponent } from '../../shared/components/ui/confirm-dialog/confirm-dialog.component';
 import { ReceiptQueueComponent } from '../../shared/components/receipts/receipt-queue.component';
+import { AiActiveJobsIndicatorComponent } from '../../shared/components/ai-active-jobs-indicator.component';
 import { PageContainerComponent } from '../../shared/components/page-container/page-container.component';
 import { HouseholdSwitcherComponent } from '../../shared/components/household-switcher.component';
 import { HouseholdPlanningAutomationNoticeComponent } from '../../shared/components/household-planning-automation-notice.component';
@@ -55,6 +56,7 @@ interface NavItem {
     TranslatePipe,
     ConfirmDialogComponent,
     ReceiptQueueComponent,
+    AiActiveJobsIndicatorComponent,
     PageContainerComponent,
     HouseholdSwitcherComponent,
     HouseholdPlanningAutomationNoticeComponent,
@@ -83,9 +85,11 @@ interface NavItem {
           <app-icon name="home" [size]="20" [label]="null" />
           <span class="header__title-text">{{ 'app.name' | t }}</span>
         </span>
-        <!-- La cola de lectura de tickets: gira mientras la IA local lee, rojo si algo
-             fallo, y su clic enseña el progreso y los frenos (## 12aj). -->
-        <app-receipt-queue *ngIf="hasActiveHousehold()" class="header__queue" />
+        <div class="header__queue-controls">
+          <app-ai-active-jobs-indicator />
+          <!-- La cola de lectura de tickets se conserva separada del resumen global de IA. -->
+          <app-receipt-queue *ngIf="hasActiveHousehold()" class="header__queue" />
+        </div>
         <button type="button" class="header__profile" (click)="navigateToProfile()">
           <!-- La foto tambien aqui: era el unico avatar de la app que ignoraba la
                URL del usuario, asi que en el movil se veia la inicial aunque la
@@ -120,7 +124,10 @@ interface NavItem {
             <app-icon name="home" [size]="20" [label]="null" />
             <span id="primary-sidebar-title">{{ 'app.name' | t }}</span>
           </span>
-          <app-receipt-queue *ngIf="hasActiveHousehold()" class="sidebar__receipt-queue" />
+          <div class="sidebar__queue-controls">
+            <app-ai-active-jobs-indicator />
+            <app-receipt-queue *ngIf="hasActiveHousehold()" class="sidebar__receipt-queue" />
+          </div>
         </div>
 
         @defer (when hasMultipleHouseholds()) {
@@ -307,6 +314,17 @@ interface NavItem {
         text-overflow: ellipsis;
       }
 
+      .header__queue-controls,
+      .sidebar__queue-controls {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-1);
+      }
+
+      .header__queue-controls {
+        flex: none;
+      }
+
       /* Sidebar */
       .sidebar {
         position: fixed;
@@ -376,8 +394,7 @@ interface NavItem {
         }
       }
 
-      .sidebar__receipt-queue {
-        order: 1;
+      .sidebar__queue-controls {
         margin-left: auto;
       }
 
