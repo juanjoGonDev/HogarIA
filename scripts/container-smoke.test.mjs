@@ -81,6 +81,27 @@ test('fails when the server never becomes healthy', async () => {
   );
 });
 
+test('keeps the process alive and retries when a health fetch never settles', async () => {
+  let healthCalls = 0;
+  await assert.rejects(
+    verifyContainerSmoke('http://127.0.0.1:3000', {
+      fetcher: async (input) => {
+        if (new URL(input).pathname === '/health') {
+          healthCalls += 1;
+          return new Promise(() => {});
+        }
+        return health();
+      },
+      timeoutMs: 25,
+      requestTimeoutMs: 5,
+      pollIntervalMs: 0,
+      sleep: async () => {}
+    }),
+    /did not become ready.*timed out/
+  );
+  assert.ok(healthCalls > 0);
+});
+
 test('fails closed when health does not include the image reference', async () => {
   const fetcher = async (input, init = {}) => {
     const url = new URL(input);

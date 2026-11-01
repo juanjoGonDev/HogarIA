@@ -22,11 +22,28 @@ function baseOrigin(value) {
   return url.origin;
 }
 
-async function request(fetcher, origin, pathname, init = {}) {
-  return fetcher(`${origin}${pathname}`, {
-    ...init,
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+async function request(fetcher, origin, pathname, init = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
+  const controller = new AbortController();
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    // A referenced timer is required: AbortSignal.timeout may be unref'ed, allowing Node to exit
+    // with code 13 while top-level await is still waiting on a fetch that never settles.
+    timeoutId = setTimeout(() => {
+      controller.abort();
+      reject(new Error(`Request timed out after ${timeoutMs} ms`));
+    }, timeoutMs);
   });
+
+  try {
+    return await Promise.race([
+      Promise.resolve().then(() =>
+        fetcher(`${origin}${pathname}`, { ...init, signal: controller.signal })
+      ),
+      timeout
+    ]);
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 async function assertHealthResponse(response, pathname, expectedImageRef) {
@@ -57,7 +74,7 @@ async function assertHealthResponse(response, pathname, expectedImageRef) {
 
 async function waitForHealth(
   origin,
-  { fetcher, timeoutMs, pollIntervalMs, sleep, expectedImageRef }
+  { fetcher, timeoutMs, requestTimeoutMs, pollIntervalMs, sleep, expectedImageRef }
 ) {
   const deadline = Date.now() + timeoutMs;
   let lastFailure = 'no response';
@@ -66,7 +83,7 @@ async function waitForHealth(
     try {
       const response = await request(fetcher, origin, '/health', {
         headers: { accept: 'application/json' }
-      });
+      }, requestTimeoutMs);
       if (response.ok) {
         await assertHealthResponse(response, '/health', expectedImageRef);
         return;
@@ -92,6 +109,7 @@ export async function verifyContainerSmoke(
   {
     fetcher = globalThis.fetch,
     timeoutMs = DEFAULT_TIMEOUT_MS,
+    requestTimeoutMs = REQUEST_TIMEOUT_MS,
     pollIntervalMs = 500,
     expectedImageRef,
     sleep = (durationMs) => new Promise((resolve) => setTimeout(resolve, durationMs))
@@ -100,6 +118,9 @@ export async function verifyContainerSmoke(
   const origin = baseOrigin(baseUrl);
   if (typeof fetcher !== 'function') throw new Error('Container smoke requires fetch support');
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new Error('timeoutMs must be positive');
+  if (!Number.isFinite(requestTimeoutMs) || requestTimeoutMs <= 0) {
+    throw new Error('requestTimeoutMs must be positive');
+  }
   if (!Number.isFinite(pollIntervalMs) || pollIntervalMs < 0) {
     throw new Error('pollIntervalMs must be non-negative');
   }
@@ -111,6 +132,7 @@ export async function verifyContainerSmoke(
   await waitForHealth(origin, {
     fetcher,
     timeoutMs,
+    requestTimeoutMs,
     pollIntervalMs,
     sleep,
     expectedImageRef: expectedRef
@@ -119,11 +141,17 @@ export async function verifyContainerSmoke(
 
   const apiHealth = await request(fetcher, origin, '/api/health', {
     headers: { accept: 'application/json' }
-  });
+  }, requestTimeoutMs);
   await assertHealthResponse(apiHealth, '/api/health', expectedRef);
   checked.push('/api/health');
 
-  const frontend = await request(fetcher, origin, '/', { headers: { accept: 'text/html' } });
+  const frontend = await request(
+    fetcher,
+    origin,
+    '/',
+    { headers: { accept: 'text/html' } },
+    requestTimeoutMs
+  );
   if (!frontend.ok) throw new Error(`GET / returned HTTP ${frontend.status}`);
   if (!frontend.headers.get('content-type')?.toLowerCase().includes('text/html')) {
     throw new Error('GET / did not serve HTML');
@@ -136,7 +164,7 @@ export async function verifyContainerSmoke(
     method: 'POST',
     headers: { accept: 'application/json', 'content-type': 'application/json' },
     body: '{}'
-  });
+  }, requestTimeoutMs);
   if (assistant.status !== 401) {
     throw new Error(
       `POST /api/ai/assistant/proposals expected auth gate HTTP 401, received ${assistant.status}`
