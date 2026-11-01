@@ -22,6 +22,14 @@
 5. La conversión de mensajes multimodales, formatos JSON Schema, errores/refusals, deadlines, idempotencia, polling y cancelación se cubre con fixtures HTTP locales. Streaming del proveedor no forma parte del transporte background: el ticket actual mantiene su estado y líneas guardadas, y al recibir la respuesta final procesa/valida el resultado completo sin perder aislamiento ni introducir una segunda petición.
 6. Para tickets se adjunta el inventario completo disponible en el scope vigente: todas las categorías y todos los productos/catálogo, sin los límites 300/2.000, incluyendo `parent_key` de categoría. No se amplía la información personal incluida ni se truncan registros silenciosamente; si el límite técnico existente de admisión impide aceptar un payload excesivo, el error debe ser claro.
 
+## Mapa de implementación requerido
+
+- `ai-client.ts`: un único transporte Responses que serializa la entrada Chat Completions existente, registra el `response_id`/diagnóstico allowlisted en el job y hace polling/cancelación. Las funciones que hoy envían SSE pasan a obtener el texto final del mismo transporte; no emiten deltas inventados.
+- `ticket-queue.ts`: eliminar la dependencia de `externalSignal` de los handlers HTTP para trabajo de IA funcional; mantener los endpoints explícitos de cancelar/reintentar. El asistente se admite en la cola común; la automatización conserva su worker durable, usando el transporte background y su propia cancelación explícita.
+- `ai-queue.routes.ts` + `ai_jobs`: endpoint read-only de jobs activos del usuario autenticado sin permiso de administración del proveedor. No añadir columnas para prompts, secretos o respuestas. La vista administrativa por configuración conserva su permiso.
+- `main-layout.component.ts` + servicio/modelo frontend: indicador global de actividad IA, visible tanto con hogar activo como en scope personal; carga al montar y polling mientras exista actividad. No sustituir ni duplicar el indicador de recibos.
+- `inventarioDeLaCasa` + fixtures de `ai-queue.spec.ts`: quitar los dos `LIMIT`, añadir `parent_key` y probar el contenido real del adjunto que recibe el job de ticket.
+
 ## Criterios de aceptación
 
 ### Transporte y jobs del servidor
