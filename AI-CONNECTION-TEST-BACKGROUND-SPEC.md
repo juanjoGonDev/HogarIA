@@ -60,6 +60,7 @@
 - `pnpm --filter @hogaria/server run build`, `pnpm run typecheck:e2e`, `pnpm run check:ui` (271 archivos/21 reglas) y `pnpm run test:config` (118 tests) aprobados.
 - `pnpm run test:e2e -- --project=chromium --project=mobile-chrome --grep "one saved AI test|copia solo el diagnóstico"`: 4 E2E aprobados sobre app/API aislada; sin proveedor real. Incluye cierre/reapertura, una sola llamada, polling y copia acotada al job.
 - El primer CI detectó una fixture full-stack que aún simulaba solo Chat Completions; se actualizó al contrato Responses background y `pnpm run test:e2e:full-stack -- --project=chromium --project=mobile-chrome --grep "keeps a saved connection test running"` pasó 2/2 en el build de producción.
+- La suite local completa `ai-config.spec.ts` mostró 54/56 aprobados; los dos fallos eran el mismo selector estricto al conservar dos toasts de validación idénticos. Se cambió a verificar ambos; el caso pasó en Chromium y móvil (2/2).
 - Playwright guardó capturas desktop/móvil de prueba en curso y cola bajo `.e2e-screenshots/ai-connection-test/`.
 - Limitación local: `pnpm run lint` no puede ejecutar `ng lint`, porque el builder `@angular-eslint/builder:lint` no está declarado/instalado en el workspace. `check:ui`, TypeScript, tests y build sí pasan; no se añadió una dependencia ajena al alcance.
 - CI del PR aún pendiente tras publicar el commit de implementación.

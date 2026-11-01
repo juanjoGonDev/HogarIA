@@ -718,7 +718,7 @@ test.describe('AI Config', () => {
       page
         .locator('.toast--error')
         .filter({ hasText: 'timeout: debe ser como máximo 2.147.483.647' })
-    ).toBeVisible();
+    ).toHaveCount(2);
     await expect(
       page.locator('.toast--error').filter({ hasText: 'No se pudo guardar la configuración' })
     ).toHaveCount(0);
