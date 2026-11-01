@@ -9,14 +9,14 @@ Explicar por qué falla un intento de lectura de ticket y permitir copiar única
 - El `POST /api/receipts/:id/retry` devuelve `200` al volver a encolar el trabajo; no confirma que el siguiente intento haya terminado correctamente (`server/src/routes/receipts.routes.ts`).
 - El worker ejecuta la lectura de forma persistente en segundo plano y conserva por trabajo etapa, transporte, HTTP status, duración e ID de respuesta validados (`server/src/utils/ticket-queue.ts`).
 - Si el fichero ya no existe, el worker hoy lo clasifica como `PROVIDER` con detalle interno `FILE_MISSING`; ese fallo se reintenta automáticamente hasta agotar intentos (`server/src/utils/ticket-queue.ts`).
-- La ficha del ticket solo enseña el código general de error. Su GET selecciona `error_detail` arbitrario y no devuelve los metadatos de diagnóstico del proveedor (`server/src/routes/receipts.routes.ts`, `receipt-detail.component.ts`).
+- El GET de la ficha devuelve actualmente `error_detail` arbitrario y no devuelve metadatos de diagnóstico del proveedor; la UI ignora ese detalle y solo traduce el código general de error (`server/src/routes/receipts.routes.ts`, `receipt-detail.component.ts`).
 - El log aportado confirma que el reintento se aceptó (`POST .../retry → 200`) y luego solo muestra consultas de estado. No contiene el error del worker/proveedor ni permite determinar la causa concreta.
 - La cola de configuración ya ofrece un patrón de copia por trabajo, con campos allowlisted, validación y feedback accesible (`ai-provider-queue.component.ts`).
 
 ## Decisiones
 
 - Mantener el trabajo independiente de la pestaña y el sondeo persistente ya implementados; el botón de reintento informa de que se ha encolado, no de éxito del proveedor.
-- Clasificar la ausencia del fichero como `FILE_MISSING`, no como error del proveedor, y no consumir reintentos automáticos para ese fallo permanente.
+- Si `AiCallError.detail === 'FILE_MISSING'`, persistir el código de dominio `FILE_MISSING` (hoy se persiste `PROVIDER`) y no consumir reintentos automáticos para ese fallo permanente.
 - Exponer a la ficha solo metadatos de diagnóstico allowlisted. No devolver/copiar `error_detail` crudo, URL del proveedor, credenciales, prompt, fichero/adjunto, respuesta ni contenido del ticket.
 - Presentar explicación localizada para ausencia del fichero, timeout y estados HTTP de autenticación, cuota o servidor; para causas no identificables, conservar un texto genérico y mostrar el diagnóstico seguro.
 - Copiar el diagnóstico de un solo trabajo, incluyendo identificador, estado/intentos/código y metadatos seguros disponibles. Limpiar metadatos del intento previo al reclamar un nuevo intento.
