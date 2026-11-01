@@ -333,6 +333,13 @@ describe('ReceiptsService', () => {
     const retried = { success: true, data: { requeued: true } };
     retryRequest.flush(retried);
     expect(await retry).toEqual(retried);
+
+    const dismissal = service.dismissQueueJob('job-1');
+    const dismissalRequest = http.expectOne(`${API}/queue/job-1`);
+    expect(dismissalRequest.request.method).toBe('DELETE');
+    const dismissed = { success: true, data: { dismissed: true } };
+    dismissalRequest.flush(dismissed);
+    expect(await dismissal).toEqual(dismissed);
   });
 
   it('returns null and shows the translated error toast when a mutation fails', async () => {

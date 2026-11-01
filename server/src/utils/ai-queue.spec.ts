@@ -920,6 +920,63 @@ describe('AI provider queue dispatcher', () => {
     );
   });
 
+  it('fails permanent provider 400s after one attempt but keeps transient 503 retries', async () => {
+    const { dispatchAI } = await import('./ticket-queue.js');
+    const fakeFetch = vi.mocked(fetch);
+    fakeFetch
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: {
+              type: 'invalid_request_error',
+              code: 'unsupported_parameter',
+              param: 'temperature',
+              message: 'synthetic provider detail'
+            }
+          }),
+          { status: 400, headers: { 'content-type': 'application/json' } }
+        )
+      )
+      .mockResolvedValueOnce(new Response('synthetic unavailable', { status: 503 }));
+
+    const permanent = dispatchAI(
+      userId,
+      [{ role: 'user', content: 'synthetic permanent request' }],
+      db,
+      RECIPE_RESPONSE_FORMAT,
+      'recipe'
+    );
+    const transient = dispatchAI(
+      userId,
+      [{ role: 'user', content: 'synthetic transient request' }],
+      db,
+      RECIPE_RESPONSE_FORMAT,
+      'recipe'
+    );
+    void permanent.catch(() => undefined);
+    void transient.catch(() => undefined);
+
+    await waitFor(() => {
+      const rows = db
+        .prepare('SELECT status, attempts FROM ai_jobs WHERE kind = ? ORDER BY created_at, id')
+        .all('recipe') as { status: string; attempts: number }[];
+      return rows.length === 2 && rows.every((row) => row.status === 'failed' || row.attempts > 0);
+    });
+
+    const rows = db
+      .prepare('SELECT status, attempts, provider_http_status FROM ai_jobs WHERE kind = ?')
+      .all('recipe') as { status: string; attempts: number; provider_http_status: number | null }[];
+    expect(rows.find((row) => row.provider_http_status === 400)).toMatchObject({
+      status: 'failed',
+      attempts: 1
+    });
+    expect(rows.find((row) => row.provider_http_status === 503)).toMatchObject({
+      status: 'queued',
+      attempts: 1
+    });
+    expect(fakeFetch).toHaveBeenCalledTimes(2);
+  });
+
   it('does not persist ticket lines until the complete background response passes validation', async () => {
     const originalDatabasePath = process.env.DATABASE_PATH;
     const isolatedDirectory = mkdtempSync(join(tmpdir(), 'hogaria-ai-queue-invalid-ticket-'));

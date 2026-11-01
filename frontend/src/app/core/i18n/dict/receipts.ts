@@ -53,6 +53,10 @@ export const receiptsEs = {
     'El proveedor limitó las solicitudes (HTTP 429). Espera un poco y revisa tu cuota.',
   'receipts.error.PROVIDER_SERVER':
     'El proveedor devolvió un error del servidor (HTTP 5xx). Inténtalo más tarde.',
+  'receipts.error.PROVIDER_UNSUPPORTED_PARAMETER':
+    'El proveedor rechazó temperature o top_p para este modelo. Revisa los ajustes del proveedor y del modelo en Ajustes → IA.',
+  'receipts.error.PROVIDER_FILE_INPUT':
+    'El proveedor rechazó un archivo adjunto (ticket o inventario). Revisa que admita su formato y tipo.',
   'receipts.copy_diagnostic': 'Copiar diagnóstico',
   'receipts.copy_diagnostic_success': 'Diagnóstico copiado.',
   'receipts.copy_diagnostic_failed':
@@ -92,6 +96,8 @@ export const receiptsEs = {
 
   // ── parar / reintentar ──
   'receipts.reintentar': 'Volver a leer',
+  'receipts.quitar_de_la_cola': 'Quitar de la cola',
+  'receipts.queue_entry_removed_announcement': 'Lectura quitada de la cola.',
   'receipts.parar': 'Parar',
   'receipts.parar_todo': 'Parar todo',
   'receipts.borrar': 'Borrar',
@@ -161,6 +167,10 @@ export const receiptsEn: Record<keyof typeof receiptsEs, string> = {
     'The provider rate-limited the request (HTTP 429). Wait and check your quota.',
   'receipts.error.PROVIDER_SERVER':
     'The provider returned a server error (HTTP 5xx). Try again later.',
+  'receipts.error.PROVIDER_UNSUPPORTED_PARAMETER':
+    'The provider rejected temperature or top_p for this model. Review the provider and model settings in Settings → AI.',
+  'receipts.error.PROVIDER_FILE_INPUT':
+    'The provider rejected an attached file (receipt or inventory). Check that its format and type are supported.',
   'receipts.copy_diagnostic': 'Copy diagnostics',
   'receipts.copy_diagnostic_success': 'Diagnostics copied.',
   'receipts.copy_diagnostic_failed': 'Could not copy diagnostics. Check clipboard permission.',
@@ -196,6 +206,8 @@ export const receiptsEn: Record<keyof typeof receiptsEs, string> = {
   'receipts.ver_inventario': 'View inventory',
 
   'receipts.reintentar': 'Read again',
+  'receipts.quitar_de_la_cola': 'Remove from queue',
+  'receipts.queue_entry_removed_announcement': 'Reading removed from the queue.',
   'receipts.parar': 'Stop',
   'receipts.parar_todo': 'Stop all',
   'receipts.borrar': 'Delete',
