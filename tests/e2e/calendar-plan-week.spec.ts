@@ -1,19 +1,10 @@
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { expect, test } from './fixtures';
+import { responsesCompleted, userInputText, type ResponsesRequest } from './helpers/ai-responses';
 import { createHousehold, registerAndGoto } from './helpers/auth';
 
-type ProviderRequest = {
-  messages?: Array<{ role?: string; content?: string }>;
-  response_format?: {
-    type?: string;
-    json_schema?: {
-      name?: string;
-      strict?: boolean;
-      schema?: Record<string, unknown>;
-    };
-  };
-};
+type ProviderRequest = ResponsesRequest;
 
 test('la planificación semanal reintenta tras error y no duplica comidas', async ({ page }) => {
   const expectedStart = '2026-10-19';
@@ -24,6 +15,10 @@ test('la planificación semanal reintenta tras error y no duplica comidas', asyn
     request.setEncoding('utf8');
     request.on('data', (chunk: string) => (body += chunk));
     request.on('end', () => {
+      if (request.method !== 'POST' || request.url !== '/v1/responses') {
+        response.writeHead(404).end();
+        return;
+      }
       const providerRequest = JSON.parse(body) as ProviderRequest;
       providerRequests.push(providerRequest);
 
@@ -34,37 +29,32 @@ test('la planificación semanal reintenta tras error y no duplica comidas', asyn
           return;
         }
 
-        const prompt =
-          providerRequest.messages?.find((message) => message.role === 'user')?.content ?? '';
+        const prompt = userInputText(providerRequest);
         const startDate = prompt.match(/Del (\d{4}-\d{2}-\d{2}) al /)?.[1];
         response.writeHead(200, { 'content-type': 'application/json' });
         response.end(
-          JSON.stringify({
-            choices: [
-              {
-                message: {
-                  content: JSON.stringify({
-                    days: startDate
-                      ? [
-                          {
-                            date: startDate,
-                            meals: {
-                              lunch: {
-                                name: 'Comida sintética sin duplicados',
-                                ingredients: ['tomate'],
-                                time: 0
-                              }
-                            },
-                            totalCalories: 350
+          JSON.stringify(
+            responsesCompleted(
+              JSON.stringify({
+                days: startDate
+                  ? [
+                      {
+                        date: startDate,
+                        meals: {
+                          lunch: {
+                            name: 'Comida sintética sin duplicados',
+                            ingredients: ['tomate'],
+                            time: 0
                           }
-                        ]
-                      : [],
-                    shoppingList: ['tomate']
-                  })
-                }
-              }
-            ]
-          })
+                        },
+                        totalCalories: 350
+                      }
+                    ]
+                  : [],
+                shoppingList: ['tomate']
+              })
+            )
+          )
         );
       };
 
@@ -204,18 +194,21 @@ test('la planificación semanal reintenta tras error y no duplica comidas', asyn
     await expect(page.getByText('Plan guardado')).toBeVisible();
 
     const successfulProviderRequest = providerRequests[1];
-    expect(successfulProviderRequest?.response_format).toMatchObject({
+    expect(successfulProviderRequest?.background).toBe(true);
+    expect(successfulProviderRequest?.store).toBe(true);
+    expect(successfulProviderRequest?.text?.format).toMatchObject({
       type: 'json_schema',
-      json_schema: { name: 'weekly_plan', strict: true }
+      name: 'weekly_plan',
+      strict: true
     });
-    const schema = successfulProviderRequest?.response_format?.json_schema?.schema;
+    const schema = successfulProviderRequest?.text?.format?.schema;
     const properties = schema?.properties as Record<string, unknown>;
     const days = properties.days as { items: { properties: Record<string, unknown> } };
     const meals = days.items.properties.meals as { properties: Record<string, unknown> };
     expect(Object.keys(meals.properties)).toEqual(['lunch']);
-    expect(
-      successfulProviderRequest?.messages?.find((message) => message.role === 'user')?.content
-    ).toContain('Preferencia sintética: cenas sencillas.');
+    expect(userInputText(successfulProviderRequest!)).toContain(
+      'Preferencia sintética: cenas sencillas.'
+    );
 
     const afterSuccess = await page.request.get(rangeUrl, { headers });
     expect(afterSuccess.ok()).toBeTruthy();

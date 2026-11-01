@@ -7,16 +7,13 @@
  * por base SQLite; no se comparte un dispatcher entre procesos. La concurrencia es POR CONFIGURACIÓN,
  * no por usuario: un proveedor lento no consume el cupo de otro.
  *
- * Cada ticket: coge el archivo, construye el «inventario.json», llama al modelo EN STREAMING,
- * y va guardando cada linea en cuanto el modelo la cierra —que es lo que hace que en la pantalla
- * se vea «poco a poco» lo que va analizando, sin fingir nada. Al final valida el objeto entero
- * (el stream puede traer lineas que el objeto final no tiene, y al reves), registra la tienda
- * detectada si no existe, y deja el ticket en `review`.
+ * Cada ticket lee el archivo, adjunta el inventario completo y espera la respuesta del modelo
+ * mediante Responses background. Al completarse, valida el objeto, registra la tienda detectada
+ * si no existe y deja el ticket en `review`; no simula streaming ni guarda prompts en la cola.
  *
- * Parar: cada trabajo en marcha lleva su `AbortController`; parar uno lo cancela de verdad (el
- * `fetch` se aborta), parar todo cancela los que corren y marca `stopped` los que esperaban.
- * Reintentar devuelve el trabajo a la cola y LIMPIA las lineas a medias: un ticket no lleva
- * lineas de dos lecturas distintas.
+ * Solo la cancelación explícita aborta el trabajo servidor y solicita cancelar el response remoto.
+ * Una desconexión HTTP no llega a ese controlador. Reintentar devuelve el ticket a la cola y
+ * limpia las líneas parciales de intentos anteriores.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -54,7 +51,6 @@ import {
   buildTicketPrompt,
   type InventarioParaPrompt
 } from './ticket-prompt.js';
-import { lineasNuevas } from './ticket-lines-stream.js';
 import { deduplicateTicketLines } from './ticket-lines-dedup.js';
 import { ticketAnswerSchema } from '../schemas/receipts.schema.js';
 import { RECEIPT_RESPONSE_FORMAT } from '../schemas/ai-generated-output.schema.js';
@@ -76,7 +72,7 @@ type AiRuntime<T = unknown> = {
   householdId: string | null;
   configId: string | null;
   config: AiConfigRow | null;
-  run: (config: AiConfigRow | null, signal: AbortSignal) => Promise<T>;
+  run: (config: AiConfigRow | null, signal: AbortSignal, jobId: string) => Promise<T>;
   failureCode?: (result: T) => string | null;
   payloadBytes: number;
   resolve: (value: T) => void;
@@ -102,7 +98,7 @@ type SubmitAiTask<T> = {
   /** Null for an unsaved connection check: metadata is queued, credentials remain volatile. */
   configId?: string | null;
   kind: string;
-  run: (config: AiConfigRow | null, signal: AbortSignal) => Promise<T>;
+  run: (config: AiConfigRow | null, signal: AbortSignal, jobId: string) => Promise<T>;
   failureCode?: (result: T) => string | null;
   payloadBytes?: number;
   externalSignal?: AbortSignal;
@@ -241,7 +237,7 @@ export function dispatchAI(
   db: SqlDb,
   responseFormat: AiResponseFormat,
   kind: AiJobKind = 'recipe',
-  externalSignal?: AbortSignal,
+  _externalSignal?: AbortSignal,
   householdId?: string | null
 ): Promise<string> {
   // Callers with a captured household scope must never resolve configuration from a later
@@ -265,8 +261,11 @@ export function dispatchAI(
     config,
     kind,
     payloadBytes,
-    externalSignal,
-    run: (_fixedConfig, signal) => callAIWithConfig(config, messages, responseFormat, signal)
+    run: (_fixedConfig, signal, jobId) =>
+      callAIWithConfig(config, messages, responseFormat, signal, {
+        jobId,
+        onDiagnostic: (diagnostic) => persistAiProviderDiagnostic(db, jobId, diagnostic)
+      })
   }).result;
 }
 
@@ -276,7 +275,7 @@ export function dispatchAIStreaming(
   db: SqlDb,
   onDelta: (text: string) => void,
   responseFormat: AiResponseFormat,
-  externalSignal: AbortSignal
+  _externalSignal: AbortSignal
 ): Promise<string> {
   const config = activeAiConfigForFunction(db, userId, 'shopping_pantry');
   if (!config)
@@ -290,9 +289,11 @@ export function dispatchAIStreaming(
       JSON.stringify({ messages, response_format: responseFormat }),
       'utf8'
     ),
-    externalSignal,
-    run: (_fixedConfig, signal) =>
-      callAIStreamingWithConfig(config, messages, onDelta, responseFormat, signal)
+    run: (_fixedConfig, signal, jobId) =>
+      callAIStreamingWithConfig(config, messages, onDelta, responseFormat, signal, {
+        jobId,
+        onDiagnostic: (diagnostic) => persistAiProviderDiagnostic(db, jobId, diagnostic)
+      })
   }).result;
 }
 
@@ -315,13 +316,13 @@ export function dispatchPingDeConexion(
         ...probe,
         jobId,
         signal,
-        onDiagnostic: (diagnostic) => persistConnectionTestDiagnostic(context.db, jobId, diagnostic)
+        onDiagnostic: (diagnostic) => persistAiProviderDiagnostic(context.db, jobId, diagnostic)
       }),
     failureCode: (result) => (result.ok ? null : 'PROVIDER')
   }).result;
 }
 
-function persistConnectionTestDiagnostic(
+export function persistAiProviderDiagnostic(
   db: SqlDb,
   jobId: string,
   diagnostic: AiConnectionTestDiagnostic
@@ -360,7 +361,7 @@ function persistConnectionTestDiagnostic(
   db.prepare(
     `UPDATE ai_jobs SET provider_response_id = ?, provider_transport = ?, provider_http_status = ?,
        elapsed_ms = ?, diagnostic_stage = ?, updated_at = CURRENT_TIMESTAMP
-     WHERE id = ? AND kind = 'connection_test'`
+     WHERE id = ? AND status = 'running'`
   ).run(responseId, transport, status, elapsedMs, stage, jobId);
 }
 
@@ -802,42 +803,20 @@ async function correr(
     };
     const contenido: AiMessagePart[] = [{ type: 'text', text: user }, ticketPart, inventarioPart];
 
-    // El stream va guardando lineas a medida que el modelo las cierra.
-    let acumulado = '';
-    let entregadas = 0;
-    let vistasEnStream = 0;
     const mensajes: AiMessage[] = [
       { role: 'system', content: system },
       { role: 'user', content: contenido }
     ];
-    const respuesta = await callAIStreamingWithConfig(
+    const respuesta = await callAIWithConfig(
       configuracion,
       mensajes,
-      (delta) => {
-        acumulado += delta;
-        const nuevas = lineasNuevas(acumulado, vistasEnStream);
-        for (const linea of nuevas) {
-          vistasEnStream += 1;
-          const parseada = seguro(() => JSON.parse(linea.crudo));
-          if (!parseada || typeof parseada !== 'object' || !('name' in parseada)) continue;
-          if (entregadas >= 300) return;
-          const sigueActivo = db
-            .prepare(
-              "SELECT 1 AS activo FROM ai_jobs WHERE id = ? AND status = 'running' AND claim_generation = ?"
-            )
-            .get(jobId, claimGeneration);
-          if (!sigueActivo) return;
-          insertarLinea(db, recibo.id, parseada as Record<string, unknown>, entregadas);
-          entregadas += 1;
-        }
-      },
       RECEIPT_RESPONSE_FORMAT,
-      señal.signal
-    ).catch(async (error) => {
-      // Sin stream en este proveedor (o error antes del primer trozo): caer a la llamada entera.
-      if (entregadas > 0 || acumulado.length > 0) throw error;
-      return callAIWithConfig(configuracion, mensajes, RECEIPT_RESPONSE_FORMAT, señal.signal);
-    });
+      señal.signal,
+      {
+        jobId,
+        onDiagnostic: (diagnostic) => persistAiProviderDiagnostic(db, jobId, diagnostic)
+      }
+    );
 
     const validado = ticketAnswerSchema.safeParse(extractJsonObject(respuesta));
     if (!validado.success) {
@@ -848,8 +827,7 @@ async function correr(
       );
     }
 
-    // Lo que manda es el objeto FINAL validado: el stream puede haber guardado una version a
-    // medias de una linea que el modelo corrigio despues. Se reescriben todas.
+    // Solo se persiste el objeto completo después de validar el esquema y el job vigente.
     db.transaction(() => {
       const sigueActivo = db
         .prepare(
@@ -977,7 +955,7 @@ async function correrTrabajoGenerico(
   if (!row || row.status !== 'running' || row.claim_generation !== claimGeneration) return;
 
   try {
-    const result = await runtime.run(runtime.config, signal);
+    const result = await runtime.run(runtime.config, signal, jobId);
     const vigente = db
       .prepare('SELECT status, claim_generation FROM ai_jobs WHERE id = ?')
       .get(jobId) as { status: string; claim_generation: number } | undefined;
@@ -1029,7 +1007,10 @@ async function correrTrabajoGenerico(
     }
 
     const errorCode = error instanceof AiCallError ? error.code : 'PROVIDER';
-    const reintentable = errorCode !== 'NO_CONFIG' && errorCode !== 'BAD_JSON';
+    const reintentable =
+      errorCode !== 'NO_CONFIG' &&
+      errorCode !== 'BAD_JSON' &&
+      !(error instanceof AiCallError && error.detail === 'BACKGROUND_UNSUPPORTED');
     if (kind !== 'connection_test' && reintentable && row.attempts < row.max_attempts) {
       db.prepare(
         `UPDATE ai_jobs SET status = 'queued', error_code = NULL, error_detail = NULL,
@@ -1047,15 +1028,6 @@ async function correrTrabajoGenerico(
       rechazar(runtime, error);
       liberarRuntime(jobId, true);
     }
-  }
-}
-
-/** `try` que no rompe el bucle: una linea mala del stream no tira la lectura entera. */
-function seguro<T>(intentar: () => T): T | null {
-  try {
-    return intentar();
-  } catch {
-    return null;
   }
 }
 
@@ -1177,6 +1149,66 @@ export type AiQueueJobDto = {
   elapsedMs: number | null;
   diagnosticStage: AiConnectionTestDiagnostic['diagnosticStage'] | null;
 };
+
+export type AiActiveJobDto = {
+  id: string;
+  kind: string;
+  status: 'queued' | 'running';
+  createdAt: string;
+  startedAt: string | null;
+};
+
+/** User-scoped activity indicator DTO; intentionally omits provider and payload diagnostics. */
+export function activeAiJobsForUser(db: SqlDb, userId: string): AiActiveJobDto[] {
+  const rows = db
+    .prepare(
+      `SELECT id, kind, status, created_at, started_at FROM ai_jobs
+       WHERE user_id = ? AND status IN ('queued', 'running')
+       ORDER BY CASE status WHEN 'running' THEN 0 ELSE 1 END, created_at, id`
+    )
+    .all(userId) as Array<{
+    id: string;
+    kind: string;
+    status: 'queued' | 'running';
+    created_at: string;
+    started_at: string | null;
+  }>;
+
+  const jobs = rows.map(({ id, kind, status, created_at, started_at }) => ({
+    id,
+    kind,
+    status,
+    createdAt: created_at,
+    startedAt: started_at
+  }));
+
+  // Planning automation has its own durable ledger instead of `ai_jobs`. Include only active
+  // runs in households where the caller is still an active member; this keeps retry/scheduled
+  // work visible after closing the initiating tab without exposing another household's state.
+  const automationRuns = db
+    .prepare(
+      `SELECT runs.id, runs.created_at FROM household_planning_automation_runs runs
+       JOIN household_members members ON members.household_id = runs.household_id
+       WHERE members.user_id = ? AND members.is_active = 1 AND runs.status = 'in_progress'
+       ORDER BY runs.created_at, runs.id`
+    )
+    .all(userId) as Array<{ id: string; created_at: string }>;
+  jobs.push(
+    ...automationRuns.map(({ id, created_at }) => ({
+      id: `planning-automation:${id}`,
+      kind: 'household_automation',
+      status: 'running' as const,
+      createdAt: created_at,
+      startedAt: created_at
+    }))
+  );
+  return jobs.sort(
+    (left, right) =>
+      Number(right.status === 'running') - Number(left.status === 'running') ||
+      left.createdAt.localeCompare(right.createdAt) ||
+      left.id.localeCompare(right.id)
+  );
+}
 
 /** DTO whitelist: no key, prompts, attachments, result, or provider error body. */
 export function queueForConfig(db: SqlDb, userId: string, configId: string): AiQueueJobDto[] {

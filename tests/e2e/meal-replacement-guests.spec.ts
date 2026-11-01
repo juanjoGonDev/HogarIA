@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { expect, test } from './fixtures';
+import { responsesCompleted, type ResponsesRequest } from './helpers/ai-responses';
 import { expectAiParticipantsSafetyNoteGeometry } from './helpers/ai-participants';
 import { registerAndGoto } from './helpers/auth';
 
@@ -20,31 +21,31 @@ test('sustituye una sola comida con restricciones efímeras de invitados tras re
   const token = await page.evaluate(() => localStorage.getItem('hogar:v1:auth_token'));
   expect(token).toBeTruthy();
 
-  const providerRequests: Array<Record<string, unknown>> = [];
+  const providerRequests: ResponsesRequest[] = [];
   const provider = createServer((request, response) => {
     let body = '';
     request.setEncoding('utf8');
     request.on('data', (chunk: string) => (body += chunk));
     request.on('end', () => {
-      providerRequests.push(JSON.parse(body) as Record<string, unknown>);
+      if (request.method !== 'POST' || request.url !== '/v1/responses') {
+        response.writeHead(404).end();
+        return;
+      }
+      providerRequests.push(JSON.parse(body) as ResponsesRequest);
       response.writeHead(200, { 'content-type': 'application/json' });
       response.end(
-        JSON.stringify({
-          choices: [
-            {
-              message: {
-                content: JSON.stringify({
-                  safe: true,
-                  name: 'Arroz de verduras QA',
-                  description: 'Una alternativa vegetal sintética para la prueba.',
-                  ingredients: ['arroz', 'calabacín', 'tomate'],
-                  estimatedTime: 30,
-                  servings: 2
-                })
-              }
-            }
-          ]
-        })
+        JSON.stringify(
+          responsesCompleted(
+            JSON.stringify({
+              safe: true,
+              name: 'Arroz de verduras QA',
+              description: 'Una alternativa vegetal sintética para la prueba.',
+              ingredients: ['arroz', 'calabacín', 'tomate'],
+              estimatedTime: 30,
+              servings: 2
+            })
+          )
+        )
       );
     });
   });
@@ -178,7 +179,7 @@ test('sustituye una sola comida con restricciones efímeras de invitados tras re
 
     // Generar una propuesta no escribe nada; solo el botón de aplicación altera el slot seleccionado.
     await expect(editor.locator('#meal-custom')).toHaveValue('Pasta original QA');
-    const requestContent = JSON.stringify(providerRequests[0]?.messages ?? {});
+    const requestContent = JSON.stringify(providerRequests[0]?.input ?? {});
     expect(requestContent).toContain('cacahuete');
     expect(requestContent).toContain('huevo');
     expect(requestContent).toContain('lactosa');

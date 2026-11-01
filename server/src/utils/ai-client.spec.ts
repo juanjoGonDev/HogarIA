@@ -1,4 +1,3 @@
-import { ReadableStream } from 'node:stream/web';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   AiCallError,
@@ -86,9 +85,35 @@ function callAIStreamingTransport(
   active: AiConfigRow,
   messages: any[],
   onDelta: (text: string) => void,
-  signal: AbortSignal
+  signal: AbortSignal,
+  requestOptions?: { jobId?: string; reasoning_effort?: 'none' }
 ) {
-  return callAIStreamingTransportRaw(active, messages, onDelta, TEST_RESPONSE_FORMAT, signal);
+  return callAIStreamingTransportRaw(
+    active,
+    messages,
+    onDelta,
+    TEST_RESPONSE_FORMAT,
+    signal,
+    requestOptions
+  );
+}
+
+function responsesResult(
+  id: string,
+  status: string,
+  text?: string,
+  extra: Record<string, unknown> = {}
+) {
+  return new Response(
+    JSON.stringify({
+      id,
+      status,
+      output:
+        text === undefined ? [] : [{ type: 'message', content: [{ type: 'output_text', text }] }],
+      ...extra
+    }),
+    { status: status === 'queued' ? 202 : 200, headers: { 'content-type': 'application/json' } }
+  );
 }
 
 function enableRealSmoke(proxyUrl = REAL_SMOKE_PROXY_URL, proxyToken = REAL_SMOKE_PROXY_TOKEN) {
@@ -120,6 +145,155 @@ describe('activeAiConfig', () => {
 });
 
 describe('callAI', () => {
+  it('envía inputs completos a Responses background, espera el resultado y vincula idempotencia al job', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(responsesResult('resp_ai_1234567', 'queued'))
+      .mockResolvedValueOnce(responsesResult('resp_ai_1234567', 'completed', '{"answer":"ok"}'));
+    vi.stubGlobal('fetch', fetchMock);
+    const diagnostics: Array<Record<string, unknown>> = [];
+    const messages = [
+      { role: 'system' as const, content: 'Sigue instrucciones.' },
+      {
+        role: 'user' as const,
+        content: [
+          { type: 'text' as const, text: 'Analiza esto' },
+          {
+            type: 'file' as const,
+            file: { filename: 'inventario.json', file_data: 'data:application/json;base64,e30=' }
+          },
+          {
+            type: 'image_url' as const,
+            image_url: { url: 'data:image/png;base64,aW1n', detail: 'high' as const }
+          }
+        ]
+      }
+    ];
+
+    const content = await callAITransportRaw(
+      { ...CONFIG, frequency_penalty: 0.4, presence_penalty: 0.3 },
+      messages,
+      TEST_RESPONSE_FORMAT,
+      undefined,
+      {
+        jobId: 'job-ai-123',
+        reasoning_effort: 'none',
+        onDiagnostic: (diagnostic) => diagnostics.push({ ...diagnostic })
+      }
+    );
+
+    expect(content).toBe('{"answer":"ok"}');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(new URL(String(fetchMock.mock.calls[0][0])).pathname).toBe('/v1/responses');
+    expect(new URL(String(fetchMock.mock.calls[1][0])).pathname).toBe(
+      '/v1/responses/resp_ai_1234567'
+    );
+    const create = fetchMock.mock.calls[0][1] as RequestInit;
+    const body = JSON.parse(String(create.body));
+    expect(body).toEqual({
+      model: 'gpt-vision',
+      background: true,
+      store: true,
+      input: [
+        { role: 'system', content: 'Sigue instrucciones.' },
+        {
+          role: 'user',
+          content: [
+            { type: 'input_text', text: 'Analiza esto' },
+            {
+              type: 'input_file',
+              filename: 'inventario.json',
+              file_data: 'data:application/json;base64,e30='
+            },
+            { type: 'input_image', image_url: 'data:image/png;base64,aW1n', detail: 'high' }
+          ]
+        }
+      ],
+      text: {
+        format: {
+          type: 'json_schema',
+          name: 'synthetic_test',
+          strict: true,
+          schema: TEST_RESPONSE_FORMAT.json_schema.schema
+        }
+      },
+      max_output_tokens: 900,
+      temperature: 0.2,
+      reasoning: { effort: 'none' }
+    });
+    expect(body).not.toHaveProperty('frequency_penalty');
+    expect(body).not.toHaveProperty('presence_penalty');
+    expect((create.headers as Record<string, string>)['Idempotency-Key']).toMatch(
+      /^hogaria-ai-job-ai-123-/
+    );
+    expect(diagnostics.at(-1)).toMatchObject({
+      providerResponseId: 'resp_ai_1234567',
+      providerTransport: 'responses_background',
+      diagnosticStage: 'completed'
+    });
+  });
+
+  it('admite JSON object y no vuelve a Chat Completions si Responses no está disponible', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('not found', { status: 404 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const error = await callAITransportRaw(CONFIG, [{ role: 'user', content: 'JSON' }], {
+      type: 'json_object'
+    }).catch((reason) => reason);
+
+    expect(error).toMatchObject({ code: 'PROVIDER', detail: 'BACKGROUND_UNSUPPORTED' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(new URL(String(fetchMock.mock.calls[0][0])).pathname).toBe('/v1/responses');
+  });
+
+  it('entrega el texto final una sola vez al callback legacy de streaming', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(responsesResult('resp_stream_123', 'in_progress'))
+        .mockResolvedValueOnce(responsesResult('resp_stream_123', 'completed', 'respuesta final'))
+    );
+    const deltas: string[] = [];
+
+    const result = await callAIStreamingTransport(
+      CONFIG,
+      [{ role: 'user', content: 'hola' }],
+      (delta) => deltas.push(delta),
+      new AbortController().signal,
+      { jobId: 'job-stream' }
+    );
+
+    expect(result).toBe('respuesta final');
+    expect(deltas).toEqual(['respuesta final']);
+  });
+
+  it('rechaza salidas Responses incompletas por límite y refusal sin exponer su texto', async () => {
+    vi.stubGlobal('fetch', async () =>
+      responsesResult('resp_incomplete_1', 'incomplete', '{"answer":"ok"}', {
+        incomplete_details: { reason: 'max_output_tokens' }
+      })
+    );
+    await expect(callAITransport(CONFIG, [])).rejects.toMatchObject({
+      code: 'BAD_JSON',
+      detail: 'TRUNCATED'
+    });
+
+    vi.stubGlobal('fetch', async () =>
+      responsesResult('resp_refusal_1', 'completed', undefined, {
+        output: [
+          {
+            type: 'message',
+            content: [{ type: 'refusal', refusal: 'private provider refusal' }]
+          }
+        ]
+      })
+    );
+    const refusal = await callAITransport(CONFIG, []).catch((reason) => reason);
+    expect(refusal).toMatchObject({ code: 'BAD_JSON', detail: 'REFUSED' });
+    expect(refusal.message).not.toContain('private provider refusal');
+  });
+
   it('rechaza el marcador genérico antes de fetch si el smoke no está habilitado', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
@@ -223,11 +397,10 @@ describe('callAI', () => {
     let authorization: string | undefined;
     vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
       authorization = (init.headers as Record<string, string>).Authorization;
-      return new Response(
-        JSON.stringify({
-          choices: [{ message: { content: `El proxy repitió ${REAL_SMOKE_PROXY_TOKEN}` } }]
-        }),
-        { status: 200 }
+      return responsesResult(
+        'resp_smoke_test',
+        'completed',
+        `El proxy repitió ${REAL_SMOKE_PROXY_TOKEN}`
       );
     });
 
@@ -250,23 +423,30 @@ describe('callAI', () => {
     const seen: { url: string; init: any }[] = [];
     vi.stubGlobal('fetch', async (url: string, init: any) => {
       seen.push({ url, init });
-      return new Response(JSON.stringify({ choices: [{ message: { content: '{"ok":true}' } }] }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' }
-      });
+      return responsesResult('resp_config_body', 'completed', '{"ok":true}');
     });
 
     const out = await callAITransport(CONFIG, [{ role: 'user', content: 'hola' }]);
 
     expect(out).toBe('{"ok":true}');
-    // `base_url` acabado en `/` no debe producir `//chat/completions`
-    expect(seen[0].url).toBe('https://ai.local/v1/chat/completions');
+    // `base_url` acabado en `/` no debe producir `//responses`.
+    expect(seen[0].url).toBe('https://ai.local/v1/responses');
     const body = JSON.parse(seen[0].init.body);
     expect(body).toMatchObject({
       model: 'gpt-vision',
       temperature: 0.2,
-      max_tokens: 900,
-      response_format: TEST_RESPONSE_FORMAT
+      background: true,
+      store: true,
+      max_output_tokens: 900,
+      input: [{ role: 'user', content: 'hola' }],
+      text: {
+        format: {
+          type: 'json_schema',
+          name: 'synthetic_test',
+          strict: true,
+          schema: TEST_RESPONSE_FORMAT.json_schema.schema
+        }
+      }
     });
     expect(seen[0].init.headers.Authorization).toBe('Bearer clave');
   });
@@ -322,9 +502,8 @@ describe('callAI', () => {
 
   it('una respuesta sin choices se dice como respuesta mala sin volcar payload del proveedor', async () => {
     const secret = 'synthetic-provider-secret-sentinel';
-    vi.stubGlobal(
-      'fetch',
-      async () => new Response(JSON.stringify({ api_key: secret, choices: [] }), { status: 200 })
+    vi.stubGlobal('fetch', async () =>
+      responsesResult('resp_no_text', 'completed', undefined, { api_key: secret })
     );
     const error = await callAITransport({ ...CONFIG, api_key: secret }, []).catch(
       (reason) => reason
@@ -351,15 +530,12 @@ describe('callAI', () => {
 
   it('redacta la clave incluso cuando el modelo la devuelve dentro de JSON valido', async () => {
     const secret = 'synthetic-valid-output-sentinel';
-    vi.stubGlobal(
-      'fetch',
-      async () =>
-        new Response(
-          JSON.stringify({
-            choices: [{ message: { content: JSON.stringify({ name: `Recipe ${secret}` }) } }]
-          }),
-          { status: 200 }
-        )
+    vi.stubGlobal('fetch', async () =>
+      responsesResult(
+        'resp_secret_output',
+        'completed',
+        JSON.stringify({ name: `Recipe ${secret}` })
+      )
     );
 
     const content = await callAITransport({ ...CONFIG, api_key: secret }, []);
@@ -428,20 +604,6 @@ describe('extractJsonObject', () => {
   });
 });
 
-/** Un cuerpo SSE de mentira: lo que devuelve un proveedor en modo stream. */
-// El tsconfig del server no declara los globals de web streams: la clase se importa de
-// node:stream/web, que es de donde sale el objeto de todas formas.
-function sse(chunks: string[]): ReadableStream<Uint8Array> {
-  const encoder = new TextEncoder();
-  let i = 0;
-  return new ReadableStream<Uint8Array>({
-    pull(controller: { enqueue: (trozo: Uint8Array) => void; close: () => void }) {
-      if (i < chunks.length) controller.enqueue(encoder.encode(chunks[i++]));
-      else controller.close();
-    }
-  });
-}
-
 type SmokeTransportConfig = Omit<typeof CONFIG, 'base_url' | 'api_key'> & {
   base_url: string;
   api_key: string;
@@ -456,34 +618,19 @@ const externalStackTransports: Array<{
   {
     name: 'completion',
     call: (config) => callAITransport(config, []),
-    providerResponse: () =>
-      new Response(JSON.stringify({ choices: [{ message: { content: 'respuesta' } }] }), {
-        status: 200
-      })
+    providerResponse: () => responsesResult('resp_e2e_completion', 'completed', 'respuesta')
   },
   {
     name: 'stream',
     call: (config) =>
       callAIStreamingTransport(config, [], () => undefined, new AbortController().signal),
-    providerResponse: () =>
-      new Response(
-        sse([
-          `data: ${JSON.stringify({ choices: [{ delta: { content: 'respuesta' } }] })}\n`,
-          'data: [DONE]\n'
-        ]),
-        { status: 200 }
-      )
+    providerResponse: () => responsesResult('resp_e2e_stream', 'completed', 'respuesta')
   },
   {
     name: 'connection test',
     call: (config) => pingDeConexionTransport(config),
     providerResponse: () =>
-      new Response(
-        JSON.stringify({
-          choices: [{ message: { content: '{"status":"ok","message":"conectado"}' } }]
-        }),
-        { status: 200 }
-      ),
+      responsesResult('resp_e2e_probe', 'completed', '{"status":"ok","message":"conectado"}'),
     connectionProbe: true
   }
 ];
@@ -567,40 +714,34 @@ describe('guard E2E_EXTERNAL_STACK', () => {
 });
 
 describe('callAIStreaming', () => {
-  it('va entregando cada delta y devuelve el texto entero, con [DONE] y ruido de por medio', async () => {
+  it('usa Responses background y entrega el texto final una sola vez al callback legacy', async () => {
     const deltas: string[] = [];
-    const seen: { url: string; body: any }[] = [];
-    vi.stubGlobal('fetch', async (url: string, init: any) => {
-      seen.push({ url, body: JSON.parse(init.body) });
-      return new Response(
-        sse([
-          'data: ' + JSON.stringify({ choices: [{ delta: { content: '{\"lines\":[' } }] }) + '\n',
-          ': keep-alive\n\n',
-          'data: no soy json\n',
-          'data: ' +
-            JSON.stringify({ choices: [{ delta: { content: '{\"name\":\"Leche\"}' } }] }) +
-            '\n',
-          'data: [DONE]\n'
-        ]),
-        { status: 200, headers: { 'content-type': 'text/event-stream' } }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(responsesResult('resp_ticket_1', 'queued'))
+      .mockResolvedValueOnce(
+        responsesResult('resp_ticket_1', 'completed', '{"lines":[{"name":"Leche"}]}')
       );
-    });
+    vi.stubGlobal('fetch', fetchMock);
 
-    const texto = await callAIStreamingTransport(
+    const result = await callAIStreamingTransport(
       CONFIG,
       [{ role: 'user', content: 'lee' }],
       (delta) => deltas.push(delta),
-      new AbortController().signal
+      new AbortController().signal,
+      { jobId: 'ticket-job' }
     );
 
-    expect(texto).toBe('{"lines":[{"name":"Leche"}');
-    expect(deltas.join('')).toBe(texto);
-    // El stream va de verdad en el body, y la senal de abort viaja con el fetch.
-    expect(seen[0].body.stream).toBe(true);
-    expect(seen[0].body.response_format).toEqual(TEST_RESPONSE_FORMAT);
+    expect(result).toBe('{"lines":[{"name":"Leche"}]}');
+    expect(deltas).toEqual([result]);
+    expect(new URL(String(fetchMock.mock.calls[0][0])).pathname).toBe('/v1/responses');
+    expect(JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body))).toMatchObject({
+      background: true,
+      store: true
+    });
   });
 
-  it('sin configuracion activa, NO_CONFIG (la cola lo traduce por «configura la IA»)', async () => {
+  it('sin configuración activa devuelve NO_CONFIG', async () => {
     await expect(
       queuedCallAIStreaming(
         'u-x',
@@ -613,156 +754,76 @@ describe('callAIStreaming', () => {
     ).rejects.toMatchObject({ code: 'NO_CONFIG' });
   });
 
-  it('usa el token resuelto en Authorization y lo redacta aunque cruce deltas', async () => {
+  it('redacta la credencial del resultado antes de emitir el callback final', async () => {
     enableRealSmoke();
     const deltas: string[] = [];
-    let authorization: string | undefined;
-    const providerDeltas = [
-      `inicio ${REAL_SMOKE_PROXY_TOKEN.slice(0, 12)}`,
-      `${REAL_SMOKE_PROXY_TOKEN.slice(12)} final`
-    ];
-    const chunks = [
-      ...providerDeltas.map(
-        (content) => `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n`
-      ),
-      'data: [DONE]\n'
-    ];
     vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
-      authorization = (init.headers as Record<string, string>).Authorization;
-      return new Response(sse(chunks), { status: 200 });
+      expect((init.headers as Record<string, string>).Authorization).toBe(
+        'Bearer ' + REAL_SMOKE_PROXY_TOKEN
+      );
+      return responsesResult(
+        'resp_secret_stream',
+        'completed',
+        JSON.stringify({ message: REAL_SMOKE_PROXY_TOKEN })
+      );
     });
 
-    const content = await callAIStreamingTransport(
-      {
-        ...CONFIG,
-        base_url: REAL_SMOKE_PROXY_URL,
-        api_key: REAL_SMOKE_PROVIDER_KEY_MARKER
-      },
+    const result = await callAIStreamingTransport(
+      { ...CONFIG, base_url: REAL_SMOKE_PROXY_URL, api_key: REAL_SMOKE_PROVIDER_KEY_MARKER },
       [],
       (delta) => deltas.push(delta),
       new AbortController().signal
     );
 
-    expect(authorization).toBe(`Bearer ${REAL_SMOKE_PROXY_TOKEN}`);
-    expect(content).not.toContain(REAL_SMOKE_PROXY_TOKEN);
-    expect(deltas.join('')).not.toContain(REAL_SMOKE_PROXY_TOKEN);
-    expect(content).toContain('[redactado]');
-    expect(deltas.join('')).toBe(content);
+    expect(result).not.toContain(REAL_SMOKE_PROXY_TOKEN);
+    expect(deltas).toEqual([result]);
+    expect(result).toContain('[redactado]');
   });
 
-  it('un 4xx/5xx del proveedor es PROVIDER y conserva solo el status', async () => {
+  it('un error HTTP mantiene el status y no expone el cuerpo del proveedor', async () => {
     const secret = 'synthetic-provider-secret-sentinel';
     vi.stubGlobal(
       'fetch',
-      async () => new Response(`upstream rejected ${secret}`, { status: 500 })
+      async () => new Response('upstream rejected ' + secret, { status: 500 })
     );
-    const error = await callAIStreamingTransport(
-      { ...CONFIG, api_key: secret },
-      [],
-      () => undefined,
-      new AbortController().signal
-    ).catch((e) => e);
-    expect(error).toBeInstanceOf(AiCallError);
-    expect(error.code).toBe('PROVIDER');
-    expect(error.detail).toBe('HTTP 500');
-    expect(JSON.stringify({ message: error.message, detail: error.detail })).not.toContain(secret);
-  });
-
-  it('un stream que no trajo nada de texto es BAD_JSON, no un exito silencioso', async () => {
-    vi.stubGlobal('fetch', async () => new Response(sse(['data: [DONE]\n']), { status: 200 }));
-    await expect(
-      callAIStreamingTransport(CONFIG, [], () => undefined, new AbortController().signal)
-    ).rejects.toMatchObject({ code: 'BAD_JSON' });
-  });
-
-  it('la senal abortada a mitad de stream corta la lectura con PROVIDER/Cancelado', async () => {
-    const control = new AbortController();
-    vi.stubGlobal(
-      'fetch',
-      async () =>
-        new Response(
-          sse([
-            'data: ' + JSON.stringify({ choices: [{ delta: { content: 'primer trozo' } }] }) + '\n',
-            'data: ' + JSON.stringify({ choices: [{ delta: { content: ' segundo' } }] }) + '\n'
-          ]),
-          { status: 200 }
-        )
-    );
-    const error = await callAIStreamingTransport(
-      CONFIG,
-      [],
-      () => control.abort(),
-      control.signal
-    ).catch((e) => e);
-    expect(error).toBeInstanceOf(AiCallError);
-    expect(error.code).toBe('PROVIDER');
-    expect(error.detail).toBe('CANCELLED');
-  });
-
-  it('redacta una clave repartida entre deltas antes de entregarla al llamante', async () => {
-    const secret = 'synthetic-stream-secret-sentinel';
-    const deltas: string[] = [];
-    const answer = `{"name":"${secret}"}`;
-    const chunks = answer.split(secret).flatMap((chunk, index, all) => {
-      const parts = [`data: ${JSON.stringify({ choices: [{ delta: { content: chunk } }] })}\n`];
-      if (index < all.length - 1) {
-        parts.push(`data: ${JSON.stringify({ choices: [{ delta: { content: secret } }] })}\n`);
-      }
-      return parts;
-    });
-    vi.stubGlobal('fetch', async () => new Response(sse(chunks), { status: 200 }));
-
-    const content = await callAIStreamingTransport(
-      { ...CONFIG, api_key: secret },
-      [],
-      (delta) => deltas.push(delta),
-      new AbortController().signal
-    );
-
-    expect(content).not.toContain(secret);
-    expect(deltas.join('')).not.toContain(secret);
-    expect(content).toContain('[redactado]');
-  });
-
-  it('no filtra una clave periodica al mover el limite seguro de un delta', async () => {
-    const secret = 'ababababab';
-    const deltas: string[] = [];
-    const content = `${secret}zzzzzzzzz`;
-    const event = `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n`;
-    vi.stubGlobal('fetch', async () => new Response(sse([event]), { status: 200 }));
-
-    await callAIStreamingTransport(
-      { ...CONFIG, api_key: secret },
-      [],
-      (delta) => deltas.push(delta),
-      new AbortController().signal
-    );
-
-    expect(deltas.join('')).not.toContain(secret);
-  });
-
-  it('normaliza un error del lector del stream sin persistir el mensaje del transporte', async () => {
-    const secret = 'synthetic-stream-reader-secret-sentinel';
-    const stream = new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.error(new Error(`connection reset after ${secret}`));
-      }
-    });
-    vi.stubGlobal('fetch', async () => new Response(stream, { status: 200 }));
     const error = await callAIStreamingTransport(
       { ...CONFIG, api_key: secret },
       [],
       () => undefined,
       new AbortController().signal
     ).catch((reason) => reason);
+    expect(error).toBeInstanceOf(AiCallError);
+    expect(error.code).toBe('PROVIDER');
+    expect(error.detail).toBe('HTTP 500');
+    expect(JSON.stringify({ message: error.message, detail: error.detail })).not.toContain(secret);
+  });
+
+  it('una cancelación explícita cancela el Responses remoto', async () => {
+    const controller = new AbortController();
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      calls.push(String(init?.method ?? 'GET') + ' ' + url);
+      if (url.endsWith('/cancel')) return responsesResult('resp_cancel_1', 'cancelled');
+      if (String(init?.method) === 'POST') {
+        return responsesResult('resp_cancel_1', 'in_progress');
+      }
+      controller.abort();
+      throw new Error('aborted');
+    });
+
+    const error = await callAIStreamingTransport(CONFIG, [], () => undefined, controller.signal, {
+      jobId: 'cancel-job'
+    }).catch((reason) => reason);
 
     expect(error).toBeInstanceOf(AiCallError);
     expect(error.code).toBe('PROVIDER');
-    expect(JSON.stringify({ message: error.message, detail: error.detail })).not.toContain(secret);
-    expect(error.message).toBe('AI provider stream connection failed');
+    expect(error.detail).toBe('CANCELLED');
+    expect(calls).toHaveLength(3);
+    expect(calls[2]).toContain('/responses/resp_cancel_1/cancel');
   });
 
-  it('un fetch que revienta con abort/timeout es TIMEOUT', async () => {
+  it('un fetch que revienta con timeout es TIMEOUT', async () => {
     vi.stubGlobal('fetch', async () => {
       throw new Error('The operation was aborted due to timeout');
     });
@@ -776,21 +837,17 @@ describe('callAIStreaming', () => {
 
 describe('endpoint', () => {
   it('la base sin camino se completa con el /v1 del convenio OpenAI-compatible', () => {
-    expect(endpoint('http://localhost:8000')).toBe('http://localhost:8000/v1/chat/completions');
+    expect(endpoint('http://localhost:8000')).toBe('http://localhost:8000/v1/responses');
   });
 
   it('la base que ya trae su version se respeta, barra final incluida', () => {
-    expect(endpoint('https://api.openai.com/v1')).toBe(
-      'https://api.openai.com/v1/chat/completions'
-    );
-    expect(endpoint('http://localhost:11434/v1/')).toBe(
-      'http://localhost:11434/v1/chat/completions'
-    );
-    expect(endpoint('http://x/api/v2')).toBe('http://x/api/v2/chat/completions');
+    expect(endpoint('https://api.openai.com/v1')).toBe('https://api.openai.com/v1/responses');
+    expect(endpoint('http://localhost:11434/v1/')).toBe('http://localhost:11434/v1/responses');
+    expect(endpoint('http://x/api/v2')).toBe('http://x/api/v2/responses');
   });
 
-  it('la URL completa hasta chat/completions se usa tal cual', () => {
-    expect(endpoint('https://x/proxy/chat/completions')).toBe('https://x/proxy/chat/completions');
+  it('convierte una URL antigua completa a la ruta Responses del mismo proxy', () => {
+    expect(endpoint('https://x/proxy/chat/completions')).toBe('https://x/proxy/v1/responses');
   });
 });
 
@@ -812,42 +869,37 @@ describe('callAI: el cuerpo lleva solo lo configurado', () => {
     let body: any;
     vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
       body = JSON.parse(String(init.body));
-      return new Response(
-        JSON.stringify({ choices: [{ message: { content: '{"answer":"ok"}' } }] }),
-        {
-          status: 200
-        }
-      );
+      return responsesResult('resp_schema', 'completed', '{"answer":"ok"}');
     });
 
     await callAITransportRaw(CONFIG, [{ role: 'user', content: 'JSON' }], responseFormat);
 
-    expect(body.response_format).toEqual(responseFormat);
+    expect(body.text.format).toEqual({
+      type: 'json_schema',
+      name: responseFormat.json_schema.name,
+      strict: true,
+      schema: responseFormat.json_schema.schema
+    });
+    expect(body.background).toBe(true);
   });
 
   it('rechaza una respuesta truncada aunque el contenido parezca JSON completo', async () => {
-    vi.stubGlobal(
-      'fetch',
-      async () =>
-        new Response(
-          JSON.stringify({
-            choices: [{ finish_reason: 'length', message: { content: '{"answer":"ok"}' } }]
-          }),
-          { status: 200 }
-        )
+    vi.stubGlobal('fetch', async () =>
+      responsesResult('resp_truncated', 'incomplete', '{"answer":"ok"}', {
+        incomplete_details: { reason: 'max_output_tokens' }
+      })
     );
     const error = await callAITransport(CONFIG, []).catch((reason) => reason);
     expect(error).toMatchObject({ code: 'BAD_JSON', detail: 'TRUNCATED' });
   });
 
   it('rechaza respuestas marcadas como refusal o content-filter sin exponerlas', async () => {
-    for (const choice of [
-      { finish_reason: 'stop', message: { refusal: 'private refusal text', content: null } },
-      { finish_reason: 'content_filter', message: { content: null } }
+    for (const output of [
+      [{ type: 'message', content: [{ type: 'refusal', refusal: 'private refusal text' }] }],
+      [{ type: 'message', content: [{ type: 'refusal', refusal: 'filtered private text' }] }]
     ]) {
-      vi.stubGlobal(
-        'fetch',
-        async () => new Response(JSON.stringify({ choices: [choice] }), { status: 200 })
+      vi.stubGlobal('fetch', async () =>
+        responsesResult('resp_refusal', 'completed', undefined, { output })
       );
       const error = await callAITransport(CONFIG, []).catch((reason) => reason);
       expect(error).toMatchObject({ code: 'BAD_JSON', detail: 'REFUSED' });
@@ -870,9 +922,7 @@ describe('callAI: el cuerpo lleva solo lo configurado', () => {
     let cuerpo: any;
     vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
       cuerpo = JSON.parse(String(init.body));
-      return new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), {
-        status: 200
-      });
+      return responsesResult('resp_null_settings', 'completed', 'ok');
     });
     await callAITransport(
       {
@@ -888,8 +938,17 @@ describe('callAI: el cuerpo lleva solo lo configurado', () => {
     vi.unstubAllGlobals();
     expect(cuerpo).toEqual({
       model: CONFIG.model,
-      messages: [{ role: 'user', content: 'hola' }],
-      response_format: TEST_RESPONSE_FORMAT
+      background: true,
+      store: true,
+      input: [{ role: 'user', content: 'hola' }],
+      text: {
+        format: {
+          type: 'json_schema',
+          name: 'synthetic_test',
+          strict: true,
+          schema: TEST_RESPONSE_FORMAT.json_schema.schema
+        }
+      }
     });
   });
 
@@ -897,29 +956,25 @@ describe('callAI: el cuerpo lleva solo lo configurado', () => {
     let cuerpo: any;
     vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
       cuerpo = JSON.parse(String(init.body));
-      return new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), {
-        status: 200
-      });
+      return responsesResult('resp_configured_settings', 'completed', 'ok');
     });
     await callAITransport({ ...CONFIG, temperature: 0.2, max_tokens: 500 }, [
       { role: 'user', content: 'hola' }
     ]);
     vi.unstubAllGlobals();
     expect(cuerpo.temperature).toBe(0.2);
-    expect(cuerpo.max_tokens).toBe(500);
+    expect(cuerpo.max_output_tokens).toBe(500);
   });
 });
 
 describe('pingDeConexion', () => {
-  const respuesta = (content: unknown, status = 200) =>
-    new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status });
   const respuestaResponses = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), {
       status,
       headers: { 'content-type': 'application/json' }
     });
 
-  it('crea un Responses background y consulta hasta recibir la salida terminal', async () => {
+  it('crea una operación Responses background idempotente y hace polling hasta completarla', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -948,7 +1003,7 @@ describe('pingDeConexion', () => {
     vi.stubGlobal('fetch', fetchMock);
     const diagnostics: Array<Record<string, unknown>> = [];
 
-    const veredicto = await pingDeConexionTransport({
+    const verdict = await pingDeConexionTransport({
       base_url: 'http://x:8000',
       api_key: 'synthetic-key',
       model: 'gpt-5',
@@ -956,15 +1011,16 @@ describe('pingDeConexion', () => {
       onDiagnostic: (diagnostic) => diagnostics.push({ ...diagnostic })
     });
 
-    expect(veredicto).toMatchObject({ ok: true, message: 'conexión establecida' });
+    expect(verdict).toMatchObject({ ok: true, message: 'conexión establecida' });
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(new URL(String(fetchMock.mock.calls[0][0])).pathname).toBe('/v1/responses');
     expect(new URL(String(fetchMock.mock.calls[1][0])).pathname).toBe('/v1/responses/resp_1234567');
     expect(new URL(String(fetchMock.mock.calls[2][0])).pathname).toBe('/v1/responses/resp_1234567');
-    const createHeaders = fetchMock.mock.calls[0][1]?.headers as Record<string, string>;
-    expect(createHeaders.Authorization).toBe('Bearer synthetic-key');
-    expect(createHeaders['Idempotency-Key']).toBe('hogaria-connection-test-job-123');
-    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({
+    const create = fetchMock.mock.calls[0][1] as RequestInit;
+    const headers = create.headers as Record<string, string>;
+    expect(headers.Authorization).toBe('Bearer synthetic-key');
+    expect(headers['Idempotency-Key']).toMatch(/^hogaria-ai-job-123-/);
+    expect(JSON.parse(String(create.body))).toMatchObject({
       model: 'gpt-5',
       background: true,
       store: true,
@@ -979,52 +1035,51 @@ describe('pingDeConexion', () => {
       }
     });
     expect(diagnostics.some((item) => item.providerResponseId === 'resp_1234567')).toBe(true);
+    expect(diagnostics.at(-1)).toMatchObject({
+      providerTransport: 'responses_background',
+      diagnosticStage: 'completed'
+    });
   });
 
-  it('usa Chat Completions solo ante rechazo explícito de endpoint Responses', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(new Response('not found', { status: 404 }))
-      .mockResolvedValueOnce(respuesta('{"status":"ok","message":"fallback"}'));
+  it('no cae a Chat Completions ante un Responses no disponible', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('not found', { status: 404 }));
     vi.stubGlobal('fetch', fetchMock);
-    const diagnostics: Array<Record<string, unknown>> = [];
 
-    const veredicto = await pingDeConexionTransport({
+    const verdict = await pingDeConexionTransport({
       base_url: 'http://x/v1',
       api_key: 'synthetic-key',
       model: 'm',
-      jobId: 'fallback-job',
-      onDiagnostic: (diagnostic) => diagnostics.push({ ...diagnostic })
+      jobId: 'unsupported-job'
     });
 
-    expect(veredicto).toMatchObject({ ok: true, message: 'fallback' });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(verdict).toMatchObject({
+      ok: false,
+      error: 'El proveedor no admite solicitudes Responses en segundo plano'
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(new URL(String(fetchMock.mock.calls[0][0])).pathname).toBe('/v1/responses');
-    expect(new URL(String(fetchMock.mock.calls[1][0])).pathname).toBe('/v1/chat/completions');
-    expect(diagnostics.at(-1)).toMatchObject({ providerTransport: 'chat_completions' });
   });
 
-  it.each([400, 401, 429, 500, 503])(
-    'no duplica una ejecución ante el rechazo ambiguo HTTP %i del POST background',
-    async (status) => {
-      const fetchMock = vi.fn().mockResolvedValue(new Response('upstream unavailable', { status }));
-      vi.stubGlobal('fetch', fetchMock);
+  it('devuelve un error explícito si el proveedor declara incompatible background', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        respuestaResponses({ error: { code: 'unsupported_parameter', param: 'background' } }, 400)
+      );
+    vi.stubGlobal('fetch', fetchMock);
 
-      const veredicto = await pingDeConexionTransport({
-        base_url: 'http://x/v1',
-        api_key: 'synthetic-key',
-        model: 'm',
-        jobId: `ambiguous-${status}`
-      });
+    const result = await callAITransport(CONFIG, []).catch((reason) => reason);
 
-      expect(veredicto.ok).toBe(false);
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-      expect(new URL(String(fetchMock.mock.calls[0][0])).pathname).toBe('/v1/responses');
-    }
-  );
+    expect(result).toMatchObject({
+      code: 'PROVIDER',
+      detail: 'BACKGROUND_UNSUPPORTED',
+      message: 'AI provider does not support Responses background requests'
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 
   it.each(['failed', 'incomplete', 'cancelled'] as const)(
-    'trata el estado terminal Responses %s como error seguro sin exponer el cuerpo del proveedor',
+    'trata el estado terminal Responses %s como error seguro',
     async (status) => {
       const fetchMock = vi.fn().mockResolvedValue(
         respuestaResponses(
@@ -1038,45 +1093,168 @@ describe('pingDeConexion', () => {
       );
       vi.stubGlobal('fetch', fetchMock);
 
-      const veredicto = await pingDeConexionTransport({
+      const verdict = await pingDeConexionTransport({
         base_url: 'http://x/v1',
         api_key: 'synthetic-key',
         model: 'm',
-        jobId: `terminal-${status}`
+        jobId: 'terminal-' + status
       });
 
-      expect(veredicto.ok).toBe(false);
-      expect(veredicto).not.toHaveProperty('message');
-      if (!veredicto.ok) {
-        expect(veredicto.error).not.toContain('synthetic provider body secret sentinel');
+      expect(verdict.ok).toBe(false);
+      expect(verdict).not.toHaveProperty('message');
+      if (!verdict.ok) {
+        expect(verdict.error).not.toContain('synthetic provider body secret sentinel');
       }
       expect(fetchMock).toHaveBeenCalledTimes(1);
     }
   );
 
-  it('rechaza una respuesta completed sin texto JSON con un error de forma seguro', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        respuestaResponses({ id: 'resp_1234567', status: 'completed', output: [] })
-      );
-    vi.stubGlobal('fetch', fetchMock);
+  it('rechaza una respuesta completed sin texto con un error de forma seguro', async () => {
+    vi.stubGlobal('fetch', async () =>
+      respuestaResponses({ id: 'resp_1234567', status: 'completed', output: [] })
+    );
 
-    const veredicto = await pingDeConexionTransport({
+    const verdict = await pingDeConexionTransport({
       base_url: 'http://x/v1',
       api_key: 'synthetic-key',
       model: 'm',
       jobId: 'malformed-response'
     });
 
-    expect(veredicto).toMatchObject({
+    expect(verdict).toMatchObject({
       ok: false,
-      error: 'La respuesta del proveedor no tiene la forma esperada (output[].content[].text)'
+      error: 'La respuesta del proveedor no tiene la forma esperada (Responses output)'
     });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('cancela el Responses aceptado solo cuando se cancela explícitamente el job', async () => {
+  it('un callback de streaming heredado recibe solo el texto final una vez', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        respuestaResponses({ id: 'resp_1234567', status: 'in_progress', output: [] }, 202)
+      )
+      .mockResolvedValueOnce(
+        respuestaResponses({
+          id: 'resp_1234567',
+          status: 'completed',
+          output: [
+            {
+              type: 'message',
+              content: [
+                { type: 'output_text', text: '{"status":"ok","message":"conexión establecida"}' }
+              ]
+            }
+          ]
+        })
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const verdict = await pingDeConexionTransport({
+      base_url: 'http://x/v1',
+      api_key: 'synthetic-key',
+      model: 'm',
+      // Omitir jobId también debe seguir el mismo flujo background.
+      onDiagnostic: () => undefined
+    });
+
+    expect(verdict.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(new URL(String(fetchMock.mock.calls[0][0])).pathname).toBe('/v1/responses');
+  });
+
+  it('resuelve el token local y lo redacta del mensaje de éxito', async () => {
+    enableRealSmoke();
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      expect((init.headers as Record<string, string>).Authorization).toBe(
+        'Bearer ' + REAL_SMOKE_PROXY_TOKEN
+      );
+      return responsesResult(
+        'resp_probe_secret',
+        'completed',
+        JSON.stringify({ status: 'ok', message: 'eco ' + REAL_SMOKE_PROXY_TOKEN })
+      );
+    });
+
+    const verdict = await pingDeConexionTransport({
+      base_url: REAL_SMOKE_PROXY_URL,
+      api_key: REAL_SMOKE_PROVIDER_KEY_MARKER,
+      model: 'm'
+    });
+
+    expect(verdict.ok).toBe(true);
+    if (verdict.ok) {
+      expect(verdict.message).not.toContain(REAL_SMOKE_PROXY_TOKEN);
+      expect(verdict.message).toContain('[redactado]');
+    }
+  });
+
+  it('un marcador sin opt-in falla sin iniciar fetch', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const verdict = await pingDeConexionTransport({
+      base_url: REAL_SMOKE_PROXY_URL,
+      api_key: REAL_SMOKE_PROVIDER_KEY_MARKER,
+      model: 'm'
+    });
+
+    expect(verdict).toMatchObject({
+      ok: false,
+      error: 'No se pudo conectar con el proveedor'
+    });
+    expect(JSON.stringify(verdict)).not.toContain(REAL_SMOKE_PROVIDER_KEY_MARKER);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('un cuerpo HTML no se copia al error seguro de conexión', async () => {
+    vi.stubGlobal(
+      'fetch',
+      async () =>
+        new Response('<html>Bad Gateway</html>', {
+          status: 200,
+          headers: { 'content-type': 'text/html' }
+        })
+    );
+
+    const verdict = await pingDeConexionTransport({
+      base_url: 'http://x/v1',
+      api_key: 'k',
+      model: 'm'
+    });
+
+    expect(verdict.ok).toBe(false);
+    if (!verdict.ok) expect(verdict.error).toContain('no tiene la forma esperada');
+  });
+
+  it('un HTTP error conserva el status y nunca revela el cuerpo del proveedor', async () => {
+    const secret = 'synthetic-provider-secret-sentinel';
+    vi.stubGlobal('fetch', async () => new Response('Invalid API key: ' + secret, { status: 401 }));
+
+    const verdict = await pingDeConexionTransport({
+      base_url: 'http://x/v1',
+      api_key: secret,
+      model: 'm'
+    });
+
+    expect(verdict).toMatchObject({ ok: false, error: 'HTTP 401' });
+    expect(JSON.stringify(verdict)).not.toContain(secret);
+  });
+
+  it('la red caída es un error seguro, no una excepción', async () => {
+    vi.stubGlobal('fetch', async () => {
+      throw new Error('fetch failed');
+    });
+
+    const verdict = await pingDeConexionTransport({
+      base_url: 'http://x/v1',
+      api_key: 'k',
+      model: 'm'
+    });
+
+    expect(verdict.ok).toBe(false);
+  });
+
+  it('cancela en el proveedor cuando la señal explícita del job se aborta durante polling', async () => {
     const controller = new AbortController();
     const calls: Array<{ url: string; method: string }> = [];
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
@@ -1094,7 +1272,7 @@ describe('pingDeConexion', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const veredicto = await pingDeConexionTransport({
+    const verdict = await pingDeConexionTransport({
       base_url: 'http://x/v1',
       api_key: 'synthetic-key',
       model: 'm',
@@ -1102,224 +1280,8 @@ describe('pingDeConexion', () => {
       signal: controller.signal
     });
 
-    expect(veredicto).toMatchObject({ ok: false, error: 'Prueba cancelada' });
-    expect(calls).toEqual([
-      { url: 'http://x/v1/responses', method: 'POST' },
-      { url: 'http://x/v1/responses/resp_1234567', method: 'GET' },
-      { url: 'http://x/v1/responses/resp_1234567/cancel', method: 'POST' }
-    ]);
-  });
-
-  it('pide el JSON dado con response_format de esquema estricto, y lo valida', async () => {
-    let cuerpo: any;
-    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
-      cuerpo = JSON.parse(String(init.body));
-      return respuesta('{"status":"ok","message":"conexión establecida"}');
-    });
-    const veredicto = await pingDeConexionTransport({
-      base_url: 'http://x:8000',
-      api_key: 'k',
-      model: 'gpt-5'
-    });
-    vi.unstubAllGlobals();
-    expect(veredicto.ok).toBe(true);
-    // El contrato del proveedor, como el ejemplo del usuario: json_schema estricto.
-    expect(cuerpo.response_format).toEqual({
-      type: 'json_schema',
-      json_schema: { name: 'connection_test', strict: true, schema: expect.any(Object) }
-    });
-    // Y nada de max_tokens ni temperature en una prueba de un segundo.
-    expect(cuerpo.max_tokens).toBeUndefined();
-    expect(cuerpo.temperature).toBeUndefined();
-  });
-
-  it('usa el token resuelto y lo redacta en el mensaje de conexión', async () => {
-    enableRealSmoke();
-    let authorization: string | undefined;
-    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
-      authorization = (init.headers as Record<string, string>).Authorization;
-      return respuesta(JSON.stringify({ status: 'ok', message: `eco ${REAL_SMOKE_PROXY_TOKEN}` }));
-    });
-
-    const veredicto = await pingDeConexionTransport({
-      base_url: REAL_SMOKE_PROXY_URL,
-      api_key: REAL_SMOKE_PROVIDER_KEY_MARKER,
-      model: 'm'
-    });
-
-    expect(authorization).toBe(`Bearer ${REAL_SMOKE_PROXY_TOKEN}`);
-    expect(veredicto.ok).toBe(true);
-    if (veredicto.ok) {
-      expect(veredicto.message).not.toContain(REAL_SMOKE_PROXY_TOKEN);
-      expect(veredicto.message).toContain('[redactado]');
-    }
-  });
-
-  it('un marcador sin opt-in falla genérico sin iniciar fetch', async () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
-
-    const veredicto = await pingDeConexionTransport({
-      base_url: REAL_SMOKE_PROXY_URL,
-      api_key: REAL_SMOKE_PROVIDER_KEY_MARKER,
-      model: 'm'
-    });
-
-    expect(veredicto).toMatchObject({
-      ok: false,
-      error: 'No se pudo conectar con el proveedor'
-    });
-    expect(JSON.stringify(veredicto)).not.toContain(REAL_SMOKE_PROVIDER_KEY_MARKER);
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it('un 200 con cuerpo que no es JSON (el proxy con su pagina HTML) es veredicto de error, no un vuelco', async () => {
-    vi.stubGlobal(
-      'fetch',
-      async () =>
-        new Response('<html>Bad Gateway</html>', {
-          status: 200,
-          headers: { 'content-type': 'text/html' }
-        })
-    );
-    const veredicto = await pingDeConexionTransport({
-      base_url: 'http://x/v1',
-      api_key: 'k',
-      model: 'm'
-    });
-    vi.unstubAllGlobals();
-    expect(veredicto.ok).toBe(false);
-    if (!veredicto.ok) expect(veredicto.error).toContain('no tiene la forma esperada');
-  });
-
-  it('si ni el cuerpo del error se puede leer, el veredicto sigue siendo un error con nombre', async () => {
-    const cuerpoRoto = new ReadableStream({
-      start(control) {
-        control.error(new Error('stream roto'));
-      }
-    });
-    vi.stubGlobal('fetch', async () => new Response(cuerpoRoto, { status: 502 }));
-    const veredicto = await pingDeConexionTransport({
-      base_url: 'http://x/v1',
-      api_key: 'k',
-      model: 'm'
-    });
-    vi.unstubAllGlobals();
-    expect(veredicto.ok).toBe(false);
-    // Sin cuerpo no hay texto del proveedor: queda el HTTP, que es lo unico cierto.
-    if (!veredicto.ok) expect(veredicto.error).toContain('HTTP 502');
-  });
-
-  it('un «Hello» ambiguo no vale y la respuesta del modelo no aparece en el error', async () => {
-    const secret = 'synthetic-provider-secret-sentinel';
-    vi.stubGlobal('fetch', async () =>
-      respuesta(`Hello! Bearer ${secret} is not the requested JSON`)
-    );
-    const veredicto = await pingDeConexionTransport({
-      base_url: 'http://x/v1',
-      api_key: secret,
-      model: 'm'
-    });
-    expect(veredicto.ok).toBe(false);
-    if (!veredicto.ok) {
-      expect(veredicto.error).toContain('no devolvió el JSON pedido');
-      expect(veredicto.error).not.toContain(secret);
-      expect(veredicto.error).not.toContain('Hello!');
-    }
-  });
-
-  it('un 400 del proveedor se cuenta con su texto', async () => {
-    vi.stubGlobal(
-      'fetch',
-      async () => new Response('{"error":"max_tokens is not supported"}', { status: 400 })
-    );
-    const veredicto = await pingDeConexionTransport({
-      base_url: 'http://x/v1',
-      api_key: 'k',
-      model: 'm'
-    });
-    vi.unstubAllGlobals();
-    expect(veredicto.ok).toBe(false);
-    if (!veredicto.ok) {
-      expect(veredicto.error).toBe('HTTP 400');
-      expect(veredicto.error).not.toContain('max_tokens is not supported');
-    }
-  });
-
-  it('no devuelve la credencial aunque el proveedor la repita en el cuerpo 401', async () => {
-    const secret = 'synthetic-provider-secret-sentinel';
-    vi.stubGlobal('fetch', async () => new Response(`Invalid API key: ${secret}`, { status: 401 }));
-    const veredicto = await pingDeConexionTransport({
-      base_url: 'http://x/v1',
-      api_key: secret,
-      model: 'm'
-    });
-
-    expect(veredicto.ok).toBe(false);
-    if (!veredicto.ok) {
-      expect(veredicto.error).not.toContain(secret);
-      expect(veredicto.error).toBe('HTTP 401');
-    }
-  });
-
-  it('no devuelve una credencial si el modelo la repite en el mensaje de éxito', async () => {
-    const secret = 'synthetic-provider-secret-sentinel';
-    vi.stubGlobal('fetch', async () =>
-      respuesta(JSON.stringify({ status: 'ok', message: `Bearer ${secret}` }))
-    );
-    const veredicto = await pingDeConexionTransport({
-      base_url: 'http://x/v1',
-      api_key: secret,
-      model: 'm'
-    });
-
-    expect(veredicto.ok).toBe(true);
-    if (veredicto.ok) expect(veredicto.message).not.toContain(secret);
-  });
-
-  it('redacta una clave corta si el modelo la devuelve como mensaje de éxito', async () => {
-    const secret = 'sk-x';
-    vi.stubGlobal('fetch', async () =>
-      respuesta(JSON.stringify({ status: 'ok', message: `La clave usada fue ${secret}` }))
-    );
-    const veredicto = await pingDeConexionTransport({
-      base_url: 'http://x/v1',
-      api_key: secret,
-      model: 'm'
-    });
-
-    expect(veredicto.ok).toBe(true);
-    if (veredicto.ok) {
-      expect(veredicto.message).not.toContain(secret);
-      expect(veredicto.message).toContain('[redactado]');
-    }
-  });
-
-  it('la red caida es un veredicto, no una excepcion', async () => {
-    vi.stubGlobal('fetch', async () => {
-      throw new Error('fetch failed');
-    });
-    const veredicto = await pingDeConexionTransport({
-      base_url: 'http://x/v1',
-      api_key: 'k',
-      model: 'm'
-    });
-    vi.unstubAllGlobals();
-    expect(veredicto.ok).toBe(false);
-  });
-
-  it('no devuelve la credencial si el error de red la incluye', async () => {
-    const secret = 'synthetic-provider-secret-sentinel';
-    vi.stubGlobal('fetch', async () => {
-      throw new Error(`socket failure ${secret}`);
-    });
-    const veredicto = await pingDeConexionTransport({
-      base_url: 'http://x/v1',
-      api_key: secret,
-      model: 'm'
-    });
-
-    expect(veredicto.ok).toBe(false);
-    if (!veredicto.ok) expect(veredicto.error).not.toContain(secret);
+    expect(verdict).toMatchObject({ ok: false, error: 'Prueba cancelada' });
+    expect(calls.map((call) => call.method)).toEqual(['POST', 'GET', 'POST']);
+    expect(calls[2].url).toContain('/responses/resp_1234567/cancel');
   });
 });

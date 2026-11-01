@@ -181,7 +181,6 @@ describe('household plan AI proposal service', () => {
   });
 
   it('sends strict response_format through the household AI queue and validates before returning', async () => {
-    const controller = new AbortController();
     const db = {} as never;
     const mockCall = vi.fn().mockResolvedValue(JSON.stringify(plan()));
 
@@ -192,8 +191,7 @@ describe('household plan AI proposal service', () => {
         language: 'en',
         prompt: 'Make the house plan',
         currentPlan: null,
-        attachment: null,
-        signal: controller.signal
+        attachment: null
       },
       mockCall
     );
@@ -207,8 +205,7 @@ describe('household plan AI proposal service', () => {
       expect.any(Array),
       db,
       HOUSEHOLD_PLAN_RESPONSE_FORMAT,
-      'household_plan',
-      controller.signal
+      'household_plan'
     );
   });
 

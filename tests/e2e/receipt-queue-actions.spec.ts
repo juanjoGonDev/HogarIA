@@ -1,11 +1,11 @@
-import { createServer, type Server, type ServerResponse } from 'node:http';
+import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect, test, type Page } from './fixtures';
 import { registerAndGoto } from './helpers/auth';
 
-type ProviderBehavior = 'hold-partial' | 'failure' | 'success';
+type ProviderBehavior = 'hold' | 'failure' | 'success';
 
 type ReceiptDetail = {
   status: string;
@@ -19,7 +19,11 @@ type ApiReply<T> = { status: number; body: { data: T; error?: string; message?: 
 class SyntheticReceiptProvider {
   private server?: Server;
   private behaviors: ProviderBehavior[] = [];
-  private readonly openResponses = new Set<ServerResponse>();
+  private readonly operations = new Map<
+    string,
+    { behavior: ProviderBehavior; cancelled: boolean }
+  >();
+  private responseSequence = 0;
   requestCount = 0;
   abortCount = 0;
   baseUrl = '';
@@ -28,81 +32,106 @@ class SyntheticReceiptProvider {
     this.server = createServer(async (request, response) => {
       const chunks: Buffer[] = [];
       for await (const chunk of request) chunks.push(Buffer.from(chunk));
-      const requestBody = JSON.parse(Buffer.concat(chunks).toString('utf8')) as {
-        stream?: boolean;
-      };
-      this.requestCount += 1;
-      const behavior = this.behaviors.shift() ?? 'success';
-      response.once('close', () => {
-        this.openResponses.delete(response);
-        if (!response.writableEnded) this.abortCount += 1;
-      });
+      const path = new URL(request.url ?? '/', 'http://provider.test').pathname;
+      const pathParts = path.split('/');
+      const responseId =
+        pathParts.at(-1) === 'cancel' ? (pathParts.at(-2) ?? '') : (pathParts.at(-1) ?? '');
 
-      if (behavior === 'failure') {
-        response.writeHead(503, { 'content-type': 'text/plain' });
-        response.end('synthetic provider failure');
+      if (request.method === 'POST' && /^\/v1\/responses\/resp_queue_\d+\/cancel$/.test(path)) {
+        const operation = this.operations.get(responseId);
+        if (!operation) {
+          response.writeHead(404).end();
+          return;
+        }
+        if (!operation.cancelled) this.abortCount += 1;
+        operation.cancelled = true;
+        response
+          .writeHead(200, { 'content-type': 'application/json' })
+          .end(JSON.stringify({ id: responseId, status: 'cancelled', output: [] }));
         return;
       }
 
-      if (behavior === 'hold-partial') {
-        this.openResponses.add(response);
-        response.writeHead(200, {
-          'content-type': 'text/event-stream',
-          'cache-control': 'no-cache',
-          connection: 'keep-alive'
-        });
-        response.write(
-          `data: ${JSON.stringify({
-            choices: [
+      if (request.method === 'GET' && /^\/v1\/responses\/resp_queue_\d+$/.test(path)) {
+        const operation = this.operations.get(responseId);
+        if (!operation) {
+          response.writeHead(404).end();
+          return;
+        }
+        if (operation.cancelled) {
+          response
+            .writeHead(200, { 'content-type': 'application/json' })
+            .end(JSON.stringify({ id: responseId, status: 'cancelled', output: [] }));
+          return;
+        }
+        if (operation.behavior === 'hold') {
+          response
+            .writeHead(200, { 'content-type': 'application/json' })
+            .end(JSON.stringify({ id: responseId, status: 'in_progress', output: [] }));
+          return;
+        }
+        response.writeHead(200, { 'content-type': 'application/json' }).end(
+          JSON.stringify({
+            id: responseId,
+            status: 'completed',
+            output: [
               {
-                delta: {
-                  content:
-                    '{"lines":[{"name":"Partial synthetic product","quantity":1,"unit":"unit","category":"other","createCategory":false,"priceMinor":100,"offer":null,"confidence":1,"note":null},' +
-                    ' '.repeat(64)
-                }
+                type: 'message',
+                content: [
+                  {
+                    type: 'output_text',
+                    text: JSON.stringify({
+                      lines: [
+                        {
+                          name: 'Final synthetic product',
+                          quantity: 1,
+                          unit: 'unit',
+                          category: 'other',
+                          createCategory: false,
+                          priceMinor: 200,
+                          offer: null,
+                          confidence: 1,
+                          note: null
+                        }
+                      ],
+                      store: 'Synthetic market',
+                      purchaseDate: null,
+                      currency: 'EUR',
+                      totalMinor: 200,
+                      warnings: []
+                    })
+                  }
+                ]
               }
             ]
-          })}\n\n`
+          })
         );
         return;
       }
 
-      const answer = JSON.stringify({
-        lines: [
-          {
-            name: 'Final synthetic product',
-            quantity: 1,
-            unit: 'unit',
-            category: 'other',
-            createCategory: false,
-            priceMinor: 200,
-            offer: null,
-            confidence: 1,
-            note: null
-          }
-        ],
-        store: 'Synthetic market',
-        purchaseDate: null,
-        currency: 'EUR',
-        totalMinor: 200,
-        warnings: []
-      });
-
-      if (requestBody.stream) {
-        response.writeHead(200, {
-          'content-type': 'text/event-stream',
-          'cache-control': 'no-cache',
-          connection: 'keep-alive'
-        });
-        response.write(
-          `data: ${JSON.stringify({ choices: [{ delta: { content: answer } }] })}\n\n`
-        );
-        response.end('data: [DONE]\n\n');
+      if (request.method !== 'POST' || path !== '/v1/responses') {
+        response.writeHead(404).end();
         return;
       }
-
-      response.writeHead(200, { 'content-type': 'application/json' });
-      response.end(JSON.stringify({ choices: [{ message: { content: answer } }] }));
+      this.requestCount += 1;
+      const requestBody = JSON.parse(Buffer.concat(chunks).toString('utf8')) as {
+        background?: boolean;
+      };
+      if (!requestBody.background) {
+        response
+          .writeHead(400, { 'content-type': 'application/json' })
+          .end(JSON.stringify({ error: { code: 'background_not_supported' } }));
+        return;
+      }
+      const behavior = this.behaviors.shift() ?? 'success';
+      if (behavior === 'failure') {
+        response.writeHead(503, { 'content-type': 'text/plain' }).end('synthetic provider failure');
+        return;
+      }
+      const id = 'resp_queue_' + ++this.responseSequence;
+      this.operations.set(id, { behavior, cancelled: false });
+      response
+        .writeHead(202, { 'content-type': 'application/json' })
+        .end(JSON.stringify({ id, status: 'in_progress', output: [] }));
     });
 
     await new Promise<void>((resolve, reject) => {
@@ -117,8 +146,6 @@ class SyntheticReceiptProvider {
   }
 
   async close(): Promise<void> {
-    for (const response of this.openResponses) response.destroy();
-    this.openResponses.clear();
     const server = this.server;
     if (!server) return;
     this.server = undefined;
@@ -244,7 +271,20 @@ test.describe('acciones reales del gestor de cola de tickets', () => {
     browserErrors = [];
     page.on('pageerror', (error) => browserErrors.push(error.message));
     page.on('console', (message) => {
-      if (message.type() === 'error') browserErrors.push(message.text());
+      if (
+        message.type() === 'error' &&
+        !message
+          .text()
+          .includes('Failed to load resource: the server responded with a status of 409')
+      ) {
+        browserErrors.push(message.text());
+      }
+    });
+    page.on('response', (response) => {
+      if (response.status() === 409) {
+        const url = new URL(response.url());
+        browserErrors.push(`HTTP 409 ${response.request().method()} ${url.pathname}`);
+      }
     });
     page.on('requestfailed', (request) => {
       const failure = request.failure()?.errorText ?? '';
@@ -264,15 +304,12 @@ test.describe('acciones reales del gestor de cola de tickets', () => {
     expect(browserErrors).toEqual([]);
   });
 
-  test('detiene una lectura parcial desde el panel y la reintenta sin mezclar líneas', async ({
-    page
-  }) => {
-    provider.setNextBehaviors('hold-partial', 'success');
+  test('detiene un trabajo background desde el panel y lo reintenta', async ({ page }) => {
+    provider.setNextBehaviors('hold', 'success');
     const receiptId = await uploadSyntheticReceipt(page);
 
-    await expect
-      .poll(async () => (await receiptDetail(page, receiptId)).lines.map((line) => line.name))
-      .toEqual(['Partial synthetic product']);
+    await expect.poll(async () => (await receiptDetail(page, receiptId)).status).toBe('analyzing');
+    expect((await receiptDetail(page, receiptId)).lines).toEqual([]);
     await expect
       .poll(async () => (await receiptDetail(page, receiptId)).job?.status)
       .toBe('running');
@@ -281,7 +318,7 @@ test.describe('acciones reales del gestor de cola de tickets', () => {
     await expect(page.getByRole('dialog', { name: 'Cola de lectura de tickets' })).toBeVisible();
     const runningRow = panel.locator('[data-test="queue-job-running"]');
     await expect(runningRow).toBeVisible();
-    await expect(runningRow).toContainText('1 línea');
+    await expect(runningRow).toContainText('Todavía no ha leído nada');
     await expectTouchTargets(panel);
     const stopButton = runningRow.getByRole('button', { name: 'Parar', exact: true });
     const stopBounds = await stopButton.boundingBox();
@@ -302,9 +339,7 @@ test.describe('acciones reales del gestor de cola de tickets', () => {
       .poll(async () => (await receiptDetail(page, receiptId)).job?.status)
       .toBe('stopped');
     await expect.poll(() => provider.abortCount).toBe(1);
-    expect((await receiptDetail(page, receiptId)).lines.map((line) => line.name)).toEqual([
-      'Partial synthetic product'
-    ]);
+    expect((await receiptDetail(page, receiptId)).lines).toEqual([]);
 
     await panel.getByRole('button', { name: 'Abrir', exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/receipts/${receiptId}$`));
@@ -322,7 +357,7 @@ test.describe('acciones reales del gestor de cola de tickets', () => {
   test('reintenta un fallo agotado y parar todo detiene un running y un queued', async ({
     page
   }) => {
-    provider.setNextBehaviors('failure', 'failure', 'success');
+    provider.setNextBehaviors('failure', 'success');
     const failedReceiptId = await uploadSyntheticReceipt(page);
     await expect
       .poll(async () => (await receiptDetail(page, failedReceiptId)).job?.status)
@@ -344,11 +379,12 @@ test.describe('acciones reales del gestor de cola de tickets', () => {
       'Final synthetic product'
     ]);
 
-    provider.setNextBehaviors('hold-partial', 'success');
+    provider.setNextBehaviors('hold', 'success');
     const runningReceiptId = await uploadSyntheticReceipt(page);
     await expect
-      .poll(async () => (await receiptDetail(page, runningReceiptId)).lines.length)
-      .toBe(1);
+      .poll(async () => (await receiptDetail(page, runningReceiptId)).status)
+      .toBe('analyzing');
+    expect((await receiptDetail(page, runningReceiptId)).lines).toEqual([]);
     const queuedReceiptId = await uploadSyntheticReceipt(page);
     await expect
       .poll(async () => (await receiptDetail(page, runningReceiptId)).job?.status)
@@ -370,9 +406,7 @@ test.describe('acciones reales del gestor de cola de tickets', () => {
       .poll(async () => (await receiptDetail(page, queuedReceiptId)).job?.status)
       .toBe('stopped');
     await expect.poll(() => provider.abortCount).toBe(1);
-    expect((await receiptDetail(page, runningReceiptId)).lines.map((line) => line.name)).toEqual([
-      'Partial synthetic product'
-    ]);
+    expect((await receiptDetail(page, runningReceiptId)).lines).toEqual([]);
     expect((await receiptDetail(page, queuedReceiptId)).lines).toEqual([]);
   });
 });

@@ -4,39 +4,15 @@ import { resolve } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { randomUUID } from 'node:crypto';
 import { expect, test } from './fixtures';
+import {
+  responsesCompleted,
+  userInput,
+  type ResponsesContentPart,
+  type ResponsesRequest
+} from './helpers/ai-responses';
 import { createHousehold } from './helpers/auth';
 
-interface ProviderRequest {
-  messages?: Array<{
-    role?: string;
-    content?:
-      | string
-      | Array<{
-          type?: string;
-          text?: string;
-          file?: { filename?: string; file_data?: string };
-        }>;
-  }>;
-  response_format?: {
-    type?: string;
-    json_schema?: {
-      name?: string;
-      strict?: boolean;
-      schema?: {
-        properties?: {
-          events?: {
-            minItems?: number;
-            items?: { properties?: { recipeAlias?: unknown } };
-          };
-          newRecipes?: {
-            type?: string;
-            items?: { properties?: { alias?: unknown; recipe?: unknown } };
-          };
-        };
-      };
-    };
-  };
-}
+type ProviderRequest = ResponsesRequest;
 
 interface ExpectedSlot {
   date: string;
@@ -205,14 +181,11 @@ const recipeDetailFixture = (name: string, ingredientName: string): CompleteReci
   tags: ['sintética']
 });
 
-function decodeJsonAttachment(
-  content: Array<{ type?: string; file?: { filename?: string; file_data?: string } }>,
-  filename: string
-): unknown | null {
-  const files = content.filter((part) => part.type === 'file');
-  const matchingFiles = files.filter((part) => part.file?.filename === filename);
+function decodeJsonAttachment(content: ResponsesContentPart[], filename: string): unknown | null {
+  const files = content.filter((part) => part.type === 'input_file');
+  const matchingFiles = files.filter((part) => part.filename === filename);
   if (files.length !== 2 || matchingFiles.length !== 1) return null;
-  const fileData = matchingFiles[0]?.file?.file_data;
+  const fileData = matchingFiles[0]?.file_data;
   const prefix = 'data:application/json;base64,';
   if (typeof fileData !== 'string' || !fileData.startsWith(prefix)) return null;
   try {
@@ -225,7 +198,7 @@ function decodeJsonAttachment(
 }
 
 function readProviderMealInputs(request: ProviderRequest): ProviderMealInputs | null {
-  const userMessage = request.messages?.find((message) => message.role === 'user');
+  const userMessage = userInput(request);
   if (!Array.isArray(userMessage?.content)) return null;
   const context = decodeJsonAttachment(
     userMessage.content,
@@ -353,6 +326,10 @@ test('genera, revisa y confirma comidas con navegación de planificación en esc
     request.setEncoding('utf8');
     request.on('data', (chunk: string) => (body += chunk));
     request.on('end', () => {
+      if (request.method !== 'POST' || request.url !== '/v1/responses') {
+        response.writeHead(404).end();
+        return;
+      }
       const payload = JSON.parse(body) as ProviderRequest;
       providerRequests.push(payload);
       const inputs = readProviderMealInputs(payload);
@@ -388,16 +365,7 @@ test('genera, revisa y confirma comidas con navegación de planificación en esc
         }));
       });
       response.writeHead(200, { 'content-type': 'application/json' });
-      response.end(
-        JSON.stringify({
-          choices: [
-            {
-              finish_reason: 'stop',
-              message: { content: JSON.stringify({ newRecipes, events }) }
-            }
-          ]
-        })
-      );
+      response.end(JSON.stringify(responsesCompleted(JSON.stringify({ newRecipes, events }))));
     });
   });
   await new Promise<void>((resolveListen) => provider.listen(0, '127.0.0.1', resolveListen));
@@ -687,37 +655,34 @@ test('genera, revisa y confirma comidas con navegación de planificación en esc
     }
 
     expect(providerRequests).toHaveLength(1);
-    expect(providerRequests[0]?.response_format).toMatchObject({
+    expect(providerRequests[0]?.background).toBe(true);
+    expect(providerRequests[0]?.store).toBe(true);
+    expect(providerRequests[0]?.text?.format).toMatchObject({
       type: 'json_schema',
-      json_schema: {
-        name: 'weekly_meal_proposal',
-        strict: true,
-        schema: {
-          properties: {
-            events: { minItems: 1 },
-            newRecipes: { type: 'array' }
-          }
+      name: 'weekly_meal_proposal',
+      strict: true,
+      schema: {
+        properties: {
+          events: { minItems: 1 },
+          newRecipes: { type: 'array' }
         }
       }
     });
     expect(
-      providerRequests[0]?.response_format?.json_schema?.schema?.properties?.events?.items
-        ?.properties?.recipeAlias
+      providerRequests[0]?.text?.format?.schema?.properties?.events?.items?.properties?.recipeAlias
     ).toBeDefined();
-    const userMessage = providerRequests[0]?.messages?.find((message) => message.role === 'user');
+    const userMessage = userInput(providerRequests[0]!);
     const contentParts = Array.isArray(userMessage?.content) ? userMessage.content : [];
-    const attachedJsonFiles = contentParts.filter((part) => part.type === 'file');
-    expect(attachedJsonFiles.map((part) => part.file?.filename).sort()).toEqual([
+    const attachedJsonFiles = contentParts.filter((part) => part.type === 'input_file');
+    expect(attachedJsonFiles.map((part) => part.filename).sort()).toEqual([
       'household-recipes-catalog.json',
       'meal-planning-context.json'
     ]);
     expect(
-      attachedJsonFiles.every((part) =>
-        part.file?.file_data?.startsWith('data:application/json;base64,')
-      )
+      attachedJsonFiles.every((part) => part.file_data?.startsWith('data:application/json;base64,'))
     ).toBe(true);
     const textPrompt = contentParts
-      .filter((part) => part.type === 'text')
+      .filter((part) => part.type === 'input_text')
       .map((part) => part.text ?? '')
       .join('\n');
     const providerInputs = readProviderMealInputs(providerRequests[0]!);

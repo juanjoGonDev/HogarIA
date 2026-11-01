@@ -10,6 +10,7 @@
  */
 
 import { z } from 'zod';
+import { createHash, randomUUID } from 'node:crypto';
 import { isIP } from 'node:net';
 import {
   activeHouseholdId,
@@ -17,7 +18,7 @@ import {
   readActiveHouseholdId
 } from './household-context.js';
 import { resolveAiFunctionProvider, type AiFunctionKey } from './ai-function-providers.js';
-import { connectionTestTimeoutMs, effectiveAiTimeoutMs } from './ai-timeout.js';
+import { aiOperationTimeoutMs, effectiveAiTimeoutMs } from './ai-timeout.js';
 import type { AiCallResponseFormat, AiResponseFormat } from '../schemas/ai-response-format.js';
 
 export type AiMessagePart =
@@ -38,10 +39,17 @@ export type AiJobKind =
   | 'shopping_photo'
   | 'expiry_estimate'
   | 'household_plan'
+  | 'assistant'
   | 'product_image_search'
   | 'connection_test';
 
-export type AiProviderRequestOptions = { reasoning_effort?: 'none' };
+export type AiProviderRequestOptions = {
+  reasoning_effort?: 'none';
+  /** Stable queue ID used to deduplicate a provider POST across server-side retries. */
+  jobId?: string;
+  /** Sanitized lifecycle metadata; callback failures never affect the provider request. */
+  onDiagnostic?: (diagnostic: AiConnectionTestDiagnostic) => void;
+};
 
 export interface AiConfigRow {
   id: string;
@@ -149,17 +157,13 @@ export function activeAiConfigForScope(db: SqlDb, userId: string, householdId: s
 }
 
 export function endpoint(baseUrl: string): string {
-  // Una barra de mas en el `base_url` escrito a mano en Ajustes es lo normal; normalizar aqui
-  // evita que cada llamante tenga que acordarse. Y el camino: el convenio OpenAI-compatible
-  // (OpenAI, Ollama, LM Studio, vLLM, la webapi de la casa…) sirve en `/v1/chat/completions`,
-  // asi que una base SIN camino (⌜http://host:8000⌋) se completa con el `/v1`; si la base ya
-  // trae su version (⌜…/v1⌋) se respeta; y quien escriba la URL completa tambien. Antes una
-  // base sin `/v1` producia un 404 silencioso y la IA «no se activaba nunca» siendo la
-  // configuracion correcta.
+  // All model traffic uses the server-side Responses background contract. Normalize the
+  // provider base once so bare hosts, versioned URLs, and legacy endpoint URLs converge.
   const base = String(baseUrl).trim().replace(/\/+$/, '');
-  if (/\/chat\/completions$/.test(base)) return base;
-  if (/\/v\d+[a-z]*$/i.test(base)) return `${base}/chat/completions`;
-  return `${base}/v1/chat/completions`;
+  if (/\/responses$/i.test(base)) return base;
+  const root = base.replace(/\/chat\/completions$/i, '');
+  if (/\/v\d+[a-z]*$/i.test(root)) return `${root}/responses`;
+  return `${root}/v1/responses`;
 }
 
 /**
@@ -223,29 +227,7 @@ function esUrlLoopback(value: string): boolean {
   }
 }
 
-/**
- * El cuerpo de la llamada se construye UNA vez: solo viaja lo que la casa configuro de verdad.
- * Mandar `temperature: null` (o cualquier parametro que el modelo no admite) es la forma mas
- * rapida de que un proveedor estricto conteste 400 a una configuracion perfecta.
- */
-function chatBody(active: AiConfigRow, extra: Record<string, unknown>): Record<string, unknown> {
-  const body: Record<string, unknown> = { model: active.model, ...extra };
-  for (const [campo, valor] of Object.entries({
-    temperature: active.temperature,
-    max_tokens: active.max_tokens,
-    top_p: active.top_p,
-    frequency_penalty: active.frequency_penalty,
-    presence_penalty: active.presence_penalty
-  })) {
-    if (valor !== null && valor !== undefined) body[campo] = valor;
-  }
-  return body;
-}
-
-/**
- * Llamada a `/chat/completions` con lo que el usuario configuro en la UI (nada de
- * variables de entorno). Devuelve el texto del primer choice.
- */
+/** Dispatch a user-configured provider through the server-side AI queue. */
 export async function callAI(
   userId: string,
   messages: AiMessage[],
@@ -259,7 +241,427 @@ export async function callAI(
   return dispatchAI(userId, messages, db, responseFormat, kind, externalSignal, householdId);
 }
 
-/** Transporte de una configuración ya fijada por el dispatcher. */
+/** Convert Chat Completions-shaped internal messages to Responses input items. */
+function responsesInput(messages: AiMessage[]): Record<string, unknown>[] {
+  return messages.map(({ role, content }) => ({
+    role,
+    content:
+      typeof content === 'string'
+        ? content
+        : content.map((part) => {
+            if (part.type === 'text') return { type: 'input_text', text: part.text };
+            if (part.type === 'file') {
+              return {
+                type: 'input_file',
+                filename: part.file.filename,
+                file_data: part.file.file_data
+              };
+            }
+            return {
+              type: 'input_image',
+              image_url: part.image_url.url,
+              ...(part.image_url.detail ? { detail: part.image_url.detail } : {})
+            };
+          })
+  }));
+}
+
+function responsesFormat(responseFormat: AiCallResponseFormat): Record<string, unknown> {
+  if (responseFormat.type === 'json_object') return { type: 'json_object' };
+  return {
+    type: 'json_schema',
+    name: responseFormat.json_schema.name,
+    strict: responseFormat.json_schema.strict,
+    schema: responseFormat.json_schema.schema
+  };
+}
+
+function responsesBody(
+  active: Pick<AiConfigRow, 'model' | 'temperature' | 'top_p' | 'max_tokens'>,
+  messages: AiMessage[],
+  responseFormat: AiCallResponseFormat,
+  requestOptions?: AiProviderRequestOptions
+): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    model: active.model,
+    background: true,
+    store: true,
+    input: responsesInput(messages),
+    text: { format: responsesFormat(responseFormat) }
+  };
+  if (active.max_tokens !== null && active.max_tokens !== undefined) {
+    body.max_output_tokens = active.max_tokens;
+  }
+  if (active.temperature !== null && active.temperature !== undefined) {
+    body.temperature = active.temperature;
+  }
+  if (active.top_p !== null && active.top_p !== undefined) body.top_p = active.top_p;
+  if (requestOptions?.reasoning_effort) {
+    body.reasoning = { effort: requestOptions.reasoning_effort };
+  }
+  return body;
+}
+
+export type AiConnectionTestDiagnostic = Readonly<{
+  providerResponseId: string | null;
+  providerTransport: 'responses_background';
+  providerHttpStatus: number | null;
+  elapsedMs: number;
+  diagnosticStage:
+    'submitting' | 'queued' | 'polling' | 'completed' | 'failed' | 'timed_out' | 'cancelled';
+}>;
+
+type BackgroundRequest = {
+  baseUrl: string;
+  apiKey: string;
+  body: Record<string, unknown>;
+  jobId?: string;
+  signal?: AbortSignal;
+  timeoutMs: number;
+  requestTimeoutMs: number;
+  onDiagnostic?: (diagnostic: AiConnectionTestDiagnostic) => void;
+};
+
+type BackgroundResult = { payload: any; responseId: string; elapsedMs: number };
+
+const RESPONSES_POLL_INITIAL_MS = 500;
+const RESPONSES_POLL_MAX_MS = 2_000;
+const RESPONSES_CANCEL_TIMEOUT_MS = 5_000;
+const SAFE_RESPONSES_ID = /^resp_[A-Za-z0-9_-]{1,128}$/;
+
+function notifyConnectionTestDiagnostic(
+  callback: ((diagnostic: AiConnectionTestDiagnostic) => void) | undefined,
+  diagnostic: AiConnectionTestDiagnostic
+): void {
+  try {
+    callback?.(diagnostic);
+  } catch {
+    // Sanitized progress is best-effort and must not affect provider execution.
+  }
+}
+
+function providerIdempotencyKey(jobId: string | undefined, body: Record<string, unknown>): string {
+  const identity = (jobId ?? randomUUID()).replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 80);
+  const digest = createHash('sha256').update(JSON.stringify(body)).digest('hex').slice(0, 24);
+  return `hogaria-ai-${identity}-${digest}`;
+}
+
+function validResponsesId(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= 133 && SAFE_RESPONSES_ID.test(value);
+}
+
+function extractResponsesText(payload: any): string | undefined {
+  if (typeof payload?.output_text === 'string') return payload.output_text;
+  if (!Array.isArray(payload?.output)) return undefined;
+  const chunks: string[] = [];
+  for (const item of payload.output) {
+    if (!Array.isArray(item?.content)) continue;
+    for (const content of item.content) {
+      if (content?.type === 'output_text' && typeof content.text === 'string') {
+        chunks.push(content.text);
+      }
+    }
+  }
+  return chunks.length ? chunks.join('') : undefined;
+}
+
+async function responsePayload(response: Response): Promise<any> {
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
+function responsesBackgroundUnsupported(status: number, payload: any): boolean {
+  if ([404, 405, 501].includes(status)) return true;
+  if (status !== 400) return false;
+  const code = String(payload?.error?.code ?? payload?.code ?? '').toLowerCase();
+  const parameter = String(payload?.error?.param ?? payload?.param ?? '').toLowerCase();
+  return (
+    [
+      'responses_not_supported',
+      'responses_endpoint_not_supported',
+      'background_not_supported'
+    ].includes(code) ||
+    (code === 'unsupported_parameter' &&
+      ['background', 'store', 'text.format', 'text.format.type'].includes(parameter))
+  );
+}
+
+async function cancelResponsesBackground(url: string, responseId: string, apiKey: string) {
+  try {
+    await fetch(`${url}/${encodeURIComponent(responseId)}/cancel`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(RESPONSES_CANCEL_TIMEOUT_MS)
+    });
+  } catch {
+    // Best-effort remote cancellation must not replace the original result.
+  }
+}
+
+async function awaitBackgroundResponse(input: BackgroundRequest): Promise<BackgroundResult> {
+  const startTime = Date.now();
+  const url = endpoint(input.baseUrl);
+  const deadline = startTime + input.timeoutMs;
+  const idempotencyKey = providerIdempotencyKey(input.jobId, input.body);
+  let responseId: string | null = null;
+  let status: number | null = null;
+  const report = (diagnosticStage: AiConnectionTestDiagnostic['diagnosticStage']) =>
+    notifyConnectionTestDiagnostic(input.onDiagnostic, {
+      providerResponseId: responseId,
+      providerTransport: 'responses_background',
+      providerHttpStatus: status,
+      elapsedMs: Math.max(0, Date.now() - startTime),
+      diagnosticStage
+    });
+  const fail = async (
+    error: AiCallError,
+    stage: AiConnectionTestDiagnostic['diagnosticStage'] = error.code === 'TIMEOUT'
+      ? 'timed_out'
+      : error.detail === 'CANCELLED'
+        ? 'cancelled'
+        : 'failed'
+  ): Promise<never> => {
+    if (responseId && (error.code === 'TIMEOUT' || error.detail === 'CANCELLED')) {
+      await cancelResponsesBackground(url, responseId, input.apiKey);
+    }
+    report(stage);
+    throw error;
+  };
+  const requestSignal = () =>
+    señalConTimeout(
+      input.signal,
+      Math.max(1, Math.min(input.requestTimeoutMs, deadline - Date.now()))
+    );
+  const parseCreate = async (response: Response): Promise<any> => {
+    status = response.status;
+    if (!response.ok) {
+      const providerPayload = await responsePayload(response);
+      await response.body?.cancel().catch(() => undefined);
+      if (responsesBackgroundUnsupported(response.status, providerPayload)) {
+        throw new AiCallError(
+          'PROVIDER',
+          'AI provider does not support Responses background requests',
+          'BACKGROUND_UNSUPPORTED'
+        );
+      }
+      const detail = `HTTP ${response.status}`;
+      throw new AiCallError('PROVIDER', `AI API error: ${detail}`, detail);
+    }
+    const payload = await responsePayload(response);
+    if (!payload) throw new AiCallError('BAD_JSON', 'Invalid AI response format');
+    if (!validResponsesId(payload.id)) {
+      throw new AiCallError('BAD_JSON', 'Invalid AI response format', 'INVALID_RESPONSE_ID');
+    }
+    responseId = payload.id;
+    return payload;
+  };
+
+  if (input.signal?.aborted) {
+    throw new AiCallError('PROVIDER', 'AI request was cancelled', 'CANCELLED');
+  }
+  report('submitting');
+  let created: Response;
+  try {
+    created = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${input.apiKey}`,
+        'Idempotency-Key': idempotencyKey
+      },
+      body: JSON.stringify(input.body),
+      signal: requestSignal()
+    });
+  } catch (error) {
+    if (input.signal?.aborted)
+      return fail(new AiCallError('PROVIDER', 'AI request was cancelled', 'CANCELLED'));
+    const timeout =
+      Date.now() >= deadline ||
+      /timeout|abort/i.test(error instanceof Error ? error.message : String(error));
+    return fail(
+      new AiCallError(
+        timeout ? 'TIMEOUT' : 'PROVIDER',
+        timeout ? 'AI provider request timed out' : 'AI provider connection failed',
+        timeout ? 'TIMEOUT' : 'CONNECTION_FAILED'
+      )
+    );
+  }
+
+  let payload: any;
+  try {
+    payload = await parseCreate(created);
+  } catch (error) {
+    return fail(
+      error instanceof AiCallError
+        ? error
+        : new AiCallError('BAD_JSON', 'Invalid AI response format')
+    );
+  }
+  const terminal = (candidate: any): BackgroundResult | null => {
+    const currentStatus = String(candidate?.status ?? '');
+    if (currentStatus === 'completed') {
+      const refusal = Array.isArray(candidate?.output)
+        ? candidate.output.some(
+            (item: any) =>
+              Array.isArray(item?.content) &&
+              item.content.some((part: any) => part?.type === 'refusal')
+          )
+        : false;
+      if (refusal) throw new AiCallError('BAD_JSON', 'AI provider refused the response', 'REFUSED');
+      const text = extractResponsesText(candidate);
+      if (typeof text !== 'string') throw new AiCallError('BAD_JSON', 'Invalid AI response format');
+      report('completed');
+      return { payload: candidate, responseId: responseId!, elapsedMs: Date.now() - startTime };
+    }
+    if (currentStatus === 'incomplete') {
+      const truncated = candidate?.incomplete_details?.reason === 'max_output_tokens';
+      throw new AiCallError(
+        'BAD_JSON',
+        truncated ? 'AI response was truncated' : 'AI provider did not complete the response',
+        truncated ? 'TRUNCATED' : 'INCOMPLETE'
+      );
+    }
+    if (['failed', 'cancelled'].includes(currentStatus)) {
+      throw new AiCallError(
+        'PROVIDER',
+        currentStatus === 'cancelled'
+          ? 'AI provider cancelled the response'
+          : 'AI provider request failed',
+        currentStatus === 'cancelled' ? 'PROVIDER_CANCELLED' : 'PROVIDER_FAILED'
+      );
+    }
+    return null;
+  };
+
+  try {
+    const completed = terminal(payload);
+    if (completed) return completed;
+  } catch (error) {
+    return fail(
+      error instanceof AiCallError
+        ? error
+        : new AiCallError('BAD_JSON', 'Invalid AI response format')
+    );
+  }
+  let state = String(payload?.status ?? '');
+  if (state !== 'queued' && state !== 'in_progress') {
+    return fail(
+      new AiCallError('BAD_JSON', 'Invalid AI response format', 'INVALID_RESPONSE_STATUS')
+    );
+  }
+  report(state === 'queued' ? 'queued' : 'polling');
+  let delayMs = RESPONSES_POLL_INITIAL_MS;
+
+  while (Date.now() < deadline) {
+    if (input.signal?.aborted) {
+      return fail(new AiCallError('PROVIDER', 'AI request was cancelled', 'CANCELLED'));
+    }
+    try {
+      await esperarConCancelacion(
+        Math.min(delayMs, Math.max(0, deadline - Date.now())),
+        input.signal
+      );
+    } catch {
+      if (input.signal?.aborted) {
+        return fail(new AiCallError('PROVIDER', 'AI request was cancelled', 'CANCELLED'));
+      }
+      return fail(new AiCallError('TIMEOUT', 'AI provider request timed out', 'TIMEOUT'));
+    }
+    if (Date.now() >= deadline) {
+      return fail(new AiCallError('TIMEOUT', 'AI provider request timed out', 'TIMEOUT'));
+    }
+
+    let current: Response;
+    try {
+      current = await fetch(`${url}/${encodeURIComponent(responseId!)}`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${input.apiKey}` },
+        signal: requestSignal()
+      });
+    } catch (error) {
+      if (input.signal?.aborted) {
+        return fail(new AiCallError('PROVIDER', 'AI request was cancelled', 'CANCELLED'));
+      }
+      if (Date.now() >= deadline) {
+        return fail(new AiCallError('TIMEOUT', 'AI provider request timed out', 'TIMEOUT'));
+      }
+      report('polling');
+      delayMs = Math.min(delayMs * 2, RESPONSES_POLL_MAX_MS);
+      continue;
+    }
+    status = current.status;
+    if (!current.ok) {
+      await current.body?.cancel().catch(() => undefined);
+      if (current.status === 429 || current.status >= 500) {
+        report('polling');
+        delayMs = Math.min(delayMs * 2, RESPONSES_POLL_MAX_MS);
+        continue;
+      }
+      const detail = `HTTP ${current.status}`;
+      return fail(new AiCallError('PROVIDER', `AI API error: ${detail}`, detail));
+    }
+    const currentPayload = await responsePayload(current);
+    if (!currentPayload || currentPayload.id !== responseId) {
+      return fail(
+        new AiCallError('BAD_JSON', 'Invalid AI response format', 'RESPONSE_ID_MISMATCH')
+      );
+    }
+    try {
+      const completed = terminal(currentPayload);
+      if (completed) return completed;
+    } catch (error) {
+      return fail(
+        error instanceof AiCallError
+          ? error
+          : new AiCallError('BAD_JSON', 'Invalid AI response format')
+      );
+    }
+    state = String(currentPayload?.status ?? '');
+    if (state !== 'queued' && state !== 'in_progress') {
+      return fail(
+        new AiCallError('BAD_JSON', 'Invalid AI response format', 'INVALID_RESPONSE_STATUS')
+      );
+    }
+    report(state === 'queued' ? 'queued' : 'polling');
+    delayMs = Math.min(delayMs * 2, RESPONSES_POLL_MAX_MS);
+  }
+  return fail(new AiCallError('TIMEOUT', 'AI provider request timed out', 'TIMEOUT'));
+}
+
+async function requestResponsesText(input: {
+  active: AiConfigRow;
+  messages: AiMessage[];
+  responseFormat: AiCallResponseFormat;
+  signal?: AbortSignal;
+  requestOptions?: AiProviderRequestOptions;
+  timeoutMs?: number;
+}): Promise<string> {
+  const apiKey = resolveProviderApiKey(input.active.base_url, input.active.api_key);
+  const body = responsesBody(
+    input.active,
+    input.messages,
+    input.responseFormat,
+    input.requestOptions
+  );
+  const response = await awaitBackgroundResponse({
+    baseUrl: input.active.base_url,
+    apiKey,
+    body,
+    jobId: input.requestOptions?.jobId,
+    signal: input.signal,
+    timeoutMs: input.timeoutMs ?? aiOperationTimeoutMs(input.active.timeout),
+    requestTimeoutMs: effectiveAiTimeoutMs(input.active.timeout),
+    onDiagnostic: input.requestOptions?.onDiagnostic
+  });
+  const text = extractResponsesText(response.payload);
+  if (typeof text !== 'string') throw new AiCallError('BAD_JSON', 'Invalid AI response format');
+  return redactarSecreto(text, apiKey);
+}
+
+/** Every model call is accepted and polled by the server through Responses background. */
 export async function callAIWithConfig(
   active: AiConfigRow,
   messages: AiMessage[],
@@ -267,74 +669,10 @@ export async function callAIWithConfig(
   signal?: AbortSignal,
   requestOptions?: AiProviderRequestOptions
 ): Promise<string> {
-  const apiKey = resolveProviderApiKey(active.base_url, active.api_key);
-  let response: Response;
-  try {
-    response = await fetch(endpoint(active.base_url), {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`
-      },
-      body: JSON.stringify(
-        chatBody(active, { messages, response_format: responseFormat, ...requestOptions })
-      ),
-      signal: señalConTimeout(signal, effectiveAiTimeoutMs(active.timeout))
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (signal?.aborted) {
-      throw new AiCallError('PROVIDER', 'AI request was cancelled', 'CANCELLED');
-    }
-    const timedOut = /timeout|abort/i.test(message);
-    const detail = timedOut ? 'TIMEOUT' : 'CONNECTION_FAILED';
-    throw new AiCallError(
-      timedOut ? 'TIMEOUT' : 'PROVIDER',
-      timedOut ? 'AI provider request timed out' : 'AI provider connection failed',
-      detail
-    );
-  }
-
-  if (!response.ok) {
-    await response.body?.cancel().catch(() => undefined);
-    const detail = `HTTP ${response.status}`;
-    throw new AiCallError('PROVIDER', `AI API error: ${detail}`, detail);
-  }
-
-  let payload: any;
-  try {
-    payload = await response.json();
-  } catch {
-    throw new AiCallError('BAD_JSON', 'Invalid AI response format');
-  }
-  const choice = payload?.choices?.[0];
-  const message = choice?.message;
-  if (choice?.finish_reason === 'length') {
-    throw new AiCallError('BAD_JSON', 'AI response was truncated', 'TRUNCATED');
-  }
-  if (
-    choice?.finish_reason === 'content_filter' ||
-    (typeof message?.refusal === 'string' && message.refusal.trim())
-  ) {
-    throw new AiCallError('BAD_JSON', 'AI provider refused the response', 'REFUSED');
-  }
-  const content = message?.content;
-  if (typeof content !== 'string') {
-    throw new AiCallError('BAD_JSON', 'Invalid AI response format');
-  }
-  return redactarSecreto(content, apiKey);
+  return requestResponsesText({ active, messages, responseFormat, signal, requestOptions });
 }
 
-/**
- * La llamada en STREAMING (## 12aj): misma configuracion, misma forma de error, pero entrega el
- * texto a medida que el modelo lo escribe. Es lo que hace que las lineas del ticket se vayan
- * viendo «poco a poco»: quien llama recibe cada trozo y decide que hacer con el.
- *
- * Si el proveedor no soporta `stream` (responde un JSON normal, o un 4xx), se lanza el mismo
- * `AiCallError` de siempre: la cola decide si reintentar sin streaming —el error antes del
- * primer trozo significa «aqui no hay stream», y caer a `callAI` es un detalle de transporte,
- * no un cambio de reglas.
- */
+/** Public queued wrapper retained for routes which use the generic AI dispatcher. */
 export async function callAIStreaming(
   userId: string,
   messages: AiMessage[],
@@ -347,89 +685,24 @@ export async function callAIStreaming(
   return dispatchAIStreaming(userId, messages, db, onDelta, responseFormat, senal);
 }
 
-/** Transporte en streaming de una configuración ya fijada por el dispatcher. */
+/** Legacy streaming consumers receive one sanitized final chunk after background completion. */
 export async function callAIStreamingWithConfig(
   active: AiConfigRow,
   messages: AiMessage[],
   onDelta: (texto: string) => void,
   responseFormat: AiResponseFormat,
-  senal: AbortSignal
+  senal: AbortSignal,
+  requestOptions?: AiProviderRequestOptions
 ): Promise<string> {
-  const apiKey = resolveProviderApiKey(active.base_url, active.api_key);
-  const signal = señalConTimeout(senal, effectiveAiTimeoutMs(active.timeout));
-  let response: Response;
-  try {
-    response = await fetch(endpoint(active.base_url), {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`
-      },
-      body: JSON.stringify(
-        chatBody(active, { messages, response_format: responseFormat, stream: true })
-      ),
-      signal
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    const timedOut = /timeout|abort/i.test(message);
-    const detail = timedOut ? 'TIMEOUT' : 'CONNECTION_FAILED';
-    throw new AiCallError(
-      timedOut ? 'TIMEOUT' : 'PROVIDER',
-      timedOut ? 'AI provider stream timed out' : 'AI provider stream connection failed',
-      detail
-    );
-  }
-
-  if (!response.ok || !response.body) {
-    await response.body?.cancel().catch(() => undefined);
-    const detail = response.ok ? 'EMPTY_STREAM' : `HTTP ${response.status}`;
-    throw new AiCallError('PROVIDER', `AI API error: ${detail}`, detail);
-  }
-
-  const decoder = new TextDecoder();
-  let entero = '';
-  let porProcesar = '';
-  let pendienteDeRedaccion = '';
-  try {
-    for await (const trozo of response.body) {
-      if (signal.aborted) throw new AiCallError('PROVIDER', 'Cancelado', 'CANCELLED');
-      porProcesar += decoder.decode(trozo, { stream: true });
-      // El SSE llega en lineas «data: {...}» separadas por saltos; una linea «data: [DONE]» cierra.
-      const lineas = porProcesar.split('\n');
-      porProcesar = lineas.pop() ?? '';
-      for (const linea of lineas) {
-        const recorte = linea.trim();
-        if (!recorte.startsWith('data:')) continue;
-        const dato = recorte.slice(5).trim();
-        if (!dato || dato === '[DONE]') continue;
-        try {
-          const delta = (JSON.parse(dato) as any)?.choices?.[0]?.delta?.content;
-          if (typeof delta === 'string' && delta) {
-            entero += delta;
-            pendienteDeRedaccion += delta;
-            const seguroHasta = prefijoSeguroHasta(pendienteDeRedaccion, apiKey);
-            if (seguroHasta > 0) {
-              onDelta(redactarSecreto(pendienteDeRedaccion.slice(0, seguroHasta), apiKey));
-              pendienteDeRedaccion = pendienteDeRedaccion.slice(seguroHasta);
-            }
-          }
-        } catch {
-          // Un trozo que no es JSON: los proveedores mandan comentarios y keep-alives; a otra cosa.
-        }
-      }
-    }
-  } catch (error) {
-    if (error instanceof AiCallError) throw error;
-    if (senal.aborted) throw new AiCallError('PROVIDER', 'Cancelado', 'CANCELLED');
-    if (signal.aborted) throw new AiCallError('TIMEOUT', 'AI provider stream timed out', 'TIMEOUT');
-    throw new AiCallError('PROVIDER', 'AI provider stream connection failed', 'CONNECTION_FAILED');
-  }
-  if (!entero) {
-    throw new AiCallError('BAD_JSON', 'El stream no trajo nada de texto', '');
-  }
-  if (pendienteDeRedaccion) onDelta(redactarSecreto(pendienteDeRedaccion, apiKey));
-  return redactarSecreto(entero, apiKey);
+  const text = await requestResponsesText({
+    active,
+    messages,
+    responseFormat,
+    signal: senal,
+    requestOptions
+  });
+  onDelta(text);
+  return text;
 }
 
 /**
@@ -472,79 +745,6 @@ export const testAnswerSchema = z.object({
   status: z.literal('ok'),
   message: z.string().min(1)
 });
-
-export type AiConnectionTestDiagnostic = Readonly<{
-  providerResponseId: string | null;
-  providerTransport: 'responses_background' | 'chat_completions';
-  providerHttpStatus: number | null;
-  elapsedMs: number;
-  diagnosticStage:
-    | 'submitting'
-    | 'queued'
-    | 'polling'
-    | 'completed'
-    | 'failed'
-    | 'timed_out'
-    | 'cancelled'
-    | 'fallback';
-}>;
-
-function notifyConnectionTestDiagnostic(
-  callback: ((diagnostic: AiConnectionTestDiagnostic) => void) | undefined,
-  diagnostic: AiConnectionTestDiagnostic
-): void {
-  try {
-    callback?.(diagnostic);
-  } catch {
-    // Diagnostic persistence is best-effort and must never prevent the provider request.
-  }
-}
-
-const CONNECTION_TEST_POLL_INITIAL_MS = 500;
-const CONNECTION_TEST_POLL_MAX_MS = 2_000;
-const CONNECTION_TEST_CANCEL_TIMEOUT_MS = 5_000;
-const SAFE_RESPONSES_ID = /^resp_[A-Za-z0-9_-]{1,128}$/;
-
-function responsesEndpoint(baseUrl: string): string {
-  const base = String(baseUrl).trim().replace(/\/+$/, '');
-  if (/\/responses$/i.test(base)) return base;
-  const root = base.replace(/\/chat\/completions$/i, '');
-  return /\/v\d+[a-z]*$/i.test(root) ? `${root}/responses` : `${root}/v1/responses`;
-}
-
-function validResponsesId(value: unknown): value is string {
-  return typeof value === 'string' && value.length <= 133 && SAFE_RESPONSES_ID.test(value);
-}
-
-function jsonFromResponsesOutput(payload: any): string | undefined {
-  if (!Array.isArray(payload?.output)) return undefined;
-  const chunks: string[] = [];
-  for (const item of payload.output) {
-    if (!Array.isArray(item?.content)) continue;
-    for (const content of item.content) {
-      if (content?.type === 'output_text' && typeof content.text === 'string') {
-        chunks.push(content.text);
-      }
-    }
-  }
-  return chunks.length ? chunks.join('') : undefined;
-}
-
-function responsesCapabilityUnsupported(status: number, payload: any): boolean {
-  if ([404, 405, 501].includes(status)) return true;
-  if (status !== 400) return false;
-  const code = String(payload?.error?.code ?? payload?.code ?? '').toLowerCase();
-  const parameter = String(payload?.error?.param ?? payload?.param ?? '').toLowerCase();
-  return (
-    [
-      'responses_not_supported',
-      'responses_endpoint_not_supported',
-      'background_not_supported'
-    ].includes(code) ||
-    (code === 'unsupported_parameter' &&
-      ['background', 'text.format', 'text.format.type'].includes(parameter))
-  );
-}
 
 function connectionTestVerdictFromContent(
   content: unknown,
@@ -626,14 +826,13 @@ export async function pingDeConexion(
   return dispatchPingDeConexion(config, context);
 }
 
-/** Raw provider connection probe. Production callers must use pingDeConexion (queued wrapper). */
+/** Raw provider connection probe; all probes use Responses background even without a queue ID. */
 export async function pingDeConexionTransport(config: {
   base_url: string;
   api_key: string;
   model: string;
   timeout?: number | null;
   signal?: AbortSignal;
-  /** Job ID selects the asynchronous Responses path used by the production dispatcher. */
   jobId?: string;
   onDiagnostic?: (diagnostic: AiConnectionTestDiagnostic) => void;
 }): Promise<
@@ -644,378 +843,101 @@ export async function pingDeConexionTransport(config: {
   try {
     apiKey = resolveProviderApiKey(config.base_url, config.api_key);
   } catch (error) {
-    const latency = Date.now() - startTime;
-    const mensaje = error instanceof Error ? error.message : String(error);
-    const timedOut = /timeout|abort/i.test(mensaje);
+    const message = error instanceof Error ? error.message : String(error);
     notifyConnectionTestDiagnostic(config.onDiagnostic, {
       providerResponseId: null,
-      providerTransport: config.jobId ? 'responses_background' : 'chat_completions',
+      providerTransport: 'responses_background',
       providerHttpStatus: null,
-      elapsedMs: latency,
+      elapsedMs: Date.now() - startTime,
       diagnosticStage: 'failed'
     });
     return {
       ok: false,
-      latency,
-      error: timedOut ? 'Tiempo de espera agotado' : 'No se pudo conectar con el proveedor'
-    };
-  }
-
-  const jobId = config.jobId;
-  if (jobId) return pingDeConexionResponsesBackground({ ...config, jobId }, apiKey, startTime);
-  return pingDeConexionChatCompletions(config, apiKey, startTime, false);
-}
-
-async function pingDeConexionResponsesBackground(
-  config: {
-    base_url: string;
-    api_key: string;
-    model: string;
-    timeout?: number | null;
-    signal?: AbortSignal;
-    jobId: string;
-    onDiagnostic?: (diagnostic: AiConnectionTestDiagnostic) => void;
-  },
-  apiKey: string,
-  startTime: number
-): Promise<
-  { ok: true; latency: number; message: string } | { ok: false; latency: number; error: string }
-> {
-  const url = responsesEndpoint(config.base_url);
-  const operationTimeoutMs = connectionTestTimeoutMs(config.timeout);
-  const requestTimeoutMs = effectiveAiTimeoutMs(config.timeout);
-  const deadline = startTime + operationTimeoutMs;
-  let providerResponseId: string | null = null;
-  let providerHttpStatus: number | null = null;
-  let providerTransport: AiConnectionTestDiagnostic['providerTransport'] = 'responses_background';
-  const diagnostic = (
-    diagnosticStage: AiConnectionTestDiagnostic['diagnosticStage'],
-    httpStatus = providerHttpStatus
-  ) => {
-    providerHttpStatus = httpStatus;
-    notifyConnectionTestDiagnostic(config.onDiagnostic, {
-      providerResponseId,
-      providerTransport,
-      providerHttpStatus,
-      elapsedMs: Math.max(0, Date.now() - startTime),
-      diagnosticStage
-    });
-  };
-  const fallBack = async (httpStatus: number) => {
-    providerTransport = 'chat_completions';
-    providerHttpStatus = httpStatus;
-    diagnostic('fallback');
-    return pingDeConexionChatCompletions(
-      config,
-      apiKey,
-      startTime,
-      true,
-      diagnostic,
-      Math.max(1, Math.min(requestTimeoutMs, deadline - Date.now()))
-    );
-  };
-  const cancel = async () => {
-    if (providerResponseId) {
-      await cancelarResponsesBackground(url, providerResponseId, apiKey);
-    }
-    diagnostic('cancelled');
-    return { ok: false as const, latency: Date.now() - startTime, error: 'Prueba cancelada' };
-  };
-  const timedOut = async () => {
-    if (providerResponseId) await cancelarResponsesBackground(url, providerResponseId, apiKey);
-    diagnostic('timed_out');
-    return {
-      ok: false as const,
       latency: Date.now() - startTime,
-      error: 'Tiempo de espera agotado'
-    };
-  };
-
-  diagnostic('submitting');
-  let created: Response;
-  try {
-    created = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-        'Idempotency-Key': `hogaria-connection-test-${config.jobId}`
-      },
-      body: JSON.stringify({
-        model: config.model,
-        background: true,
-        store: true,
-        input:
-          'Prueba de conexión. Devuelve exactamente este JSON y nada más: {"status":"ok","message":"conexión establecida"}',
-        text: {
-          format: {
-            type: 'json_schema',
-            name: 'connection_test',
-            strict: true,
-            schema: TEST_ANSWER_SCHEMA
-          }
-        }
-      }),
-      signal: señalConTimeout(
-        config.signal,
-        Math.max(1, Math.min(requestTimeoutMs, deadline - Date.now()))
-      )
-    });
-  } catch (error) {
-    if (config.signal?.aborted) return cancel();
-    const message = error instanceof Error ? error.message : String(error);
-    const requestTimedOut = Date.now() >= deadline || /timeout|abort/i.test(message);
-    diagnostic(requestTimedOut ? 'timed_out' : 'failed');
-    return {
-      ok: false,
-      latency: Date.now() - startTime,
-      error: requestTimedOut ? 'Tiempo de espera agotado' : 'No se pudo conectar con el proveedor'
+      error: /timeout|abort/i.test(message)
+        ? 'Tiempo de espera agotado'
+        : 'No se pudo conectar con el proveedor'
     };
   }
 
-  providerHttpStatus = created.status;
-  const initialPayload = (await created.json().catch(() => null)) as any;
-  if (!created.ok) {
-    if (responsesCapabilityUnsupported(created.status, initialPayload)) {
-      if (Date.now() >= deadline) return timedOut();
-      return fallBack(created.status);
-    }
-    diagnostic('failed');
-    return { ok: false, latency: Date.now() - startTime, error: `HTTP ${created.status}` };
-  }
-
-  if (!validResponsesId(initialPayload?.id)) {
-    diagnostic('failed');
-    return {
-      ok: false,
-      latency: Date.now() - startTime,
-      error: 'La respuesta del proveedor no tiene la forma esperada (Responses id)'
-    };
-  }
-  providerResponseId = initialPayload.id;
-  const acceptedResponseId: string = initialPayload.id;
-
-  const terminal = (payload: any) => {
-    const status = String(payload?.status ?? '');
-    if (status === 'completed') {
-      const content = jsonFromResponsesOutput(payload);
-      const result = connectionTestVerdictFromContent(
-        content,
-        apiKey,
-        Date.now() - startTime,
-        'output[].content[].text'
-      );
-      diagnostic(result.ok ? 'completed' : 'failed');
-      return result;
-    }
-    if (status === 'failed' || status === 'incomplete' || status === 'cancelled') {
-      diagnostic(status === 'cancelled' ? 'cancelled' : 'failed');
-      return {
-        ok: false as const,
-        latency: Date.now() - startTime,
-        error:
-          status === 'cancelled'
-            ? 'La prueba fue cancelada por el proveedor'
-            : 'La ejecución del proveedor terminó sin completar la prueba'
-      };
-    }
-    return null;
-  };
-
-  const immediate = terminal(initialPayload);
-  if (immediate) return immediate;
-  let state = String(initialPayload?.status ?? '');
-  if (state !== 'queued' && state !== 'in_progress') {
-    diagnostic('failed');
-    return {
-      ok: false,
-      latency: Date.now() - startTime,
-      error: 'La respuesta del proveedor no tiene un estado válido'
-    };
-  }
-  diagnostic(state === 'queued' ? 'queued' : 'polling');
-
-  let delayMs = CONNECTION_TEST_POLL_INITIAL_MS;
-  while (Date.now() < deadline) {
-    if (config.signal?.aborted) return cancel();
-    const remainingMs = deadline - Date.now();
-    try {
-      await esperarConCancelacion(Math.min(delayMs, remainingMs), config.signal);
-    } catch {
-      if (config.signal?.aborted) return cancel();
-      return timedOut();
-    }
-    if (Date.now() >= deadline) return timedOut();
-
-    let current: Response;
-    try {
-      current = await fetch(`${url}/${encodeURIComponent(acceptedResponseId)}`, {
-        method: 'GET',
-        headers: { Authorization: `Bearer ${apiKey}` },
-        signal: señalConTimeout(
-          config.signal,
-          Math.max(1, Math.min(requestTimeoutMs, deadline - Date.now()))
-        )
-      });
-    } catch {
-      if (config.signal?.aborted) return cancel();
-      if (Date.now() >= deadline) return timedOut();
-      diagnostic('polling');
-      delayMs = Math.min(delayMs * 2, CONNECTION_TEST_POLL_MAX_MS);
-      continue;
-    }
-
-    providerHttpStatus = current.status;
-    if (!current.ok) {
-      await current.body?.cancel().catch(() => undefined);
-      if (current.status >= 500 || current.status === 429) {
-        diagnostic('polling');
-        delayMs = Math.min(delayMs * 2, CONNECTION_TEST_POLL_MAX_MS);
-        continue;
+  const body = {
+    model: config.model,
+    background: true,
+    store: true,
+    input:
+      'Prueba de conexión. Devuelve exactamente este JSON y nada más: {"status":"ok","message":"conexión establecida"}',
+    text: {
+      format: {
+        type: 'json_schema',
+        name: 'connection_test',
+        strict: true,
+        schema: TEST_ANSWER_SCHEMA
       }
-      diagnostic('failed');
-      return { ok: false, latency: Date.now() - startTime, error: `HTTP ${current.status}` };
     }
-
-    const payload = (await current.json().catch(() => null)) as any;
-    if (payload?.id !== acceptedResponseId) {
-      diagnostic('failed');
-      return {
-        ok: false,
-        latency: Date.now() - startTime,
-        error: 'La respuesta del proveedor no coincide con la prueba iniciada'
-      };
-    }
-    const result = terminal(payload);
-    if (result) return result;
-    state = String(payload?.status ?? '');
-    if (state !== 'queued' && state !== 'in_progress') {
-      diagnostic('failed');
-      return {
-        ok: false,
-        latency: Date.now() - startTime,
-        error: 'La respuesta del proveedor no tiene un estado válido'
-      };
-    }
-    diagnostic(state === 'queued' ? 'queued' : 'polling');
-    delayMs = Math.min(delayMs * 2, CONNECTION_TEST_POLL_MAX_MS);
-  }
-  return timedOut();
-}
-
-async function cancelarResponsesBackground(
-  url: string,
-  responseId: string,
-  apiKey: string
-): Promise<void> {
-  try {
-    await fetch(`${url}/${encodeURIComponent(responseId)}/cancel`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}` },
-      signal: AbortSignal.timeout(CONNECTION_TEST_CANCEL_TIMEOUT_MS)
-    });
-  } catch {
-    // A best-effort cancellation must not replace the original timeout/cancel result.
-  }
-}
-
-async function pingDeConexionChatCompletions(
-  config: {
-    base_url: string;
-    api_key: string;
-    model: string;
-    timeout?: number | null;
-    signal?: AbortSignal;
-    onDiagnostic?: (diagnostic: AiConnectionTestDiagnostic) => void;
-  },
-  apiKey: string,
-  startTime: number,
-  backgroundFallback: boolean,
-  report?: (stage: AiConnectionTestDiagnostic['diagnosticStage'], status: number | null) => void,
-  timeoutRemainingMs?: number
-): Promise<
-  { ok: true; latency: number; message: string } | { ok: false; latency: number; error: string }
-> {
-  const timeoutMs = backgroundFallback
-    ? Math.max(
-        1,
-        Math.min(
-          effectiveAiTimeoutMs(config.timeout),
-          timeoutRemainingMs ?? connectionTestTimeoutMs(config.timeout)
-        )
-      )
-    : effectiveAiTimeoutMs(config.timeout);
-  const diagnostic = (
-    diagnosticStage: AiConnectionTestDiagnostic['diagnosticStage'],
-    status: number | null
-  ) => {
-    if (report) {
-      report(diagnosticStage, status);
-      return;
-    }
-    notifyConnectionTestDiagnostic(config.onDiagnostic, {
-      providerResponseId: null,
-      providerTransport: 'chat_completions',
-      providerHttpStatus: status,
-      elapsedMs: Math.max(0, Date.now() - startTime),
-      diagnosticStage
-    });
   };
   try {
-    const response = await fetch(endpoint(config.base_url), {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: config.model,
-        messages: [
-          {
-            role: 'user',
-            content:
-              'Prueba de conexión. Devuelve exactamente este JSON y nada más: {"status":"ok","message":"conexión establecida"}'
-          }
-        ],
-        response_format: {
-          type: 'json_schema',
-          json_schema: {
-            name: 'connection_test',
-            strict: true,
-            schema: TEST_ANSWER_SCHEMA
-          }
-        }
-      }),
-      signal: señalConTimeout(config.signal, timeoutMs)
-    });
-
-    if (!response.ok) {
-      await response.body?.cancel().catch(() => undefined);
-      diagnostic('failed', response.status);
-      return { ok: false, latency: Date.now() - startTime, error: `HTTP ${response.status}` };
-    }
-
-    const payload = (await response.json().catch(() => null)) as any;
-    const result = connectionTestVerdictFromContent(
-      payload?.choices?.[0]?.message?.content,
+    const response = await awaitBackgroundResponse({
+      baseUrl: config.base_url,
       apiKey,
-      Date.now() - startTime,
-      'choices[0].message.content'
+      body,
+      jobId: config.jobId,
+      signal: config.signal,
+      timeoutMs: aiOperationTimeoutMs(config.timeout),
+      requestTimeoutMs: effectiveAiTimeoutMs(config.timeout),
+      onDiagnostic: config.onDiagnostic
+    });
+    const result = connectionTestVerdictFromContent(
+      extractResponsesText(response.payload),
+      apiKey,
+      response.elapsedMs,
+      'output[].content[].text'
     );
-    diagnostic(result.ok ? 'completed' : 'failed', response.status);
+    if (!result.ok) {
+      notifyConnectionTestDiagnostic(config.onDiagnostic, {
+        providerResponseId: response.responseId,
+        providerTransport: 'responses_background',
+        providerHttpStatus: null,
+        elapsedMs: Date.now() - startTime,
+        diagnosticStage: 'failed'
+      });
+    }
     return result;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    const timedOut = /timeout|abort/i.test(message);
-    diagnostic(config.signal?.aborted ? 'cancelled' : timedOut ? 'timed_out' : 'failed', null);
+    const aiError =
+      error instanceof AiCallError
+        ? error
+        : new AiCallError('PROVIDER', 'AI provider connection failed', 'CONNECTION_FAILED');
+    const diagnosticStage: AiConnectionTestDiagnostic['diagnosticStage'] =
+      aiError.code === 'TIMEOUT'
+        ? 'timed_out'
+        : aiError.detail === 'CANCELLED'
+          ? 'cancelled'
+          : 'failed';
+    const httpStatus = /^HTTP \d+$/.test(aiError.detail ?? '')
+      ? Number(aiError.detail?.slice(5))
+      : null;
+    notifyConnectionTestDiagnostic(config.onDiagnostic, {
+      providerResponseId: null,
+      providerTransport: 'responses_background',
+      providerHttpStatus: httpStatus,
+      elapsedMs: Date.now() - startTime,
+      diagnosticStage
+    });
     return {
       ok: false,
       latency: Date.now() - startTime,
-      error: config.signal?.aborted
-        ? 'Prueba cancelada'
-        : timedOut
-          ? 'Tiempo de espera agotado'
-          : 'No se pudo conectar con el proveedor'
+      error:
+        aiError.detail === 'CANCELLED'
+          ? 'Prueba cancelada'
+          : aiError.detail === 'BACKGROUND_UNSUPPORTED'
+            ? 'El proveedor no admite solicitudes Responses en segundo plano'
+            : aiError.code === 'TIMEOUT'
+              ? 'Tiempo de espera agotado'
+              : httpStatus
+                ? `HTTP ${httpStatus}`
+                : aiError.code === 'BAD_JSON'
+                  ? 'La respuesta del proveedor no tiene la forma esperada (Responses output)'
+                  : 'No se pudo conectar con el proveedor'
     };
   }
 }
@@ -1025,50 +947,6 @@ function variantesDeSecreto(secreto: string): string[] {
   return [
     ...new Set([secreto, encodeURIComponent(secreto), JSON.stringify(secreto).slice(1, -1)])
   ].filter(Boolean);
-}
-
-/** Devuelve cuánto texto puede emitirse sin partir una clave o un prefijo suyo. */
-function prefijoSeguroHasta(texto: string, secreto: string): number {
-  const variantes = variantesDeSecreto(secreto);
-  if (!variantes.length) return texto.length;
-
-  const mayor = Math.max(...variantes.map((variante) => variante.length));
-  let limite = texto.length - mayor + 1;
-  if (limite <= 0) return 0;
-
-  // No cortar una clave completa por la mitad, aunque haya empezado antes del margen.
-  while (limite > 0) {
-    let claveCruzada = false;
-    for (const variante of variantes) {
-      const inicioMinimo = Math.max(0, limite - variante.length + 1);
-      let inicio = texto.indexOf(variante, inicioMinimo);
-      while (inicio >= 0 && inicio < limite) {
-        if (inicio + variante.length > limite) {
-          limite = inicio;
-          claveCruzada = true;
-          break;
-        }
-        inicio = texto.indexOf(variante, inicio + 1);
-      }
-      if (claveCruzada) break;
-    }
-    if (claveCruzada) continue;
-
-    // Tampoco emitir el sufijo que podria ser el inicio de una clave aun incompleta.
-    const maxOverlap = Math.min(limite, mayor - 1);
-    let overlap = 0;
-    for (let longitud = maxOverlap; longitud > 0; longitud -= 1) {
-      const sufijo = texto.slice(limite - longitud, limite);
-      if (variantes.some((variante) => variante.startsWith(sufijo))) {
-        overlap = longitud;
-        break;
-      }
-    }
-    if (!overlap) return limite;
-    // El nuevo limite puede cortar otra clave repetida; vuelve a comprobar ambos casos.
-    limite -= overlap;
-  }
-  return 0;
 }
 
 function redactarSecreto(texto: string, secreto: string): string {

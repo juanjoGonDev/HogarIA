@@ -21,6 +21,73 @@ let jwtSecret = '';
 
 const WEEK_START = '2026-10-12';
 
+function responsesText(content: string, id = 'resp_household_meal_fixture'): Response {
+  return new Response(
+    JSON.stringify({
+      id,
+      status: 'completed',
+      output: [{ type: 'message', content: [{ type: 'output_text', text: content }] }]
+    }),
+    { status: 200, headers: { 'content-type': 'application/json' } }
+  );
+}
+
+async function responsesReply(
+  reply: Response,
+  id = 'resp_household_meal_fixture'
+): Promise<Response> {
+  if (!reply.ok) return reply;
+  const payload = (await reply
+    .clone()
+    .json()
+    .catch(() => null)) as any;
+  if (typeof payload?.id === 'string' && Array.isArray(payload?.output)) return reply;
+  const choice = payload?.choices?.[0];
+  if (choice?.finish_reason === 'length') {
+    return new Response(JSON.stringify({ id, status: 'incomplete', output: [] }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    });
+  }
+  if (typeof choice?.message?.refusal === 'string') {
+    return new Response(
+      JSON.stringify({
+        id,
+        status: 'completed',
+        output: [
+          { type: 'message', content: [{ type: 'refusal', refusal: choice.message.refusal }] }
+        ]
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } }
+    );
+  }
+  return responsesText(String(choice?.message?.content ?? ''), id);
+}
+
+function stubResponsesFetch(
+  implementation: (input: string | URL | Request, init?: RequestInit) => Promise<Response>
+) {
+  const provider = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith('/cancel')) {
+      expect(init?.method).toBe('POST');
+      return new Response('{}', { status: 200 });
+    }
+    expect(url.pathname).toMatch(/\/responses$/);
+    expect(init?.method).toBe('POST');
+    const body = JSON.parse(String(init?.body));
+    expect(body).toMatchObject({ background: true, store: true });
+    expect(Array.isArray(body.input)).toBe(true);
+    expect(body.text?.format).toBeDefined();
+    return responsesReply(
+      await implementation(input, init),
+      `resp_household_meal_${provider.mock.calls.length}`
+    );
+  });
+  vi.stubGlobal('fetch', provider);
+  return provider;
+}
+
 function addDays(date: string, days: number): string {
   const [year, month, day] = date.split('-').map(Number);
   return new Date(Date.UTC(year!, month! - 1, day! + days)).toISOString().slice(0, 10);
@@ -218,7 +285,7 @@ describe('household meal proposal preview route', () => {
       `INSERT INTO ai_configs
         (id, user_id, household_id, name, provider, base_url, api_key, model,
          timeout, retry_attempts, concurrency, is_active)
-       VALUES (?, ?, ?, 'Synthetic planner', 'custom', 'https://provider.invalid/v1',
+       VALUES (?, ?, ?, 'Synthetic planner', 'custom', 'http://127.0.0.1:9/v1',
          'synthetic-secret', 'test-model', 2000, 0, 0, 1)`
     ).run(`ai-${householdId}`, userId, householdId);
   }
@@ -353,22 +420,20 @@ describe('household meal proposal preview route', () => {
   }
 
   function readProviderFile(providerBody: any, filename: string): Record<string, any> {
-    const content = providerBody.messages[1].content;
+    const content = providerBody.input[1].content;
     expect(Array.isArray(content)).toBe(true);
-    const fileParts = content.filter((part: any) => part.type === 'file');
+    const fileParts = content.filter((part: any) => part.type === 'input_file');
     expect(fileParts).toHaveLength(2);
-    expect(fileParts.map((part: any) => part.file.filename)).toEqual([
+    expect(fileParts.map((part: any) => part.filename)).toEqual([
       HOUSEHOLD_MEAL_PLANNING_CONTEXT_FILENAME,
       HOUSEHOLD_RECIPE_CATALOG_FILENAME
     ]);
     expect(
-      fileParts.every((part: any) =>
-        part.file.file_data.startsWith('data:application/json;base64,')
-      )
+      fileParts.every((part: any) => part.file_data.startsWith('data:application/json;base64,'))
     ).toBe(true);
-    const filePart = fileParts.find((part: any) => part.file.filename === filename);
+    const filePart = fileParts.find((part: any) => part.filename === filename);
     expect(filePart).toBeDefined();
-    const base64 = filePart.file.file_data.slice('data:application/json;base64,'.length);
+    const base64 = filePart.file_data.slice('data:application/json;base64,'.length);
     return JSON.parse(Buffer.from(base64, 'base64').toString('utf8')) as Record<string, any>;
   }
 
@@ -381,8 +446,8 @@ describe('household meal proposal preview route', () => {
   }
 
   function readProviderPrompt(providerBody: any): string {
-    return providerBody.messages[1].content
-      .filter((part: any) => part.type === 'text')
+    return providerBody.input[1].content
+      .filter((part: any) => part.type === 'input_text')
       .map((part: any) => part.text)
       .join('\n');
   }
@@ -417,8 +482,8 @@ describe('household meal proposal preview route', () => {
     addAiConfig(planner.id, 'home');
 
     let providerBody: any;
-    const provider = vi.fn(async (_url: string, init: RequestInit) => {
-      providerBody = JSON.parse(String(init.body));
+    const provider = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      providerBody = JSON.parse(String(init?.body));
       return new Response(
         JSON.stringify({
           choices: [
@@ -428,7 +493,7 @@ describe('household meal proposal preview route', () => {
         { status: 200 }
       );
     });
-    vi.stubGlobal('fetch', provider);
+    stubResponsesFetch(provider);
 
     const mealsBefore = db.prepare('SELECT COUNT(*) AS count FROM meals').get();
     const response = await call(planner, {
@@ -456,7 +521,10 @@ describe('household meal proposal preview route', () => {
       servings: 2
     });
     expect(provider).toHaveBeenCalledTimes(1);
-    expect(providerBody.response_format).toEqual(createMealProposalResponseFormat());
+    expect(providerBody.text.format).toEqual({
+      type: 'json_schema',
+      ...createMealProposalResponseFormat().json_schema
+    });
     expect(JSON.stringify(readProviderMealContext(providerBody))).toContain('calabacín');
     expect(serializedProviderRequest).not.toContain(planner.membershipId);
     expect(serializedProviderRequest).not.toContain(second.membershipId);
@@ -484,7 +552,7 @@ describe('household meal proposal preview route', () => {
           { status: 200 }
         )
     );
-    vi.stubGlobal('fetch', provider);
+    stubResponsesFetch(provider);
     const before = {
       meals: db.prepare('SELECT COUNT(*) AS count FROM meals').get(),
       calendars: db.prepare('SELECT COUNT(*) AS count FROM weekly_calendars').get(),
@@ -543,7 +611,7 @@ describe('household meal proposal preview route', () => {
           { status: 200 }
         )
     );
-    vi.stubGlobal('fetch', provider);
+    stubResponsesFetch(provider);
     const before = {
       meals: db.prepare('SELECT COUNT(*) AS count FROM meals').get(),
       calendars: db.prepare('SELECT COUNT(*) AS count FROM weekly_calendars').get(),
@@ -609,8 +677,8 @@ describe('household meal proposal preview route', () => {
     addAiConfig(planner.id, 'home');
 
     let providerBody: any;
-    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
-      providerBody = JSON.parse(String(init.body));
+    stubResponsesFetch(async (_url, init) => {
+      providerBody = JSON.parse(String(init?.body));
       return new Response(
         JSON.stringify({
           choices: [
@@ -658,7 +726,10 @@ describe('household meal proposal preview route', () => {
       servings: 1,
       objectiveSummary: 'Plato compatible con el objetivo muscle-gain.'
     });
-    expect(providerBody.response_format).toEqual(createMealProposalResponseFormat());
+    expect(providerBody.text.format).toEqual({
+      type: 'json_schema',
+      ...createMealProposalResponseFormat().json_schema
+    });
     expect(prompt).toContain('Busca primero un plato compartido');
     expect(prompt).not.toContain(promptMarker);
     expect(context.household.objective).toBeNull();
@@ -717,8 +788,8 @@ describe('household meal proposal preview route', () => {
     addAiConfig(planner.id, 'home');
 
     let providerBody: any;
-    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
-      providerBody = JSON.parse(String(init.body));
+    stubResponsesFetch(async (_url, init) => {
+      providerBody = JSON.parse(String(init?.body));
       return new Response(
         JSON.stringify({
           choices: [
@@ -818,8 +889,8 @@ describe('household meal proposal preview route', () => {
     addAiConfig(planner.id, 'home');
 
     let providerBody: any;
-    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
-      providerBody = JSON.parse(String(init.body));
+    stubResponsesFetch(async (_url, init) => {
+      providerBody = JSON.parse(String(init?.body));
       const dinnerEvents = validProposal(['P1']).events.map((event) => ({
         ...event,
         mealType: 'dinner',
@@ -922,8 +993,8 @@ describe('household meal proposal preview route', () => {
     );
 
     let providerBody: any;
-    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
-      providerBody = JSON.parse(String(init.body));
+    stubResponsesFetch(async (_url, init) => {
+      providerBody = JSON.parse(String(init?.body));
       return new Response(
         JSON.stringify({
           choices: [
@@ -984,8 +1055,8 @@ describe('household meal proposal preview route', () => {
     const catalogRecipe = generatedRecipe('Receta ya guardada');
     addCanonicalRecipe('owned-recipe', planner.id, catalogRecipe);
     let providerBody: any;
-    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
-      providerBody = JSON.parse(String(init.body));
+    stubResponsesFetch(async (_url, init) => {
+      providerBody = JSON.parse(String(init?.body));
       const output = {
         newRecipes: [],
         events: validProposal(['P1']).events.map((event) => ({ ...event, recipeAlias: 'R1' }))
@@ -1046,7 +1117,7 @@ describe('household meal proposal preview route', () => {
     const planner = addUser('planner', 'home');
     addAiConfig(planner.id, 'home');
     addCanonicalRecipe('owned-recipe', planner.id, generatedRecipe('Receta revisada'));
-    vi.stubGlobal('fetch', async () => {
+    stubResponsesFetch(async () => {
       const output = {
         newRecipes: [],
         events: validProposal(['P1']).events.map((event) => ({ ...event, recipeAlias: 'R1' }))
@@ -1096,7 +1167,7 @@ describe('household meal proposal preview route', () => {
       'oversized-recipe'
     );
     const provider = vi.fn();
-    vi.stubGlobal('fetch', provider);
+    stubResponsesFetch(provider);
 
     const response = await call(planner, {
       weekStart: WEEK_START,
@@ -1155,8 +1226,8 @@ describe('household meal proposal preview route', () => {
     }
 
     let providerBody: any;
-    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
-      providerBody = JSON.parse(String(init.body));
+    stubResponsesFetch(async (_url, init) => {
+      providerBody = JSON.parse(String(init?.body));
       return new Response(
         JSON.stringify({
           choices: [
@@ -1335,8 +1406,8 @@ describe('household meal proposal preview route', () => {
     );
 
     let providerBody: any;
-    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
-      providerBody = JSON.parse(String(init.body));
+    stubResponsesFetch(async (_url, init) => {
+      providerBody = JSON.parse(String(init?.body));
       return new Response(
         JSON.stringify({
           choices: [
@@ -1357,11 +1428,16 @@ describe('household meal proposal preview route', () => {
     const catalog = readProviderRecipeCatalog(providerBody);
     const serializedContext = JSON.stringify(context);
     const serializedCatalog = JSON.stringify(catalog);
-    const textParts = providerBody.messages[1].content.filter((part: any) => part.type === 'text');
+    const textParts = providerBody.input[1].content.filter(
+      (part: any) => part.type === 'input_text'
+    );
 
     expect(response.status).toBe(200);
-    expect(providerBody.response_format).toEqual(createMealProposalResponseFormat());
-    expect(providerBody.response_format.json_schema.schema.properties.events.minItems).toBe(1);
+    expect(providerBody.text.format).toEqual({
+      type: 'json_schema',
+      ...createMealProposalResponseFormat().json_schema
+    });
+    expect(providerBody.text.format.schema.properties.events.minItems).toBe(1);
     expect(textParts).toHaveLength(1);
     expect(textParts[0].text).toContain('meal-planning-context.json');
     expect(context).toMatchObject({
@@ -1469,7 +1545,7 @@ describe('household meal proposal preview route', () => {
     const planner = addUser('planner', 'home');
     const reader = addUser('reader', 'home', { calendar: { edit: false } });
     const provider = vi.fn();
-    vi.stubGlobal('fetch', provider);
+    stubResponsesFetch(provider);
 
     const stale = await call(
       planner,
@@ -1516,7 +1592,7 @@ describe('household meal proposal preview route', () => {
         { status: 200 }
       );
     });
-    vi.stubGlobal('fetch', provider);
+    stubResponsesFetch(provider);
 
     const response = await call(planner, {
       weekStart: WEEK_START,
@@ -1535,7 +1611,7 @@ describe('household meal proposal preview route', () => {
     const planner = addUser('planner', 'home');
     addAiConfig(planner.id, 'home');
     const provider = vi.fn();
-    vi.stubGlobal('fetch', provider);
+    stubResponsesFetch(provider);
 
     let releaseBody!: () => void;
     let markBodyStarted!: () => void;
@@ -1618,7 +1694,7 @@ describe('household meal proposal preview route', () => {
           { status: 200 }
         )
     );
-    vi.stubGlobal('fetch', provider);
+    stubResponsesFetch(provider);
 
     const deniedPreview = await call(planner, {
       weekStart: WEEK_START,
@@ -1665,7 +1741,7 @@ describe('household meal proposal preview route', () => {
     addHousehold('home');
     const planner = addUser('planner', 'home');
     const provider = vi.fn();
-    vi.stubGlobal('fetch', provider);
+    stubResponsesFetch(provider);
 
     db.prepare('UPDATE household_members SET permissions = ? WHERE id = ?').run(
       '{broken',
@@ -1706,7 +1782,7 @@ describe('household meal proposal preview route', () => {
     addHousehold('home');
     const planner = addUser('planner', 'home');
     const provider = vi.fn();
-    vi.stubGlobal('fetch', provider);
+    stubResponsesFetch(provider);
 
     const malformed = await callRaw(planner, '{not-json');
     const invalid = await call(planner, {
@@ -1748,7 +1824,7 @@ describe('household meal proposal preview route', () => {
       'home'
     );
     const provider = vi.fn();
-    vi.stubGlobal('fetch', provider);
+    stubResponsesFetch(provider);
 
     const response = await call(planner, {
       weekStart: WEEK_START,
@@ -1766,7 +1842,7 @@ describe('household meal proposal preview route', () => {
     const planner = addUser('planner', 'home');
     const outsider = addUser('outsider', 'other');
     const provider = vi.fn();
-    vi.stubGlobal('fetch', provider);
+    stubResponsesFetch(provider);
 
     const response = await call(planner, {
       weekStart: WEEK_START,
@@ -1794,7 +1870,7 @@ describe('household meal proposal preview route', () => {
       }
     );
     const provider = vi.fn();
-    vi.stubGlobal('fetch', provider);
+    stubResponsesFetch(provider);
 
     const response = await call(planner, {
       weekStart: WEEK_START,
@@ -1830,7 +1906,7 @@ describe('household meal proposal preview route', () => {
           { status: 200 }
         )
     );
-    vi.stubGlobal('fetch', provider);
+    stubResponsesFetch(provider);
 
     const response = await call(planner, {
       weekStart: WEEK_START,
@@ -1859,7 +1935,7 @@ describe('household meal proposal preview route', () => {
           { status: 200 }
         )
     );
-    vi.stubGlobal('fetch', provider);
+    stubResponsesFetch(provider);
 
     const previewResponse = await call(planner, {
       weekStart: WEEK_START,
@@ -1999,8 +2075,7 @@ describe('household meal proposal preview route', () => {
     addHousehold('home');
     const planner = addUser('planner', 'home');
     addAiConfig(planner.id, 'home');
-    vi.stubGlobal(
-      'fetch',
+    stubResponsesFetch(
       async () =>
         new Response(
           JSON.stringify({
@@ -2037,8 +2112,7 @@ describe('household meal proposal preview route', () => {
     addHousehold('home');
     const planner = addUser('planner', 'home', { calendar: { edit: true, view: true } });
     addAiConfig(planner.id, 'home');
-    vi.stubGlobal(
-      'fetch',
+    stubResponsesFetch(
       async () =>
         new Response(
           JSON.stringify({
@@ -2096,8 +2170,7 @@ describe('household meal proposal preview route', () => {
       }
     );
     addAiConfig(planner.id, 'home');
-    vi.stubGlobal(
-      'fetch',
+    stubResponsesFetch(
       async () =>
         new Response(
           JSON.stringify({
@@ -2199,8 +2272,7 @@ describe('household meal proposal preview route', () => {
     const planner = addUser('planner', 'home');
     addAiConfig(planner.id, 'home');
 
-    vi.stubGlobal(
-      'fetch',
+    stubResponsesFetch(
       async () =>
         new Response(
           JSON.stringify({

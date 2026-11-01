@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { expect, test } from './fixtures';
+import { responsesCompleted, type ResponsesRequest } from './helpers/ai-responses';
 import { createHousehold, registerAndGoto } from './helpers/auth';
 
 const today = (): string => {
@@ -18,31 +19,31 @@ test('sustituir una comida usa solo miembros elegidos del hogar activo y persist
       : { width: 320, height: 568 };
   await page.setViewportSize(viewport);
   const secondPage = await browser.newPage({ locale: 'es-ES', viewport });
-  const providerRequests: Array<{ messages?: Array<{ role?: string; content?: string }> }> = [];
+  const providerRequests: ResponsesRequest[] = [];
   const provider = createServer((request, response) => {
     let body = '';
     request.setEncoding('utf8');
     request.on('data', (chunk: string) => (body += chunk));
     request.on('end', () => {
-      providerRequests.push(JSON.parse(body) as (typeof providerRequests)[number]);
+      if (request.method !== 'POST' || request.url !== '/v1/responses') {
+        response.writeHead(404).end();
+        return;
+      }
+      providerRequests.push(JSON.parse(body) as ResponsesRequest);
       response.writeHead(200, { 'content-type': 'application/json' });
       response.end(
-        JSON.stringify({
-          choices: [
-            {
-              message: {
-                content: JSON.stringify({
-                  safe: true,
-                  name: 'Arroz vegetal multicasa QA',
-                  description: 'Alternativa sintética para comprobar aislamiento.',
-                  ingredients: ['arroz', 'calabacín'],
-                  estimatedTime: 25,
-                  servings: 2
-                })
-              }
-            }
-          ]
-        })
+        JSON.stringify(
+          responsesCompleted(
+            JSON.stringify({
+              safe: true,
+              name: 'Arroz vegetal multicasa QA',
+              description: 'Alternativa sintética para comprobar aislamiento.',
+              ingredients: ['arroz', 'calabacín'],
+              estimatedTime: 25,
+              servings: 2
+            })
+          )
+        )
       );
     });
   });
@@ -192,8 +193,7 @@ test('sustituir una comida usa solo miembros elegidos del hogar activo y persist
     );
 
     expect(providerRequests).toHaveLength(1);
-    const prompt =
-      providerRequests[0]?.messages?.map((message) => message.content ?? '').join('\n') ?? '';
+    const prompt = JSON.stringify(providerRequests[0]?.input ?? []);
     expect(prompt).toContain('sésamo QA');
     expect(prompt).not.toContain('nuez QA');
     for (const member of currentMembers) {

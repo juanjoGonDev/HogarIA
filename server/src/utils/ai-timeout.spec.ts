@@ -27,14 +27,16 @@ describe('AI timeout runtime limits', () => {
   it('gives each job a lease for its timeout plus the fixed safety margin', () => {
     expect(AI_JOB_LEASE_MARGIN_SECONDS).toBe(60);
     expect(aiJobLeaseSeconds(900_123)).toBe(961);
-    expect(aiJobLeaseSeconds(null)).toBe(90);
+    expect(aiJobLeaseSeconds(null)).toBe(180);
     expect(aiJobLeaseSeconds(AI_TIMEOUT_MAX_MS)).toBe(
       Math.ceil(AI_TIMEOUT_MAX_MS / 1000) + AI_JOB_LEASE_MARGIN_SECONDS
     );
   });
 
-  it('reserves a second timeout window for receipt streaming fallback', () => {
-    expect(aiJobLeaseSeconds(900_123, 'receipt')).toBe(2 * Math.ceil(900_123 / 1000) + 60);
+  it('gives every AI job at least two minutes and no longer reserves a fallback window', () => {
+    expect(aiJobLeaseSeconds(null, 'recipe')).toBe(180);
+    expect(aiJobLeaseSeconds(30_000, 'receipt')).toBe(180);
+    expect(aiJobLeaseSeconds(900_123, 'receipt')).toBe(Math.ceil(900_123 / 1000) + 60);
     expect(aiJobLeaseSeconds(900_123, 'recipe')).toBe(Math.ceil(900_123 / 1000) + 60);
   });
 

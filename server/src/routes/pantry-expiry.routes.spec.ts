@@ -19,13 +19,27 @@ let db: Sql;
 let closeDatabase: () => void;
 let alice: { id: string; token: string };
 
+function responsesText(content: string, id = 'resp_pantry_expiry_fixture'): Response {
+  return new Response(
+    JSON.stringify({
+      id,
+      status: 'completed',
+      output: [{ type: 'message', content: [{ type: 'output_text', text: content }] }]
+    }),
+    { status: 200, headers: { 'content-type': 'application/json' } }
+  );
+}
+
 async function makeUser(email: string) {
   const id = `u-${email.split('@')[0]}`;
-  db.prepare('INSERT INTO users (id, email, name, password_hash, household_id) VALUES (?, ?, ?, ?, NULL)').run(
-    id, email, 'Cocinera', 'hash'
-  );
+  db.prepare(
+    'INSERT INTO users (id, email, name, password_hash, household_id) VALUES (?, ?, ?, ?, NULL)'
+  ).run(id, email, 'Cocinera', 'hash');
   const config = await import('../config/app.config.js');
-  return { id, token: jwt.sign({ sub: id, email }, config.config.auth.jwtSecret, { expiresIn: '1h' }) };
+  return {
+    id,
+    token: jwt.sign({ sub: id, email }, config.config.auth.jwtSecret, { expiresIn: '1h' })
+  };
 }
 
 async function call(method: string, path: string, body?: unknown) {
@@ -50,7 +64,10 @@ function sembrar(nombre: string, extra: Record<string, unknown> = {}): string {
      VALUES (?, ?, NULL, ?, 'other', ?, 'ud', NULL, NULL, '2026-09-01 10:00:00')`
   ).run(id, alice.id, nombre, extra['quantity'] ?? 1);
   if (extra['expiration_date'] !== undefined) {
-    db.prepare('UPDATE ingredients SET expiration_date = ? WHERE id = ?').run(extra['expiration_date'], id);
+    db.prepare('UPDATE ingredients SET expiration_date = ? WHERE id = ?').run(
+      extra['expiration_date'],
+      id
+    );
   }
   return id;
 }
@@ -88,7 +105,11 @@ describe('GET /expiry', () => {
     const respuesta = await call('GET', '/expiry');
     expect(respuesta.status).toBe(200);
     const filas = respuesta.payload.data;
-    expect(filas.map((fila: any) => fila.name)).toEqual(['Pan de barra', 'Pescado fresco', 'Arroz']);
+    expect(filas.map((fila: any) => fila.name)).toEqual([
+      'Pan de barra',
+      'Pescado fresco',
+      'Arroz'
+    ]);
     expect(filas[0]).toMatchObject({ shelfSource: 'catalogo', estimatedDays: 4 });
     expect(filas[0].daysLeft).toBeLessThan(-15);
     expect(filas[1]).toMatchObject({ shelfSource: 'fecha', daysLeft: -1 });
@@ -115,10 +136,11 @@ describe('POST /expiry/estimate', () => {
     const quinoa = sembrar('Quinoa real');
 
     const cuerpo = JSON.stringify({ products: [{ name: 'Quinoa Real', days: '180' }] });
-    vi.stubGlobal(
-      'fetch',
-      async () => new Response(JSON.stringify({ choices: [{ message: { content: cuerpo } }] }), { status: 200 })
-    );
+    vi.stubGlobal('fetch', async (input: string | URL | Request, init?: RequestInit) => {
+      expect(new URL(String(input)).pathname).toBe('/v1/responses');
+      expect(JSON.parse(String(init?.body)).background).toBe(true);
+      return responsesText(cuerpo);
+    });
     db.prepare(
       `INSERT INTO ai_configs (id, user_id, name, provider, base_url, api_key, model, is_active)
        VALUES ('ai-1', ?, 'Local', 'custom', 'http://localhost:9/v1', 'k', 'm', 1)`
@@ -129,7 +151,9 @@ describe('POST /expiry/estimate', () => {
     expect(respuesta.status).toBe(200);
     expect(respuesta.payload.data).toMatchObject({ catalogo: 1, ia: 1, sinEstimar: 0 });
 
-    const guardado = db.prepare('SELECT estimated_shelf_days FROM ingredients WHERE id = ?').get(quinoa) as any;
+    const guardado = db
+      .prepare('SELECT estimated_shelf_days FROM ingredients WHERE id = ?')
+      .get(quinoa) as any;
     expect(guardado.estimated_shelf_days).toBe(180);
 
     const filas = (await call('GET', '/expiry')).payload.data;
@@ -139,10 +163,11 @@ describe('POST /expiry/estimate', () => {
 
   it('un modelo que contesta JSON invalido es 422, no un 500 sin nombre', async () => {
     sembrar('Quinoa real');
-    vi.stubGlobal(
-      'fetch',
-      async () => new Response(JSON.stringify({ choices: [{ message: { content: 'no soy json' } }] }), { status: 200 })
-    );
+    vi.stubGlobal('fetch', async (input: string | URL | Request, init?: RequestInit) => {
+      expect(new URL(String(input)).pathname).toBe('/v1/responses');
+      expect(JSON.parse(String(init?.body)).text.format.type).toBe('json_schema');
+      return responsesText('no soy json');
+    });
     db.prepare(
       `INSERT INTO ai_configs (id, user_id, name, provider, base_url, api_key, model, is_active)
        VALUES ('ai-1', ?, 'Local', 'custom', 'http://localhost:9/v1', 'k', 'm', 1)`

@@ -4,11 +4,10 @@ import { resolve } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { expect, test } from './fixtures';
 import { expectAiParticipantsSafetyNoteGeometry } from './helpers/ai-participants';
+import { responsesCompleted, userInputText, type ResponsesRequest } from './helpers/ai-responses';
 import { createHousehold, registerAndGoto } from './helpers/auth';
 
-type ProviderRequest = {
-  messages?: Array<{ role?: string; content?: string }>;
-};
+type ProviderRequest = ResponsesRequest;
 
 const screenshotDirectory = resolve(`.e2e-screenshots/ai-weekly-participants-${process.pid}`);
 
@@ -28,38 +27,37 @@ test('la planificación usa solo miembros activos elegidos e invitados efímeros
     request.setEncoding('utf8');
     request.on('data', (chunk: string) => (body += chunk));
     request.on('end', () => {
+      if (request.method !== 'POST' || request.url !== '/v1/responses') {
+        response.writeHead(404).end();
+        return;
+      }
       const payload = JSON.parse(body) as ProviderRequest;
       providerRequests.push(payload);
-      const userPrompt =
-        payload.messages?.find((message) => message.role === 'user')?.content ?? '';
+      const userPrompt = userInputText(payload);
       const startDate = userPrompt.match(/Del (\d{4}-\d{2}-\d{2}) al /)?.[1];
       response.writeHead(200, { 'content-type': 'application/json' });
       response.end(
-        JSON.stringify({
-          choices: [
-            {
-              message: {
-                content: JSON.stringify({
-                  days: startDate
-                    ? [
-                        {
-                          date: startDate,
-                          meals: {
-                            lunch: {
-                              name: 'Garbanzos sintéticos de prueba',
-                              ingredients: ['garbanzos'],
-                              time: null
-                            }
-                          }
+        JSON.stringify(
+          responsesCompleted(
+            JSON.stringify({
+              days: startDate
+                ? [
+                    {
+                      date: startDate,
+                      meals: {
+                        lunch: {
+                          name: 'Garbanzos sintéticos de prueba',
+                          ingredients: ['garbanzos'],
+                          time: null
                         }
-                      ]
-                    : [],
-                  shoppingList: []
-                })
-              }
-            }
-          ]
-        })
+                      }
+                    }
+                  ]
+                : [],
+              shoppingList: []
+            })
+          )
+        )
       );
     });
   });
@@ -206,8 +204,7 @@ test('la planificación usa solo miembros activos elegidos e invitados efímeros
     await expect(page.locator('.toast__title')).toContainText('Plan guardado');
 
     expect(providerRequests).toHaveLength(1);
-    const providerPrompt =
-      providerRequests[0]?.messages?.map((message) => message.content ?? '').join('\n') ?? '';
+    const providerPrompt = JSON.stringify(providerRequests[0]?.input ?? []);
     expect(providerPrompt).toContain('Preferencia sintética de prueba');
     expect(providerPrompt).not.toContain('Planificador sintético uno');
     expect(providerPrompt).not.toContain('Planificador sintético dos');

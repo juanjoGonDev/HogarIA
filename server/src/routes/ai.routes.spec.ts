@@ -72,21 +72,54 @@ function call(user: User, method: string, path: string, body?: unknown, appLangu
 
 const json = async (response: Response): Promise<any> => await response.json();
 const data = async (response: Response): Promise<any> => (await json(response)).data;
+const PROVIDER_BASE_URL = 'http://127.0.0.1:9/v1';
+
+function responsesFixture(
+  content: string,
+  id = 'resp_route_fixture',
+  status = 'completed'
+): Response {
+  return new Response(
+    JSON.stringify({
+      id,
+      status,
+      output:
+        status === 'completed'
+          ? [{ type: 'message', content: [{ type: 'output_text', text: content }] }]
+          : []
+    }),
+    { status: 200, headers: { 'content-type': 'application/json' } }
+  );
+}
+
+function providerBodyView(rawBody: string): any {
+  return JSON.parse(rawBody);
+}
+
+function inputText(body: any, index: number): string {
+  const content = body.input[index]?.content;
+  if (typeof content === 'string') return content;
+  return Array.isArray(content)
+    ? content
+        .filter((part: any) => part.type === 'input_text')
+        .map((part: any) => part.text)
+        .join('')
+    : '';
+}
+
+function responsesTextFormat(format: any): any {
+  return format?.type === 'json_schema' ? { type: 'json_schema', ...format.json_schema } : format;
+}
 
 /** El proveedor contesta lo que se le diga: aqui se decide si la prueba pasa o no. */
 function stubDelProveedor(content: string, status = 200): void {
   vi.stubGlobal('fetch', (async (input: string | URL | Request): Promise<Response> => {
     if (new URL(String(input)).pathname.endsWith('/responses')) {
-      return new Response(
-        JSON.stringify({
-          id: 'resp_1234567',
-          status: 'completed',
-          output: [{ type: 'message', content: [{ type: 'output_text', text: content }] }]
-        }),
-        { status: 200, headers: { 'content-type': 'application/json' } }
-      );
+      return responsesFixture(content, 'resp_1234567');
     }
-    return new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status });
+    return new Response('Unexpected non-Responses AI request', {
+      status: status === 200 ? 500 : status
+    });
   }) as unknown as typeof fetch);
 }
 
@@ -839,7 +872,22 @@ function stubRecipeProvider(
     init?: RequestInit
   ): Promise<Response> => {
     requests.push({ url: String(input), body: String(init?.body ?? '') });
-    return responseForCall(requests.length);
+    const body = JSON.parse(String(init?.body ?? '{}'));
+    expect(new URL(String(input)).pathname).toMatch(/\/responses$/);
+    expect(body.background).toBe(true);
+    expect(body.store).toBe(true);
+    expect(Array.isArray(body.input)).toBe(true);
+    expect(body.text?.format).toBeDefined();
+
+    const fixture = await responseForCall(requests.length);
+    if (!fixture.ok) return fixture;
+    const payload = (await fixture
+      .clone()
+      .json()
+      .catch(() => null)) as any;
+    if (typeof payload?.id === 'string' && Array.isArray(payload?.output)) return fixture;
+    const text = payload?.choices?.[0]?.message?.content;
+    return responsesFixture(typeof text === 'string' ? text : '', `resp_route_${requests.length}`);
   }) as typeof fetch);
   return requests;
 }
@@ -870,7 +918,7 @@ function createMealForReplacement(
 
 describe('POST /generate-recipe y /generate-multiple-recipes', () => {
   it('rechaza restricciones estrictas sin verificador antes de llamar al proveedor', async () => {
-    await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
+    await crearConfig(alice, 'Proveedor sin retries', 'http://127.0.0.1:9/v1', 0);
     const requests = stubRecipeProvider();
 
     for (const [path, body] of [
@@ -886,13 +934,13 @@ describe('POST /generate-recipe y /generate-multiple-recipes', () => {
   });
 
   it('instruye el idioma activo resuelto y evita forzar español cuando la app está en inglés', async () => {
-    await crearConfig(alice, 'Proveedor de prueba', 'http://ai.test/v1', 0);
+    await crearConfig(alice, 'Proveedor de prueba', 'http://127.0.0.1:9/v1', 0);
     const requests = stubRecipeProvider();
 
     const response = await call(alice, 'POST', '/generate-recipe', peticionGeneracion, 'en');
     expect(response.status).toBe(200);
-    const system = JSON.parse(requests[0].body).messages[0].content as string;
-    const prompt = JSON.parse(requests[0].body).messages[1].content as string;
+    const system = inputText(providerBodyView(requests[0].body), 0);
+    const prompt = inputText(providerBodyView(requests[0].body), 1);
 
     expect(system).toContain('English (United Kingdom)');
     expect(prompt).toContain('English (United Kingdom)');
@@ -900,7 +948,7 @@ describe('POST /generate-recipe y /generate-multiple-recipes', () => {
   });
 
   it('genera cantidades base para una ración y conserva en la respuesta el rendimiento normalizado', async () => {
-    await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
+    await crearConfig(alice, 'Proveedor sin retries', 'http://127.0.0.1:9/v1', 0);
     const requests = stubRecipeProvider();
 
     const response = await call(alice, 'POST', '/generate-recipe', {
@@ -908,12 +956,12 @@ describe('POST /generate-recipe y /generate-multiple-recipes', () => {
       servings: 4
     });
     const result = await json(response);
-    const providerRequest = JSON.parse(requests[0].body);
-    const prompt = providerRequest.messages[1].content as string;
+    const providerRequest = providerBodyView(requests[0].body);
+    const prompt = inputText(providerRequest, 1);
 
     expect(response.status).toBe(200);
-    expect(providerRequest.response_format.type).toBe('json_schema');
-    expect(providerRequest.response_format.json_schema.strict).toBe(true);
+    expect(providerRequest.text.format.type).toBe('json_schema');
+    expect(providerRequest.text.format.strict).toBe(true);
     expect(prompt).toContain('Raciones solicitadas para cocinar: 4');
     expect(prompt).toContain('rendimiento base de exactamente 1 ración');
     expect(prompt).toContain('cantidades de ingredientes por ración');
@@ -927,7 +975,7 @@ describe('POST /generate-recipe y /generate-multiple-recipes', () => {
   });
 
   it('rechaza una respuesta que no esté normalizada a una ración sin guardar nada', async () => {
-    await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
+    await crearConfig(alice, 'Proveedor sin retries', 'http://127.0.0.1:9/v1', 0);
     const requests = stubRecipeProvider(
       () =>
         new Response(
@@ -969,7 +1017,7 @@ describe('POST /generate-recipe y /generate-multiple-recipes', () => {
          VALUES (?, ?, ?, 'member', '{}')`
       ).run(`servings-${suffix}-membership`, 'servings-house', member.id);
     }
-    await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
+    await crearConfig(alice, 'Proveedor sin retries', 'http://127.0.0.1:9/v1', 0);
 
     const generated = { ...recetaGenerada, baseServings: 1 };
     const requests = stubRecipeProvider(
@@ -984,7 +1032,7 @@ describe('POST /generate-recipe y /generate-multiple-recipes', () => {
 
     const response = await call(alice, 'POST', '/generate-recipe', request);
     const result = await json(response);
-    const prompt = JSON.parse(requests[0].body).messages[1].content as string;
+    const prompt = inputText(providerBodyView(requests[0].body), 1);
 
     expect(response.status).toBe(200);
     expect(result.data.baseServings).toBe(1);
@@ -1028,7 +1076,7 @@ describe('POST /generate-recipe y /generate-multiple-recipes', () => {
       `INSERT INTO household_members (id, household_id, user_id, role, permissions, is_active)
        VALUES (?, ?, ?, 'member', '{}', 0)`
     ).run('participants-inactive', 'participants-house', inactive.id);
-    await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
+    await crearConfig(alice, 'Proveedor sin retries', 'http://127.0.0.1:9/v1', 0);
 
     const requests = stubRecipeProvider();
     const {
@@ -1044,7 +1092,7 @@ describe('POST /generate-recipe y /generate-multiple-recipes', () => {
       ]
     });
     const result = await json(response);
-    const prompt = JSON.parse(requests[0].body).messages[1].content as string;
+    const prompt = inputText(providerBodyView(requests[0].body), 1);
 
     expect(response.status).toBe(200);
     expect(result.data.baseServings).toBe(1);
@@ -1063,7 +1111,7 @@ describe('POST /generate-recipe y /generate-multiple-recipes', () => {
   });
 
   it('rejects inactive or foreign member IDs before calling the recipe provider', async () => {
-    await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
+    await crearConfig(alice, 'Proveedor sin retries', 'http://127.0.0.1:9/v1', 0);
     db.prepare('INSERT INTO households (id, name, invite_code) VALUES (?, ?, ?)').run(
       'invalid-participants-house',
       'Casa interna',
@@ -1108,7 +1156,7 @@ describe('POST /generate-recipe y /generate-multiple-recipes', () => {
       JSON.stringify({ taste: { allergies: ['cacahuete'] } }),
       alice.id
     );
-    await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
+    await crearConfig(alice, 'Proveedor sin retries', 'http://127.0.0.1:9/v1', 0);
     const conflictingRecipe = {
       ...recetaGenerada,
       ingredients: [
@@ -1142,7 +1190,7 @@ describe('POST /generate-recipe y /generate-multiple-recipes', () => {
   });
 
   it('single rechaza la respuesta si falta un nivel de instrucciones', async () => {
-    await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
+    await crearConfig(alice, 'Proveedor sin retries', 'http://127.0.0.1:9/v1', 0);
     const requests = stubRecipeProvider(
       () =>
         new Response(
@@ -1175,7 +1223,7 @@ describe('POST /generate-recipe y /generate-multiple-recipes', () => {
   });
 
   it('single devuelve todas las instrucciones y la selección inicial en una llamada', async () => {
-    await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
+    await crearConfig(alice, 'Proveedor sin retries', 'http://127.0.0.1:9/v1', 0);
     const requests = stubRecipeProvider(
       () =>
         new Response(
@@ -1196,13 +1244,13 @@ describe('POST /generate-recipe y /generate-multiple-recipes', () => {
     expect(result.data.selectedDetailLevel).toBe('basic');
     expect(result.data).not.toHaveProperty('steps');
     expect(requests).toHaveLength(1);
-    const prompt = JSON.parse(requests[0].body).messages[1].content as string;
+    const prompt = inputText(providerBodyView(requests[0].body), 1);
     expect(prompt).toContain('genera SIEMPRE los tres niveles completos');
     expect(recipeCount()).toBe(0);
   });
 
   it('single devuelve un borrador con el prompt vigente y no crea filas', async () => {
-    await crearConfig(alice, 'Proveedor de prueba', 'http://ai.test/v1');
+    await crearConfig(alice, 'Proveedor de prueba', 'http://127.0.0.1:9/v1');
     const requests = stubRecipeProvider();
 
     const response = await call(alice, 'POST', '/generate-recipe', peticionGeneracion);
@@ -1214,9 +1262,9 @@ describe('POST /generate-recipe y /generate-multiple-recipes', () => {
     expect(result.data).not.toHaveProperty('id');
     expect(recipeCount()).toBe(0);
     expect(requests).toHaveLength(1);
-    expect(requests[0].url).toBe('http://ai.test/v1/chat/completions');
-    const providerBody = JSON.parse(requests[0].body);
-    const prompt = providerBody.messages[1].content as string;
+    expect(requests[0].url).toBe('http://127.0.0.1:9/v1/responses');
+    const providerBody = providerBodyView(requests[0].body);
+    const prompt = inputText(providerBody, 1);
     expect(prompt).toContain('Ingredientes disponibles: 200 g de lentejas');
     expect(prompt).toContain('Utensilios disponibles: Olla');
     expect(prompt).toContain('Raciones solicitadas para cocinar: 2');
@@ -1249,8 +1297,48 @@ describe('POST /generate-recipe y /generate-multiple-recipes', () => {
     expect(result.data.guidance).toEqual(recetaGenerada.guidance);
   });
 
+  it('consume la salida final de Responses background tras polling y no usa Chat Completions', async () => {
+    await crearConfig(alice, 'Proveedor de prueba', PROVIDER_BASE_URL, 0);
+    const requests: Array<{ url: string; method: string; body: string; idempotencyKey: string }> =
+      [];
+    vi.stubGlobal('fetch', (async (
+      input: string | URL | Request,
+      init?: RequestInit
+    ): Promise<Response> => {
+      const url = String(input);
+      const method = String(init?.method ?? 'GET').toUpperCase();
+      requests.push({
+        url,
+        method,
+        body: String(init?.body ?? ''),
+        idempotencyKey: new Headers(init?.headers).get('Idempotency-Key') ?? ''
+      });
+      if (method === 'POST' && url.endsWith('/v1/responses')) {
+        return responsesFixture('', 'resp_route_poll', 'queued');
+      }
+      if (method === 'GET' && url.endsWith('/v1/responses/resp_route_poll')) {
+        return responsesFixture(JSON.stringify(recetaGenerada), 'resp_route_poll');
+      }
+      throw new Error(`Unexpected provider request: ${method} ${url}`);
+    }) as typeof fetch);
+
+    const response = await call(alice, 'POST', '/generate-recipe', peticionGeneracion);
+    const result = await json(response);
+
+    expect(response.status).toBe(200);
+    expect(result.data).toMatchObject(recetaGenerada);
+    expect(requests.map(({ method, url }) => [method, url])).toEqual([
+      ['POST', `${PROVIDER_BASE_URL}/responses`],
+      ['GET', `${PROVIDER_BASE_URL}/responses/resp_route_poll`]
+    ]);
+    const create = JSON.parse(requests[0].body);
+    expect(create).toMatchObject({ model: 'gpt-5', background: true, store: true });
+    expect(create.text.format).toMatchObject({ type: 'json_schema', strict: true });
+    expect(requests[0].idempotencyKey).toMatch(/^hogaria-ai-/);
+  });
+
   it('multiple genera exactamente las candidatas pedidas mediante el proveedor y no persiste ninguna', async () => {
-    await crearConfig(alice, 'Proveedor de prueba', 'http://ai.test/v1');
+    await crearConfig(alice, 'Proveedor de prueba', 'http://127.0.0.1:9/v1');
     const requests = stubRecipeProvider((callIndex) => {
       const recipe = {
         ...recetaGenerada,
@@ -1295,12 +1383,12 @@ describe('POST /generate-recipe y /generate-multiple-recipes', () => {
       'Receta 3'
     ]);
     expect(requests).toHaveLength(3);
-    expect(requests.every(({ url }) => url === 'http://ai.test/v1/chat/completions')).toBe(true);
+    expect(requests.every(({ url }) => url === 'http://127.0.0.1:9/v1/responses')).toBe(true);
     expect(recipeCount()).toBe(0);
   });
 
   it('multiple devuelve un borrador completo y utilizable con retries desactivados', async () => {
-    await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
+    await crearConfig(alice, 'Proveedor sin retries', 'http://127.0.0.1:9/v1', 0);
     const requests = stubRecipeProvider();
 
     const response = await call(alice, 'POST', '/generate-multiple-recipes', {
@@ -1329,7 +1417,7 @@ describe('POST /generate-recipe y /generate-multiple-recipes', () => {
   });
 
   it('multiple comparte las raciones elegidas como contexto y devuelve cada candidata normalizada', async () => {
-    await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
+    await crearConfig(alice, 'Proveedor sin retries', 'http://127.0.0.1:9/v1', 0);
     const requests = stubRecipeProvider();
 
     const response = await call(alice, 'POST', '/generate-multiple-recipes', {
@@ -1338,11 +1426,11 @@ describe('POST /generate-recipe y /generate-multiple-recipes', () => {
       count: 1
     });
     const result = await json(response);
-    const providerRequest = JSON.parse(requests[0].body);
-    const prompt = providerRequest.messages[1].content as string;
+    const providerRequest = providerBodyView(requests[0].body);
+    const prompt = inputText(providerRequest, 1);
 
     expect(response.status).toBe(200);
-    expect(providerRequest.response_format.json_schema.strict).toBe(true);
+    expect(providerRequest.text.format.strict).toBe(true);
     expect(result.data).toHaveLength(1);
     expect(result.data.map((recipe: { baseServings: number }) => recipe.baseServings)).toEqual([1]);
     expect(
@@ -1357,7 +1445,7 @@ describe('POST /generate-recipe y /generate-multiple-recipes', () => {
   });
 
   it('valida y devuelve un aviso explícito de cocinar en tandas', async () => {
-    await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
+    await crearConfig(alice, 'Proveedor sin retries', 'http://127.0.0.1:9/v1', 0);
     const warning = 'Dora la cebolla en tres tandas; amontonarla haría que soltara agua.';
     stubRecipeProvider(
       () =>
@@ -1390,7 +1478,7 @@ describe('POST /generate-recipe y /generate-multiple-recipes', () => {
   });
 
   it('multiple rechaza un JSON insuficiente en lugar de devolver un candidato parcial', async () => {
-    await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
+    await crearConfig(alice, 'Proveedor sin retries', 'http://127.0.0.1:9/v1', 0);
     const requests = stubRecipeProvider(
       () =>
         new Response(
@@ -1415,7 +1503,7 @@ describe('POST /generate-recipe y /generate-multiple-recipes', () => {
   });
 
   it('multiple rechaza una receta duplicada por contenido aunque el título cambie', async () => {
-    await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
+    await crearConfig(alice, 'Proveedor sin retries', 'http://127.0.0.1:9/v1', 0);
     const requests = stubRecipeProvider(() => {
       const isSecondCall = requests.length !== 1;
       const recipe = {
@@ -1472,7 +1560,7 @@ describe('POST /generate-recipe y /generate-multiple-recipes', () => {
   });
 
   it('multiple devuelve dos candidatas completas y distintas con una llamada por candidata', async () => {
-    await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
+    await crearConfig(alice, 'Proveedor sin retries', 'http://127.0.0.1:9/v1', 0);
     const requests = stubRecipeProvider((callIndex) => {
       const recipe = {
         ...recetaGenerada,
@@ -1530,7 +1618,7 @@ describe('POST /generate-recipe y /generate-multiple-recipes', () => {
   });
 
   it('un fallo del proveedor no se oculta como lista vacía ni éxito parcial', async () => {
-    await crearConfig(alice, 'Proveedor de prueba', 'http://ai.test/v1');
+    await crearConfig(alice, 'Proveedor de prueba', 'http://127.0.0.1:9/v1');
     const requests = stubRecipeProvider((callIndex) =>
       callIndex === 1
         ? new Response(
@@ -1554,7 +1642,7 @@ describe('POST /generate-recipe y /generate-multiple-recipes', () => {
   });
 
   it('single reporta el error del proveedor y no persiste una receta', async () => {
-    await crearConfig(alice, 'Proveedor de prueba', 'http://ai.test/v1');
+    await crearConfig(alice, 'Proveedor de prueba', 'http://127.0.0.1:9/v1');
     const requests = stubRecipeProvider(
       () => new Response('provider unavailable', { status: 503 })
     );
@@ -1569,7 +1657,7 @@ describe('POST /generate-recipe y /generate-multiple-recipes', () => {
   });
 
   it('multiple falla si el proveedor no produce ninguna candidata utilizable', async () => {
-    await crearConfig(alice, 'Proveedor de prueba', 'http://ai.test/v1');
+    await crearConfig(alice, 'Proveedor de prueba', 'http://127.0.0.1:9/v1');
     const requests = stubRecipeProvider(
       () =>
         new Response(
@@ -1594,7 +1682,7 @@ describe('POST /generate-recipe y /generate-multiple-recipes', () => {
   });
 
   it('una respuesta sin receta útil falla y no devuelve un borrador vacío', async () => {
-    await crearConfig(alice, 'Proveedor de prueba', 'http://ai.test/v1');
+    await crearConfig(alice, 'Proveedor de prueba', 'http://127.0.0.1:9/v1');
     stubRecipeProvider(
       () =>
         new Response(JSON.stringify({ choices: [{ message: { content: '{}' } }] }), { status: 200 })
@@ -1620,7 +1708,7 @@ describe('POST /replace-meal', () => {
   };
 
   it('returns an ephemeral alternative, omits identifiers and leaves persistence to confirmation', async () => {
-    await crearConfig(alice, 'Proveedor de reemplazo', 'http://ai.test/v1', 0);
+    await crearConfig(alice, 'Proveedor de reemplazo', 'http://127.0.0.1:9/v1', 0);
     createMealForReplacement(alice.id, 'replace-meal-safe');
     const requests = stubRecipeProvider(
       () =>
@@ -1663,7 +1751,7 @@ describe('POST /replace-meal', () => {
       'en'
     );
     const result = await json(response);
-    const prompt = JSON.parse(requests[0].body).messages[1].content as string;
+    const prompt = inputText(providerBodyView(requests[0].body), 1);
     const savedMeal = db
       .prepare('SELECT custom_meal FROM meals WHERE id = ?')
       .get('replace-meal-safe') as { custom_meal: string } | undefined;
@@ -1685,7 +1773,7 @@ describe('POST /replace-meal', () => {
 
   it('accepts AI replacement text longer than the former character caps', async () => {
     const longText = 'x'.repeat(2_501);
-    await crearConfig(alice, 'Proveedor de reemplazo', 'http://ai.test/v1', 0);
+    await crearConfig(alice, 'Proveedor de reemplazo', 'http://127.0.0.1:9/v1', 0);
     createMealForReplacement(alice.id, 'replace-meal-long-text');
     const requests = stubRecipeProvider(
       () =>
@@ -1714,7 +1802,7 @@ describe('POST /replace-meal', () => {
       mealId: 'replace-meal-long-text'
     });
     const result = await json(response);
-    const body = JSON.parse(requests[0].body);
+    const body = providerBodyView(requests[0].body);
 
     expect(response.status).toBe(200);
     expect(result.data).toMatchObject({
@@ -1722,14 +1810,14 @@ describe('POST /replace-meal', () => {
       description: longText,
       ingredients: [longText]
     });
-    expect(JSON.stringify(body.response_format.json_schema.schema)).not.toContain('"maxLength"');
+    expect(JSON.stringify(body.text.format.schema)).not.toContain('"maxLength"');
     expect(
       db.prepare('SELECT custom_meal FROM meals WHERE id = ?').get('replace-meal-long-text')
     ).toMatchObject({ custom_meal: 'Pasta con salsa' });
   });
 
   it('rejects an incomplete AI alternative and leaves the existing meal unchanged', async () => {
-    await crearConfig(alice, 'Proveedor de reemplazo', 'http://ai.test/v1', 0);
+    await crearConfig(alice, 'Proveedor de reemplazo', 'http://127.0.0.1:9/v1', 0);
     createMealForReplacement(alice.id, 'replace-meal-incomplete');
     stubRecipeProvider(
       () =>
@@ -1768,7 +1856,7 @@ describe('POST /replace-meal', () => {
   });
 
   it('honors an explicit no-safe-alternative response without changing the existing meal', async () => {
-    await crearConfig(alice, 'Proveedor de reemplazo', 'http://ai.test/v1', 0);
+    await crearConfig(alice, 'Proveedor de reemplazo', 'http://127.0.0.1:9/v1', 0);
     createMealForReplacement(alice.id, 'replace-meal-no-safe-alternative');
     const requests = stubRecipeProvider(
       () =>
@@ -1810,7 +1898,7 @@ describe('POST /replace-meal', () => {
 
   it('applies plural goals and only the selected household members preferences to the prompt', async () => {
     selectHousehold(alice, 'replan-house', { settings: true });
-    await crearConfig(alice, 'Proveedor de reemplazo', 'http://ai.test/v1', 0);
+    await crearConfig(alice, 'Proveedor de reemplazo', 'http://127.0.0.1:9/v1', 0);
     const otherMember = await makeUser(
       `replan-other-${Math.random().toString(36).slice(2)}@test.local`
     );
@@ -1856,7 +1944,7 @@ describe('POST /replace-meal', () => {
         customInstructions: 'Prioriza platos saciantes con legumbres.'
       }
     });
-    const prompt = JSON.parse(requests[0].body).messages[1].content as string;
+    const prompt = inputText(providerBodyView(requests[0].body), 1);
 
     expect(response.status).toBe(200);
     expect(prompt).toContain('weight-loss');
@@ -1886,7 +1974,7 @@ describe('POST /replace-meal', () => {
   });
 
   it('rejects guest identifiers and never calls the provider for an invalid request', async () => {
-    await crearConfig(alice, 'Proveedor de reemplazo', 'http://ai.test/v1', 0);
+    await crearConfig(alice, 'Proveedor de reemplazo', 'http://127.0.0.1:9/v1', 0);
     const requests = stubRecipeProvider();
     const response = await call(alice, 'POST', '/replace-meal', {
       mealId: 'some-meal',
@@ -1898,7 +1986,7 @@ describe('POST /replace-meal', () => {
   });
 
   it('rejects an unverified strict restriction before contacting the provider', async () => {
-    await crearConfig(alice, 'Proveedor de reemplazo', 'http://ai.test/v1', 0);
+    await crearConfig(alice, 'Proveedor de reemplazo', 'http://127.0.0.1:9/v1', 0);
     createMealForReplacement(alice.id, 'replace-meal-unsupported');
     const requests = stubRecipeProvider();
 
@@ -1913,7 +2001,7 @@ describe('POST /replace-meal', () => {
   });
 
   it('fails closed if the generated ingredient list contradicts an intolerance', async () => {
-    await crearConfig(alice, 'Proveedor de reemplazo', 'http://ai.test/v1', 0);
+    await crearConfig(alice, 'Proveedor de reemplazo', 'http://127.0.0.1:9/v1', 0);
     createMealForReplacement(alice.id, 'replace-meal-unsafe');
     stubRecipeProvider(
       () =>
@@ -1955,7 +2043,7 @@ describe('POST /replace-meal', () => {
   it('does not disclose another user’s meal', async () => {
     const bob = await makeUser(`replace-bob-${Math.random().toString(36).slice(2)}@test.local`);
     createMealForReplacement(bob.id, 'replace-meal-private');
-    await crearConfig(alice, 'Proveedor de reemplazo', 'http://ai.test/v1', 0);
+    await crearConfig(alice, 'Proveedor de reemplazo', 'http://127.0.0.1:9/v1', 0);
     const requests = stubRecipeProvider();
 
     const response = await call(alice, 'POST', '/replace-meal', { mealId: 'replace-meal-private' });
@@ -1984,7 +2072,7 @@ describe('POST /replace-meal', () => {
       VALUES ('meal-other-home', 'calendar-other-home-meal', '2026-10-07', 'dinner', 'Cena privada', '20:00', 2)
     `
     ).run();
-    await crearConfig(alice, 'Proveedor hogar activo', 'http://ai.test/v1', 0);
+    await crearConfig(alice, 'Proveedor hogar activo', 'http://127.0.0.1:9/v1', 0);
     const requests = stubRecipeProvider();
 
     const response = await call(alice, 'POST', '/replace-meal', { mealId: 'meal-other-home' });
@@ -1997,8 +2085,13 @@ describe('POST /replace-meal', () => {
 
 describe('POST /recommendations y /plan-week', () => {
   it('mantiene fijo el proveedor de un trabajo admitido si después cambia la asignación', async () => {
-    const original = await crearConfig(alice, 'Proveedor inicial', 'http://first.test/v1', 0);
-    const next = await crearConfig(alice, 'Proveedor nuevo', 'http://second.test/v1', 0);
+    const original = await crearConfig(
+      alice,
+      'Proveedor inicial',
+      'http://127.0.0.1:9/first/v1',
+      0
+    );
+    const next = await crearConfig(alice, 'Proveedor nuevo', 'http://127.0.0.1:9/second/v1', 0);
     let notifyStarted!: () => void;
     let finishProvider!: (response: Response) => void;
     const started = new Promise<void>((resolve) => (notifyStarted = resolve));
@@ -2019,19 +2112,14 @@ describe('POST /recommendations y /plan-week', () => {
       config_id: original.id
     });
 
-    finishProvider(
-      new Response(
-        JSON.stringify({ choices: [{ message: { content: '{"recommendations":[]}' } }] }),
-        { status: 200 }
-      )
-    );
+    finishProvider(responsesFixture('{"recommendations":[]}', 'resp_pinned_config'));
     expect((await pending).status).toBe(200);
-    expect(requests).toEqual(['http://first.test/v1/chat/completions']);
+    expect(requests).toEqual(['http://127.0.0.1:9/first/v1/responses']);
   });
 
   it('envía recomendaciones al proveedor asignado a recetas y no al asistente', async () => {
-    const assistant = await crearConfig(alice, 'Asistente', 'http://assistant.test/v1', 0);
-    const recipes = await crearConfig(alice, 'Recetas', 'http://recipes.test/v1', 0);
+    const assistant = await crearConfig(alice, 'Asistente', 'http://127.0.0.1:9/assistant/v1', 0);
+    const recipes = await crearConfig(alice, 'Recetas', 'http://127.0.0.1:9/recipes/v1', 0);
     const recommendations = [
       { name: 'Sopa', reason: 'Fixture sintético', ingredients: ['tomate'], estimatedTime: 10 }
     ];
@@ -2053,7 +2141,7 @@ describe('POST /recommendations y /plan-week', () => {
 
     expect(response.status).toBe(200);
     expect(requests).toHaveLength(1);
-    expect(requests[0].url).toBe('http://recipes.test/v1/chat/completions');
+    expect(requests[0].url).toBe('http://127.0.0.1:9/recipes/v1/responses');
     expect(
       db.prepare("SELECT config_id FROM ai_jobs WHERE kind = 'recommendations'").get()
     ).toEqual({ config_id: recipes.id });
@@ -2061,7 +2149,7 @@ describe('POST /recommendations y /plan-week', () => {
   });
 
   it('rechaza intolerancias libres no verificables antes de llamar al proveedor o guardar', async () => {
-    await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
+    await crearConfig(alice, 'Proveedor sin retries', 'http://127.0.0.1:9/v1', 0);
     const requests = stubRecipeProvider();
 
     const response = await call(alice, 'POST', '/plan-week', {
@@ -2089,7 +2177,7 @@ describe('POST /recommendations y /plan-week', () => {
         estimatedTime: 20
       }
     ];
-    await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
+    await crearConfig(alice, 'Proveedor sin retries', 'http://127.0.0.1:9/v1', 0);
     const requests = stubRecipeProvider(
       () =>
         new Response(
@@ -2118,7 +2206,7 @@ describe('POST /recommendations y /plan-week', () => {
     expect(result.success).toBe(true);
     expect(result.data).toEqual(recommendations);
     expect(requests).toHaveLength(1);
-    const prompt = JSON.parse(requests[0].body).messages[1].content as string;
+    const prompt = inputText(providerBodyView(requests[0].body), 1);
     expect(prompt).toContain('2026-10-02: Pasta');
     expect(prompt).toContain('Ingredientes disponibles: tomate');
     expect(prompt).toContain('Likes=sopa, Dislikes=picante, Alergias=nuez');
@@ -2136,7 +2224,7 @@ describe('POST /recommendations y /plan-week', () => {
       ],
       shoppingList: ['Tomate']
     };
-    await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
+    await crearConfig(alice, 'Proveedor sin retries', 'http://127.0.0.1:9/v1', 0);
     const requests = stubRecipeProvider(
       () =>
         new Response(
@@ -2166,7 +2254,7 @@ describe('POST /recommendations y /plan-week', () => {
     expect(result.data.saved.created).toBe(1);
     expect(result.data.saved.skipped).toBe(0);
     expect(requests).toHaveLength(1);
-    const prompt = JSON.parse(requests[0].body).messages[1].content as string;
+    const prompt = inputText(providerBodyView(requests[0].body), 1);
     expect(prompt).toContain('Indicaciones del usuario (prioritarias): Prioriza sencillez');
     expect(prompt).toContain('Ingredientes disponibles: Tomate');
     expect(prompt).toContain('Planifica SOLO estas comidas: dinner');
@@ -2191,7 +2279,7 @@ describe('POST /recommendations y /plan-week', () => {
   });
 
   it('rechaza preferencias de hogar falsificadas antes de llamar al proveedor o persistir', async () => {
-    await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
+    await crearConfig(alice, 'Proveedor sin retries', 'http://127.0.0.1:9/v1', 0);
     const requests = stubRecipeProvider();
 
     const response = await call(alice, 'POST', '/plan-week', {
@@ -2239,7 +2327,7 @@ describe('POST /recommendations y /plan-week', () => {
       `INSERT INTO household_members (id, household_id, user_id, role, permissions, is_active)
        VALUES (?, ?, ?, 'member', '{}', 0)`
     ).run('weekly-serving-inactive', 'weekly-servings-house', inactive.id);
-    await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
+    await crearConfig(alice, 'Proveedor sin retries', 'http://127.0.0.1:9/v1', 0);
 
     const plan = {
       days: [
@@ -2259,7 +2347,7 @@ describe('POST /recommendations y /plan-week', () => {
       mealTypes: ['dinner']
     });
     const result = await json(response);
-    const prompt = JSON.parse(requests[0].body).messages[1].content as string;
+    const prompt = inputText(providerBodyView(requests[0].body), 1);
     const savedMeal = db
       .prepare(
         `SELECT m.servings FROM meals m
@@ -2296,7 +2384,7 @@ describe('POST /recommendations y /plan-week', () => {
       `INSERT INTO household_members (id, household_id, user_id, role, permissions)
        VALUES (?, ?, ?, 'member', '{}')`
     ).run('weekly-participants-selected', 'weekly-participants-house', selected.id);
-    await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
+    await crearConfig(alice, 'Proveedor sin retries', 'http://127.0.0.1:9/v1', 0);
     const plan = {
       days: [
         {
@@ -2320,7 +2408,7 @@ describe('POST /recommendations y /plan-week', () => {
       guests: [{ allergies: ['huevo'], likes: ['lentejas'] }]
     });
     const result = await json(response);
-    const prompt = JSON.parse(requests[0].body).messages[1].content as string;
+    const prompt = inputText(providerBodyView(requests[0].body), 1);
     const calendar = db
       .prepare('SELECT goals FROM weekly_calendars WHERE user_id = ?')
       .get(alice.id) as {
@@ -2363,7 +2451,7 @@ describe('POST /recommendations y /plan-week', () => {
       `INSERT INTO household_members (id, household_id, user_id, role, permissions)
        VALUES (?, ?, ?, 'admin', '{"settings":true}')`
     ).run('weekly-allergy-alice', 'weekly-allergy-house', alice.id);
-    await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
+    await crearConfig(alice, 'Proveedor sin retries', 'http://127.0.0.1:9/v1', 0);
     stubRecipeProvider(
       () =>
         new Response(
@@ -2440,7 +2528,7 @@ describe('POST /recommendations y /plan-week', () => {
         JSON.stringify({ taste: { allergies: ['huevo'] } }),
         alice.id
       );
-      await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
+      await crearConfig(alice, 'Proveedor sin retries', 'http://127.0.0.1:9/v1', 0);
       const requests = stubRecipeProvider(
         () =>
           new Response(
@@ -2480,7 +2568,7 @@ describe('POST /recommendations y /plan-week', () => {
       ],
       shoppingList: []
     };
-    await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
+    await crearConfig(alice, 'Proveedor sin retries', 'http://127.0.0.1:9/v1', 0);
     const requests = stubRecipeProvider(
       () =>
         new Response(
@@ -2504,7 +2592,7 @@ describe('POST /recommendations y /plan-week', () => {
     expect(response.status).toBe(200);
     expect(result.success).toBe(true);
     expect(result.data.saved.created).toBe(1);
-    const prompt = JSON.parse(requests[0].body).messages[1].content as string;
+    const prompt = inputText(providerBodyView(requests[0].body), 1);
     expect(prompt).toContain('Objetivos: Perder peso, Variada');
     expect(prompt).toContain(
       'Indicaciones del usuario (prioritarias): Prioriza legumbres y cenas sencillas'
@@ -2522,7 +2610,7 @@ describe('POST /recommendations y /plan-week', () => {
   });
 
   it('rechaza objetivos vacíos o un objetivo personalizado sin texto antes de llamar al proveedor', async () => {
-    await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
+    await crearConfig(alice, 'Proveedor sin retries', 'http://127.0.0.1:9/v1', 0);
     const requests = stubRecipeProvider();
 
     for (const goals of [{ types: [] }, { types: ['custom'] }]) {
@@ -2542,7 +2630,7 @@ describe('POST /recommendations y /plan-week', () => {
 
   it('mantiene compatible el objetivo singular legacy y lo normaliza a una lista', async () => {
     const plan = { days: [{ date: '2026-10-12', meals: { dinner: { name: 'Sopa' } } }] };
-    await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
+    await crearConfig(alice, 'Proveedor sin retries', 'http://127.0.0.1:9/v1', 0);
     const requests = stubRecipeProvider(
       () =>
         new Response(
@@ -2559,7 +2647,7 @@ describe('POST /recommendations y /plan-week', () => {
     });
 
     expect(response.status).toBe(200);
-    expect(JSON.parse(requests[0].body).messages[1].content).toContain('Objetivo: Equilibrada');
+    expect(inputText(providerBodyView(requests[0].body), 1)).toContain('Objetivo: Equilibrada');
     const calendar = db
       .prepare('SELECT goals FROM weekly_calendars WHERE user_id = ?')
       .get(alice.id) as { goals: string };
@@ -2594,7 +2682,7 @@ describe('POST /recommendations y /plan-week', () => {
 
   describe('POST /improve-recipe', () => {
     it('enforces a byte ceiling without invoking the provider', async () => {
-      await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
+      await crearConfig(alice, 'Proveedor sin retries', 'http://127.0.0.1:9/v1', 0);
       const requests = stubRecipeProvider();
       const response = await call(alice, 'POST', '/improve-recipe', {
         recipe: { description: 'x'.repeat(MAX_RECIPE_CONTENT_REQUEST_BYTES + 1) },
@@ -2610,7 +2698,7 @@ describe('POST /recommendations y /plan-week', () => {
     });
 
     it('accepts long recipe input and validates equally long canonical AI output', async () => {
-      await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
+      await crearConfig(alice, 'Proveedor sin retries', 'http://127.0.0.1:9/v1', 0);
       const longText = 'x'.repeat(2_501);
       const longRecipe = {
         ...recetaGenerada,
@@ -2667,13 +2755,15 @@ describe('POST /recommendations y /plan-week', () => {
         scopes: ['details']
       });
       const result = await json(response);
-      const providerBody = JSON.parse(requests[0].body);
+      const providerBody = providerBodyView(requests[0].body);
 
       expect(response.status).toBe(200);
-      expect(providerBody.response_format).toEqual(
-        (await import('../schemas/ai-generated-output.schema.js')).RECIPE_RESPONSE_FORMAT
+      expect(providerBody.text.format).toEqual(
+        responsesTextFormat(
+          (await import('../schemas/ai-generated-output.schema.js')).RECIPE_RESPONSE_FORMAT
+        )
       );
-      expect(providerBody.messages[1].content).toContain(longText);
+      expect(inputText(providerBody, 1)).toContain(longText);
       expect(result.data.proposal).toMatchObject({
         name: longText,
         description: longText,
@@ -2687,7 +2777,7 @@ describe('POST /recommendations y /plan-week', () => {
     });
 
     it('usa contrato estricto y devuelve patch solo con ámbitos pedidos', async () => {
-      await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
+      await crearConfig(alice, 'Proveedor sin retries', 'http://127.0.0.1:9/v1', 0);
       const proposal = {
         ...recetaGenerada,
         totalTime: 42,
@@ -2720,11 +2810,13 @@ describe('POST /recommendations y /plan-week', () => {
         scopes: ['timing', 'guidance']
       });
       const result = await json(response);
-      const providerBody = JSON.parse(requests[0].body);
+      const providerBody = providerBodyView(requests[0].body);
 
       expect(response.status).toBe(200);
-      expect(providerBody.response_format).toEqual(
-        (await import('../schemas/ai-generated-output.schema.js')).RECIPE_RESPONSE_FORMAT
+      expect(providerBody.text.format).toEqual(
+        responsesTextFormat(
+          (await import('../schemas/ai-generated-output.schema.js')).RECIPE_RESPONSE_FORMAT
+        )
       );
       expect(result).toMatchObject({
         success: true,
@@ -2748,7 +2840,7 @@ describe('POST /recommendations y /plan-week', () => {
     });
 
     it('convierte preparación legacy solo cuando se pide y devuelve sus tres variantes', async () => {
-      await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
+      await crearConfig(alice, 'Proveedor sin retries', 'http://127.0.0.1:9/v1', 0);
       const { instructionsByLevel: _levels, ...canonical } = recetaGenerada;
       const legacyRecipe = {
         ...canonical,
@@ -2772,7 +2864,7 @@ describe('POST /recommendations y /plan-week', () => {
         scopes: ['preparation']
       });
       const result = await json(response);
-      const prompt = JSON.parse(requests[0].body).messages[1].content as string;
+      const prompt = inputText(providerBodyView(requests[0].body), 1);
 
       expect(response.status).toBe(200);
       expect(prompt).toContain('legacy');
@@ -2782,7 +2874,7 @@ describe('POST /recommendations y /plan-week', () => {
     });
 
     it('rechaza respuesta no canónica sin proponer ni guardar y protege ámbitos no seleccionados', async () => {
-      await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
+      await crearConfig(alice, 'Proveedor sin retries', 'http://127.0.0.1:9/v1', 0);
       const invalidProposal = { ...recetaGenerada, unexpected: 'forged' };
       stubRecipeProvider(
         () =>
@@ -2835,7 +2927,7 @@ describe('POST /recommendations y /plan-week', () => {
     });
 
     it('bloquea ingredientes incompatibles o restricciones no verificables antes de devolver propuesta', async () => {
-      await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
+      await crearConfig(alice, 'Proveedor sin retries', 'http://127.0.0.1:9/v1', 0);
       db.prepare('UPDATE users SET preferences = ? WHERE id = ?').run(
         JSON.stringify({ taste: { allergies: ['cacahuete'], notes: 'dato privado de prueba' } }),
         alice.id
@@ -2861,8 +2953,8 @@ describe('POST /recommendations y /plan-week', () => {
         recipe: recetaGenerada,
         scopes: ['ingredients']
       });
-      const providerBody = JSON.parse(requests[0].body);
-      const prompt = providerBody.messages[1].content as string;
+      const providerBody = providerBodyView(requests[0].body);
+      const prompt = inputText(providerBody, 1);
 
       expect(response.status).toBe(422);
       expect((await json(response)).code).toBe('PARTICIPANT_RESTRICTION_CONFLICT');
@@ -2873,7 +2965,7 @@ describe('POST /recommendations y /plan-week', () => {
     });
 
     it('rechaza una alergia no verificable y mapea timeout/error de proveedor sin persistir', async () => {
-      await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
+      await crearConfig(alice, 'Proveedor sin retries', 'http://127.0.0.1:9/v1', 0);
       db.prepare('UPDATE users SET preferences = ? WHERE id = ?').run(
         JSON.stringify({ taste: { allergies: ['fructosa'] } }),
         alice.id
@@ -2920,7 +3012,7 @@ describe('POST /recommendations y /plan-week', () => {
       });
       expect(noAuth.status).toBe(401);
 
-      await crearConfig(alice, 'Proveedor sin retries', 'http://ai.test/v1', 0);
+      await crearConfig(alice, 'Proveedor sin retries', 'http://127.0.0.1:9/v1', 0);
       const requests = stubRecipeProvider();
       const invalidRequests = await Promise.all([
         call(alice, 'POST', '/improve-recipe', {

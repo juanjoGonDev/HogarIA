@@ -9,7 +9,7 @@ import { shoppingNewListAction } from '../helpers/shopping-ui';
 type ProviderContentPart = {
   type?: string;
   text?: string;
-  image_url?: { url?: string; detail?: string };
+  image_url?: string;
 };
 
 type ProviderMessage = {
@@ -19,12 +19,10 @@ type ProviderMessage = {
 
 type ProviderRequest = {
   model?: string;
-  stream?: boolean;
-  response_format?: {
-    type?: string;
-    json_schema?: { name?: string; strict?: boolean; schema?: unknown };
-  };
-  messages?: ProviderMessage[];
+  background?: boolean;
+  store?: boolean;
+  text?: { format?: { type?: string; name?: string; strict?: boolean; schema?: unknown } };
+  input?: ProviderMessage[];
 };
 
 interface SyntheticPhotoProvider {
@@ -75,11 +73,29 @@ const photoAnswer = {
 const test = baseTest.extend<{ syntheticPhotoProvider: SyntheticPhotoProvider }>({
   syntheticPhotoProvider: async ({}, use) => {
     const requests: ProviderRequest[] = [];
+    const operations = new Map<string, string>();
     const provider = createServer((request, response) => {
       const chunks: Buffer[] = [];
       request.on('data', (chunk: Buffer) => chunks.push(chunk));
       request.on('end', () => {
-        if (request.method !== 'POST' || request.url !== '/v1/chat/completions') {
+        const path = new URL(request.url ?? '/', 'http://provider.test').pathname;
+        const responseId = path.split('/').at(-1) ?? '';
+        if (request.method === 'GET' && /^resp_photo_\d+$/.test(responseId)) {
+          const content = operations.get(responseId);
+          if (!content) {
+            response.writeHead(404).end();
+            return;
+          }
+          response.writeHead(200, { 'content-type': 'application/json' }).end(
+            JSON.stringify({
+              id: responseId,
+              status: 'completed',
+              output: [{ type: 'message', content: [{ type: 'output_text', text: content }] }]
+            })
+          );
+          return;
+        }
+        if (request.method !== 'POST' || path !== '/v1/responses') {
           response.writeHead(404).end();
           return;
         }
@@ -93,18 +109,11 @@ const test = baseTest.extend<{ syntheticPhotoProvider: SyntheticPhotoProvider }>
         }
         requests.push(body);
         const content = JSON.stringify(photoAnswer);
-
-        if (body.stream) {
-          const delta = JSON.stringify({ choices: [{ delta: { content } }] });
-          response
-            .writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' })
-            .end(`data: ${delta}\n\ndata: [DONE]\n\n`);
-          return;
-        }
-
+        const id = `resp_photo_${requests.length}`;
+        operations.set(id, content);
         response
-          .writeHead(200, { 'content-type': 'application/json' })
-          .end(JSON.stringify({ choices: [{ message: { content } }] }));
+          .writeHead(202, { 'content-type': 'application/json' })
+          .end(JSON.stringify({ id, status: 'in_progress', output: [] }));
       });
     });
 
@@ -258,11 +267,13 @@ test('analiza una foto, deja revisar la propuesta y persiste solo lo confirmado'
   const providerRequest = syntheticPhotoProvider.requests[0];
   expect(syntheticPhotoProvider.requests).toHaveLength(1);
   expect(providerRequest.model).toBe('synthetic-shopping-photo');
-  expect(providerRequest.response_format).toMatchObject({
+  expect(providerRequest).toMatchObject({ background: true, store: true });
+  expect(providerRequest.text?.format).toMatchObject({
     type: 'json_schema',
-    json_schema: { strict: true }
+    name: 'shopping_photo',
+    strict: true
   });
-  const promptText = (providerRequest.messages ?? [])
+  const promptText = (providerRequest.input ?? [])
     .flatMap((message) =>
       typeof message.content === 'string'
         ? [message.content]
@@ -271,10 +282,10 @@ test('analiza una foto, deja revisar la propuesta y persiste solo lo confirmado'
     .join('\n');
   expect(promptText).toContain('Compra sintética para revisar el ticket');
   expect(promptText).toContain('TICKET');
-  const imagePart = (providerRequest.messages ?? [])
+  const imagePart = (providerRequest.input ?? [])
     .flatMap((message) => (Array.isArray(message.content) ? message.content : []))
-    .find((part) => part.type === 'image_url');
-  expect(Boolean(imagePart?.image_url?.url?.startsWith('data:image/png;base64,'))).toBe(true);
+    .find((part) => part.type === 'input_image');
+  expect(Boolean(imagePart?.image_url?.startsWith('data:image/png;base64,'))).toBe(true);
 
   const listBeforeConfirm = await page.request.get(`/api/shopping/lists/${listId}`, {
     headers: { authorization: `Bearer ${token}` }

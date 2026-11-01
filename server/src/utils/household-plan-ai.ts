@@ -154,8 +154,7 @@ type HouseholdPlanAiCall = (
   messages: AiMessage[],
   db: Parameters<typeof callAI>[2],
   responseFormat: AiResponseFormat,
-  kind: AiJobKind,
-  externalSignal?: AbortSignal
+  kind: AiJobKind
 ) => Promise<string>;
 
 export async function generateHouseholdPlanProposal(
@@ -167,7 +166,6 @@ export async function generateHouseholdPlanProposal(
     currentPlan: HouseholdPlan | null;
     draftPlan?: HouseholdPlan | null;
     attachment: HouseholdPlanAttachment | null;
-    signal?: AbortSignal;
   },
   aiCall: HouseholdPlanAiCall = callAI
 ): Promise<{ plan: HouseholdPlan; diff: PlanProposalDiff }> {
@@ -177,8 +175,7 @@ export async function generateHouseholdPlanProposal(
     messages,
     input.db,
     HOUSEHOLD_PLAN_RESPONSE_FORMAT,
-    'household_plan',
-    input.signal
+    'household_plan'
   );
 
   let candidate: unknown;

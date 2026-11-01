@@ -1,4 +1,4 @@
-import { createServer, type Server, type ServerResponse } from 'node:http';
+import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -76,31 +76,81 @@ const syntheticRecipe = {
 class LocalAiProvider {
   private server?: Server;
   private behaviors: ProviderBehavior[] = [];
-  private held: ServerResponse[] = [];
+  private readonly responses = new Map<
+    string,
+    { behavior: ProviderBehavior; status: 'in_progress' | 'completed' | 'cancelled' }
+  >();
   requestCount = 0;
   abortCount = 0;
+  chatCompletionsCount = 0;
   baseUrl = '';
 
   async start(): Promise<void> {
     this.server = createServer(async (request, response) => {
+      const url = new URL(request.url ?? '/', 'http://127.0.0.1');
       for await (const _chunk of request) {
-        // Consume the synthetic OpenAI request body; never inspect or persist it.
+        // Consume the synthetic request body only in memory; never persist prompt or credentials.
       }
-      this.requestCount += 1;
-      const behavior = this.behaviors.shift() ?? 'success';
-      response.once('close', () => {
-        if (!response.writableEnded) this.abortCount += 1;
-      });
 
-      if (behavior === 'hold') {
-        this.held.push(response);
+      if (request.method === 'POST' && url.pathname === '/v1/responses') {
+        this.requestCount += 1;
+        const behavior = this.behaviors.shift() ?? 'success';
+        if (behavior === 'fail') {
+          response
+            .writeHead(503, { 'content-type': 'application/json' })
+            .end(JSON.stringify({ error: { message: 'synthetic provider failure' } }));
+          return;
+        }
+        const id = `resp_synthetic_${this.requestCount}`;
+        const status = behavior === 'hold' ? 'in_progress' : 'completed';
+        this.responses.set(id, { behavior, status });
+        response
+          .writeHead(202, { 'content-type': 'application/json' })
+          .end(JSON.stringify({ id, status, output: status === 'completed' ? this.output() : [] }));
         return;
       }
-      if (behavior === 'fail') {
-        response.writeHead(503, { 'content-type': 'text/plain' }).end('synthetic provider failure');
+
+      if (request.method === 'GET' && url.pathname.startsWith('/v1/responses/')) {
+        const id = decodeURIComponent(url.pathname.slice('/v1/responses/'.length));
+        const result = this.responses.get(id);
+        if (!result) {
+          response.writeHead(404, { 'content-type': 'application/json' }).end('{}');
+          return;
+        }
+        response.writeHead(200, { 'content-type': 'application/json' }).end(
+          JSON.stringify({
+            id,
+            status: result.status,
+            output: result.status === 'completed' ? this.output() : []
+          })
+        );
         return;
       }
-      this.sendSuccess(response);
+
+      if (request.method === 'POST' && url.pathname.endsWith('/cancel')) {
+        const id = decodeURIComponent(url.pathname.split('/').at(-2) ?? '');
+        const result = this.responses.get(id);
+        if (result) {
+          result.status = 'cancelled';
+          this.abortCount += 1;
+        }
+        response
+          .writeHead(200, { 'content-type': 'application/json' })
+          .end(JSON.stringify({ id, status: 'cancelled' }));
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/v1/chat/completions') {
+        this.chatCompletionsCount += 1;
+        response
+          .writeHead(410, { 'content-type': 'application/json' })
+          .end(
+            JSON.stringify({ error: { message: 'Chat Completions is disabled in this fixture' } })
+          );
+        return;
+      }
+
+      response.writeHead(404, { 'content-type': 'application/json' }).end('{}');
     });
     await new Promise<void>((resolve, reject) => {
       this.server!.once('error', reject);
@@ -114,8 +164,8 @@ class LocalAiProvider {
   }
 
   async close(): Promise<void> {
-    for (const response of this.held.splice(0)) {
-      if (!response.writableEnded && !response.destroyed) this.sendSuccess(response);
+    for (const response of this.responses.values()) {
+      if (response.status === 'in_progress') response.status = 'completed';
     }
     const server = this.server;
     if (!server) return;
@@ -126,13 +176,16 @@ class LocalAiProvider {
     });
   }
 
-  private sendSuccess(response: ServerResponse): void {
-    if (response.writableEnded || response.destroyed) return;
-    response.writeHead(200, { 'content-type': 'application/json' }).end(
-      JSON.stringify({
-        choices: [{ message: { content: JSON.stringify(syntheticRecipe) } }]
-      })
-    );
+  private output(): Array<{
+    type: 'message';
+    content: Array<{ type: 'output_text'; text: string }>;
+  }> {
+    return [
+      {
+        type: 'message',
+        content: [{ type: 'output_text', text: JSON.stringify(syntheticRecipe) }]
+      }
+    ];
   }
 }
 
@@ -407,6 +460,7 @@ test.describe('gestor de cola de IA por proveedor', () => {
     await expect(page.locator('[data-test="ai-queue-job-running"]')).toHaveCount(0);
     await waitForProviderRequest(provider, 2);
     expect((await queueJobs(page, configId)).some((job) => job.status === 'failed')).toBe(false);
+    expect(provider.chatCompletionsCount).toBe(0);
 
     const replies = await Promise.all(calls.map(({ result }) => result));
     expect(replies[0].status).toBeGreaterThanOrEqual(400);
@@ -462,9 +516,9 @@ test.describe('gestor de cola de IA por proveedor', () => {
     expect(copyBounds?.height).toBeGreaterThanOrEqual(44);
     await copyButton.focus();
     await page.keyboard.press('Enter');
-    await expect(page.locator('[role="status"][aria-live="polite"]')).toContainText(
-      'Diagnóstico copiado.'
-    );
+    await expect(
+      page.locator('[data-test="ai-provider-queue"] [role="status"][aria-live="polite"]')
+    ).toContainText('Diagnóstico copiado.');
     const copiedText = await page.evaluate(
       () => (window as Window & { __hogariaCopiedDiagnostic?: string }).__hogariaCopiedDiagnostic
     );
@@ -495,6 +549,7 @@ test.describe('gestor de cola de IA por proveedor', () => {
     expect(reply.status).toBe(200);
     expect(reply.body.success).toBe(true);
     expect(provider.requestCount).toBe(3);
+    expect(provider.chatCompletionsCount).toBe(0);
   });
 
   test('traduce formulario y gestor al inglés y oculta la cola en límite cero', async ({

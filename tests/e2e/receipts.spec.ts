@@ -19,8 +19,8 @@ import { mockAiFunctionAvailable } from './helpers/ai';
  *  - Un ticket fallido se rescata a mano: lineas anadidas y editadas por la interfaz, tienda
  *    corregida, y confirmar sube la compra al inventario y registra la tienda.
  *
- * Lo que queda fuera: la lectura en si (el stream de lineas llegando poco a poco) es cosa del
- * modelo y del `ticket-queue`; aqui se cubre con los specs de server.
+ * La lectura se ejecuta en Responses background; el progreso y la cancelación remota se cubren
+ * con los specs de server y la cola de tickets.
  */
 
 const TOKEN_KEY = 'hogar:v1:auth_token';
@@ -97,26 +97,23 @@ function pdfDeMentira(): Buffer {
   return Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(64, 0x20)]);
 }
 
-type TicketProviderMessage = {
-  role?: string;
-  content?:
-    | string
-    | {
-        file?: { filename?: string; file_data?: string };
-        type?: string;
-        text?: string;
-        image_url?: { url?: string; detail?: string };
-      }[];
+type TicketProviderPart = {
+  type?: string;
+  filename?: string;
+  file_data?: string;
+  text?: string;
+  image_url?: string;
+  detail?: string;
 };
 
 type TicketProviderRequest = {
   model?: string;
-  stream?: boolean;
-  response_format?: {
-    type?: string;
-    json_schema?: { name?: string; strict?: boolean; schema?: unknown };
+  background?: boolean;
+  store?: boolean;
+  text?: {
+    format?: { type?: string; name?: string; strict?: boolean; schema?: unknown };
   };
-  messages?: TicketProviderMessage[];
+  input?: { role?: string; content?: string | TicketProviderPart[] }[];
 };
 
 function deferred<T = void>() {
@@ -130,11 +127,81 @@ async function iniciarProveedorDeTickets(
   antesDeResponder?: (solicitud: TicketProviderRequest, indice: number) => Promise<void>
 ) {
   const solicitudes: TicketProviderRequest[] = [];
+  const operaciones = new Map<
+    string,
+    {
+      request: TicketProviderRequest;
+      index: number;
+      terminal: 'completed' | 'failed' | 'cancelled' | null;
+      started: boolean;
+    }
+  >();
   const proveedor = createServer((request, response) => {
     const chunks: Buffer[] = [];
-    request.on('data', (chunk: Buffer) => chunks.push(chunk));
+    request.on('data', (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
     request.on('end', () => {
-      if (request.method !== 'POST' || request.url !== '/v1/chat/completions') {
+      const path = new URL(request.url ?? '/', 'http://provider.test').pathname;
+      const pathParts = path.split('/');
+      const responseId =
+        pathParts.at(-1) === 'cancel' ? (pathParts.at(-2) ?? '') : (pathParts.at(-1) ?? '');
+
+      if (request.method === 'POST' && /^\/v1\/responses\/resp_ticket_\d+\/cancel$/.test(path)) {
+        const operation = operaciones.get(responseId);
+        if (!operation) {
+          response.writeHead(404).end();
+          return;
+        }
+        operation.terminal = 'cancelled';
+        response
+          .writeHead(200, { 'content-type': 'application/json' })
+          .end(JSON.stringify({ id: responseId, status: 'cancelled', output: [] }));
+        return;
+      }
+
+      if (request.method === 'GET' && /^\/v1\/responses\/resp_ticket_\d+$/.test(path)) {
+        const operation = operaciones.get(responseId);
+        if (!operation) {
+          response.writeHead(404).end();
+          return;
+        }
+        if (!operation.started && !operation.terminal) {
+          operation.started = true;
+          void Promise.resolve()
+            .then(() => antesDeResponder?.(operation.request, operation.index))
+            .then(
+              () => {
+                if (operation.terminal !== 'cancelled') operation.terminal = 'completed';
+              },
+              () => {
+                if (operation.terminal !== 'cancelled') operation.terminal = 'failed';
+              }
+            );
+        }
+        const completed = operation.terminal === 'completed';
+        response.writeHead(200, { 'content-type': 'application/json' }).end(
+          JSON.stringify(
+            completed
+              ? {
+                  id: responseId,
+                  status: 'completed',
+                  output: [
+                    {
+                      type: 'message',
+                      content: [{ type: 'output_text', text: JSON.stringify(respuesta) }]
+                    }
+                  ]
+                }
+              : {
+                  id: responseId,
+                  status: operation.terminal ?? 'in_progress',
+                  output: []
+                }
+          )
+        );
+        return;
+      }
+
+      if (request.method !== 'POST' || path !== '/v1/responses') {
         response.writeHead(404).end();
         return;
       }
@@ -146,26 +213,12 @@ async function iniciarProveedorDeTickets(
         response.writeHead(400).end();
         return;
       }
-      solicitudes.push(body);
-      void (async () => {
-        await antesDeResponder?.(body, solicitudes.length - 1);
-        if (response.destroyed) return;
-        const content = JSON.stringify(respuesta);
-
-        if (body.stream) {
-          const delta = JSON.stringify({ choices: [{ delta: { content } }] });
-          response
-            .writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' })
-            .end(`data: ${delta}\n\ndata: [DONE]\n\n`);
-          return;
-        }
-
-        response
-          .writeHead(200, { 'content-type': 'application/json' })
-          .end(JSON.stringify({ choices: [{ message: { content } }] }));
-      })().catch(() => {
-        if (!response.destroyed) response.writeHead(500).end();
-      });
+      const index = solicitudes.push(body) - 1;
+      const id = 'resp_ticket_' + (index + 1);
+      operaciones.set(id, { request: body, index, terminal: null, started: false });
+      response
+        .writeHead(202, { 'content-type': 'application/json' })
+        .end(JSON.stringify({ id, status: 'in_progress', output: [] }));
     });
   });
 
@@ -209,7 +262,10 @@ async function cerrarAvisos(page: Page): Promise<void> {
 async function terminarTransiciones(page: Page): Promise<void> {
   await page.evaluate(async () => {
     await Promise.all(
-      document.getAnimations().map((animation) => animation.finished.catch(() => undefined))
+      document
+        .getAnimations()
+        .filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity)
+        .map((animation) => animation.finished.catch(() => undefined))
     );
   });
 }
@@ -938,24 +994,30 @@ test.describe('metadatos e historial con zona horaria extrema', () => {
         await expect.poll(receiptStatus, { timeout: 20_000 }).toBe('analyzing');
         const providerRequest = proveedor.solicitudes[0];
         expect(providerRequest.model).toBe('synthetic-ticket-model');
-        expect(providerRequest.stream).toBe(true);
-        expect(providerRequest.response_format).toMatchObject({
+        expect(providerRequest).toMatchObject({ background: true, store: true });
+        expect(providerRequest.text?.format).toMatchObject({
           type: 'json_schema',
-          json_schema: { strict: true }
+          strict: true
         });
-        const userContent = providerRequest.messages?.find(
+        const userContent = providerRequest.input?.find(
           (message) => message.role === 'user'
         )?.content;
         const parts = Array.isArray(userContent) ? userContent : [];
         expect(parts).toHaveLength(3);
-        expect(parts.map((part) => part.type).sort()).toEqual(['file', 'image_url', 'text']);
-        expect(parts.find((part) => part.type === 'text')?.text).toContain('purchaseDate');
-        expect(parts.find((part) => part.type === 'image_url')?.image_url?.url).toMatch(
+        expect(parts.map((part) => part.type).sort()).toEqual([
+          'input_file',
+          'input_image',
+          'input_text'
+        ]);
+        expect(parts.find((part) => part.type === 'input_text')?.text).toContain('purchaseDate');
+        expect(parts.find((part) => part.type === 'input_image')?.image_url).toMatch(
           /^data:image\/png;base64,/
         );
-        const inventoryFile = parts.find((part) => part.type === 'file');
-        expect(inventoryFile?.file?.filename).toBe('inventario.json');
-        const inventoryData = inventoryFile?.file?.file_data ?? '';
+        const inventoryFile = parts.find(
+          (part) => part.type === 'input_file' && part.filename === 'inventario.json'
+        );
+        expect(inventoryFile?.filename).toBe('inventario.json');
+        const inventoryData = inventoryFile?.file_data ?? '';
         expect(inventoryData).toMatch(/^data:application\/json;base64,/);
         const inventory = JSON.parse(
           Buffer.from(
@@ -1316,8 +1378,8 @@ test.describe('metadatos manuales en reintentos de tickets', () => {
     const proveedor = await iniciarProveedorDeTickets(
       respuestaDeReintento,
       async (_request, index) => {
-        // The worker makes a non-streaming fallback after a provider fails before sending any delta.
-        if (index < 2) throw new Error('synthetic first-attempt failure');
+        // First background provider response fails terminally; manual retry gets a fresh operation.
+        if (index === 0) throw new Error('synthetic first-attempt failure');
       }
     );
     const erroresPagina: string[] = [];
@@ -1365,10 +1427,9 @@ test.describe('metadatos manuales en reintentos de tickets', () => {
         return ((await response.json()) as { data: { status: string } }).data.status;
       };
 
-      await expect.poll(() => proveedor.solicitudes.length, { timeout: 20_000 }).toBe(2);
+      await expect.poll(() => proveedor.solicitudes.length, { timeout: 20_000 }).toBe(1);
       await expect.poll(receiptStatus, { timeout: 20_000 }).toBe('failed');
-      expect(proveedor.solicitudes[0].stream).toBe(true);
-      expect(proveedor.solicitudes[1].stream).toBeUndefined();
+      expect(proveedor.solicitudes[0]).toMatchObject({ background: true, store: true });
       expect(trabajosDeTicket(receiptId)).toBe(1);
 
       await page.goto(`/receipts/${receiptId}`);
@@ -1403,7 +1464,7 @@ test.describe('metadatos manuales en reintentos de tickets', () => {
       );
       await page.getByRole('button', { name: 'Volver a leer', exact: true }).click();
       expect((await retryResponse).status()).toBe(200);
-      await expect.poll(() => proveedor.solicitudes.length, { timeout: 20_000 }).toBe(3);
+      await expect.poll(() => proveedor.solicitudes.length, { timeout: 20_000 }).toBe(2);
       await expect.poll(receiptStatus, { timeout: 20_000 }).toBe('review');
 
       const retriedDetail = await page.request.get(detailPath, { headers: detailHeaders });
@@ -1413,11 +1474,11 @@ test.describe('metadatos manuales en reintentos de tickets', () => {
         purchaseDate: manualPurchaseDate
       });
       expect(
-        proveedor.solicitudes[2].messages?.find((message) => message.role === 'user')?.content
+        proveedor.solicitudes[1].input?.find((message) => message.role === 'user')?.content
       ).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ type: 'text' }),
-          expect.objectContaining({ type: 'image_url' })
+          expect.objectContaining({ type: 'input_text' }),
+          expect.objectContaining({ type: 'input_image' })
         ])
       );
       expect(trabajosDeTicket(receiptId)).toBe(1);
@@ -1444,6 +1505,7 @@ test.describe('metadatos editables mientras la IA trabaja', () => {
       heading: 'Tickets',
       storeLabel: 'Tienda',
       dateLabel: 'Fecha de compra',
+      saveLabel: 'Guardar cambios',
       savedLabel: 'Cambios guardados',
       manualStore: 'Tienda manual en cola'
     },
@@ -1452,6 +1514,7 @@ test.describe('metadatos editables mientras la IA trabaja', () => {
       heading: 'Receipts',
       storeLabel: 'Store',
       dateLabel: 'Purchase date',
+      saveLabel: 'Save changes',
       savedLabel: 'Changes saved',
       manualStore: 'Store corrected while queued'
     }
@@ -1569,7 +1632,7 @@ test.describe('metadatos editables mientras la IA trabaja', () => {
             new URL(response.url()).pathname === `/api/receipts/${target.id}` &&
             response.request().method() === 'PATCH'
         );
-        await page.locator('[data-test="save-receipt-metadata"]').click();
+        await page.getByRole('button', { name: scenario.saveLabel, exact: true }).click();
         expect((await queuedPatch).status()).toBe(503);
         await expect(page.locator('.ficha__metadatos-error')).toBeVisible();
         const queuedAfterFailure = await page.request.get(`/api/receipts/${target.id}`, {
@@ -1586,7 +1649,7 @@ test.describe('metadatos editables mientras la IA trabaja', () => {
             new URL(response.url()).pathname === `/api/receipts/${target.id}` &&
             response.request().method() === 'PATCH'
         );
-        await page.locator('[data-test="save-receipt-metadata"]').click();
+        await page.getByRole('button', { name: scenario.saveLabel, exact: true }).click();
         expect((await queuedRetry).status()).toBe(200);
         await expect(page.locator('.ficha__metadatos-estado')).toContainText(scenario.savedLabel);
         const queuedAfterPatch = await page.request.get(`/api/receipts/${target.id}`, {
@@ -1625,7 +1688,7 @@ test.describe('metadatos editables mientras la IA trabaja', () => {
             new URL(response.url()).pathname === `/api/receipts/${target.id}` &&
             response.request().method() === 'PATCH'
         );
-        await page.locator('[data-test="save-receipt-metadata"]').click();
+        await page.getByRole('button', { name: scenario.saveLabel, exact: true }).click();
         expect((await analyzingPatch).status()).toBe(200);
         await expect(page.locator('.ficha__metadatos-estado')).toContainText(scenario.savedLabel);
         const analyzingAfterPatch = await page.request.get(`/api/receipts/${target.id}`, {

@@ -1,17 +1,17 @@
 # Peticiones IA en background y contexto completo de tickets
 
-**Estado:** contrato activo; implementación pendiente.  
-**Base:** `origin/master` (`a9c0ef83ca6ea3a689f0a5e2983d5bf1adcce90d`).  
-**Rama:** `fix/ai-requests-background`.  
+**Estado:** implementación y verificación local completadas; CI final pendiente.
+**Base actual del PR:** `origin/master` (`94ac5581a5d4e6b276b077bb141ba73f35860582`).
+**Base de creación de la rama:** `94ac5581a5d4e6b276b077bb141ba73f35860582` (`origin/master`).
+**Rama:** `fix/ai-requests-background`.
 **Entrega:** un único PR Draft, sin límite de tamaño, según petición explícita.
 
-## Fuente vigente y hallazgos
+## Línea base verificada antes de implementar
 
-- `AI-CONNECTION-TEST-BACKGROUND-SPEC.md` define el patrón ya existente: crear una Responses API con `background: true`, guardar metadatos del job, consultar su estado y cancelar solo por acción explícita. La implementación actual conserva un fallback síncrono de conexión; este contrato nuevo lo elimina para todas las llamadas a modelos.
-- `server/src/utils/ai-client.ts` concentra las llamadas de modelo, pero `callAIWithConfig` y `callAIStreamingWithConfig` todavía usan Chat Completions síncrono. El asistente (`ai-assistant-runtime.ts`) elude la cola; el worker de automatización llama directamente al transporte.
-- `ai_jobs` conserva estado y alcance. Las entradas y closures genéricas residen en RAM; algunos callers pasan `c.req.raw.signal`, por lo que cerrar la página puede cancelar el job. El endpoint actual de cola es por proveedor y requiere permiso de gestión; no hay estado global recuperable para cada persona al volver a abrir la web.
-- Los handlers HTTP conservan su contrato de respuesta actual. El trabajo del modelo se ejecuta en el servidor aunque el cliente deje de esperar. La nueva vista global muestra los jobs aún activos del usuario autenticado. No almacena ni expone prompts, archivos, resultados del proveedor, URLs ni claves.
-- `ticket-queue.ts:inventarioDeLaCasa` adjunta `inventario.json`, pero limita categorías a 300 y productos a 2.000. El alcance actual de filas —hogar seleccionado y filas personales de quien lanza el ticket— se conserva. `ticket-prompt.ts` establece excluir existencias, precios, códigos, ubicación, notas e historial; las categorías sí deben conservar su relación padre.
+- `AI-CONNECTION-TEST-BACKGROUND-SPEC.md` ya definía el patrón para pruebas de conexión: crear Responses con `background: true`, guardar metadatos del job, consultar estado y cancelar solo por acción explícita. Antes de este cambio, el resto de llamadas usaba Chat Completions síncrono o conectaba la cancelación al ciclo HTTP.
+- `server/src/utils/ai-client.ts` centralizaba llamadas de modelo, pero `callAIWithConfig` y `callAIStreamingWithConfig` usaban Chat Completions síncrono. El asistente eludía la cola y el worker de automatización llamaba directamente al transporte.
+- `ai_jobs` conservaba estado y alcance, mientras que no había un estado global recuperable para cada persona al reabrir la web. La cola visible estaba limitada a proveedor y permiso de gestión.
+- `ticket-queue.ts:inventarioDeLaCasa` adjuntaba `inventario.json`, pero limitaba categorías a 300 y productos a 2.000. Se conserva el scope de hogar seleccionado más filas personales del usuario ejecutor. `ticket-prompt.ts` excluye existencias, precios, códigos, ubicación, notas e historial; las categorías deben conservar la relación padre.
 
 ## Decisiones
 
@@ -34,20 +34,20 @@
 
 ### Transporte y jobs del servidor
 
-- [ ] Cada egress de modelo usa Responses background; búsqueda de imágenes que no llama a un modelo queda fuera.
-- [ ] El transporte mapea mensajes de texto, imágenes y archivos; response formats y parámetros compatibles. Respuestas `queued`/`in_progress` se consultan hasta terminal; `failed`, `incomplete`, `cancelled`, refusals, JSON inválido y timeout producen errores seguros.
-- [ ] Se rechaza explícitamente un proveedor sin Responses background; nunca hay fallback a `/chat/completions`, retry que duplique un create ya aceptado ni segunda ejecución por una recarga.
-- [ ] IDs de idempotencia identifican cada job local; límites por petición y lease cubren su timeout efectivo sin un límite de producto nuevo.
-- [ ] `AbortSignal` de la petición HTTP no cancela jobs ordinarios. Cancelar desde las acciones existentes aborta la operación HogarIA y, con `response_id`, intenta cancelar el job del proveedor.
-- [ ] Tickets, asistentes y automatizaciones usan el mismo transporte; formatos de salida y side-effects de dominio se conservan.
-- [ ] Tests cubren mapeos multimodales, estados terminales, rechazo de capability, cancelación explícita, desconexión de cliente, concurrencia/deduplicación y recuperación segura al reiniciar, sin proveedor ni WebAPI real.
+- [x] Cada egress de modelo usa Responses background; búsqueda de imágenes que no llama a un modelo queda fuera. Revisado con búsqueda en `server/src` y tests locales.
+- [x] El transporte mapea mensajes de texto, imágenes y archivos; response formats y parámetros compatibles. Estados terminales, errores, refusal y timeout cubiertos por fixtures HTTP locales.
+- [x] Se rechaza explícitamente un proveedor sin Responses background; no hay fallback a `/chat/completions` ni segunda ejecución al recargar. Idempotencia evita duplicar un create aceptado.
+- [x] IDs de idempotencia identifican cada job local; timeout mínimo 120 s sin máximo de producto y lease con margen; el cap restante es límite técnico de Node.
+- [x] `AbortSignal` HTTP no cancela jobs ordinarios. Las cancelaciones explícitas mantienen la cancelación de HogarIA y del proveedor cuando existe `response_id`.
+- [x] Tickets, asistentes y automatizaciones usan el mismo transporte; pruebas server verifican salida y efectos de dominio.
+- [x] Suite server: 123 archivos aprobados, 1 omitido; 2.141 aprobados y 1 omitido; coverage server 89,42/81,66/95,58/92,33 %.
 
 ### Descubrimiento al reabrir
 
-- [ ] Endpoint autenticado devuelve solo jobs activos propios con DTO allowlist; prueba aislamiento entre usuarios y permisos.
-- [ ] El shell consulta el endpoint al cargar y actualiza mientras la sesión está abierta; tras refresh, los jobs aún activos reaparecen hasta terminal.
-- [ ] Estados, títulos/localización, accesibilidad y diseño funcionan con teclado y en PC/móvil; no se muestran IDs o datos sensibles innecesarios.
-- [ ] Playwright real con API/app aisladas prueba cerrar/recargar mientras un fixture del proveedor sigue pendiente, verificar continuidad y ver el job activo al reabrir; capturas sintéticas de PC/móvil.
+- [x] Endpoint autenticado devuelve solo jobs activos propios con DTO allowlist; incluye automatizaciones activas autorizadas y permite el scope personal/no seleccionado. Tests cubren aislamiento y no-cache.
+- [x] El shell consulta el endpoint al cargar y actualiza cada 2 s mientras haya trabajo; E2E confirma reapertura y estado activo hasta terminal.
+- [x] Etiquetas ES/EN accesibles y visualización en PC/móvil; no expone IDs ni metadatos sensibles. E2E mide touch target >=44 px, ausencia de overflow móvil y geometría equivalente con tolerancia <=1 px.
+- [x] Playwright aislado con Responses sintético confirma cerrar pestaña sin abort/cancel/duplicado, reabrir y ver el job activo. Capturas sintéticas bajo `.e2e-screenshots/ai-background-request/`.
 
 ### Inventario de tickets
 
@@ -57,13 +57,18 @@
 
 ### Verificación y entrega
 
-- [ ] TDD por unidad; cada test, comando, resultado y limitación se registra aquí. Coverage del alcance ≥70 % en statements, branches, functions y lines, sin rebajar gates superiores.
-- [ ] Suite server/client/config, build y gates CI relevantes verdes; E2E aislado en escritorio/móvil y evidencia geométrica/capturas sintéticas donde aplique. No se llama al proveedor habitual.
-- [ ] Un único PR a `master`, rama basada en `origin/master`, con exactamente una etiqueta `type:*`; no mergear ni cambiar Draft/Ready sin indicación del usuario.
+- [x] Regresiones reproducidas primero (inventario truncado, gate de estado, respuesta malformada sin persistencia parcial y timeout de container smoke); suite server/client/config, build y coverage cumplen los gates locales. Coverage client 90,58/81,01/91,89/93,18 %.
+- [ ] CI final verde. No se llama a WebAPI ni a proveedor real; el smoke AI real opt-in no se ejecutó.
+- [x] Un único PR Draft #65 a `master`, rama derivada de `origin/master`, exactamente una etiqueta `type:feature`; no se ha mergeado ni cambiado su estado.
 
 ## Evidencia y decisiones pendientes
 
 - Rama creada desde `origin/master`; este contrato se publica antes de implementar, conforme al flujo SDD del repositorio.
 - Unidad de inventario: `pnpm --filter @hogaria/server exec vitest run src/utils/ai-queue.spec.ts src/utils/ticket-prompt.spec.ts -t "includes every scoped product and category|processes a synthetic ticket|snapshotting|buildTicketPrompt"` pasó (11 tests). Incluye el fixture del job real con 2.001 productos/301 categorías adjuntos, clave padre y scope; el test nuevo falló primero por el `LIMIT 300` y pasó al retirar límites y serializar padres.
+- `pnpm run test`: config 119/119, client 1.794/1.794 y server 123 archivos aprobados, 1 omitido; 2.141 tests aprobados y 1 omitido. `pnpm run test:server:coverage`: 89,42/81,66/95,58/92,33 %. Coverage client: 90,58/81,01/91,89/93,18 %.
+- `pnpm run test:config`: 119 aprobados. `pnpm run build`: servidor y frontend producción pasan. `pnpm run typecheck:e2e`: pasa. `pnpm run check:ui`: 276 ficheros/21 reglas sin incidencias.
+- E2E focales con fixtures Responses: recetas 4, tickets/metadata 4 y cola de tickets 2 aprobados. Full-stack aislado `ai-background-request`: 2 aprobados, Chromium PC y Pixel 5 móvil; repetición local Chromium aprobada. `receipt-queue-actions`: 2 aprobados tras procesar tickets solo desde la respuesta completa validada. `ai-real-smoke` opt-in no ejecutado.
+- CI previo a la implementación falló solo en `Container image smoke (arm64)`: el script salía con código 13 si un `fetch` no se resolvía y el timeout usaba un temporizador unref'ed. Se añadió timeout explícito con timer referenciado y regresión; `node --test scripts/container-smoke.test.mjs` pasó 9/9 y `pnpm run test:config` 119/119. CI final pendiente.
+- `pnpm run lint:server` no ejecuta: el script existente usa `eslint src --ext .ts`, opción incompatible con ESLint 9.17; `eslint src` desde raíz tampoco encuentra config. `pnpm run check:ui` sí pasó; no se añadió dependencia ni se reconfiguró lint fuera de alcance.
 - No se cambia WebAPI. Su soporte de Responses/background se trata como capacidad del proveedor y se comprueba sin fallback síncrono.
 - La limitación intencionada es no recuperar una respuesta terminada mientras la persona estaba fuera; la exigencia explícita cubre que el trabajo no se interrumpa y que su estado activo reaparezca al reabrir. Persistir prompts/resultados está fuera de alcance por privacidad y porque las rutas transforman y validan resultados de distinta forma.
