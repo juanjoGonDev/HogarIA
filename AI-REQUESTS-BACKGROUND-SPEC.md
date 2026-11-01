@@ -57,7 +57,7 @@
 
 ### Verificación y entrega
 
-- [x] Regresiones reproducidas primero (inventario truncado, gate de estado, respuesta malformada sin persistencia parcial y timeout de container smoke); suite server/client/config, build y coverage cumplen los gates locales. Coverage client 90,58/81,01/91,89/93,18 %.
+- [x] Regresiones reproducidas primero (inventario truncado, gate de estado, respuesta malformada sin persistencia parcial y timeout de container smoke); suite server/client/config, build y coverage cumplen los gates locales. Coverage client 90,57/80,99/91,89/93,18 %.
 - [ ] CI final verde. No se llama a WebAPI ni a proveedor real; el smoke AI real opt-in no se ejecutó.
 - [x] Un único PR Draft #65 a `master`, rama derivada de `origin/master`, exactamente una etiqueta `type:feature`; no se ha mergeado ni cambiado su estado.
 
@@ -65,7 +65,7 @@
 
 - Rama creada desde `origin/master`; este contrato se publica antes de implementar, conforme al flujo SDD del repositorio.
 - Unidad de inventario: `pnpm --filter @hogaria/server exec vitest run src/utils/ai-queue.spec.ts src/utils/ticket-prompt.spec.ts -t "includes every scoped product and category|processes a synthetic ticket|snapshotting|buildTicketPrompt"` pasó (11 tests). Incluye el fixture del job real con 2.001 productos/301 categorías adjuntos, clave padre y scope; el test nuevo falló primero por el `LIMIT 300` y pasó al retirar límites y serializar padres.
-- `pnpm run test`: config 119/119, client 1.794/1.794 y server 123 archivos aprobados, 1 omitido; 2.141 tests aprobados y 1 omitido. `pnpm run test:server:coverage`: 89,42/81,66/95,58/92,33 %. Coverage client: 90,58/81,01/91,89/93,18 %.
+- `pnpm run test`: config 119/119, client 1.794/1.794 y server 123 archivos aprobados, 1 omitido; 2.141 tests aprobados y 1 omitido. `pnpm run test:server:coverage`: 89,42/81,66/95,58/92,33 %. Coverage client: 90,57/80,99/91,89/93,18 %.
 - `pnpm run test:config`: 119 aprobados. `pnpm run build`: servidor y frontend producción pasan. `pnpm run typecheck:e2e`: pasa. `pnpm run check:ui`: 276 ficheros/21 reglas sin incidencias.
 - E2E focales con fixtures Responses: recetas 4, tickets/metadata 4 y cola de tickets 2 aprobados. Full-stack aislado `ai-background-request`: 2 aprobados, Chromium PC y Pixel 5 móvil; repetición local Chromium aprobada. `receipt-queue-actions`: 2 aprobados tras procesar tickets solo desde la respuesta completa validada. `ai-real-smoke` opt-in no ejecutado.
 - CI previo a la implementación falló solo en `Container image smoke (arm64)`: el script salía con código 13 si un `fetch` no se resolvía y el timeout usaba un temporizador unref'ed. Se añadió timeout explícito con timer referenciado y regresión; `node --test scripts/container-smoke.test.mjs` pasó 9/9 y `pnpm run test:config` 119/119. CI final pendiente.
