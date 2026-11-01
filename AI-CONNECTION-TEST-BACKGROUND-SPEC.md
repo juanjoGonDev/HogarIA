@@ -16,7 +16,7 @@
 ## Decisiones
 
 1. Una acción de probar conexión equivale a **un solo intento de proveedor**, sin reintentos automáticos. Un fallo puede volver a probarse con una nueva acción desde el proveedor.
-2. Para probar, HogarIA negocia Responses en background primero; solo usa Chat Completions si recibe un rechazo explícito que demuestra que Responses/background no está soportado (p. ej. ruta 404/405/501 o error de validación inequívoco). No hace fallback tras timeout, desconexión, 5xx ni respuesta ambigua: podría duplicar una ejecución aceptada.
+2. Para probar, HogarIA negocia Responses en background primero; solo usa Chat Completions si recibe un rechazo explícito que demuestra que Responses/background no está soportado (p. ej. ruta 404/405/501 o error de validación inequívoco). No hace fallback tras timeout, desconexión, 5xx ni respuesta ambigua: podría duplicar una ejecución aceptada. Enviar `Idempotency-Key: hogaria-connection-test-<jobId>`; cada nueva acción tiene un `jobId` distinto.
 3. Tras aceptar el background, consultar estados `queued`/`in_progress` con backoff hasta un estado terminal. El límite total de la prueba será `max(timeout configurado, 120 s)`; 120 s es una ventana mínima, no un cap de producto, alineada con el timeout de ejecución registrado por WebAPI. El lease de cola debe cubrir esa ventana más el margen actual. Cada petición HTTP individual conserva timeout técnico acotado.
 4. Si la persona cancela explícitamente el job y ya hay `response_id`, intentar cancelarlo en el proveedor. Cerrar/recargar el navegador no dispara cancelación: el estado guardado sigue consultándose.
 5. Diagnóstico copiable por job visible en la cola, con ID local, tipo, estado, intentos, timestamps/código seguro y, cuando exista, protocolo, HTTP status y `response_id` del proveedor. Nunca copiar ni persistir API keys, URLs, prompts, adjuntos, respuestas ni cuerpos de error del proveedor. El ID del proveedor sirve para correlacionar el incidente en WebAPI.
@@ -28,7 +28,7 @@
 
 - [ ] Una prueba inicia un solo intento de proveedor, incluso con `retry_attempts > 0`; ningún reintento automático genera ejecuciones/costes repetidos.
 - [ ] El POST Responses usa `background: true`, JSON Schema estricto en `text.format`, autorización actual y un identificador de idempotencia seguro para correlación; el cuerpo no incluye parámetros nulos ni configuración irrelevante.
-- [ ] Respuesta `queued`/`in_progress` se consulta hasta `completed` y valida texto de salida con el mismo `testAnswerSchema`; `failed`, `incomplete`, `cancelled`, malformado y deadline producen resultado fallido seguro.
+- [ ] La respuesta inicial terminal se procesa sin polling; estados `queued`/`in_progress` se consultan hasta `completed` y se valida el texto de salida con el mismo `testAnswerSchema`; `failed`, `incomplete`, `cancelled`, malformado y deadline producen resultado fallido seguro.
 - [ ] Extraer salida de `output[].content[]` (`type: output_text`); nunca asumir `choices` o `output_text` de raíz en Responses.
 - [ ] Proveedor Chat Completions-only cae al endpoint actual solo ante rechazo inequívoco de soporte; errores ambiguos, autenticación, rate limit y 5xx no reenvían generación.
 - [ ] Timeout total mínimo 120 s y lease cubren prueba lenta; timeout configurado superior sigue respetándose sin máximo de producto.
