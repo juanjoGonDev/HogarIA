@@ -1,6 +1,6 @@
 # Peticiones IA en background y contexto completo de tickets
 
-**Estado:** implementación y verificación local completadas; CI final pendiente.
+**Estado:** implementación y verificación local completadas; CI final verde en el run 1040 para `2f07205`.
 **Base actual del PR:** `origin/master` (`94ac5581a5d4e6b276b077bb141ba73f35860582`).
 **Base de creación de la rama:** `94ac5581a5d4e6b276b077bb141ba73f35860582` (`origin/master`).
 **Rama:** `fix/ai-requests-background`.
@@ -58,7 +58,7 @@
 ### Verificación y entrega
 
 - [x] Regresiones reproducidas primero (inventario truncado, gate de estado, respuesta malformada sin persistencia parcial y timeout de container smoke); suite server/client/config, build y coverage cumplen los gates locales. Coverage client 90,57/80,99/91,89/93,18 %.
-- [ ] CI final verde. No se llama a WebAPI ni a proveedor real; el smoke AI real opt-in no se ejecutó.
+- [x] CI final verde: run 1040 completado con éxito para `2f07205` (todos los jobs). No se llama a WebAPI ni a proveedor real; el smoke AI real opt-in no se ejecutó.
 - [x] Un único PR #65 a `master`, rama derivada de `origin/master`, exactamente una etiqueta `type:feature`; el propietario lo dejó Ready for review y no se ha cambiado ese estado. No se ha mergeado.
 
 ## Evidencia y decisiones pendientes
@@ -68,8 +68,9 @@
 - `pnpm run test`: config 119/119, client 1.794/1.794 y server 123 archivos aprobados, 1 omitido; 2.141 tests aprobados y 1 omitido. `pnpm run test:server:coverage`: 89,42/81,66/95,58/92,33 %. Coverage client: 90,57/80,99/91,89/93,18 %.
 - `pnpm run test:config`: 119 aprobados. `pnpm run build`: servidor y frontend producción pasan. `pnpm run typecheck:e2e`: pasa. `pnpm run check:ui`: 276 ficheros/21 reglas sin incidencias.
 - E2E focales con fixtures Responses: recetas 4, tickets/metadata 4 y cola de tickets 2 aprobados. Full-stack aislado `ai-background-request`: 2 aprobados, Chromium PC y Pixel 5 móvil; repetición local Chromium aprobada. `receipt-queue-actions`: 2 aprobados tras procesar tickets solo desde la respuesta completa validada. `ai-real-smoke` opt-in no ejecutado.
-- CI previo a la implementación falló solo en `Container image smoke (arm64)`: el script salía con código 13 si un `fetch` no se resolvía y el timeout usaba un temporizador unref'ed. Se añadió timeout explícito con timer referenciado y regresión; `node --test scripts/container-smoke.test.mjs` pasó 9/9 y `pnpm run test:config` 119/119. CI final pendiente.
+- CI previo a la implementación falló solo en `Container image smoke (arm64)`: el script salía con código 13 si un `fetch` no se resolvía y el timeout usaba un temporizador unref'ed. Se añadió timeout explícito con timer referenciado y regresión; `node --test scripts/container-smoke.test.mjs` pasó 9/9 y `pnpm run test:config` 119/119.
 - `pnpm run lint:server` no ejecuta: el script existente usa `eslint src --ext .ts`, opción incompatible con ESLint 9.17; `eslint src` desde raíz tampoco encuentra config. `pnpm run check:ui` sí pasó; no se añadió dependencia ni se reconfiguró lint fuera de alcance.
 - La ejecución de CI 1038 encontró dos regresiones E2E de convivencia con el indicador: un `role=status` vacío duplicaba estados accesibles y el anillo infinito impedía la espera de animaciones finitas. Corregido con role condicional y exclusión de animaciones infinitas en `waitForStableView`; `ai-active-jobs-indicator` 4/4, `dashboard-ai-queue` 2/2, búsqueda de fotos en editor 1/1 y filtros/borrado de logs 1/1 pasan localmente. La última prueba pausa su stream tras cargar filas sintéticas para aislar la selección frente a logs de otros workers.
+- CI #1040 terminó verde en `2f07205`: 11 jobs correctos, incluidos los cuatro shards E2E, full-stack E2E, smoke de imágenes amd64/arm64, build, tipos y suite server.
 - No se cambia WebAPI. Su soporte de Responses/background se trata como capacidad del proveedor y se comprueba sin fallback síncrono.
 - La limitación intencionada es no recuperar una respuesta terminada mientras la persona estaba fuera; la exigencia explícita cubre que el trabajo no se interrumpa y que su estado activo reaparezca al reabrir. Persistir prompts/resultados está fuera de alcance por privacidad y porque las rutas transforman y validan resultados de distinta forma.
