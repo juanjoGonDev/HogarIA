@@ -201,7 +201,11 @@ describe('AI provider queue dispatcher', () => {
     const snapshot = inventarioDeLaCasa(db, userId, null);
 
     expect(snapshot.categorias).toEqual(
-      DEFAULT_PANTRY_CATEGORIES.map(({ key, name }) => ({ clave: key, nombre: name }))
+      DEFAULT_PANTRY_CATEGORIES.map(({ key, name, parent }) => ({
+        clave: key,
+        nombre: name,
+        padre: parent ?? null
+      }))
     );
     expect(db.prepare('SELECT COUNT(*) AS count FROM pantry_categories').get()).toEqual({
       count: DEFAULT_PANTRY_CATEGORIES.length
@@ -216,11 +220,143 @@ describe('AI provider queue dispatcher', () => {
     ).run(userId);
 
     expect(inventarioDeLaCasa(db, userId, null).categorias).toEqual([
-      { clave: 'custom', nombre: 'Mi categoría' }
+      { clave: 'custom', nombre: 'Mi categoría', padre: null }
     ]);
     expect(db.prepare('SELECT COUNT(*) AS count FROM pantry_categories').get()).toEqual({
       count: 1
     });
+  });
+
+  it('includes every scoped product and category, preserving parents and excluding other scopes', async () => {
+    const { inventarioDeLaCasa } = await import('./ticket-queue.js');
+    const otherUserId = 'inventory-other-user';
+    db.prepare('INSERT INTO users (id, email, name, password_hash) VALUES (?, ?, ?, ?)').run(
+      otherUserId,
+      'inventory-other@test.local',
+      'Other user',
+      'hash'
+    );
+    db.prepare('INSERT INTO households (id, name, invite_code) VALUES (?, ?, ?)').run(
+      'inventory-home-a',
+      'Inventory home A',
+      'inventory-invite-a'
+    );
+    db.prepare('INSERT INTO households (id, name, invite_code) VALUES (?, ?, ?)').run(
+      'inventory-home-b',
+      'Inventory home B',
+      'inventory-invite-b'
+    );
+
+    const insertCategory = db.prepare(
+      `INSERT INTO pantry_categories (id, user_id, household_id, key, name, parent_key, position)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    );
+    for (let index = 0; index < 150; index += 1) {
+      insertCategory.run(
+        `inventory-personal-category-${index}`,
+        userId,
+        null,
+        `personal-${index}`,
+        `Personal ${index}`,
+        index === 0 ? null : 'personal-0',
+        index
+      );
+    }
+    for (let index = 0; index < 151; index += 1) {
+      insertCategory.run(
+        `inventory-household-category-${index}`,
+        userId,
+        'inventory-home-a',
+        `household-${index}`,
+        `Household ${index}`,
+        index === 0 ? null : 'household-0',
+        index + 150
+      );
+    }
+    insertCategory.run(
+      'inventory-private-category',
+      otherUserId,
+      null,
+      'private-category',
+      'Private category',
+      null,
+      0
+    );
+    insertCategory.run(
+      'inventory-other-home-category',
+      otherUserId,
+      'inventory-home-b',
+      'other-home-category',
+      'Other home category',
+      null,
+      0
+    );
+
+    const insertProduct = db.prepare(
+      `INSERT INTO ingredients
+        (id, user_id, household_id, name, category, quantity, unit, expiration_date, location, barcode, notes)
+       VALUES (?, ?, ?, ?, ?, 12, 'ud', '2026-01-01', 'private cupboard', 'secret-barcode', 'private note')`
+    );
+    for (let index = 0; index < 1000; index += 1) {
+      insertProduct.run(
+        `inventory-personal-product-${index}`,
+        userId,
+        null,
+        `Producto personal ${String(index).padStart(4, '0')}`,
+        'personal-0'
+      );
+    }
+    for (let index = 0; index < 1001; index += 1) {
+      insertProduct.run(
+        `inventory-household-product-${index}`,
+        userId,
+        'inventory-home-a',
+        `Producto hogar ${String(index).padStart(4, '0')}`,
+        'household-0'
+      );
+    }
+    insertProduct.run(
+      'inventory-private-product',
+      otherUserId,
+      null,
+      'Producto privado ajeno',
+      'private-category'
+    );
+    insertProduct.run(
+      'inventory-other-home-product',
+      otherUserId,
+      'inventory-home-b',
+      'Producto de otro hogar',
+      'other-home-category'
+    );
+
+    const snapshot = inventarioDeLaCasa(db, userId, 'inventory-home-a');
+
+    expect(snapshot.categorias).toHaveLength(301);
+    expect(snapshot.categorias).toContainEqual({
+      clave: 'household-150',
+      nombre: 'Household 150',
+      padre: 'household-0'
+    });
+    expect(snapshot.productos).toHaveLength(2001);
+    expect(snapshot.productos).toContainEqual({
+      categoria: 'household-0',
+      nombre: 'Producto hogar 1000',
+      unidad: 'ud'
+    });
+    expect(snapshot.productos).toContainEqual({
+      categoria: 'personal-0',
+      nombre: 'Producto personal 0999',
+      unidad: 'ud'
+    });
+    expect(snapshot.productos.some(({ nombre }) => nombre.includes('privado ajeno'))).toBe(false);
+    expect(snapshot.productos.some(({ nombre }) => nombre.includes('otro hogar'))).toBe(false);
+    expect(Object.keys(snapshot.productos[0] ?? {}).sort()).toEqual([
+      'categoria',
+      'nombre',
+      'unidad'
+    ]);
+    expect(Object.keys(snapshot.categorias[0] ?? {}).sort()).toEqual(['clave', 'nombre', 'padre']);
   });
 
   it('keeps a household job pinned to its home when another member changes homes before claim', async () => {
@@ -894,6 +1030,31 @@ describe('AI provider queue dispatcher', () => {
         'data: [DONE]\n\n'
       ].join('');
       seedMovedInventoryProduct();
+      const insertCategory = db.prepare(
+        `INSERT INTO pantry_categories (id, user_id, household_id, key, name, parent_key, position)
+         VALUES (?, ?, NULL, ?, ?, ?, ?)`
+      );
+      for (let index = 0; index < 299; index += 1) {
+        insertCategory.run(
+          `receipt-bulk-category-${index}`,
+          userId,
+          `receipt-bulk-${index}`,
+          `Receipt category ${index}`,
+          index === 0 ? null : 'receipt-bulk-0',
+          index + 3
+        );
+      }
+      const insertProduct = db.prepare(
+        `INSERT INTO ingredients (id, user_id, household_id, name, category, quantity, unit)
+         VALUES (?, ?, NULL, ?, 'receipt-bulk-0', 1, 'ud')`
+      );
+      for (let index = 0; index < 2000; index += 1) {
+        insertProduct.run(
+          `receipt-bulk-product-${index}`,
+          userId,
+          `Ticket catalog product ${String(index).padStart(4, '0')}`
+        );
+      }
       vi.mocked(fetch).mockResolvedValueOnce(
         new Response(
           new ReadableStream<Uint8Array>({
@@ -949,10 +1110,27 @@ describe('AI provider queue dispatcher', () => {
       const inventorySnapshot = JSON.parse(
         Buffer.from(inventoryBase64!, 'base64').toString('utf8')
       ) as {
-        categorias: { clave: string; nombre: string }[];
+        categorias: { clave: string; nombre: string; padre: string | null }[];
         productos: { categoria: string; nombre: string; unidad: string }[];
       };
-      expect(inventorySnapshot.categorias).toContainEqual({ clave: 'dairy', nombre: 'Lácteos' });
+      expect(inventorySnapshot.categorias).toHaveLength(301);
+      expect(inventorySnapshot.productos).toHaveLength(2001);
+      expect(inventorySnapshot.categorias).toContainEqual({
+        clave: 'receipt-bulk-298',
+        nombre: 'Receipt category 298',
+        padre: 'receipt-bulk-0'
+      });
+      expect(inventorySnapshot.productos).toContainEqual({
+        categoria: 'receipt-bulk-0',
+        nombre: 'Ticket catalog product 1999',
+        unidad: 'ud'
+      });
+      expect(JSON.stringify(inventorySnapshot)).not.toContain('quantity');
+      expect(inventorySnapshot.categorias).toContainEqual({
+        clave: 'dairy',
+        nombre: 'Lácteos',
+        padre: null
+      });
       expect(inventorySnapshot.productos).toContainEqual({
         categoria: 'dairy',
         nombre: 'Leche semidesnatada',

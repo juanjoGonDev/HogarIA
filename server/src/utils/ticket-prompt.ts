@@ -35,7 +35,7 @@ export const TICKET_SHAPE = `{
 /** La forma del «inventario.json» que viaja con cada ticket. */
 export interface InventarioParaPrompt {
   tiendas: string[];
-  categorias: { clave: string; nombre: string }[];
+  categorias: { clave: string; nombre: string; padre: string | null }[];
   productos: { categoria: string; nombre: string; unidad: string }[];
 }
 

@@ -10,8 +10,8 @@ describe('buildTicketPrompt (## 12aj)', () => {
   const inventario = {
     tiendas: ['Mercadona', 'Lidl'],
     categorias: [
-      { clave: 'dairy', nombre: 'Lácteos' },
-      { clave: 'other', nombre: 'Otros' }
+      { clave: 'dairy', nombre: 'Lácteos', padre: 'food' },
+      { clave: 'other', nombre: 'Otros', padre: null }
     ],
     productos: [{ categoria: 'dairy', nombre: 'Leche entera', unidad: 'unit' }]
   };

@@ -1116,19 +1116,19 @@ export function inventarioDeLaCasa(
   const categorias = (
     db
       .prepare(
-        `SELECT key, name FROM pantry_categories
+        `SELECT key, name, parent_key FROM pantry_categories
          WHERE household_id = ? OR (household_id IS NULL AND user_id = ?)
-         ORDER BY position LIMIT 300`
+         ORDER BY position`
       )
-      .all(householdId, userId) as { key: string; name: string }[]
-  ).map((fila) => ({ clave: fila.key, nombre: fila.name }));
+      .all(householdId, userId) as { key: string; name: string; parent_key: string | null }[]
+  ).map((fila) => ({ clave: fila.key, nombre: fila.name, padre: fila.parent_key }));
 
   const productos = (
     db
       .prepare(
         `SELECT name, category, unit FROM ingredients
          WHERE household_id = ? OR (household_id IS NULL AND user_id = ?)
-         ORDER BY name LIMIT 2000`
+         ORDER BY name`
       )
       .all(householdId, userId) as { name: string; category: string; unit: string }[]
   ).map((fila) => ({ categoria: fila.category, nombre: fila.name, unidad: fila.unit }));

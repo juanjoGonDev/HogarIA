@@ -51,9 +51,9 @@
 
 ### Inventario de tickets
 
-- [ ] El JSON adjunto incluye más de 2.000 productos y más de 300 categorías, incluidos los últimos registros, sin `LIMIT` de producto.
-- [ ] Cada categoría conserva su padre; productos/categorías siguen limitados al hogar activo y datos personales del usuario ejecutor.
-- [ ] No se adjuntan existencias, precios, barcode/códigos, ubicaciones, notas ni historial. La petición de ticket incluye realmente el archivo generado, validado con un test del worker.
+- [x] El JSON adjunto incluye más de 2.000 productos y más de 300 categorías, incluidos los últimos registros, sin `LIMIT` de producto.
+- [x] Cada categoría conserva su padre; productos/categorías siguen limitados al hogar activo y datos personales del usuario ejecutor.
+- [x] No se adjuntan existencias, precios, barcode/códigos, ubicaciones, notas ni historial. La petición de ticket incluye realmente el archivo generado, validado con un test del worker.
 
 ### Verificación y entrega
 
@@ -64,5 +64,6 @@
 ## Evidencia y decisiones pendientes
 
 - Rama creada desde `origin/master`; este contrato se publica antes de implementar, conforme al flujo SDD del repositorio.
+- Unidad de inventario: `pnpm --filter @hogaria/server exec vitest run src/utils/ai-queue.spec.ts src/utils/ticket-prompt.spec.ts -t "includes every scoped product and category|processes a synthetic ticket|snapshotting|buildTicketPrompt"` pasó (11 tests). Incluye el fixture del job real con 2.001 productos/301 categorías adjuntos, clave padre y scope; el test nuevo falló primero por el `LIMIT 300` y pasó al retirar límites y serializar padres.
 - No se cambia WebAPI. Su soporte de Responses/background se trata como capacidad del proveedor y se comprueba sin fallback síncrono.
 - La limitación intencionada es no recuperar una respuesta terminada mientras la persona estaba fuera; la exigencia explícita cubre que el trabajo no se interrumpa y que su estado activo reaparezca al reabrir. Persistir prompts/resultados está fuera de alcance por privacidad y porque las rutas transforman y validan resultados de distinta forma.
