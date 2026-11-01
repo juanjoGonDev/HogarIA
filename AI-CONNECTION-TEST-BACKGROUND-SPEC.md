@@ -1,6 +1,6 @@
 # Prueba de conexión IA en background
 
-**Estado:** implementación verificada localmente; PR #64 sigue Draft a la espera de CI.
+**Estado:** implementación verificada localmente; PR #64 está listo para revisión por decisión del usuario y CI verde en `41324710564`.
 **Base:** `origin/master` (`c260b21786e2385a857400c3bbc5cdc3d646bc5f`), rama `fix/webapi-background-connection-test`.
 **Alcance:** prueba de conexión de proveedor y diagnóstico copiable de trabajos IA en la cola. No modificar el repositorio WebAPI ni el resto de transportes de generación.
 
@@ -49,7 +49,7 @@
 - [x] Playwright real app/API aislada: PC y móvil, clipboard aislado, cerrar/recargar vista durante test sin cancelarlo, teclado, accesibilidad y breakpoints aplicables; capturas sintéticas bajo `.e2e-screenshots/ai-connection-test/`.
 - [x] Coverage >=70 % en todas las métricas: servidor 89,44/81,70/95,40/92,44 % (statements/branches/functions/lines); cliente 90,54/80,98/91,84/93,15 %. Playwright mide target táctil >=44 px y altura entre controles equivalentes con tolerancia <=1 CSS px.
 - [x] Registrar comandos/resultados y limitaciones; evidencia detallada abajo.
-- [x] PR #64 permanece Draft; no se modificó el estado de otros PRs ni se mergeó.
+- [x] PR #64 se mantiene en el estado listo para revisión elegido por el usuario; no se mergeó. PR #56 y #63 ya aparecen como merged al revisarlos; no se alteró su estado.
 
 ## Evidencia local
 
@@ -63,7 +63,7 @@
 - La suite local completa `ai-config.spec.ts` mostró 54/56 aprobados; los dos fallos eran el mismo selector estricto al conservar dos toasts de validación idénticos. Se cambió a verificar ambos; el caso pasó en Chromium y móvil (2/2).
 - Playwright guardó capturas desktop/móvil de prueba en curso y cola bajo `.e2e-screenshots/ai-connection-test/`.
 - Limitación local: `pnpm run lint` no puede ejecutar `ng lint`, porque el builder `@angular-eslint/builder:lint` no está declarado/instalado en el workspace. `check:ui`, TypeScript, tests y build sí pasan; no se añadió una dependencia ajena al alcance.
-- CI run `41323420464` detectó un E2E de calendario preexistente que esperaba `date=2026-11-01` justo el 1 de noviembre, aunque la ruta omite intencionadamente el parámetro cuando la fecha seleccionada es hoy. Se ajustó solo esa expectativa; el test aislado pasa 1/1 y CI post-corrección queda pendiente. `calendar-google-like-ui.spec.ts` está fuera de la implementación AI.
+- CI run `41323420464` detectó un E2E de calendario preexistente que esperaba `date=2026-11-01` justo el 1 de noviembre, aunque la ruta omite intencionadamente el parámetro cuando la fecha seleccionada es hoy. Se ajustó solo esa expectativa; el test aislado pasó 1/1. CI post-corrección `41324710564` pasó completo (build, servidor, full-stack y 4 shards E2E). `calendar-google-like-ui.spec.ts` está fuera de la implementación AI.
 
 ## Desviación / pendiente
 
