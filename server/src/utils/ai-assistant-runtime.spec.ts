@@ -1,33 +1,79 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { callAssistantAITransient } from './ai-assistant-runtime.js';
 import type { AiConfigRow } from './ai-client.js';
 
-const config: AiConfigRow = {
-  id: 'assistant-config',
-  name: 'Local test',
-  provider: 'custom',
-  base_url: 'http://localhost:1234/v1',
-  api_key: 'test-key',
-  model: 'test-model',
-  temperature: null,
-  max_tokens: 500,
-  top_p: null,
-  frequency_penalty: null,
-  presence_penalty: null,
-  timeout: 1_000,
-  concurrency: 1
-};
+process.env.DATABASE_PATH = ':memory:';
+process.env.NODE_ENV = 'test';
+
+type Sql = import('better-sqlite3').Database;
+let db: Sql;
+let closeDatabase: () => void;
 
 const responseFormat = {
   type: 'json_schema' as const,
   json_schema: { name: 'test', strict: true as const, schema: { type: 'object' } }
 };
 
-function response(content: string): Response {
-  return new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status: 200 });
+function response(content: string, id = 'resp_assistant'): Response {
+  return new Response(
+    JSON.stringify({
+      id,
+      status: 'completed',
+      output: [{ type: 'message', content: [{ type: 'output_text', text: content }] }]
+    }),
+    { status: 200 }
+  );
 }
 
-afterEach(() => vi.unstubAllGlobals());
+function insertConfig(
+  userId: string,
+  id = `${userId}-assistant-config`,
+  overrides: Partial<AiConfigRow> = {}
+): AiConfigRow {
+  if (!db.prepare('SELECT 1 FROM users WHERE id = ?').get(userId)) {
+    db.prepare('INSERT INTO users (id, email, name, password_hash) VALUES (?, ?, ?, ?)').run(
+      userId,
+      `${userId}@assistant.test`,
+      userId,
+      'hash'
+    );
+  }
+  db.prepare(
+    `INSERT INTO ai_configs
+      (id, user_id, name, provider, base_url, api_key, model, temperature, max_tokens, top_p,
+       frequency_penalty, presence_penalty, timeout, retry_attempts, concurrency, is_active)
+     VALUES (?, ?, 'Local test', 'custom', ?, 'test-key', 'test-model', NULL, 500, NULL,
+       NULL, NULL, 1000, 1, 1, 1)`
+  ).run(id, userId, overrides.base_url ?? 'http://localhost:1234/v1');
+  return db.prepare('SELECT * FROM ai_configs WHERE id = ?').get(id) as AiConfigRow;
+}
+
+beforeAll(async () => {
+  const database = await import('../config/database.js');
+  await database.initializeDatabase();
+  db = database.getDatabase();
+  closeDatabase = database.closeDatabase;
+});
+
+beforeEach(async () => {
+  const { stopWorker } = await import('./ticket-queue.js');
+  stopWorker();
+  db.exec(
+    'DELETE FROM household_members; DELETE FROM ai_jobs; DELETE FROM ai_configs; DELETE FROM users; DELETE FROM households;'
+  );
+});
+
+afterEach(async () => {
+  const { stopWorker } = await import('./ticket-queue.js');
+  stopWorker();
+  vi.unstubAllGlobals();
+});
+
+afterAll(async () => {
+  const { stopWorker } = await import('./ticket-queue.js');
+  stopWorker();
+  closeDatabase?.();
+});
 
 describe('callAssistantAITransient', () => {
   it('passes the server JSON Schema to loopback Ollama without duplicating it in the prompt', async () => {
@@ -43,7 +89,9 @@ describe('callAssistantAITransient', () => {
     await expect(
       callAssistantAITransient({
         userId: 'u-ollama',
-        config: { ...config, base_url: 'http://127.0.0.1:11434/v1' },
+        config: insertConfig('u-ollama', 'ollama-config', {
+          base_url: 'http://127.0.0.1:11434/v1'
+        }),
         messages: [
           { role: 'system', content: 'System contract.' },
           { role: 'user', content: 'Synthetic prompt.' }
@@ -52,8 +100,14 @@ describe('callAssistantAITransient', () => {
       })
     ).resolves.toBe('{"ok":true}');
 
-    expect(requestBody?.response_format).toEqual(responseFormat);
-    expect(requestBody?.messages).toEqual([
+    expect(requestBody).toMatchObject({ background: true, store: true });
+    expect(requestBody?.text?.format).toEqual({
+      type: 'json_schema',
+      name: 'test',
+      strict: true,
+      schema: { type: 'object' }
+    });
+    expect(requestBody?.input).toEqual([
       { role: 'system', content: 'System contract.' },
       { role: 'user', content: 'Synthetic prompt.' }
     ]);
@@ -121,7 +175,9 @@ describe('callAssistantAITransient', () => {
 
     await callAssistantAITransient({
       userId: 'u-ollama-plan',
-      config: { ...config, base_url: 'http://127.0.0.1:11434/v1' },
+      config: insertConfig('u-ollama-plan', 'ollama-plan-config', {
+        base_url: 'http://127.0.0.1:11434/v1'
+      }),
       messages: [
         { role: 'system', content: 'System contract.' },
         { role: 'user', content: 'Synthetic prompt.' }
@@ -129,9 +185,8 @@ describe('callAssistantAITransient', () => {
       responseFormat: actionPlanFormat
     });
 
-    expect(requestBody?.reasoning_effort).toBe('none');
-    const actionUnion =
-      requestBody?.response_format.json_schema.schema.properties.actions.items.anyOf;
+    expect(requestBody?.reasoning).toEqual({ effort: 'none' });
+    const actionUnion = requestBody?.text.format.schema.properties.actions.items.anyOf;
     expect(actionUnion).toHaveLength(2);
     expect(actionUnion[0].properties.kind).toEqual({
       type: 'string',
@@ -146,7 +201,7 @@ describe('callAssistantAITransient', () => {
     expect(actionUnion[0].properties.payload.properties.expirationDate.anyOf[0]).not.toHaveProperty(
       'pattern'
     );
-    expect(requestBody?.messages).toEqual([
+    expect(requestBody?.input).toEqual([
       { role: 'system', content: 'System contract.' },
       { role: 'user', content: 'Synthetic prompt.' }
     ]);
@@ -164,14 +219,19 @@ describe('callAssistantAITransient', () => {
 
     await callAssistantAITransient({
       userId: 'u-custom',
-      config,
+      config: insertConfig('u-custom'),
       messages: [{ role: 'system', content: 'System contract.' }],
       responseFormat
     });
 
-    expect(requestBody?.response_format).toEqual(responseFormat);
-    expect(requestBody?.messages).toEqual([{ role: 'system', content: 'System contract.' }]);
-    expect(requestBody?.reasoning_effort).toBeUndefined();
+    expect(requestBody?.text.format).toEqual({
+      type: 'json_schema',
+      name: 'test',
+      strict: true,
+      schema: { type: 'object' }
+    });
+    expect(requestBody?.input).toEqual([{ role: 'system', content: 'System contract.' }]);
+    expect(requestBody?.reasoning).toBeUndefined();
   });
 
   it('gates one request per user/provider and releases the gate after completion', async () => {
@@ -188,6 +248,8 @@ describe('callAssistantAITransient', () => {
       })
     );
 
+    const config = insertConfig('u1');
+    const otherConfig = insertConfig('u1', 'other-config');
     const first = callAssistantAITransient({
       userId: 'u1',
       config,
@@ -199,7 +261,7 @@ describe('callAssistantAITransient', () => {
     await expect(
       callAssistantAITransient({
         userId: 'u1',
-        config: { ...config, id: 'other-config' },
+        config: otherConfig,
         messages: [{ role: 'user', content: 'two' }],
         responseFormat
       })
@@ -225,21 +287,28 @@ describe('callAssistantAITransient', () => {
     ).resolves.toBe('{"ok":true}');
   });
 
-  it('rejects an already-aborted request before network access', async () => {
-    const fetch = vi.fn();
+  it('runs the provider with an independent server-owned signal', async () => {
+    let enterFetch!: () => void;
+    let releaseFetch!: () => void;
+    let transportSignal: AbortSignal | undefined;
+    const fetchEntered = new Promise<void>((resolve) => (enterFetch = resolve));
+    const fetchGate = new Promise<void>((resolve) => (releaseFetch = resolve));
+    const fetch = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      transportSignal = init?.signal ?? undefined;
+      enterFetch();
+      await fetchGate;
+      return response('{"ok":true}');
+    });
     vi.stubGlobal('fetch', fetch);
-    const controller = new AbortController();
-    controller.abort();
-
-    await expect(
-      callAssistantAITransient({
-        userId: 'u-aborted',
-        config,
-        messages: [{ role: 'user', content: 'cancelled' }],
-        responseFormat,
-        signal: controller.signal
-      })
-    ).rejects.toMatchObject({ detail: 'CANCELLED' });
-    expect(fetch).not.toHaveBeenCalled();
+    const pending = callAssistantAITransient({
+      userId: 'u-aborted',
+      config: insertConfig('u-aborted'),
+      messages: [{ role: 'user', content: 'still running' }],
+      responseFormat
+    });
+    await fetchEntered;
+    expect(transportSignal?.aborted).toBe(false);
+    releaseFetch();
+    await expect(pending).resolves.toBe('{"ok":true}');
   });
 });

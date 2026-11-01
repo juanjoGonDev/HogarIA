@@ -4,6 +4,7 @@ import { authMiddleware } from '../middleware/auth.middleware.js';
 import { getDatabase } from '../config/database.js';
 import type { AppEnv } from '../types/hono-env.js';
 import {
+  activeAiJobsForUser,
   cancelarTrabajo,
   queueForConfig,
   reordenarCola,
@@ -17,6 +18,17 @@ import {
 
 const aiQueueRoutes = new Hono<AppEnv>();
 aiQueueRoutes.use('*', authMiddleware);
+
+aiQueueRoutes.get('/queue/active', (c) => {
+  const userId = c.get('userId');
+  c.header('Cache-Control', 'no-store, no-cache, must-revalidate');
+  c.header('Pragma', 'no-cache');
+  return c.json({
+    success: true,
+    data: { jobs: activeAiJobsForUser(getDatabase(), userId) }
+  });
+});
+
 aiQueueRoutes.use('*', async (c, next) => {
   if (needsActiveHouseholdSelection(getDatabase(), c.get('userId'))) {
     return c.json(

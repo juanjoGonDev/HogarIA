@@ -64,6 +64,17 @@ function call(
 const json = async (response: Response): Promise<any> => await response.json();
 const data = async (response: Response): Promise<any> => (await json(response)).data;
 
+function responsesText(content: string, id = 'resp_shopping_fixture'): Response {
+  return new Response(
+    JSON.stringify({
+      id,
+      status: 'completed',
+      output: [{ type: 'message', content: [{ type: 'output_text', text: content }] }]
+    }),
+    { status: 200, headers: { 'content-type': 'application/json' } }
+  );
+}
+
 let alice: User;
 let bob: User;
 
@@ -1613,20 +1624,18 @@ describe('entrada por foto (§8f)', () => {
   function giveAi(user: User, id = `ai-${Math.random().toString(36).slice(2)}`) {
     db.prepare(
       `INSERT INTO ai_configs (id, user_id, name, provider, base_url, api_key, model, is_active, timeout)
-       VALUES (?, ?, 'Local', 'openai', 'http://ai.test/v1', 'clave', 'vision-mini', 1, 4000)`
+       VALUES (?, ?, 'Local', 'openai', 'http://127.0.0.1:9/v1', 'clave', 'vision-mini', 1, 4000)`
     ).run(id, user.id);
     return id;
   }
 
   function answersWith(content: string) {
-    vi.stubGlobal(
-      'fetch',
-      async () =>
-        new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' }
-        })
-    );
+    vi.stubGlobal('fetch', async (input: string | URL | Request, init?: RequestInit) => {
+      expect(new URL(String(input)).pathname).toBe('/v1/responses');
+      const providerRequest = JSON.parse(String(init?.body));
+      expect(providerRequest).toMatchObject({ background: true, store: true });
+      return responsesText(content);
+    });
   }
 
   afterEach(() => {
@@ -1682,11 +1691,10 @@ describe('entrada por foto (§8f)', () => {
   it('el prompt lleva el catalogo y la forma esperada', async () => {
     giveAi(alice);
     let sent = '';
-    vi.stubGlobal('fetch', async (_url: string, init: any) => {
-      sent = JSON.stringify(init.body);
-      return new Response(JSON.stringify({ choices: [{ message: { content: '{"lines":[]}' } }] }), {
-        status: 200
-      });
+    vi.stubGlobal('fetch', async (input: string | URL | Request, init: RequestInit) => {
+      expect(new URL(String(input)).pathname).toBe('/v1/responses');
+      sent = String(init.body);
+      return responsesText('{"lines":[]}');
     });
     const list = await createList(alice);
     await call(
@@ -1703,7 +1711,12 @@ describe('entrada por foto (§8f)', () => {
 
     expect(sent).toContain('Frutas y verduras');
     expect(sent).toContain('priceMinor');
-    expect(sent).toContain('image_url');
+    const providerRequest = JSON.parse(sent);
+    expect(providerRequest.background).toBe(true);
+    expect(providerRequest.input[1].content).toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: 'input_image' })])
+    );
+    expect(providerRequest.text.format.type).toBe('json_schema');
     expect(sent).toContain('es del chino');
     expect(sent).toContain('English (United Kingdom)');
     expect(sent).toContain('warnings');

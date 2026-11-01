@@ -947,8 +947,7 @@ Cada dependencia referencia el índice de una acción previa. Para cada acción,
         userId,
         config,
         messages,
-        responseFormat: AI_ASSISTANT_RESPONSE_FORMAT,
-        signal: c.req.raw.signal
+        responseFormat: AI_ASSISTANT_RESPONSE_FORMAT
       });
       const providerOutput = extractJsonObject(response);
       const candidate = assistantActionPlanProviderCandidateSchema.safeParse(providerOutput);
@@ -1032,7 +1031,6 @@ async function generateAssistantMealProposal(
         householdMemberIds: input.householdMemberIds,
         weekStart: input.weekStart,
         language: c.get('appLanguage'),
-        signal: c.req.raw.signal,
         afterProvider: () => {
           const current = currentAssistantHouseholdSnapshot(c);
           if (!current.valid || current.householdId !== householdId) {
@@ -1040,13 +1038,12 @@ async function generateAssistantMealProposal(
           }
         }
       },
-      (messages, responseFormat, signal) =>
+      (messages, responseFormat) =>
         callAssistantAITransient({
           userId,
           config,
           messages: appendMealAssistantContext(messages, input.instructions, currentDraft),
-          responseFormat,
-          signal
+          responseFormat
         })
     );
     const current = currentAssistantHouseholdSnapshot(c);
@@ -1377,8 +1374,7 @@ Devuelve solo el JSON del esquema estricto; no incluyas la acciónId ni acciones
         userId,
         config,
         messages,
-        responseFormat: AI_ASSISTANT_REFINEMENT_RESPONSE_FORMAT,
-        signal: c.req.raw.signal
+        responseFormat: AI_ASSISTANT_REFINEMENT_RESPONSE_FORMAT
       });
       const candidate = assistantActionRefinementProviderCandidateSchema.safeParse(
         extractJsonObject(response)
@@ -1520,8 +1516,7 @@ No propongas operaciones destructivas, compartir con terceros ni invitados. Si u
         userId,
         config,
         messages,
-        responseFormat: AI_ASSISTANT_BATCH_REFINEMENT_RESPONSE_FORMAT,
-        signal: c.req.raw.signal
+        responseFormat: AI_ASSISTANT_BATCH_REFINEMENT_RESPONSE_FORMAT
       });
       const candidate = assistantActionBatchRefinementProviderCandidateSchema.safeParse(
         extractJsonObject(response)

@@ -15,6 +15,84 @@ let db: Sql;
 let closeDatabase: () => void;
 let jwtSecret = '';
 
+function responsesText(content: string, id = 'resp_household_plan_fixture'): Response {
+  return new Response(
+    JSON.stringify({
+      id,
+      status: 'completed',
+      output: [{ type: 'message', content: [{ type: 'output_text', text: content }] }]
+    }),
+    { status: 200, headers: { 'content-type': 'application/json' } }
+  );
+}
+
+async function responsesReply(
+  reply: Response,
+  id = 'resp_household_plan_fixture'
+): Promise<Response> {
+  if (!reply.ok) return reply;
+  const payload = (await reply
+    .clone()
+    .json()
+    .catch(() => null)) as any;
+  if (typeof payload?.id === 'string' && Array.isArray(payload?.output)) return reply;
+  const choice = payload?.choices?.[0];
+  if (choice?.finish_reason === 'length') {
+    return new Response(JSON.stringify({ id, status: 'incomplete', output: [] }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    });
+  }
+  if (typeof choice?.message?.refusal === 'string') {
+    return new Response(
+      JSON.stringify({
+        id,
+        status: 'completed',
+        output: [
+          { type: 'message', content: [{ type: 'refusal', refusal: choice.message.refusal }] }
+        ]
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } }
+    );
+  }
+  return responsesText(String(choice?.message?.content ?? ''), id);
+}
+
+function stubResponsesFetch(
+  implementation: (input: string | URL | Request, init?: RequestInit) => Promise<Response>
+) {
+  const provider = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith('/cancel')) {
+      expect(init?.method).toBe('POST');
+      return new Response('{}', { status: 200 });
+    }
+    expect(url.pathname).toMatch(/\/responses$/);
+    expect(init?.method).toBe('POST');
+    const body = JSON.parse(String(init?.body));
+    expect(body).toMatchObject({ background: true, store: true });
+    expect(Array.isArray(body.input)).toBe(true);
+    expect(body.text?.format).toBeDefined();
+    return responsesReply(
+      await implementation(input, init),
+      `resp_household_plan_${provider.mock.calls.length}`
+    );
+  });
+  vi.stubGlobal('fetch', provider);
+  return provider;
+}
+
+function inputText(body: any, index: number): string {
+  const content = body.input[index]?.content;
+  if (typeof content === 'string') return content;
+  return Array.isArray(content)
+    ? content
+        .filter((part: any) => part.type === 'input_text')
+        .map((part: any) => part.text)
+        .join('')
+    : '';
+}
+
 function validPlan(): HouseholdPlan {
   return {
     schemaVersion: 1,
@@ -177,7 +255,7 @@ describe('household plan persistence routes', () => {
       `INSERT INTO ai_configs
         (id, user_id, household_id, name, provider, base_url, api_key, model,
          timeout, retry_attempts, concurrency, is_active)
-       VALUES (?, ?, ?, 'Synthetic plan provider', 'custom', 'https://provider.test/v1',
+       VALUES (?, ?, ?, 'Synthetic plan provider', 'custom', 'http://127.0.0.1:9/v1',
          'synthetic-secret', 'vision-model', 2000, 0, 0, 1)`
     ).run(id, userId, householdId);
   }
@@ -460,14 +538,9 @@ describe('household plan persistence routes', () => {
     const owner = makeUser('owner-a', 'home-a', true);
     addAiConfig('ai-home-a', owner.id, 'home-a');
     let providerBody: any;
-    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
-      providerBody = JSON.parse(String(init.body));
-      return new Response(
-        JSON.stringify({
-          choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(validPlan()) } }]
-        }),
-        { status: 200 }
-      );
+    stubResponsesFetch(async (_url, init) => {
+      providerBody = JSON.parse(String(init?.body));
+      return responsesText(JSON.stringify(validPlan()));
     });
 
     const response = await callProposal(owner, { baseVersion: 0, prompt: 'Crea un plano inicial' });
@@ -482,8 +555,11 @@ describe('household plan persistence routes', () => {
         orphanedTaskIds: []
       }
     });
-    expect(providerBody.response_format).toEqual(HOUSEHOLD_PLAN_RESPONSE_FORMAT);
-    expect(providerBody.messages[1].content[0].text).toContain('No hay un plano confirmado');
+    expect(providerBody.text.format).toEqual({
+      type: 'json_schema',
+      ...HOUSEHOLD_PLAN_RESPONSE_FORMAT.json_schema
+    });
+    expect(inputText(providerBody, 1)).toContain('No hay un plano confirmado');
     expect(db.prepare('SELECT kind, status FROM ai_jobs').get()).toMatchObject({
       kind: 'household_plan',
       status: 'done'
@@ -522,16 +598,7 @@ describe('household plan persistence routes', () => {
       owner.id
     );
     const proposedPlan = planWithoutSpaces();
-    vi.stubGlobal(
-      'fetch',
-      async () =>
-        new Response(
-          JSON.stringify({
-            choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(proposedPlan) } }]
-          }),
-          { status: 200 }
-        )
-    );
+    stubResponsesFetch(async () => responsesText(JSON.stringify(proposedPlan)));
 
     const response = await callProposal(owner, { baseVersion: 1, prompt: 'Quita la cocina' });
 
@@ -550,14 +617,9 @@ describe('household plan persistence routes', () => {
     const owner = makeUser('owner-a', 'home-a', true);
     addAiConfig('ai-home-a', owner.id, 'home-a');
     let providerBody: any;
-    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
-      providerBody = JSON.parse(String(init.body));
-      return new Response(
-        JSON.stringify({
-          choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(validPlan()) } }]
-        }),
-        { status: 200 }
-      );
+    stubResponsesFetch(async (_url, init) => {
+      providerBody = JSON.parse(String(init?.body));
+      return responsesText(JSON.stringify(validPlan()));
     });
     const form = new FormData();
     form.set('baseVersion', '0');
@@ -579,17 +641,21 @@ describe('household plan persistence routes', () => {
       success: true,
       data: { draft: { summary: 'Borrador local' } }
     });
-    expect(providerBody.messages[1].content).toEqual(
+    expect(providerBody.input[1].content).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          type: 'image_url',
-          image_url: { url: 'data:image/png;base64,iVBORw0KGgo=', detail: 'high' }
+          type: 'input_image',
+          image_url: 'data:image/png;base64,iVBORw0KGgo=',
+          detail: 'high'
         })
       ])
     );
     expect(JSON.stringify(providerBody)).not.toContain('private-sketch-name');
-    expect(providerBody.messages[1].content[0].text).toContain(JSON.stringify(draft));
-    expect(providerBody.response_format).toEqual(HOUSEHOLD_PLAN_RESPONSE_FORMAT);
+    expect(inputText(providerBody, 1)).toContain(JSON.stringify(draft));
+    expect(providerBody.text.format).toEqual({
+      type: 'json_schema',
+      ...HOUSEHOLD_PLAN_RESPONSE_FORMAT.json_schema
+    });
   });
 
   it('rejects stale base versions, missing prompts and members without settings before calling AI', async () => {
@@ -635,16 +701,7 @@ describe('household plan persistence routes', () => {
       from: { x: 0, y: 0 },
       to: { x: 0, y: 0 }
     });
-    vi.stubGlobal(
-      'fetch',
-      async () =>
-        new Response(
-          JSON.stringify({
-            choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(invalid) } }]
-          }),
-          { status: 200 }
-        )
-    );
+    stubResponsesFetch(async () => responsesText(JSON.stringify(invalid)));
     const invalidProposal = await callProposal(owner, { baseVersion: 0, prompt: 'Crea un plano' });
     expect(invalidProposal.status).toBe(422);
     expect(await invalidProposal.json()).toMatchObject({
@@ -678,15 +735,23 @@ describe('household plan persistence routes', () => {
     const owner = makeUser('owner-a', 'home-a', true);
     addAiConfig('ai-home-a', owner.id, 'home-a');
     const replies = [
-      {
-        choices: [{ finish_reason: 'length', message: { content: JSON.stringify(validPlan()) } }]
-      },
-      { choices: [{ finish_reason: 'content_filter', message: { refusal: 'Refused' } }] },
-      { choices: [{ finish_reason: 'stop', message: { content: '{"schemaVersion":1' } }] }
+      new Response(JSON.stringify({ id: 'resp_incomplete', status: 'incomplete', output: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      }),
+      new Response(
+        JSON.stringify({
+          id: 'resp_refusal',
+          status: 'completed',
+          output: [{ type: 'message', content: [{ type: 'refusal', refusal: 'Refused' }] }]
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      ),
+      responsesText('{"schemaVersion":1', 'resp_malformed')
     ];
 
     for (const reply of replies) {
-      vi.stubGlobal('fetch', async () => new Response(JSON.stringify(reply), { status: 200 }));
+      stubResponsesFetch(async () => reply);
       const response = await callProposal(owner, { baseVersion: 0, prompt: 'Crea un plano' });
       expect(response.status).toBe(422);
       expect(await response.json()).toMatchObject({ success: false, code: 'AI_PROPOSAL_INVALID' });
@@ -716,11 +781,11 @@ describe('household plan persistence routes', () => {
     const draft = validPlan();
     draft.summary = 'Borrador en memoria';
     let providerBody: any;
-    const provider = vi.fn(async (_url: string, init: RequestInit) => {
-      providerBody = JSON.parse(String(init.body));
+    const provider = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      providerBody = JSON.parse(String(init?.body));
       return new Response('response_format json_schema is unsupported', { status: 400 });
     });
-    vi.stubGlobal('fetch', provider);
+    stubResponsesFetch(provider);
 
     const response = await callProposal(owner, {
       baseVersion: 1,
@@ -734,10 +799,13 @@ describe('household plan persistence routes', () => {
       code: 'AI_PROVIDER_UNAVAILABLE'
     });
     expect(provider).toHaveBeenCalledTimes(1);
-    expect(providerBody.response_format).toEqual(HOUSEHOLD_PLAN_RESPONSE_FORMAT);
-    expect(providerBody.messages[1].content[0].text).toContain(JSON.stringify(validPlan()));
-    expect(providerBody.messages[1].content[0].text).toContain(JSON.stringify(draft));
-    expect(providerBody.messages[1].content[0].text).toContain('Mueve la cocina');
+    expect(providerBody.text.format).toEqual({
+      type: 'json_schema',
+      ...HOUSEHOLD_PLAN_RESPONSE_FORMAT.json_schema
+    });
+    expect(inputText(providerBody, 1)).toContain(JSON.stringify(validPlan()));
+    expect(inputText(providerBody, 1)).toContain(JSON.stringify(draft));
+    expect(inputText(providerBody, 1)).toContain('Mueve la cocina');
     expect(db.prepare('SELECT COUNT(*) AS count FROM household_plan_revisions').get()).toEqual({
       count: 1
     });
@@ -747,29 +815,39 @@ describe('household plan persistence routes', () => {
     });
   });
 
-  it('propagates request cancellation without sending or saving a proposal', async () => {
+  it('keeps the queued proposal running after the HTTP caller disconnects', async () => {
     makeHousehold('home-a');
     const owner = makeUser('owner-a', 'home-a', true);
     addAiConfig('ai-home-a', owner.id, 'home-a');
-    const provider = vi.fn();
-    vi.stubGlobal('fetch', provider);
+    let providerStarted!: () => void;
+    let finishProvider!: () => void;
+    let providerSignal: AbortSignal | undefined;
+    const started = new Promise<void>((resolve) => (providerStarted = resolve));
+    const providerResponse = new Promise<void>((resolve) => (finishProvider = resolve));
+    const provider = stubResponsesFetch(async (_input, init) => {
+      providerSignal = init?.signal as AbortSignal | undefined;
+      providerStarted();
+      await providerResponse;
+      return responsesText(JSON.stringify(validPlan()));
+    });
     const controller = new AbortController();
-    controller.abort();
-
-    const response = await callProposal(
+    const pendingResponse = callProposal(
       owner,
       { baseVersion: 0, prompt: 'Añade un jardín' },
       controller.signal
     );
+    await started;
+    controller.abort();
+    expect(providerSignal?.aborted).toBe(false);
+    finishProvider();
+    const response = await pendingResponse;
 
-    expect(response.status).toBe(409);
-    expect(await response.json()).toMatchObject({ success: false, code: 'AI_REQUEST_CANCELLED' });
-    expect(provider).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(provider).toHaveBeenCalledTimes(1);
     expect(db.prepare('SELECT COUNT(*) AS count FROM household_plans').get()).toEqual({ count: 0 });
-    expect(db.prepare('SELECT status, error_code, error_detail FROM ai_jobs').get()).toMatchObject({
-      status: 'stopped',
-      error_code: 'CANCELLED',
-      error_detail: null
+    expect(db.prepare('SELECT status, error_code FROM ai_jobs').get()).toMatchObject({
+      status: 'done',
+      error_code: null
     });
   });
 

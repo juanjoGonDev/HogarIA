@@ -2,7 +2,6 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ReadableStream } from 'node:stream/web';
 import {
   RECEIPT_RESPONSE_FORMAT,
   RECIPE_RESPONSE_FORMAT
@@ -48,6 +47,24 @@ function deferred<T = void>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => (resolve = done));
   return { promise, resolve };
+}
+
+function responsesCompleted(text: string, id = 'resp_queue_fixture'): Response {
+  return new Response(
+    JSON.stringify({
+      id,
+      status: 'completed',
+      output: [{ type: 'message', content: [{ type: 'output_text', text }] }]
+    }),
+    { status: 200, headers: { 'content-type': 'application/json' } }
+  );
+}
+
+function responsesInProgress(id: string): Response {
+  return new Response(JSON.stringify({ id, status: 'in_progress', output: [] }), {
+    status: 202,
+    headers: { 'content-type': 'application/json' }
+  });
 }
 
 beforeAll(async () => {
@@ -201,7 +218,11 @@ describe('AI provider queue dispatcher', () => {
     const snapshot = inventarioDeLaCasa(db, userId, null);
 
     expect(snapshot.categorias).toEqual(
-      DEFAULT_PANTRY_CATEGORIES.map(({ key, name }) => ({ clave: key, nombre: name }))
+      DEFAULT_PANTRY_CATEGORIES.map(({ key, name, parent }) => ({
+        clave: key,
+        nombre: name,
+        padre: parent ?? null
+      }))
     );
     expect(db.prepare('SELECT COUNT(*) AS count FROM pantry_categories').get()).toEqual({
       count: DEFAULT_PANTRY_CATEGORIES.length
@@ -216,11 +237,188 @@ describe('AI provider queue dispatcher', () => {
     ).run(userId);
 
     expect(inventarioDeLaCasa(db, userId, null).categorias).toEqual([
-      { clave: 'custom', nombre: 'Mi categoría' }
+      { clave: 'custom', nombre: 'Mi categoría', padre: null }
     ]);
     expect(db.prepare('SELECT COUNT(*) AS count FROM pantry_categories').get()).toEqual({
       count: 1
     });
+  });
+
+  it('includes every scoped product and category, preserving parents and excluding other scopes', async () => {
+    const { inventarioDeLaCasa } = await import('./ticket-queue.js');
+    const otherUserId = 'inventory-other-user';
+    db.prepare('INSERT INTO users (id, email, name, password_hash) VALUES (?, ?, ?, ?)').run(
+      otherUserId,
+      'inventory-other@test.local',
+      'Other user',
+      'hash'
+    );
+    db.prepare('INSERT INTO households (id, name, invite_code) VALUES (?, ?, ?)').run(
+      'inventory-home-a',
+      'Inventory home A',
+      'inventory-invite-a'
+    );
+    db.prepare('INSERT INTO households (id, name, invite_code) VALUES (?, ?, ?)').run(
+      'inventory-home-b',
+      'Inventory home B',
+      'inventory-invite-b'
+    );
+
+    const insertCategory = db.prepare(
+      `INSERT INTO pantry_categories (id, user_id, household_id, key, name, parent_key, position)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    );
+    for (let index = 0; index < 150; index += 1) {
+      insertCategory.run(
+        `inventory-personal-category-${index}`,
+        userId,
+        null,
+        `personal-${index}`,
+        `Personal ${index}`,
+        index === 0 ? null : 'personal-0',
+        index
+      );
+    }
+    for (let index = 0; index < 151; index += 1) {
+      insertCategory.run(
+        `inventory-household-category-${index}`,
+        userId,
+        'inventory-home-a',
+        `household-${index}`,
+        `Household ${index}`,
+        index === 0 ? null : 'household-0',
+        index + 150
+      );
+    }
+    insertCategory.run(
+      'inventory-private-category',
+      otherUserId,
+      null,
+      'private-category',
+      'Private category',
+      null,
+      0
+    );
+    insertCategory.run(
+      'inventory-other-home-category',
+      otherUserId,
+      'inventory-home-b',
+      'other-home-category',
+      'Other home category',
+      null,
+      0
+    );
+
+    const insertProduct = db.prepare(
+      `INSERT INTO ingredients
+        (id, user_id, household_id, name, category, quantity, unit, expiration_date, location, barcode, notes)
+       VALUES (?, ?, ?, ?, ?, 12, 'ud', '2026-01-01', 'private cupboard', 'secret-barcode', 'private note')`
+    );
+    for (let index = 0; index < 1000; index += 1) {
+      insertProduct.run(
+        `inventory-personal-product-${index}`,
+        userId,
+        null,
+        `Producto personal ${String(index).padStart(4, '0')}`,
+        'personal-0'
+      );
+    }
+    for (let index = 0; index < 1001; index += 1) {
+      insertProduct.run(
+        `inventory-household-product-${index}`,
+        userId,
+        'inventory-home-a',
+        `Producto hogar ${String(index).padStart(4, '0')}`,
+        'household-0'
+      );
+    }
+    insertProduct.run(
+      'inventory-private-product',
+      otherUserId,
+      null,
+      'Producto privado ajeno',
+      'private-category'
+    );
+    insertProduct.run(
+      'inventory-other-home-product',
+      otherUserId,
+      'inventory-home-b',
+      'Producto de otro hogar',
+      'other-home-category'
+    );
+
+    const snapshot = inventarioDeLaCasa(db, userId, 'inventory-home-a');
+
+    expect(snapshot.categorias).toHaveLength(301);
+    expect(snapshot.categorias).toContainEqual({
+      clave: 'household-150',
+      nombre: 'Household 150',
+      padre: 'household-0'
+    });
+    expect(snapshot.productos).toHaveLength(2001);
+    expect(snapshot.productos).toContainEqual({
+      categoria: 'household-0',
+      nombre: 'Producto hogar 1000',
+      unidad: 'ud'
+    });
+    expect(snapshot.productos).toContainEqual({
+      categoria: 'personal-0',
+      nombre: 'Producto personal 0999',
+      unidad: 'ud'
+    });
+    expect(snapshot.productos.some(({ nombre }) => nombre.includes('privado ajeno'))).toBe(false);
+    expect(snapshot.productos.some(({ nombre }) => nombre.includes('otro hogar'))).toBe(false);
+    expect(Object.keys(snapshot.productos[0] ?? {}).sort()).toEqual([
+      'categoria',
+      'nombre',
+      'unidad'
+    ]);
+    expect(Object.keys(snapshot.categorias[0] ?? {}).sort()).toEqual(['clave', 'nombre', 'padre']);
+  });
+
+  it('returns only the caller’s active AI jobs through a minimal allowlisted DTO', async () => {
+    const { activeAiJobsForUser } = await import('./ticket-queue.js');
+    const otherUserId = 'active-job-other-user';
+    db.prepare('INSERT INTO users (id, email, name, password_hash) VALUES (?, ?, ?, ?)').run(
+      otherUserId,
+      'active-job-other@test.local',
+      'Other user',
+      'hash'
+    );
+    db.prepare(
+      `INSERT INTO ai_jobs
+        (id, user_id, config_id, kind, status, error_detail, provider_response_id, provider_transport,
+         provider_http_status, elapsed_ms, diagnostic_stage)
+       VALUES
+        ('active-own-running', ?, ?, 'assistant', 'running', 'secret provider body', 'resp_secret',
+         'responses_background', 200, 100, 'polling'),
+        ('active-own-queued', ?, ?, 'receipt', 'queued', NULL, NULL, NULL, NULL, NULL, NULL),
+        ('active-own-done', ?, ?, 'recipe', 'done', NULL, NULL, NULL, NULL, NULL, NULL),
+        ('active-other-running', ?, ?, 'recipe', 'running', NULL, NULL, NULL, NULL, NULL, NULL)`
+    ).run(userId, config.id, userId, config.id, userId, config.id, otherUserId, config.id);
+    db.prepare(
+      "UPDATE ai_jobs SET started_at = CURRENT_TIMESTAMP WHERE id = 'active-own-running'"
+    ).run();
+
+    const jobs = activeAiJobsForUser(db, userId);
+
+    expect(jobs).toHaveLength(2);
+    expect(jobs.map(({ id }) => id).sort()).toEqual(['active-own-queued', 'active-own-running']);
+    expect(jobs.find(({ id }) => id === 'active-own-running')).toMatchObject({
+      kind: 'assistant',
+      status: 'running',
+      createdAt: expect.any(String),
+      startedAt: expect.any(String)
+    });
+    expect(Object.keys(jobs[0] ?? {}).sort()).toEqual([
+      'createdAt',
+      'id',
+      'kind',
+      'startedAt',
+      'status'
+    ]);
+    expect(JSON.stringify(jobs)).not.toContain('secret');
+    expect(JSON.stringify(jobs)).not.toContain('resp_secret');
   });
 
   it('keeps a household job pinned to its home when another member changes homes before claim', async () => {
@@ -348,11 +546,9 @@ describe('AI provider queue dispatcher', () => {
     const provider = vi.fn(async (_url: string, init: RequestInit) => {
       const request = JSON.parse(String(init.body));
       expect(request.model).toBe('model-a');
+      expect(request.background).toBe(true);
       expect(init.headers).toMatchObject({ Authorization: 'Bearer scope-a-secret' });
-      return new Response(
-        JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: '{}' } }] }),
-        { status: 200 }
-      );
+      return responsesCompleted('{}', 'resp_scope_household');
     });
     vi.stubGlobal('fetch', provider);
 
@@ -691,17 +887,86 @@ describe('AI provider queue dispatcher', () => {
     expect(db.prepare('SELECT COUNT(*) AS n FROM ai_jobs').get()).toMatchObject({ n: 100 });
   });
 
+  it('does not retry when a provider explicitly lacks Responses background support', async () => {
+    const { dispatchAI } = await import('./ticket-queue.js');
+    const fakeFetch = vi.mocked(fetch);
+    fakeFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: { code: 'background_not_supported' } }), {
+        status: 501,
+        headers: { 'content-type': 'application/json' }
+      })
+    );
+
+    const result = dispatchAI(
+      userId,
+      [{ role: 'user', content: 'synthetic unsupported-background prompt' }],
+      db,
+      RECIPE_RESPONSE_FORMAT,
+      'recipe'
+    );
+    void result.catch(() => undefined);
+    await waitFor(() => {
+      const row = db
+        .prepare(
+          'SELECT status, attempts FROM ai_jobs WHERE kind = ? ORDER BY created_at DESC LIMIT 1'
+        )
+        .get('recipe') as { status: string; attempts: number } | undefined;
+      return row?.status === 'failed' && row.attempts === 1;
+    });
+
+    expect(fakeFetch).toHaveBeenCalledTimes(1);
+    expect(db.prepare('SELECT status, attempts FROM ai_jobs WHERE kind = ?').get('recipe')).toEqual(
+      { status: 'failed', attempts: 1 }
+    );
+  });
+
+  it('does not persist ticket lines until the complete background response passes validation', async () => {
+    const originalDatabasePath = process.env.DATABASE_PATH;
+    const isolatedDirectory = mkdtempSync(join(tmpdir(), 'hogaria-ai-queue-invalid-ticket-'));
+    const { encolarTicket, stopWorker } = await import('./ticket-queue.js');
+    try {
+      process.env.DATABASE_PATH = join(isolatedDirectory, 'database.sqlite');
+      const { storeTicket, uploadsRoot } = await import('./uploads.js');
+      const fileUrl = storeTicket(
+        'synthetic-invalid-ticket',
+        Buffer.from('synthetic invalid ticket'),
+        'png',
+        uploadsRoot()
+      );
+      const receiptId = 'synthetic-invalid-receipt';
+      db.prepare(
+        `INSERT INTO receipts (id, user_id, status, file_url, file_kind)
+         VALUES (?, ?, 'queued', ?, 'png')`
+      ).run(receiptId, userId, fileUrl);
+      vi.mocked(fetch).mockResolvedValueOnce(
+        responsesCompleted(
+          JSON.stringify({ lines: [{ name: 'No debe persistir' }] }),
+          'resp_invalid_ticket'
+        )
+      );
+
+      const jobId = encolarTicket(db, userId, receiptId);
+      await waitFor(() => jobRow(jobId).status === 'failed');
+
+      expect(
+        db.prepare('SELECT COUNT(*) AS n FROM receipt_items WHERE receipt_id = ?').get(receiptId)
+      ).toEqual({ n: 0 });
+      expect(db.prepare('SELECT status FROM receipts WHERE id = ?').get(receiptId)).toEqual({
+        status: 'failed'
+      });
+    } finally {
+      stopWorker();
+      process.env.DATABASE_PATH = originalDatabasePath ?? ':memory:';
+      rmSync(isolatedDirectory, { recursive: true, force: true });
+    }
+  });
+
   it('routes JSON requests, streaming and connection probes through the provider dispatcher', async () => {
     const { dispatchAI, dispatchAIStreaming, dispatchPingDeConexion } =
       await import('./ticket-queue.js');
     const fakeFetch = vi.mocked(fetch);
-    const json = (content: string) =>
-      new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' }
-      });
 
-    fakeFetch.mockResolvedValueOnce(json('recipe result'));
+    fakeFetch.mockResolvedValueOnce(responsesCompleted('recipe result', 'resp_recipe_dispatch'));
     await expect(
       dispatchAI(
         userId,
@@ -711,28 +976,19 @@ describe('AI provider queue dispatcher', () => {
         'recipe'
       )
     ).resolves.toBe('recipe result');
-    expect(JSON.parse(String(fakeFetch.mock.calls[0][1]?.body)).response_format).toEqual(
-      RECIPE_RESPONSE_FORMAT
-    );
+    const recipeRequest = JSON.parse(String(fakeFetch.mock.calls[0][1]?.body));
+    expect(recipeRequest).toMatchObject({ background: true, store: true });
+    expect(recipeRequest.text.format).toEqual({
+      type: 'json_schema',
+      name: RECIPE_RESPONSE_FORMAT.json_schema.name,
+      strict: true,
+      schema: RECIPE_RESPONSE_FORMAT.json_schema.schema
+    });
     expect(
       db.prepare('SELECT kind, status FROM ai_jobs ORDER BY created_at DESC LIMIT 1').get()
     ).toMatchObject({ kind: 'recipe', status: 'done' });
 
-    const encoder = new TextEncoder();
-    fakeFetch.mockResolvedValueOnce(
-      new Response(
-        new ReadableStream<Uint8Array>({
-          start(controller) {
-            controller.enqueue(
-              encoder.encode('data: {"choices":[{"delta":{"content":"chunk"}}]}\n\n')
-            );
-            controller.enqueue(encoder.encode('data: [DONE]\n\n'));
-            controller.close();
-          }
-        }),
-        { status: 200, headers: { 'content-type': 'text/event-stream' } }
-      )
-    );
+    fakeFetch.mockResolvedValueOnce(responsesCompleted('chunk', 'resp_receipt_dispatch'));
     const deltas: string[] = [];
     await expect(
       dispatchAIStreaming(
@@ -747,19 +1003,7 @@ describe('AI provider queue dispatcher', () => {
     expect(deltas).toEqual(['chunk']);
 
     fakeFetch.mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          id: 'resp_1234567',
-          status: 'completed',
-          output: [
-            {
-              type: 'message',
-              content: [{ type: 'output_text', text: '{"status":"ok","message":"synthetic ok"}' }]
-            }
-          ]
-        }),
-        { status: 200, headers: { 'content-type': 'application/json' } }
-      )
+      responsesCompleted('{"status":"ok","message":"synthetic ok"}', 'resp_1234567')
     );
     await expect(
       dispatchPingDeConexion(
@@ -836,7 +1080,7 @@ describe('AI provider queue dispatcher', () => {
     });
   });
 
-  it('processes a synthetic ticket through the pinned provider stream and final schema', async () => {
+  it('processes a synthetic ticket through the pinned background response and final schema', async () => {
     const originalDatabasePath = process.env.DATABASE_PATH;
     const isolatedDirectory = mkdtempSync(join(tmpdir(), 'hogaria-ai-queue-ticket-'));
     const { encolarTicket, stopWorker } = await import('./ticket-queue.js');
@@ -888,22 +1132,34 @@ describe('AI provider queue dispatcher', () => {
         totalMinor: 850,
         warnings: []
       };
-      const encoder = new TextEncoder();
-      const frames = [
-        `data: ${JSON.stringify({ choices: [{ delta: { content: JSON.stringify(finalAnswer) } }] })}\n\n`,
-        'data: [DONE]\n\n'
-      ].join('');
       seedMovedInventoryProduct();
+      const insertCategory = db.prepare(
+        `INSERT INTO pantry_categories (id, user_id, household_id, key, name, parent_key, position)
+         VALUES (?, ?, NULL, ?, ?, ?, ?)`
+      );
+      for (let index = 0; index < 299; index += 1) {
+        insertCategory.run(
+          `receipt-bulk-category-${index}`,
+          userId,
+          `receipt-bulk-${index}`,
+          `Receipt category ${index}`,
+          index === 0 ? null : 'receipt-bulk-0',
+          index + 3
+        );
+      }
+      const insertProduct = db.prepare(
+        `INSERT INTO ingredients (id, user_id, household_id, name, category, quantity, unit)
+         VALUES (?, ?, NULL, ?, 'receipt-bulk-0', 1, 'ud')`
+      );
+      for (let index = 0; index < 2000; index += 1) {
+        insertProduct.run(
+          `receipt-bulk-product-${index}`,
+          userId,
+          `Ticket catalog product ${String(index).padStart(4, '0')}`
+        );
+      }
       vi.mocked(fetch).mockResolvedValueOnce(
-        new Response(
-          new ReadableStream<Uint8Array>({
-            start(controller) {
-              controller.enqueue(encoder.encode(frames));
-              controller.close();
-            }
-          }),
-          { status: 200, headers: { 'content-type': 'text/event-stream' } }
-        )
+        responsesCompleted(JSON.stringify(finalAnswer), 'resp_receipt_pdf')
       );
       db.prepare(
         `INSERT INTO receipts (id, user_id, status, file_url, file_kind, ai_output_language)
@@ -913,35 +1169,40 @@ describe('AI provider queue dispatcher', () => {
       const jobId = encolarTicket(db, userId, receiptId);
       await waitFor(() => jobRow(jobId).status === 'done');
       const providerRequest = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body));
-      const providerMessages = providerRequest.messages as {
+      const providerMessages = providerRequest.input as {
         role: string;
         content:
           | string
           | Array<{
               type?: string;
               text?: string;
-              file?: { filename?: string; file_data?: string };
+              filename?: string;
+              file_data?: string;
             }>;
       }[];
-      expect(providerRequest.response_format).toEqual(RECEIPT_RESPONSE_FORMAT);
+      expect(providerRequest).toMatchObject({ background: true, store: true });
+      expect(providerRequest.text.format).toEqual({
+        type: 'json_schema',
+        name: RECEIPT_RESPONSE_FORMAT.json_schema.name,
+        strict: true,
+        schema: RECEIPT_RESPONSE_FORMAT.json_schema.schema
+      });
       expect(providerMessages[0]?.content).toContain('English (United Kingdom)');
       expect(providerMessages[0]?.content).toContain('warnings');
       const ticketContent = providerMessages.find(({ role }) => role === 'user')?.content;
       expect(Array.isArray(ticketContent)).toBe(true);
       const ticketTextParts = Array.isArray(ticketContent)
-        ? ticketContent.filter(({ type }) => type === 'text')
+        ? ticketContent.filter(({ type }) => type === 'input_text')
         : [];
       expect(ticketTextParts).toHaveLength(1);
       expect(ticketTextParts[0]?.text).toContain('inventario.json');
       expect(ticketTextParts[0]?.text).toContain('adjunto');
       const ticketParts = Array.isArray(ticketContent) ? ticketContent : [];
       const inventoryFilePart = ticketParts.find(
-        ({ type, file }) => type === 'file' && file?.filename === 'inventario.json'
+        ({ type, filename }) => type === 'input_file' && filename === 'inventario.json'
       );
-      expect(inventoryFilePart?.file?.file_data?.startsWith('data:application/json;base64,')).toBe(
-        true
-      );
-      const inventoryBase64 = inventoryFilePart?.file?.file_data?.replace(
+      expect(inventoryFilePart?.file_data?.startsWith('data:application/json;base64,')).toBe(true);
+      const inventoryBase64 = inventoryFilePart?.file_data?.replace(
         'data:application/json;base64,',
         ''
       );
@@ -949,21 +1210,38 @@ describe('AI provider queue dispatcher', () => {
       const inventorySnapshot = JSON.parse(
         Buffer.from(inventoryBase64!, 'base64').toString('utf8')
       ) as {
-        categorias: { clave: string; nombre: string }[];
+        categorias: { clave: string; nombre: string; padre: string | null }[];
         productos: { categoria: string; nombre: string; unidad: string }[];
       };
-      expect(inventorySnapshot.categorias).toContainEqual({ clave: 'dairy', nombre: 'Lácteos' });
+      expect(inventorySnapshot.categorias).toHaveLength(301);
+      expect(inventorySnapshot.productos).toHaveLength(2001);
+      expect(inventorySnapshot.categorias).toContainEqual({
+        clave: 'receipt-bulk-298',
+        nombre: 'Receipt category 298',
+        padre: 'receipt-bulk-0'
+      });
+      expect(inventorySnapshot.productos).toContainEqual({
+        categoria: 'receipt-bulk-0',
+        nombre: 'Ticket catalog product 1999',
+        unidad: 'ud'
+      });
+      expect(JSON.stringify(inventorySnapshot)).not.toContain('quantity');
+      expect(inventorySnapshot.categorias).toContainEqual({
+        clave: 'dairy',
+        nombre: 'Lácteos',
+        padre: null
+      });
       expect(inventorySnapshot.productos).toContainEqual({
         categoria: 'dairy',
         nombre: 'Leche semidesnatada',
         unidad: 'l'
       });
       const ticketPdfPart = ticketParts.find(
-        ({ type, file }) => type === 'file' && file?.filename === 'ticket.pdf'
+        ({ type, filename }) => type === 'input_file' && filename === 'ticket.pdf'
       );
-      expect(ticketPdfPart?.file?.file_data?.startsWith('data:application/pdf;base64,')).toBe(true);
-      expect(ticketParts.filter(({ type }) => type === 'file')).toHaveLength(2);
-      expect(ticketParts.some(({ type }) => type === 'image_url')).toBe(false);
+      expect(ticketPdfPart?.file_data?.startsWith('data:application/pdf;base64,')).toBe(true);
+      expect(ticketParts.filter(({ type }) => type === 'input_file')).toHaveLength(2);
+      expect(ticketParts.some(({ type }) => type === 'input_image')).toBe(false);
       expect(jobRow(jobId)).toMatchObject({
         kind: 'receipt',
         status: 'done',
@@ -1021,20 +1299,8 @@ describe('AI provider queue dispatcher', () => {
         totalMinor: 0,
         warnings: []
       };
-      const manualFrames = [
-        `data: ${JSON.stringify({ choices: [{ delta: { content: JSON.stringify(manualAnswer) } }] })}\n\n`,
-        'data: [DONE]\n\n'
-      ].join('');
       vi.mocked(fetch).mockResolvedValueOnce(
-        new Response(
-          new ReadableStream<Uint8Array>({
-            start(controller) {
-              controller.enqueue(encoder.encode(manualFrames));
-              controller.close();
-            }
-          }),
-          { status: 200, headers: { 'content-type': 'text/event-stream' } }
-        )
+        responsesCompleted(JSON.stringify(manualAnswer), 'resp_receipt_manual')
       );
       const manualJobId = encolarTicket(db, userId, manualReceiptId);
       await waitFor(() => jobRow(manualJobId).status === 'done');
@@ -1074,21 +1340,8 @@ describe('AI provider queue dispatcher', () => {
         totalMinor: null,
         warnings: []
       };
-      const encoder = new TextEncoder();
-      const frames = [
-        `data: ${JSON.stringify({ choices: [{ delta: { content: JSON.stringify(answer) } }] })}\n\n`,
-        'data: [DONE]\n\n'
-      ].join('');
       vi.mocked(fetch).mockResolvedValueOnce(
-        new Response(
-          new ReadableStream<Uint8Array>({
-            start(controller) {
-              controller.enqueue(encoder.encode(frames));
-              controller.close();
-            }
-          }),
-          { status: 200, headers: { 'content-type': 'text/event-stream' } }
-        )
+        responsesCompleted(JSON.stringify(answer), 'resp_receipt_jpeg')
       );
       db.prepare(
         `INSERT INTO receipts (id, user_id, status, file_url, file_kind)
@@ -1098,25 +1351,30 @@ describe('AI provider queue dispatcher', () => {
       const jobId = encolarTicket(db, userId, receiptId);
       await waitFor(() => jobRow(jobId).status === 'done');
       const request = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body));
-      expect(request.response_format).toEqual(RECEIPT_RESPONSE_FORMAT);
-      const userMessage = request.messages.find(({ role }: { role: string }) => role === 'user');
+      expect(request).toMatchObject({ background: true, store: true });
+      expect(request.text.format).toEqual({
+        type: 'json_schema',
+        name: RECEIPT_RESPONSE_FORMAT.json_schema.name,
+        strict: true,
+        schema: RECEIPT_RESPONSE_FORMAT.json_schema.schema
+      });
+      const userMessage = request.input.find(({ role }: { role: string }) => role === 'user');
       const parts = userMessage.content as Array<{
         type?: string;
         text?: string;
-        file?: { filename?: string; file_data?: string };
-        image_url?: { url?: string };
+        filename?: string;
+        file_data?: string;
+        image_url?: string;
       }>;
-      const textParts = parts.filter(({ type }) => type === 'text');
+      const textParts = parts.filter(({ type }) => type === 'input_text');
       expect(textParts).toHaveLength(1);
       expect(textParts[0]?.text).toContain('inventario.json');
       expect(textParts[0]?.text).toContain('adjunto');
       const inventoryFilePart = parts.find(
-        ({ type, file }) => type === 'file' && file?.filename === 'inventario.json'
+        ({ type, filename }) => type === 'input_file' && filename === 'inventario.json'
       );
-      expect(inventoryFilePart?.file?.file_data?.startsWith('data:application/json;base64,')).toBe(
-        true
-      );
-      const inventoryBase64 = inventoryFilePart?.file?.file_data?.replace(
+      expect(inventoryFilePart?.file_data?.startsWith('data:application/json;base64,')).toBe(true);
+      const inventoryBase64 = inventoryFilePart?.file_data?.replace(
         'data:application/json;base64,',
         ''
       );
@@ -1129,11 +1387,11 @@ describe('AI provider queue dispatcher', () => {
         nombre: 'Leche semidesnatada',
         unidad: 'l'
       });
-      expect(parts.filter(({ type }) => type === 'file')).toHaveLength(1);
+      expect(parts.filter(({ type }) => type === 'input_file')).toHaveLength(1);
       expect(
         parts
-          .find(({ type }) => type === 'image_url')
-          ?.image_url?.url?.startsWith('data:image/jpeg;base64,')
+          .find(({ type }) => type === 'input_image')
+          ?.image_url?.startsWith('data:image/jpeg;base64,')
       ).toBe(true);
     } finally {
       stopWorker();
@@ -1163,26 +1421,15 @@ describe('AI provider queue dispatcher', () => {
         totalMinor: 0,
         warnings: []
       };
-      const frames = [
-        `data: ${JSON.stringify({ choices: [{ delta: { content: JSON.stringify(finalAnswer) } }] })}\n\n`,
-        'data: [DONE]\n\n'
-      ].join('');
-      const encoder = new TextEncoder();
-      // The first streaming and non-streaming request both fail so the queue really retries.
-      vi.mocked(fetch).mockRejectedValueOnce(new Error('synthetic transient stream failure'));
-      vi.mocked(fetch).mockRejectedValueOnce(new Error('synthetic transient fallback failure'));
+      // The first background POST fails so the queue really retries the request.
+      vi.mocked(fetch).mockRejectedValueOnce(new Error('synthetic transient request failure'));
       vi.mocked(fetch).mockImplementationOnce(async () => {
         providerStarted.resolve();
-        return new Response(
-          new ReadableStream<Uint8Array>({
-            async start(controller) {
-              await releaseProvider.promise;
-              controller.enqueue(encoder.encode(frames));
-              controller.close();
-            }
-          }),
-          { status: 200, headers: { 'content-type': 'text/event-stream' } }
-        );
+        return responsesInProgress('resp_active_metadata');
+      });
+      vi.mocked(fetch).mockImplementationOnce(async () => {
+        await releaseProvider.promise;
+        return responsesCompleted(JSON.stringify(finalAnswer), 'resp_active_metadata');
       });
       db.prepare(
         `INSERT INTO receipts (id, user_id, status, file_url, file_kind)
@@ -1203,7 +1450,7 @@ describe('AI provider queue dispatcher', () => {
         status: 'analyzing'
       });
 
-      // Equivalent to the authorized metadata PATCH while the provider stream is still pending.
+      // Equivalent to the authorized metadata PATCH while the background response is still pending.
       db.prepare('UPDATE receipts SET store = ?, store_manual = 1 WHERE id = ?').run(
         'Tienda corregida durante análisis',
         receiptId
@@ -1213,16 +1460,26 @@ describe('AI provider queue dispatcher', () => {
 
       const requestBodies = vi
         .mocked(fetch)
-        .mock.calls.map(([, init]) => JSON.parse(String(init?.body)));
-      expect(requestBodies.slice(0, 3).map(({ response_format }) => response_format)).toEqual([
-        RECEIPT_RESPONSE_FORMAT,
-        RECEIPT_RESPONSE_FORMAT,
-        RECEIPT_RESPONSE_FORMAT
+        .mock.calls.filter(([, init]) => Boolean(init?.body))
+        .map(([, init]) => JSON.parse(String(init?.body)));
+      expect(requestBodies).toHaveLength(2);
+      expect(requestBodies.map(({ background, store }) => ({ background, store }))).toEqual([
+        { background: true, store: true },
+        { background: true, store: true }
       ]);
-      expect(requestBodies.slice(0, 3).map(({ stream }) => stream)).toEqual([
-        true,
-        undefined,
-        true
+      expect(requestBodies.map(({ text }) => text.format)).toEqual([
+        {
+          type: 'json_schema',
+          name: RECEIPT_RESPONSE_FORMAT.json_schema.name,
+          strict: true,
+          schema: RECEIPT_RESPONSE_FORMAT.json_schema.schema
+        },
+        {
+          type: 'json_schema',
+          name: RECEIPT_RESPONSE_FORMAT.json_schema.name,
+          strict: true,
+          schema: RECEIPT_RESPONSE_FORMAT.json_schema.schema
+        }
       ]);
 
       expect(

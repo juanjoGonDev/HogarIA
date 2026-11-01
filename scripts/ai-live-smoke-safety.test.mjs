@@ -69,6 +69,8 @@ test('recipe-only success requires one unbounded strict recipe schema and one co
   const runnerExit = { code: 0, timedOut: false, cancelled: false, runnerCleaned: true };
   const call = {
     status: 200,
+    stream: false,
+    providerTransport: 'responses_background',
     schemaName: 'generated_recipe',
     requestContract: { strictJsonSchema: true, recipeTextUnbounded: true },
     responseFormat: {
@@ -155,6 +157,8 @@ test('assistant-only success requires the complete strict action-plan matrix and
   const runnerExit = { code: 0, timedOut: false, cancelled: false, runnerCleaned: true };
   const call = {
     status: 200,
+    stream: false,
+    providerTransport: 'responses_background',
     schemaName: 'ai_action_plan',
     requestContract: { strictJsonSchema: true },
     responseFormat: {
@@ -266,6 +270,8 @@ test('household meal smoke succeeds only for one validated strict-schema provide
   const runnerExit = { code: 0, timedOut: false, cancelled: false, runnerCleaned: true };
   const call = {
     status: 200,
+    stream: false,
+    providerTransport: 'responses_background',
     schemaName: 'weekly_meal_proposal',
     requestContract: {
       strictJsonSchema: true,
@@ -1093,8 +1099,13 @@ test('assistant-only runner environment keeps its mode in Playwright and strips 
   assert.equal(processEnvs.playwright.HOGARIA_AI_REAL_SMOKE_PROXY_TOKEN, undefined);
 });
 
-test('accepts only a fully successful run with nine or ten live completions', () => {
-  const calls = (count) => Array.from({ length: count }, () => ({ status: 200 }));
+test('accepts only a fully successful run with nine or ten background Responses completions', () => {
+  const calls = (count) =>
+    Array.from({ length: count }, () => ({
+      status: 200,
+      stream: false,
+      providerTransport: 'responses_background'
+    }));
   const runnerExit = { code: 0, timedOut: false, cancelled: false, runnerCleaned: true };
 
   assert.equal(
@@ -1117,7 +1128,10 @@ test('accepts only a fully successful run with nine or ten live completions', ()
     isSuccessfulAiLiveSmokeResult({
       runnerExit,
       cleanupFailed: false,
-      calls: [...calls(9), { status: 500 }]
+      calls: [
+        ...calls(9),
+        { status: 500, stream: false, providerTransport: 'responses_background' }
+      ]
     }),
     false
   );
@@ -1157,11 +1171,12 @@ const VALID_RECEIPT_REQUEST_CONTRACT = {
   receiptAttachmentCount: 1
 };
 
-test('accepts exactly two receipt jobs with at most one immediate stream fallback each', () => {
+test('accepts receipt smoke only when every ticket uses one background Responses completion', () => {
   const runnerExit = { code: 0, timedOut: false, cancelled: false, runnerCleaned: true };
   const receipts = Array.from({ length: 2 }, () => ({
     status: 200,
-    stream: true,
+    stream: false,
+    providerTransport: 'responses_background',
     schemaName: 'receipt',
     requestContract: VALID_RECEIPT_REQUEST_CONTRACT
   }));
@@ -1223,7 +1238,7 @@ test('accepts exactly two receipt jobs with at most one immediate stream fallbac
       calls: withFallback,
       receiptsOnly: true
     }),
-    true
+    false
   );
   assert.equal(
     isSuccessfulAiLiveSmokeResult({
@@ -1232,7 +1247,7 @@ test('accepts exactly two receipt jobs with at most one immediate stream fallbac
       calls: withFallbackForEach,
       receiptsOnly: true
     }),
-    true
+    false
   );
   assert.equal(
     isSuccessfulAiLiveSmokeResult({
@@ -1250,7 +1265,8 @@ test('accepts exactly two receipt jobs with at most one immediate stream fallbac
       calls: [
         {
           status: 500,
-          stream: true,
+          stream: false,
+          providerTransport: 'responses_background',
           schemaName: 'receipt',
           requestContract: VALID_RECEIPT_REQUEST_CONTRACT
         },
@@ -1268,6 +1284,8 @@ test('accepts exactly two receipt jobs with at most one immediate stream fallbac
         ...receipts,
         {
           status: 200,
+          stream: false,
+          providerTransport: 'responses_background',
           schemaName: 'recipe',
           requestContract: VALID_RECEIPT_REQUEST_CONTRACT
         }
@@ -1282,7 +1300,8 @@ test('accepts one successful long-ticket receipt request without requiring an am
   const runnerExit = { code: 0, timedOut: false, cancelled: false, runnerCleaned: true };
   const call = {
     status: 200,
-    stream: true,
+    stream: false,
+    providerTransport: 'responses_background',
     schemaName: 'receipt',
     requestContract: VALID_RECEIPT_REQUEST_CONTRACT
   };
@@ -1319,7 +1338,7 @@ test('accepts one successful long-ticket receipt request without requiring an am
   );
 });
 
-test('accepts only the failed streaming receipt attempt when its strict non-stream fallback succeeds', () => {
+test('rejects Chat Completions fallback in a smoke that requires background Responses', () => {
   const runnerExit = { code: 0, timedOut: false, cancelled: false, runnerCleaned: true };
   const calls = Array.from({ length: 8 }, () => ({ status: 200 }));
   calls.splice(
@@ -1329,7 +1348,7 @@ test('accepts only the failed streaming receipt attempt when its strict non-stre
     { status: 200, stream: false, schemaName: 'receipt' }
   );
 
-  assert.equal(isSuccessfulAiLiveSmokeResult({ runnerExit, cleanupFailed: false, calls }), true);
+  assert.equal(isSuccessfulAiLiveSmokeResult({ runnerExit, cleanupFailed: false, calls }), false);
   assert.equal(
     isSuccessfulAiLiveSmokeResult({
       runnerExit,
@@ -1369,14 +1388,18 @@ async function listen(server) {
 }
 
 function postJson(url, bearer, payload) {
+  return requestJson(url, bearer, 'POST', payload);
+}
+
+function requestJson(url, bearer, method, payload) {
   const target = new URL(url);
   return new Promise((resolve, reject) => {
     const request = httpRequest(
       {
         hostname: target.hostname,
         port: Number(target.port),
-        path: target.pathname,
-        method: 'POST',
+        path: `${target.pathname}${target.search}`,
+        method,
         headers: {
           authorization: `Bearer ${bearer}`,
           'content-type': 'application/json',
@@ -1393,7 +1416,7 @@ function postJson(url, bearer, payload) {
       }
     );
     request.once('error', reject);
-    request.end(JSON.stringify(payload));
+    request.end(payload === undefined ? undefined : JSON.stringify(payload));
   });
 }
 
@@ -2186,6 +2209,197 @@ test('meal proxy rejects wrong schema, missing or extra recipe/catalog attachmen
     for (const payload of invalidInputs) await assertRejected(payload);
     assert.equal(upstreamCalls, 0);
   } finally {
+    await new Promise((resolve, reject) =>
+      upstream.close((error) => (error ? reject(error) : resolve()))
+    );
+  }
+});
+
+test('background Responses proxy validates its fixed route, polls only accepted IDs, and redacts credentials', async () => {
+  const bearer = 'synthetic-responses-provider-bearer';
+  const upstreamRequests = [];
+  let proxyToken = '';
+  let responseSequence = 0;
+  const upstream = createServer(async (request, response) => {
+    const chunks = [];
+    for await (const chunk of request) chunks.push(chunk);
+    const raw = Buffer.concat(chunks).toString('utf8');
+    upstreamRequests.push({
+      method: request.method,
+      path: request.url,
+      authorization: request.headers.authorization,
+      body: raw ? JSON.parse(raw) : null
+    });
+    if (request.method === 'POST' && request.url === '/v1/responses') {
+      const id = `resp_fixture_${++responseSequence}`;
+      response.writeHead(202, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ id, status: 'in_progress', output: [] }));
+      return;
+    }
+    if (request.method === 'GET' && request.url === '/v1/responses/resp_fixture_1') {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(
+        JSON.stringify({
+          id: 'resp_fixture_1',
+          status: 'completed',
+          output: [
+            { type: 'message', content: [{ type: 'output_text', text: '{"answer":"ok"}' }] }
+          ],
+          usage: { input_tokens: 7, output_tokens: 5, total_tokens: 12 }
+        })
+      );
+      return;
+    }
+    if (request.method === 'GET' && request.url === '/v1/responses/resp_fixture_2') {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ id: 'resp_fixture_2', status: 'in_progress', output: [] }));
+      return;
+    }
+    if (request.method === 'POST' && request.url === '/v1/responses/resp_fixture_2/cancel') {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ id: 'resp_fixture_2', status: 'cancelled', output: [] }));
+      return;
+    }
+    response.writeHead(404).end();
+  });
+  const upstreamPort = await listen(upstream);
+  const proxy = await createAiLiveProxy({
+    token: bearer,
+    model: 'gpt-5',
+    targetOrigin: `http://127.0.0.1:${upstreamPort}`,
+    maxCalls: 2
+  });
+  proxyToken = proxy.clientToken;
+
+  try {
+    const request = {
+      model: 'gpt-5',
+      background: true,
+      store: true,
+      input: [{ role: 'user', content: 'synthetic background prompt' }],
+      text: {
+        format: {
+          type: 'json_schema',
+          name: 'synthetic_answer',
+          strict: true,
+          schema: SYNTHETIC_STRICT_RESPONSE_FORMAT.json_schema.schema
+        }
+      }
+    };
+    const create = await postJson(`${proxy.baseUrl}/responses`, proxyToken, request);
+    assert.equal(create.status, 202);
+    assert.deepEqual(JSON.parse(create.text), {
+      id: 'resp_fixture_1',
+      status: 'in_progress',
+      output: []
+    });
+
+    const unauthorized = await requestJson(
+      `${proxy.baseUrl}/responses/resp_fixture_1`,
+      bearer,
+      'GET'
+    );
+    assert.equal(unauthorized.status, 401);
+    const unknown = await requestJson(`${proxy.baseUrl}/responses/resp_other`, proxyToken, 'GET');
+    assert.equal(unknown.status, 404);
+    const query = await requestJson(
+      `${proxy.baseUrl}/responses/resp_fixture_1?include=arbitrary`,
+      proxyToken,
+      'GET'
+    );
+    assert.equal(query.status, 404);
+
+    const completed = await requestJson(
+      `${proxy.baseUrl}/responses/resp_fixture_1`,
+      proxyToken,
+      'GET'
+    );
+    assert.equal(completed.status, 200);
+    assert.equal(JSON.parse(completed.text).status, 'completed');
+    assert.equal(completed.text.includes(bearer), false);
+    assert.equal(completed.text.includes(proxyToken), false);
+    assert.deepEqual(
+      upstreamRequests.map(({ method, path, authorization }) => ({ method, path, authorization })),
+      [
+        { method: 'POST', path: '/v1/responses', authorization: `Bearer ${bearer}` },
+        { method: 'GET', path: '/v1/responses/resp_fixture_1', authorization: `Bearer ${bearer}` }
+      ]
+    );
+    assert.deepEqual(proxy.metrics.calls[0].usage, {
+      promptTokens: 7,
+      completionTokens: 5,
+      totalTokens: 12
+    });
+    assert.equal(proxy.metrics.calls[0].schemaName, 'synthetic_answer');
+    assert.deepEqual(proxy.metrics.calls[0].responseFormat, {
+      hasChoices: true,
+      messageContentType: 'text',
+      contentChars: '{"answer":"ok"}'.length,
+      isJsonObject: true,
+      finishReason: 'stop'
+    });
+    assert.equal(JSON.stringify(proxy.metrics).includes('synthetic background prompt'), false);
+    assert.equal(JSON.stringify(proxy.metrics).includes(bearer), false);
+    assert.equal(JSON.stringify(proxy.metrics).includes(proxyToken), false);
+
+    const secondCreate = await postJson(`${proxy.baseUrl}/responses`, proxyToken, request);
+    assert.equal(secondCreate.status, 202);
+    const cancel = await requestJson(
+      `${proxy.baseUrl}/responses/resp_fixture_2/cancel`,
+      proxyToken,
+      'POST'
+    );
+    assert.equal(cancel.status, 200);
+    assert.equal(JSON.parse(cancel.text).status, 'cancelled');
+    assert.equal(cancel.text.includes(bearer), false);
+    assert.deepEqual(
+      upstreamRequests.slice(-2).map(({ method, path }) => ({ method, path })),
+      [
+        { method: 'POST', path: '/v1/responses' },
+        { method: 'POST', path: '/v1/responses/resp_fixture_2/cancel' }
+      ]
+    );
+
+    const invalidBackground = await postJson(`${proxy.baseUrl}/responses`, proxyToken, {
+      ...request,
+      background: false
+    });
+    assert.equal(invalidBackground.status, 400);
+    const invalidStore = await postJson(`${proxy.baseUrl}/responses`, proxyToken, {
+      ...request,
+      store: false
+    });
+    assert.equal(invalidStore.status, 400);
+    const invalidFormat = await postJson(`${proxy.baseUrl}/responses`, proxyToken, {
+      ...request,
+      text: { format: { ...request.text.format, strict: false } }
+    });
+    assert.equal(invalidFormat.status, 400);
+    const invalidInputPart = await postJson(`${proxy.baseUrl}/responses`, proxyToken, {
+      ...request,
+      input: [
+        {
+          role: 'user',
+          content: [{ type: 'input_text', text: 'synthetic', unexpected: 'not forwarded' }]
+        }
+      ]
+    });
+    assert.equal(invalidInputPart.status, 400);
+    const unsupportedField = await postJson(`${proxy.baseUrl}/responses`, proxyToken, {
+      ...request,
+      tools: [{ type: 'web_search' }]
+    });
+    assert.equal(unsupportedField.status, 400);
+    const arbitraryRoute = await requestJson(
+      `${proxy.baseUrl}/responses/resp_fixture_1/replay`,
+      proxyToken,
+      'POST',
+      request
+    );
+    assert.equal(arbitraryRoute.status, 404);
+    assert.equal(upstreamRequests.length, 4);
+  } finally {
+    await proxy.close();
     await new Promise((resolve, reject) =>
       upstream.close((error) => (error ? reject(error) : resolve()))
     );

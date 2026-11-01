@@ -97,6 +97,18 @@ function addHouseholdMember(user: User, householdId: string, settings: boolean):
   db.prepare('UPDATE users SET household_id = ? WHERE id = ?').run(householdId, user.id);
 }
 
+function createActiveAutomationRun(id: string, householdId: string): void {
+  db.prepare(
+    `INSERT INTO household_planning_automation_runs
+       (id, household_id, occurrence_key, scheduled_at, scheduled_local_date, time_zone,
+        config_version, mode, scopes_json, target_week_start, status, lease_owner,
+        lease_expires_at, fence, failure_code)
+     VALUES (?, ?, ?, '2026-11-01T12:00:00.000Z', '2026-11-01', 'UTC', 1,
+       'generate', '["tasks"]', '2026-11-09', 'in_progress', 'e2e-worker',
+       '2026-11-01T12:05:00.000Z', 1, NULL)`
+  ).run(id, householdId, `occurrence-${id}`);
+}
+
 async function call(user: User, method: string, path: string, body?: unknown) {
   const response = await app.request(`/api/ai${path}`, {
     method,
@@ -106,7 +118,11 @@ async function call(user: User, method: string, path: string, body?: unknown) {
     },
     body: body === undefined ? undefined : JSON.stringify(body)
   });
-  return { status: response.status, payload: (await response.json()) as any };
+  return {
+    status: response.status,
+    cacheControl: response.headers.get('cache-control'),
+    payload: (await response.json()) as any
+  };
 }
 
 beforeAll(async () => {
@@ -138,6 +154,90 @@ beforeEach(async () => {
 });
 
 describe('AI queue API', () => {
+  it('shows active jobs to their owner without provider-settings permission or foreign metadata', async () => {
+    const householdId = 'queue-home-active-jobs';
+    addHouseholdMember(alice, householdId, false);
+    createActiveAutomationRun('active-own-automation-run', householdId);
+    const foreignHouseholdId = 'queue-home-foreign-automation';
+    addHouseholdMember(bob, foreignHouseholdId, false);
+    createActiveAutomationRun('active-foreign-automation-run', foreignHouseholdId);
+    const ownConfig = createConfig(alice.id, 'active-own-config', 1, householdId);
+    createJob({
+      id: 'active-household-job',
+      userId: alice.id,
+      householdId,
+      configId: ownConfig,
+      kind: 'assistant',
+      status: 'running',
+      errorDetail: 'private prompt text',
+      providerResponseId: 'resp_private_id',
+      providerTransport: 'responses_background',
+      providerHttpStatus: 200,
+      elapsedMs: 2000,
+      diagnosticStage: 'polling'
+    });
+    createJob({
+      id: 'active-own-queued-job',
+      userId: alice.id,
+      householdId,
+      configId: ownConfig,
+      kind: 'receipt',
+      status: 'queued'
+    });
+    createJob({
+      id: 'active-own-completed-job',
+      userId: alice.id,
+      householdId,
+      configId: ownConfig,
+      status: 'done'
+    });
+    const foreignConfig = createConfig(bob.id);
+    createJob({
+      id: 'active-foreign-job',
+      userId: bob.id,
+      configId: foreignConfig,
+      status: 'running'
+    });
+
+    const response = await call(alice, 'GET', '/queue/active');
+
+    expect(response.status).toBe(200);
+    expect(response.cacheControl).toBe('no-store, no-cache, must-revalidate');
+    expect(response.payload.success).toBe(true);
+    expect(response.payload.data.jobs).toEqual(
+      expect.arrayContaining([
+        {
+          id: 'active-household-job',
+          kind: 'assistant',
+          status: 'running',
+          createdAt: expect.any(String),
+          startedAt: null
+        },
+        {
+          id: 'active-own-queued-job',
+          kind: 'receipt',
+          status: 'queued',
+          createdAt: expect.any(String),
+          startedAt: null
+        },
+        {
+          id: 'planning-automation:active-own-automation-run',
+          kind: 'household_automation',
+          status: 'running',
+          createdAt: expect.any(String),
+          startedAt: expect.any(String)
+        }
+      ])
+    );
+    expect(response.payload.data.jobs).toHaveLength(3);
+    expect(response.payload.data.jobs.map(({ id }: { id: string }) => id)).not.toContain(
+      'planning-automation:active-foreign-automation-run'
+    );
+    expect(JSON.stringify(response.payload)).not.toContain('private prompt');
+    expect(JSON.stringify(response.payload)).not.toContain('resp_private_id');
+    expect(JSON.stringify(response.payload)).not.toContain('providerHttpStatus');
+  });
+
   it('denies every queue route to a home member without settings permission', async () => {
     const householdId = 'queue-home-no-settings';
     addHouseholdMember(alice, householdId, false);

@@ -9,6 +9,16 @@ type Sql = import('better-sqlite3').Database;
 type User = { id: string; token: string };
 
 const SECRET = 'synthetic-provider-key-sentinel';
+function responsesText(content: string, id = 'resp_secret_redaction_fixture'): Response {
+  return new Response(
+    JSON.stringify({
+      id,
+      status: 'completed',
+      output: [{ type: 'message', content: [{ type: 'output_text', text: content }] }]
+    }),
+    { status: 200, headers: { 'content-type': 'application/json' } }
+  );
+}
 let app: Hono;
 let db: Sql;
 let closeDatabase: () => void;
@@ -70,7 +80,7 @@ describe('redacción de secretos en la configuración IA', () => {
     const created = await request('POST', '/configs', {
       name: 'Synthetic provider',
       provider: 'custom',
-      baseUrl: 'https://redaction-test.invalid/v1',
+      baseUrl: 'http://127.0.0.1:9/v1',
       apiKey: SECRET,
       model: 'synthetic-model',
       retryAttempts: 0,
@@ -81,10 +91,11 @@ describe('redacción de secretos en la configuración IA', () => {
   }
 
   it('no expone ni persiste la clave cuando el proveedor la repite en un error HTTP', async () => {
-    vi.stubGlobal(
-      'fetch',
-      async () => new Response(`Invalid API key: Bearer ${SECRET}`, { status: 401 })
-    );
+    vi.stubGlobal('fetch', async (input: string | URL | Request, init?: RequestInit) => {
+      expect(new URL(String(input)).pathname).toBe('/v1/responses');
+      expect(JSON.parse(String(init?.body)).background).toBe(true);
+      return new Response(`Invalid API key: Bearer ${SECRET}`, { status: 401 });
+    });
 
     const configId = await saveConfig();
 
@@ -187,14 +198,11 @@ describe('redacción de secretos en la configuración IA', () => {
       storage: null,
       tags: []
     });
-    vi.stubGlobal(
-      'fetch',
-      async () =>
-        new Response(JSON.stringify({ choices: [{ message: { content: responseContent } }] }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' }
-        })
-    );
+    vi.stubGlobal('fetch', async (input: string | URL | Request, init?: RequestInit) => {
+      expect(new URL(String(input)).pathname).toBe('/v1/responses');
+      expect(JSON.parse(String(init?.body)).text.format.type).toBe('json_schema');
+      return responsesText(responseContent);
+    });
     await saveConfig();
 
     const generated = await request('POST', '/generate-recipe', {
@@ -208,7 +216,11 @@ describe('redacción de secretos en la configuración IA', () => {
   });
 
   it('no expone el excerpt del body si la respuesta 200 del proveedor no es JSON', async () => {
-    vi.stubGlobal('fetch', async () => new Response(`Invalid API key: ${SECRET}`, { status: 200 }));
+    vi.stubGlobal('fetch', async (input: string | URL | Request, init?: RequestInit) => {
+      expect(new URL(String(input)).pathname).toBe('/v1/responses');
+      expect(JSON.parse(String(init?.body)).background).toBe(true);
+      return new Response(`Invalid API key: ${SECRET}`, { status: 200 });
+    });
     await saveConfig();
 
     const generated = await request('POST', '/generate-recipe', {

@@ -26,6 +26,8 @@ function guardedDependencies(calls) {
 function successfulCall() {
   return {
     status: 200,
+    stream: false,
+    providerTransport: 'responses_background',
     schemaName: AI_LIVE_HOUSEHOLD_MEAL_SCHEMA_NAME,
     elapsedMs: 12,
     requestContract: {

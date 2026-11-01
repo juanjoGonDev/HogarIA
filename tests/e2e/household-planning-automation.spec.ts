@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join, resolve } from 'node:path';
 import { expect, test } from './fixtures';
+import { responsesCompleted, userInputText, type ResponsesRequest } from './helpers/ai-responses';
 import { registerWithHousehold } from './helpers/auth';
 
 interface AutomationSnapshot {
@@ -28,13 +29,7 @@ interface AutomationSnapshot {
   } | null;
 }
 
-interface SyntheticChatCompletionRequest {
-  messages?: Array<{ role?: string; content?: unknown }>;
-  response_format?: {
-    type?: string;
-    json_schema?: { name?: string; strict?: boolean };
-  };
-}
+type SyntheticResponsesRequest = ResponsesRequest & { model?: string };
 
 const screenshotsDirectory = resolve('.e2e-screenshots/household-planning-automation');
 const weekdayLabels = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
@@ -452,34 +447,30 @@ test('publica una propuesta desde el editor pasando por el scheduler y worker re
   );
   test.setTimeout(90_000);
 
-  const providerRequests: SyntheticChatCompletionRequest[] = [];
+  const providerRequests: SyntheticResponsesRequest[] = [];
   const provider = createServer((request, response) => {
     let body = '';
     request.setEncoding('utf8');
     request.on('data', (chunk: string) => (body += chunk));
     request.on('end', () => {
-      const payload = JSON.parse(body) as SyntheticChatCompletionRequest;
+      if (request.method !== 'POST' || request.url !== '/v1/responses') {
+        response.writeHead(404).end();
+        return;
+      }
+      const payload = JSON.parse(body) as SyntheticResponsesRequest;
       providerRequests.push(payload);
-      const userMessage = payload.messages?.find((message) => message.role === 'user')?.content;
-      const weekStart =
-        typeof userMessage === 'string'
-          ? userMessage.match(/"weekStart":"(\d{4}-\d{2}-\d{2})"/)?.[1]
-          : undefined;
+      const weekStart = userInputText(payload).match(/"weekStart":"(\d{4}-\d{2}-\d{2})"/)?.[1];
       response.writeHead(200, { 'content-type': 'application/json' });
       response.end(
-        JSON.stringify({
-          choices: [
-            {
-              message: {
-                content: JSON.stringify({
-                  tasks: weekStart
-                    ? [{ title: 'Revisar la cocina', scheduledDate: weekStart, spaceId: null }]
-                    : []
-                })
-              }
-            }
-          ]
-        })
+        JSON.stringify(
+          responsesCompleted(
+            JSON.stringify({
+              tasks: weekStart
+                ? [{ title: 'Revisar la cocina', scheduledDate: weekStart, spaceId: null }]
+                : []
+            })
+          )
+        )
       );
     });
   });
@@ -611,10 +602,9 @@ test('publica una propuesta desde el editor pasando por el scheduler y worker re
     expect(providerRequests).toHaveLength(1);
     expect(providerRequests[0]).toMatchObject({
       model: 'synthetic-task-planner',
-      response_format: {
-        type: 'json_schema',
-        json_schema: { name: 'household_task_proposal', strict: true }
-      }
+      background: true,
+      store: true,
+      text: { format: { type: 'json_schema', name: 'household_task_proposal', strict: true } }
     });
 
     const pollCountAfterPublication = await readSchedulerPollCount();

@@ -15,6 +15,7 @@ export const AI_FUNCTION_KEYS = [
 export type AiFunctionKey = (typeof AI_FUNCTION_KEYS)[number];
 
 const JOB_FUNCTION: Readonly<Record<string, AiFunctionKey>> = {
+  assistant: 'assistant',
   recipe: 'recipes',
   multiple_recipes: 'recipes',
   recommendations: 'recipes',

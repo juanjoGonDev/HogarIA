@@ -253,7 +253,6 @@ householdMealProposalRoutes.post('/meal-planning/proposal', async (c) => {
         householdMemberIds: request.data.householdMemberIds,
         weekStart: request.data.weekStart,
         language: c.get('appLanguage'),
-        signal: c.req.raw.signal,
         afterProvider: () => {
           if (activeHouseholdId(db, userId) !== householdId) {
             throw new AutomatedHouseholdMealProposalError('HOUSEHOLD_CONTEXT_CHANGED');

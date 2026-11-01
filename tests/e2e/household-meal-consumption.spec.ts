@@ -3,6 +3,7 @@ import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { expect, test } from './fixtures';
+import { responsesCompleted, userInput, type ResponsesRequest } from './helpers/ai-responses';
 import { createHousehold, registerUser } from './helpers/auth';
 
 interface Slot {
@@ -12,13 +13,7 @@ interface Slot {
   eligibleParticipants: string[];
 }
 
-interface ProviderRequest {
-  messages?: Array<{
-    role?: string;
-    content?: string | Array<{ type?: string; file?: { filename?: string; file_data?: string } }>;
-  }>;
-  response_format?: { type?: string; json_schema?: { strict?: boolean } };
-}
+type ProviderRequest = ResponsesRequest;
 
 const screenshotDirectory = resolve('.e2e-screenshots/household-meal-consumption');
 
@@ -47,12 +42,17 @@ test('registra raciones reales o una comida omitida desde el calendario, en escr
     request.setEncoding('utf8');
     request.on('data', (chunk: string) => (body += chunk));
     request.on('end', () => {
+      if (request.method !== 'POST' || request.url !== '/v1/responses') {
+        response.writeHead(404).end();
+        return;
+      }
       const payload = JSON.parse(body) as ProviderRequest;
       providerRequests.push(payload);
-      const userContent = payload.messages?.find((message) => message.role === 'user')?.content;
+      const userContent = userInput(payload)?.content;
       const contextFile = Array.isArray(userContent)
-        ? userContent.find((part) => part.file?.filename === 'meal-planning-context.json')?.file
-            ?.file_data
+        ? userContent.find(
+            (part) => part.type === 'input_file' && part.filename === 'meal-planning-context.json'
+          )?.file_data
         : undefined;
       const contextPrefix = 'data:application/json;base64,';
       const slots =
@@ -125,16 +125,9 @@ test('registra raciones reales o una comida omitida desde el calendario, en escr
       }));
       response.writeHead(200, { 'content-type': 'application/json' });
       response.end(
-        JSON.stringify({
-          choices: [
-            {
-              finish_reason: 'stop',
-              message: {
-                content: JSON.stringify({ newRecipes: [{ alias: 'N1', recipe }], events })
-              }
-            }
-          ]
-        })
+        JSON.stringify(
+          responsesCompleted(JSON.stringify({ newRecipes: [{ alias: 'N1', recipe }], events }))
+        )
       );
     });
   });
@@ -207,9 +200,9 @@ test('registra raciones reales o una comida omitida desde el calendario, en escr
     };
     expect(proposal.data.events.length).toBeGreaterThanOrEqual(2);
     expect(providerRequests).toHaveLength(1);
-    expect(providerRequests[0]?.response_format).toMatchObject({
+    expect(providerRequests[0]?.text?.format).toMatchObject({
       type: 'json_schema',
-      json_schema: { strict: true }
+      strict: true
     });
 
     const confirmResponse = await page.request.post('/api/household/meal-planning/confirm', {

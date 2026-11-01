@@ -151,7 +151,9 @@ function isHouseholdSelectionRoute(c: Context): boolean {
   const path = new URL(c.req.url).pathname.replace(/\/+$/, '') || '/';
   return (
     (c.req.method === 'GET' &&
-      (path.endsWith('/api/household/memberships') || path.endsWith('/api/household'))) ||
+      (path.endsWith('/api/household/memberships') ||
+        path.endsWith('/api/household') ||
+        path === '/api/ai/queue/active')) ||
     (c.req.method === 'POST' && path.endsWith('/api/household/active'))
   );
 }

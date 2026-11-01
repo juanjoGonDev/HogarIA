@@ -129,7 +129,7 @@ type SmokeRecipe = {
 
 type SyntheticProviderRequest = {
   model: string | null;
-  stream: boolean;
+  background: boolean;
   hasImage: boolean;
   hasResponseFormat: boolean;
   userPrompt: string;
@@ -324,6 +324,8 @@ function complexRecipeFixture() {
 class SyntheticAiProvider {
   private server?: Server;
   private replies: unknown[] = [];
+  private readonly operations = new Map<string, string>();
+  private responseSequence = 0;
   baseUrl = '';
   readonly requests: SyntheticProviderRequest[] = [];
 
@@ -336,7 +338,24 @@ class SyntheticAiProvider {
       const chunks: Buffer[] = [];
       request.on('data', (chunk: Buffer) => chunks.push(chunk));
       request.on('end', () => {
-        if (request.method !== 'POST' || request.url !== '/v1/chat/completions') {
+        const path = new URL(request.url ?? '/', 'http://provider.test').pathname;
+        const responseId = path.split('/').at(-1) ?? '';
+        if (request.method === 'GET' && /^resp_smoke_\d+$/.test(responseId)) {
+          const content = this.operations.get(responseId);
+          if (content === undefined) {
+            response.writeHead(404).end();
+            return;
+          }
+          response.writeHead(200, { 'content-type': 'application/json' }).end(
+            JSON.stringify({
+              id: responseId,
+              status: 'completed',
+              output: [{ type: 'message', content: [{ type: 'output_text', text: content }] }]
+            })
+          );
+          return;
+        }
+        if (request.method !== 'POST' || path !== '/v1/responses') {
           response.writeHead(404).end();
           return;
         }
@@ -349,23 +368,38 @@ class SyntheticAiProvider {
           return;
         }
 
-        const messageList = Array.isArray(body.messages) ? body.messages : [];
-        const messages = JSON.stringify(messageList);
-        const userPrompt = messageList
+        const inputList = Array.isArray(body.input) ? body.input : [];
+        const input = JSON.stringify(inputList);
+        const userPrompt = inputList
           .filter(
-            (message): message is { role: string; content: string } =>
+            (message): message is { role: string; content: unknown } =>
               typeof message === 'object' &&
               message !== null &&
               (message as { role?: unknown }).role === 'user' &&
-              typeof (message as { content?: unknown }).content === 'string'
+              'content' in message
           )
-          .map(({ content }) => content)
+          .map(({ content }) =>
+            typeof content === 'string'
+              ? content
+              : Array.isArray(content)
+                ? content
+                    .filter(
+                      (part): part is { text: string } =>
+                        typeof part === 'object' &&
+                        part !== null &&
+                        (part as { type?: unknown }).type === 'input_text' &&
+                        typeof (part as { text?: unknown }).text === 'string'
+                    )
+                    .map(({ text }) => text)
+                    .join('\n')
+                : ''
+          )
           .join('\n');
         this.requests.push({
           model: typeof body.model === 'string' ? body.model : null,
-          stream: body.stream === true,
-          hasImage: messages.includes('image_url'),
-          hasResponseFormat: Boolean(body.response_format),
+          background: body.background === true,
+          hasImage: input.includes('input_image'),
+          hasResponseFormat: Boolean((body.text as { format?: unknown } | undefined)?.format),
           userPrompt
         });
 
@@ -378,9 +412,11 @@ class SyntheticAiProvider {
         }
 
         const content = typeof fixture === 'string' ? fixture : JSON.stringify(fixture);
+        const id = 'resp_smoke_' + ++this.responseSequence;
+        this.operations.set(id, content);
         response
-          .writeHead(200, { 'content-type': 'application/json' })
-          .end(JSON.stringify({ choices: [{ message: { content } }] }));
+          .writeHead(202, { 'content-type': 'application/json' })
+          .end(JSON.stringify({ id, status: 'in_progress', output: [] }));
       });
     });
 
@@ -2063,7 +2099,7 @@ test('cubre los ocho AiJobKind con fixtures de proveedor loopback', async ({ pag
     ).toBe(true);
     expect(multiple.data[0].ingredients).not.toEqual(multiple.data[1].ingredients);
     expect(multiple.data[0].instructionsByLevel).not.toEqual(multiple.data[1].instructionsByLevel);
-    expect(provider.requests.slice(2, 4).every(({ stream }) => !stream)).toBe(true);
+    expect(provider.requests.slice(2, 4).every(({ background }) => background)).toBe(true);
     for (const request of provider.requests.slice(2, 4)) {
       for (const ingredient of COMPLEX_RECIPE_INGREDIENTS) {
         expect(request.userPrompt).toContain(
@@ -2250,7 +2286,7 @@ test('cubre los ocho AiJobKind con fixtures de proveedor loopback', async ({ pag
     expect(provider.requests.every(({ model }) => model === 'synthetic-ai-model')).toBe(true);
     expect(provider.requests.some(({ hasImage }) => hasImage)).toBe(true);
     expect(provider.requests.every(({ hasResponseFormat }) => hasResponseFormat)).toBe(true);
-    expect(provider.requests.every(({ stream }) => !stream)).toBe(true);
+    expect(provider.requests.every(({ background }) => background)).toBe(true);
     expect(provider.pendingReplyCount).toBe(0);
   } finally {
     await provider.close();

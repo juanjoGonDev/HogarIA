@@ -10,16 +10,15 @@ export function effectiveAiTimeoutMs(timeoutMs: number | null | undefined): numb
   return Math.min(timeoutMs, AI_TIMEOUT_MAX_MS);
 }
 
-/** A background connection probe must outlive the 30 s synchronous default. */
-export function connectionTestTimeoutMs(timeoutMs: number | null | undefined): number {
+/** Every provider operation gets time to finish after the background POST is accepted. */
+export function aiOperationTimeoutMs(timeoutMs: number | null | undefined): number {
   return Math.max(effectiveAiTimeoutMs(timeoutMs), AI_CONNECTION_TEST_MIN_TIMEOUT_MS);
 }
 
+/** Kept as a compatibility alias for the connection-test callsite. */
+export const connectionTestTimeoutMs = aiOperationTimeoutMs;
+
 export function aiJobLeaseSeconds(timeoutMs: number | null | undefined, kind?: string): number {
-  const attempts = kind === 'receipt' ? 2 : 1;
-  const effectiveTimeout =
-    kind === 'connection_test'
-      ? connectionTestTimeoutMs(timeoutMs)
-      : effectiveAiTimeoutMs(timeoutMs);
-  return attempts * Math.ceil(effectiveTimeout / 1000) + AI_JOB_LEASE_MARGIN_SECONDS;
+  void kind;
+  return Math.ceil(aiOperationTimeoutMs(timeoutMs) / 1000) + AI_JOB_LEASE_MARGIN_SECONDS;
 }

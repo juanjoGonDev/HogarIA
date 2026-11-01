@@ -268,6 +268,112 @@ function validStrictResponseFormat(value) {
   );
 }
 
+function normalizeResponsesInput(input) {
+  if (!Array.isArray(input) || input.length === 0 || input.length > 200) return null;
+  const messages = [];
+  for (const message of input) {
+    if (
+      !hasAllowedKeys(message, ['role', 'content']) ||
+      !['system', 'developer', 'user', 'assistant'].includes(message.role)
+    ) {
+      return null;
+    }
+    if (typeof message.content === 'string') {
+      messages.push({ role: message.role, content: message.content });
+      continue;
+    }
+    if (!Array.isArray(message.content) || message.content.length === 0) return null;
+    const parts = [];
+    for (const part of message.content) {
+      if (!isRecord(part) || typeof part.type !== 'string') return null;
+      if (
+        part.type === 'input_text' &&
+        hasExactKeys(part, ['type', 'text']) &&
+        typeof part.text === 'string'
+      ) {
+        parts.push({ type: 'text', text: part.text });
+        continue;
+      }
+      if (
+        part.type === 'input_file' &&
+        hasExactKeys(part, ['type', 'filename', 'file_data']) &&
+        typeof part.filename === 'string' &&
+        typeof part.file_data === 'string'
+      ) {
+        parts.push({ type: 'file', file: { filename: part.filename, file_data: part.file_data } });
+        continue;
+      }
+      if (
+        part.type === 'input_image' &&
+        hasAllowedKeys(part, ['type', 'image_url'], ['detail']) &&
+        typeof part.image_url === 'string' &&
+        (part.detail === undefined || ['auto', 'low', 'high'].includes(part.detail))
+      ) {
+        parts.push({
+          type: 'image_url',
+          image_url: {
+            url: part.image_url,
+            ...(part.detail === undefined ? {} : { detail: part.detail })
+          }
+        });
+        continue;
+      }
+      return null;
+    }
+    messages.push({ role: message.role, content: parts });
+  }
+  return messages;
+}
+
+function normalizeBackgroundResponsesRequest(payload, state) {
+  if (
+    !hasAllowedKeys(
+      payload,
+      ['model', 'background', 'store', 'input', 'text'],
+      ['max_output_tokens', 'temperature', 'top_p', 'reasoning']
+    ) ||
+    payload.model !== state.model ||
+    payload.background !== true ||
+    payload.store !== true ||
+    !hasExactKeys(payload.text, ['format']) ||
+    !hasExactKeys(payload.text.format, ['type', 'name', 'strict', 'schema']) ||
+    payload.text.format.type !== 'json_schema' ||
+    payload.text.format.strict !== true
+  ) {
+    return null;
+  }
+  if (
+    (payload.max_output_tokens !== undefined &&
+      (!Number.isSafeInteger(payload.max_output_tokens) || payload.max_output_tokens < 1)) ||
+    (payload.temperature !== undefined &&
+      (!Number.isFinite(payload.temperature) ||
+        payload.temperature < 0 ||
+        payload.temperature > 2)) ||
+    (payload.top_p !== undefined &&
+      (!Number.isFinite(payload.top_p) || payload.top_p < 0 || payload.top_p > 1)) ||
+    (payload.reasoning !== undefined &&
+      (!hasExactKeys(payload.reasoning, ['effort']) ||
+        !['none', 'low', 'medium', 'high'].includes(payload.reasoning.effort)))
+  ) {
+    return null;
+  }
+  const messages = normalizeResponsesInput(payload.input);
+  const responseFormat = {
+    type: 'json_schema',
+    json_schema: {
+      name: payload.text.format.name,
+      strict: payload.text.format.strict,
+      schema: payload.text.format.schema
+    }
+  };
+  if (!messages || !validStrictResponseFormat(responseFormat)) return null;
+  return { messages, responseFormat };
+}
+
+function validProviderResponseId(value) {
+  return typeof value === 'string' && /^resp_[A-Za-z0-9_-]{1,128}$/.test(value);
+}
+
 function schemaHasMaxLength(value) {
   if (value === null || typeof value !== 'object') return false;
   if (Array.isArray(value)) return value.some(schemaHasMaxLength);
@@ -716,30 +822,10 @@ export function isSuccessfulAiLiveSmokeResult({
       runnerExit.timedOut !== true &&
       runnerExit.runnerCleaned === true &&
       cleanupFailed !== true &&
+      proxyMetrics?.failed !== true &&
       validReceiptRun
     );
   }
-
-  const unsuccessfulIndexes = Array.isArray(calls)
-    ? calls.reduce((indexes, call, index) => {
-        if (!Number.isInteger(call?.status) || call.status < 200 || call.status >= 300) {
-          indexes.push(index);
-        }
-        return indexes;
-      }, [])
-    : [];
-  const failedReceiptStreamIndex = unsuccessfulIndexes[0];
-  const failedReceiptStream = calls?.[failedReceiptStreamIndex];
-  const receiptFallback = calls?.[failedReceiptStreamIndex + 1];
-  const onlySuccessfulReceiptFallbackFailed =
-    unsuccessfulIndexes.length === 1 &&
-    failedReceiptStream?.status === 400 &&
-    failedReceiptStream?.stream === true &&
-    failedReceiptStream?.schemaName === 'receipt' &&
-    receiptFallback?.status >= 200 &&
-    receiptFallback?.status < 300 &&
-    receiptFallback?.stream === false &&
-    receiptFallback?.schemaName === 'receipt';
 
   return (
     runnerExit?.code === 0 &&
@@ -750,7 +836,18 @@ export function isSuccessfulAiLiveSmokeResult({
     Array.isArray(calls) &&
     calls.length >= AI_LIVE_SMOKE_MIN_COMPLETIONS &&
     calls.length <= AI_LIVE_SMOKE_COMPLETION_BUDGET &&
-    (unsuccessfulIndexes.length === 0 || onlySuccessfulReceiptFallbackFailed)
+    calls.every(isSuccessfulBackgroundCompletion) &&
+    proxyMetrics?.failed !== true
+  );
+}
+
+function isSuccessfulBackgroundCompletion(call) {
+  return (
+    call?.providerTransport === 'responses_background' &&
+    call.stream === false &&
+    Number.isInteger(call.status) &&
+    call.status >= 200 &&
+    call.status < 300
   );
 }
 
@@ -770,8 +867,7 @@ export function isSuccessfulAiLiveAssistantSmokeResult({
     calls.length === AI_LIVE_ASSISTANT_SMOKE_COMPLETION_BUDGET &&
     calls.every(
       (call) =>
-        call?.status >= 200 &&
-        call.status < 300 &&
+        isSuccessfulBackgroundCompletion(call) &&
         call.schemaName === AI_LIVE_ASSISTANT_SCHEMA_NAME &&
         call.requestContract?.strictJsonSchema === true &&
         call.responseFormat?.hasChoices === true &&
@@ -798,8 +894,7 @@ export function isSuccessfulAiLiveRecipeSmokeResult({
     runnerExit.timedOut !== true &&
     runnerExit.runnerCleaned === true &&
     cleanupFailed !== true &&
-    call?.status >= 200 &&
-    call?.status < 300 &&
+    isSuccessfulBackgroundCompletion(call) &&
     call?.schemaName === AI_LIVE_RECIPE_SCHEMA_NAME &&
     call?.requestContract?.strictJsonSchema === true &&
     call.requestContract.recipeTextUnbounded === true &&
@@ -826,8 +921,7 @@ export function isSuccessfulAiLiveHouseholdMealSmokeResult({
     runnerExit.timedOut !== true &&
     runnerExit.runnerCleaned === true &&
     cleanupFailed !== true &&
-    call?.status >= 200 &&
-    call?.status < 300 &&
+    isSuccessfulBackgroundCompletion(call) &&
     call?.schemaName === AI_LIVE_HOUSEHOLD_MEAL_SCHEMA_NAME &&
     call?.requestContract?.strictJsonSchema === true &&
     call.requestContract.nonEmptyEventsSchemaValid === true &&
@@ -869,27 +963,12 @@ function isSuccessfulReceiptOnlyRun(calls, expectedReceiptTicketCount) {
   while (index < calls.length) {
     const call = calls[index];
     if (call?.schemaName !== 'receipt' || !validReceiptRequestContract(call)) return false;
-    if (call.status >= 200 && call.status < 300) {
-      if (call.stream !== true) return false;
+    if (isSuccessfulBackgroundCompletion(call)) {
       completedTickets += 1;
       index += 1;
       continue;
     }
-
-    const fallback = calls[index + 1];
-    if (
-      call.status !== 400 ||
-      call.stream !== true ||
-      fallback?.schemaName !== 'receipt' ||
-      !validReceiptRequestContract(fallback) ||
-      fallback.status < 200 ||
-      fallback.status >= 300 ||
-      fallback.stream !== false
-    ) {
-      return false;
-    }
-    completedTickets += 1;
-    index += 2;
+    return false;
   }
   return completedTickets === expectedReceiptTicketCount;
 }
@@ -1029,6 +1108,45 @@ function responseFormatSummary(contentType, body, options = {}) {
     payload = JSON.parse(body.toString('utf8'));
   } catch {
     return null;
+  }
+
+  if (typeof payload?.output_text === 'string' || Array.isArray(payload?.output)) {
+    const chunks = [];
+    if (typeof payload.output_text === 'string') chunks.push(payload.output_text);
+    else {
+      for (const item of payload.output) {
+        if (!Array.isArray(item?.content)) continue;
+        for (const part of item.content) {
+          if (part?.type === 'output_text' && typeof part.text === 'string') {
+            chunks.push(part.text);
+          }
+        }
+      }
+    }
+    const content = chunks.join('');
+    let parsedContent;
+    let isJsonObject = false;
+    try {
+      parsedContent = JSON.parse(content);
+      isJsonObject = isRecord(parsedContent);
+    } catch {
+      // Response content itself is deliberately never retained in diagnostics.
+    }
+    const summary = {
+      hasChoices: true,
+      messageContentType: content ? 'text' : 'missing',
+      contentChars: content ? content.length : null,
+      isJsonObject,
+      finishReason: payload.status === 'completed' ? 'stop' : 'other'
+    };
+    if (options.expectedSchemaName === AI_LIVE_HOUSEHOLD_MEAL_SCHEMA_NAME) {
+      summary.recipeReferencesValid =
+        payload.status === 'completed' &&
+        isJsonObject &&
+        options.catalogRecipeAliases instanceof Set &&
+        validMealRecipeReferences(parsedContent, options.catalogRecipeAliases);
+    }
+    return summary;
   }
 
   const hasChoices = Array.isArray(payload?.choices);
@@ -1668,10 +1786,224 @@ function validatePromptTermList(value, name) {
   return value.map((term) => term.toLowerCase());
 }
 
+function sendSanitizedProviderResponse(response, status, contentType, rawBody, state) {
+  const safeProviderBody = redactBearerFromResponse(rawBody, state.token);
+  const safeBody = redactBearerFromResponse(safeProviderBody, state.clientToken);
+  response.writeHead(status, {
+    'content-type': contentType,
+    'content-length': safeBody.length,
+    'cache-control': 'no-store'
+  });
+  response.end(safeBody);
+}
+
+function failBackgroundResponse(state, operation, status = 502) {
+  state.failed = true;
+  state.metrics.failed = true;
+  operation.complete(status, null, {
+    hasChoices: true,
+    messageContentType: 'missing',
+    contentChars: null,
+    isJsonObject: false,
+    finishReason: 'other',
+    ...(operation.schemaName === AI_LIVE_HOUSEHOLD_MEAL_SCHEMA_NAME
+      ? { recipeReferencesValid: false }
+      : {})
+  });
+}
+
+function handleBackgroundResponseControl(request, response, state, responseId, cancel) {
+  if (request.headers.authorization !== `Bearer ${state.clientToken}`) {
+    rejectLiveProxyRequest(response, state, 401, 'Live AI smoke authorization rejected.');
+    return;
+  }
+  const operation = state.responses.get(responseId);
+  if (!operation) {
+    rejectLiveProxyRequest(
+      response,
+      state,
+      404,
+      'Live AI smoke response was not created by this proxy.'
+    );
+    return;
+  }
+  if (cancel) {
+    void collectRequestBody(request, 1)
+      .then((body) => {
+        if (body.length > 0) {
+          rejectLiveProxyRequest(
+            response,
+            state,
+            400,
+            'Live AI smoke cancellation body is not allowed.'
+          );
+          return;
+        }
+        forwardBackgroundResponseControl(request, response, state, responseId, operation, true);
+      })
+      .catch(() =>
+        rejectLiveProxyRequest(response, state, 400, 'Live AI smoke cancellation was rejected.')
+      );
+    return;
+  }
+  request.resume();
+  forwardBackgroundResponseControl(request, response, state, responseId, operation, false);
+}
+
+function forwardBackgroundResponseControl(request, response, state, responseId, operation, cancel) {
+  const method = cancel ? 'POST' : 'GET';
+  const upstreamPath = `/v1/responses/${encodeURIComponent(responseId)}${cancel ? '/cancel' : ''}`;
+  let settled = false;
+  let upstream;
+  const complete = (status, usage, format) => {
+    if (settled) return;
+    settled = true;
+    if (upstream) state.upstreamRequests.delete(upstream);
+    if (status < 200 || status >= 300 || format?.isJsonObject !== true) {
+      state.failed = true;
+      state.metrics.failed = true;
+    }
+    operation.complete(status, usage, format);
+  };
+  upstream = httpRequest(
+    {
+      hostname: state.target.hostname,
+      port: Number(state.target.port),
+      method,
+      path: upstreamPath,
+      headers: {
+        accept: 'application/json',
+        authorization: `Bearer ${state.token}`,
+        connection: 'close'
+      },
+      agent: false,
+      timeout: state.timeoutMs
+    },
+    async (upstreamResponse) => {
+      const status = upstreamResponse.statusCode ?? 502;
+      const contentType = String(upstreamResponse.headers['content-type'] ?? '').toLowerCase();
+      if (status < 200 || status >= 300) {
+        upstreamResponse.resume();
+        state.upstreamRequests.delete(upstream);
+        if (cancel || (status !== 429 && status < 500)) {
+          state.responses.delete(responseId);
+          complete(status, null, null);
+          if (cancel) failBackgroundResponse(state, operation, status);
+        }
+        sendJson(
+          response,
+          status >= 300 && status < 400 ? 502 : status,
+          'Local AI provider returned a non-success status.'
+        );
+        return;
+      }
+      if (!contentType.includes('application/json')) {
+        upstreamResponse.resume();
+        state.upstreamRequests.delete(upstream);
+        state.responses.delete(responseId);
+        failBackgroundResponse(state, operation);
+        sendJson(response, 502, 'Local AI provider returned an unsupported response type.');
+        return;
+      }
+
+      const chunks = [];
+      let byteLength = 0;
+      try {
+        for await (const chunk of upstreamResponse) {
+          byteLength += chunk.length;
+          if (byteLength > state.maxResponseBytes) throw new Error('response-too-large');
+          chunks.push(chunk);
+        }
+      } catch {
+        state.upstreamRequests.delete(upstream);
+        state.responses.delete(responseId);
+        failBackgroundResponse(state, operation);
+        sendJson(response, 502, 'Local AI provider response exceeded the smoke limit.');
+        return;
+      }
+
+      state.upstreamRequests.delete(upstream);
+      const rawBody = Buffer.concat(chunks, byteLength);
+      let payload;
+      try {
+        payload = JSON.parse(rawBody.toString('utf8'));
+      } catch {
+        state.responses.delete(responseId);
+        failBackgroundResponse(state, operation);
+        sendJson(response, 502, 'Local AI provider returned an invalid response.');
+        return;
+      }
+      const validStatus = [
+        'queued',
+        'in_progress',
+        'completed',
+        'failed',
+        'incomplete',
+        'cancelled'
+      ];
+      if (
+        !isRecord(payload) ||
+        payload.id !== responseId ||
+        !validStatus.includes(payload.status) ||
+        (cancel && payload.status !== 'cancelled')
+      ) {
+        state.responses.delete(responseId);
+        failBackgroundResponse(state, operation);
+        sendJson(response, 502, 'Local AI provider returned an invalid response.');
+        return;
+      }
+
+      if (payload.status === 'completed') {
+        state.responses.delete(responseId);
+        const format = responseFormatSummary(contentType, rawBody, {
+          expectedSchemaName: operation.schemaName,
+          catalogRecipeAliases: operation.catalogRecipeAliases
+        });
+        complete(status, responseUsage(contentType, rawBody), format);
+      } else if (cancel || ['failed', 'incomplete', 'cancelled'].includes(payload.status)) {
+        state.responses.delete(responseId);
+        failBackgroundResponse(state, operation, status);
+      }
+      sendSanitizedProviderResponse(response, status, contentType, rawBody, state);
+    }
+  );
+  state.upstreamRequests.add(upstream);
+  request.once('aborted', () => upstream.destroy(new Error('client-aborted')));
+  response.once('close', () => {
+    if (!response.writableEnded) upstream.destroy(new Error('client-response-closed'));
+  });
+  upstream.once('timeout', () => upstream.destroy(new Error('upstream-timeout')));
+  upstream.once('error', () => {
+    state.upstreamRequests.delete(upstream);
+    if (cancel || !settled) {
+      state.responses.delete(responseId);
+      failBackgroundResponse(state, operation);
+    }
+    if (!response.destroyed && !response.headersSent) {
+      sendJson(response, 502, 'Local AI provider is unavailable.');
+    }
+  });
+  upstream.end();
+}
+
 async function handleProxyRequest(request, response, state) {
-  state.metrics.requestAttempts += 1;
   const path = new URL(request.url ?? '/', 'http://127.0.0.1').pathname;
-  if (request.method !== 'POST' || path !== '/v1/chat/completions' || request.url !== path) {
+  const exactPath = request.url === path;
+  const responseIdMatch = path.match(/^\/v1\/responses\/(resp_[A-Za-z0-9_-]{1,128})$/);
+  const cancelMatch = path.match(/^\/v1\/responses\/(resp_[A-Za-z0-9_-]{1,128})\/cancel$/);
+  if (request.method === 'GET' && responseIdMatch && exactPath) {
+    handleBackgroundResponseControl(request, response, state, responseIdMatch[1], false);
+    return;
+  }
+  if (request.method === 'POST' && cancelMatch && exactPath) {
+    handleBackgroundResponseControl(request, response, state, cancelMatch[1], true);
+    return;
+  }
+
+  state.metrics.requestAttempts += 1;
+  const responsesBackground = request.method === 'POST' && path === '/v1/responses' && exactPath;
+  const chatCompletions = request.method === 'POST' && path === '/v1/chat/completions' && exactPath;
+  if (!responsesBackground && !chatCompletions) {
     rejectLiveProxyRequest(response, state, 404, 'Live AI smoke route not found.');
     return;
   }
@@ -1718,20 +2050,27 @@ async function handleProxyRequest(request, response, state) {
     rejectLiveProxyRequest(response, state, 400, 'Live AI smoke request is malformed.');
     return;
   }
-  if (
-    payload?.model !== state.model ||
-    !Array.isArray(payload.messages) ||
-    payload.messages.length === 0
-  ) {
+  const normalized = responsesBackground
+    ? normalizeBackgroundResponsesRequest(payload, state)
+    : payload?.model === state.model &&
+        Array.isArray(payload.messages) &&
+        payload.messages.length > 0
+      ? { messages: payload.messages, responseFormat: payload.response_format }
+      : null;
+  if (!normalized) {
     rejectLiveProxyRequest(
       response,
       state,
       400,
-      'Live AI smoke request is outside its model/fixture contract.'
+      responsesBackground
+        ? 'Live AI smoke requires a safe Responses background request.'
+        : 'Live AI smoke request is outside its model/fixture contract.'
     );
     return;
   }
-  if (!validStrictResponseFormat(payload.response_format)) {
+  const messages = normalized.messages;
+  const responseFormatInput = normalized.responseFormat;
+  if (!validStrictResponseFormat(responseFormatInput)) {
     rejectLiveProxyRequest(
       response,
       state,
@@ -1740,11 +2079,11 @@ async function handleProxyRequest(request, response, state) {
     );
     return;
   }
-  const requestStream = payload.stream === true;
-  const requestSchemaName = payload.response_format.json_schema.name;
+  const requestStream = responsesBackground ? false : payload.stream === true;
+  const requestSchemaName = responseFormatInput.json_schema.name;
   if (
     state.requireReceiptAttachments &&
-    (requestSchemaName !== 'receipt' || !hasExactReceiptAttachments(payload.messages))
+    (requestSchemaName !== 'receipt' || !hasExactReceiptAttachments(messages))
   ) {
     rejectLiveProxyRequest(
       response,
@@ -1754,7 +2093,7 @@ async function handleProxyRequest(request, response, state) {
     );
     return;
   }
-  const eventsSchema = payload.response_format.json_schema.schema?.properties?.events;
+  const eventsSchema = responseFormatInput.json_schema.schema?.properties?.events;
   const nonEmptyEventsSchemaValid =
     requestSchemaName !== AI_LIVE_HOUSEHOLD_MEAL_SCHEMA_NAME ||
     (eventsSchema?.type === 'array' &&
@@ -1762,14 +2101,14 @@ async function handleProxyRequest(request, response, state) {
       eventsSchema.minItems >= 1);
   const mealRecipeAliasSchemaValid =
     requestSchemaName !== AI_LIVE_HOUSEHOLD_MEAL_SCHEMA_NAME ||
-    validMealRecipeAliasSchema(payload.response_format.json_schema.schema);
+    validMealRecipeAliasSchema(responseFormatInput.json_schema.schema);
   const contextContract =
     state.expectedSchemaName === AI_LIVE_HOUSEHOLD_MEAL_SCHEMA_NAME
-      ? mealContextContract(payload.messages, state)
+      ? mealContextContract(messages, state)
       : undefined;
   const recipeTextUnbounded =
     requestSchemaName !== AI_LIVE_RECIPE_SCHEMA_NAME ||
-    !schemaHasMaxLength(payload.response_format.json_schema.schema);
+    !schemaHasMaxLength(responseFormatInput.json_schema.schema);
   const expectedSchemaValid =
     !state.expectedSchemaName ||
     (requestSchemaName === state.expectedSchemaName &&
@@ -1787,7 +2126,7 @@ async function handleProxyRequest(request, response, state) {
   }
   const promptContract =
     state.requiredPromptTerms || state.forbiddenPromptTerms
-      ? promptTermContract(payload.messages, state)
+      ? promptTermContract(messages, state)
       : { requiredPromptTermsPresent: true, forbiddenPromptTermsAbsent: true };
   if (!promptContract.requiredPromptTermsPresent || !promptContract.forbiddenPromptTermsAbsent) {
     rejectLiveProxyRequest(
@@ -1808,7 +2147,11 @@ async function handleProxyRequest(request, response, state) {
     ? { ...safeContextContract, nonEmptyEventsSchemaValid, mealRecipeAliasSchemaValid }
     : undefined;
   const expectedStreaming = !state.fallbackPending;
-  if (state.requireReceiptAttachments && requestStream !== expectedStreaming) {
+  if (
+    state.requireReceiptAttachments &&
+    !responsesBackground &&
+    requestStream !== expectedStreaming
+  ) {
     rejectLiveProxyRequest(
       response,
       state,
@@ -1848,6 +2191,7 @@ async function handleProxyRequest(request, response, state) {
       model: state.model,
       status,
       stream: requestStream,
+      providerTransport: responsesBackground ? 'responses_background' : 'chat_completions',
       schemaName: requestSchemaName,
       requestContract: {
         strictJsonSchema: true,
@@ -1869,7 +2213,7 @@ async function handleProxyRequest(request, response, state) {
     });
     notifySafeProgress(state.onCompletion, { ordinal, status, elapsedMs, responseFormat });
   };
-  const upstreamPath = '/v1/chat/completions';
+  const upstreamPath = responsesBackground ? '/v1/responses' : '/v1/chat/completions';
   upstream = httpRequest(
     {
       hostname: state.target.hostname,
@@ -1877,7 +2221,9 @@ async function handleProxyRequest(request, response, state) {
       method: 'POST',
       path: upstreamPath,
       headers: {
-        accept: String(request.headers.accept ?? 'application/json, text/event-stream'),
+        accept: responsesBackground
+          ? 'application/json'
+          : String(request.headers.accept ?? 'application/json, text/event-stream'),
         authorization: `Bearer ${state.token}`,
         'content-type': 'application/json',
         'content-length': body.length,
@@ -1920,6 +2266,61 @@ async function handleProxyRequest(request, response, state) {
         return;
       }
       const rawBody = Buffer.concat(chunks, byteLength);
+      if (responsesBackground) {
+        let providerResponse;
+        try {
+          providerResponse = JSON.parse(rawBody.toString('utf8'));
+        } catch {
+          completeMetrics(502);
+          sendJson(response, 502, 'Local AI provider returned an invalid Responses payload.');
+          return;
+        }
+        if (
+          !isRecord(providerResponse) ||
+          !validProviderResponseId(providerResponse.id) ||
+          !['queued', 'in_progress', 'completed', 'failed', 'incomplete', 'cancelled'].includes(
+            providerResponse.status
+          )
+        ) {
+          completeMetrics(502);
+          sendJson(response, 502, 'Local AI provider returned an invalid Responses payload.');
+          return;
+        }
+        if (['queued', 'in_progress'].includes(providerResponse.status)) {
+          state.responses.set(providerResponse.id, {
+            complete: completeMetrics,
+            schemaName: requestSchemaName,
+            catalogRecipeAliases: selectableRecipeAliases
+          });
+          state.upstreamRequests.delete(upstream);
+          sendSanitizedProviderResponse(response, status, contentType, rawBody, state);
+          return;
+        }
+
+        const responseFormat = responseFormatSummary(contentType, rawBody, {
+          expectedSchemaName: requestSchemaName,
+          catalogRecipeAliases: selectableRecipeAliases
+        });
+        if (
+          providerResponse.status !== 'completed' ||
+          responseFormat?.isJsonObject !== true ||
+          responseFormat.finishReason !== 'stop'
+        ) {
+          state.failed = true;
+          state.metrics.failed = true;
+        }
+        if (
+          state.expectedSchemaName === AI_LIVE_HOUSEHOLD_MEAL_SCHEMA_NAME &&
+          responseFormat?.recipeReferencesValid !== true
+        ) {
+          state.failed = true;
+          state.metrics.failed = true;
+        }
+        completeMetrics(status, responseUsage(contentType, rawBody), responseFormat);
+        sendSanitizedProviderResponse(response, status, contentType, rawBody, state);
+        return;
+      }
+
       const usage = responseUsage(contentType, rawBody);
       const responseFormat = responseFormatSummary(contentType, rawBody, {
         expectedSchemaName: requestSchemaName,
@@ -2028,6 +2429,7 @@ export async function createAiLiveProxy({
     forbiddenPromptTerms: validatedForbiddenPromptTerms,
     onRequest,
     onCompletion,
+    responses: new Map(),
     upstreamRequests: new Set(),
     metrics: { calls: [], requestAttempts: 0, rejectedRequests: 0, failed: false }
   };

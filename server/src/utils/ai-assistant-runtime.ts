@@ -1,6 +1,7 @@
 import { AiCallError, callAIWithConfig } from './ai-client.js';
 import type { AiConfigRow, AiMessage } from './ai-client.js';
 import type { AiResponseFormat } from '../schemas/ai-response-format.js';
+import { getDatabase } from '../config/database.js';
 
 const activeUsers = new Set<string>();
 const activeConfigs = new Set<string>();
@@ -40,21 +41,17 @@ function isLocalOllamaConfig(baseUrl: string): boolean {
 }
 
 /**
- * The assistant intentionally avoids `callAI`/`ticket-queue`: that path persists an `ai_jobs`
- * row. This lightweight per-process gate keeps one provider request per user/config in flight,
- * while the existing transport still owns provider safety, timeout, response parsing, and abort.
+ * Assistant model calls share the server queue so tab disconnects cannot abort the provider job.
+ * The local gate preserves the existing one-request-per-user/config behavior while the durable
+ * queue owns provider scheduling, status and explicit cancellation.
  */
 export async function callAssistantAITransient(input: {
   userId: string;
   config: AiConfigRow;
   messages: AiMessage[];
   responseFormat: AiResponseFormat;
-  signal?: AbortSignal;
 }): Promise<string> {
   const configId = input.config.id;
-  if (input.signal?.aborted) {
-    throw new AiCallError('PROVIDER', 'AI request was cancelled', 'CANCELLED');
-  }
   if (activeUsers.has(input.userId) || activeConfigs.has(configId)) {
     throw new AiCallError(
       'PROVIDER',
@@ -79,13 +76,26 @@ export async function callAssistantAITransient(input: {
           }
         }
       : input.responseFormat;
-    return await callAIWithConfig(
-      input.config,
-      input.messages,
-      responseFormat,
-      input.signal,
-      localOllama ? { reasoning_effort: 'none' } : undefined
-    );
+    const { persistAiProviderDiagnostic, submitAiTask } = await import('./ticket-queue.js');
+    const db = getDatabase();
+    const requestOptions = localOllama ? { reasoning_effort: 'none' as const } : {};
+    return await submitAiTask({
+      db,
+      userId: input.userId,
+      householdId: input.config.household_id ?? null,
+      config: input.config,
+      kind: 'assistant',
+      payloadBytes: Buffer.byteLength(
+        JSON.stringify({ messages: input.messages, responseFormat }),
+        'utf8'
+      ),
+      run: (_fixedConfig, signal, jobId) =>
+        callAIWithConfig(input.config, input.messages, responseFormat, signal, {
+          ...requestOptions,
+          jobId,
+          onDiagnostic: (diagnostic) => persistAiProviderDiagnostic(db, jobId, diagnostic)
+        })
+    }).result;
   } finally {
     activeUsers.delete(input.userId);
     activeConfigs.delete(configId);

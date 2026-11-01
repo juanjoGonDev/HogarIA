@@ -4,15 +4,10 @@ import { mkdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { devices, type BrowserContext, type Page } from '@playwright/test';
 import { expect, test } from './fixtures';
+import { responsesCompleted, userInput, type ResponsesRequest } from './helpers/ai-responses';
 import { createHousehold, registerUser } from './helpers/auth';
 
-interface ProviderRequest {
-  messages?: Array<{
-    role?: string;
-    content?: string | Array<{ type?: string; file?: { filename?: string; file_data?: string } }>;
-  }>;
-  response_format?: { type?: string; json_schema?: { name?: string; strict?: boolean } };
-}
+type ProviderRequest = ResponsesRequest;
 
 interface MealSlot {
   date: string;
@@ -194,14 +189,14 @@ function eventKey(meal: {
 }
 
 function readRequiredTurns(payload: ProviderRequest): MealSlot[] {
-  const userContent = payload.messages?.find((message) => message.role === 'user')?.content;
+  const userContent = userInput(payload)?.content;
   if (!Array.isArray(userContent)) {
     throw new Error('Provider fixture is missing multipart planning context.');
   }
 
   const contextFile = userContent.find(
-    (part) => part.file?.filename === 'meal-planning-context.json'
-  )?.file?.file_data;
+    (part) => part.type === 'input_file' && part.filename === 'meal-planning-context.json'
+  )?.file_data;
   const contextPrefix = 'data:application/json;base64,';
   if (!contextFile?.startsWith(contextPrefix)) {
     throw new Error('Provider fixture is missing the planning context attachment.');
@@ -257,6 +252,10 @@ test('recorre planificación del hogar y guarda automatización futura sin escri
     request.setEncoding('utf8');
     request.on('data', (chunk: string) => (body += chunk));
     request.on('end', () => {
+      if (request.method !== 'POST' || request.url !== '/v1/responses') {
+        response.writeHead(404).end();
+        return;
+      }
       try {
         const payload = JSON.parse(body) as ProviderRequest;
         providerRequests.push(payload);
@@ -329,16 +328,9 @@ test('recorre planificación del hogar y guarda automatización futura sin escri
         });
         response.writeHead(200, { 'content-type': 'application/json' });
         response.end(
-          JSON.stringify({
-            choices: [
-              {
-                finish_reason: 'stop',
-                message: {
-                  content: JSON.stringify({ newRecipes: [{ alias: 'N1', recipe }], events })
-                }
-              }
-            ]
-          })
+          JSON.stringify(
+            responsesCompleted(JSON.stringify({ newRecipes: [{ alias: 'N1', recipe }], events }))
+          )
         );
       } catch {
         response.writeHead(500, { 'content-type': 'application/json' });
@@ -594,9 +586,12 @@ test('recorre planificación del hogar y guarda automatización futura sin escri
     expect(proposalBody.events.some((event) => event.participantIds.length === 2)).toBe(true);
     expect(proposalBody.events.some((event) => event.participantIds.length === 1)).toBe(true);
     expect(providerRequests).toHaveLength(1);
-    expect(providerRequests[0]?.response_format).toMatchObject({
+    expect(providerRequests[0]?.background).toBe(true);
+    expect(providerRequests[0]?.store).toBe(true);
+    expect(providerRequests[0]?.text?.format).toMatchObject({
       type: 'json_schema',
-      json_schema: { name: 'weekly_meal_proposal', strict: true }
+      name: 'weekly_meal_proposal',
+      strict: true
     });
     expect(readRequiredTurns(providerRequests[0] ?? {})).toEqual(
       expect.arrayContaining([

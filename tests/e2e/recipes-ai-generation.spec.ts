@@ -13,7 +13,20 @@ import {
 import { mockRecipeStepPhotos } from './helpers/recipe-step-photos';
 
 type ProviderResponse = { status?: number; content?: unknown; delayMs?: number };
-type ProviderRequest = { model?: string; messages?: { content?: string }[] };
+type ProviderInputPart = {
+  type?: string;
+  text?: string;
+  filename?: string;
+  file_data?: string;
+  image_url?: string;
+};
+type ProviderRequest = {
+  model?: string;
+  background?: boolean;
+  store?: boolean;
+  input?: { role?: string; content?: string | ProviderInputPart[] }[];
+  text?: { format?: { type?: string; name?: string; strict?: boolean; schema?: unknown } };
+};
 
 interface SyntheticProvider {
   readonly baseUrl: string;
@@ -25,11 +38,40 @@ const test = baseTest.extend<{ syntheticProvider: SyntheticProvider }>({
   syntheticProvider: async ({}, use) => {
     const queue: ProviderResponse[] = [];
     const requests: ProviderRequest[] = [];
+    const operations = new Map<string, { content: string; completeAt: number }>();
+    let responseSequence = 0;
     const server = createServer((request, response) => {
       const chunks: Buffer[] = [];
       request.on('data', (chunk: Buffer) => chunks.push(chunk));
       request.on('end', () => {
-        if (request.url !== '/v1/chat/completions' || request.method !== 'POST') {
+        const path = new URL(request.url ?? '/', 'http://provider.test').pathname;
+        if (request.method === 'GET' && /^\/v1\/responses\/resp_recipe_\d+$/.test(path)) {
+          const id = path.split('/').at(-1)!;
+          const operation = operations.get(id);
+          if (!operation) {
+            response.writeHead(404).end();
+            return;
+          }
+          const complete = Date.now() >= operation.completeAt;
+          response.writeHead(200, { 'content-type': 'application/json' }).end(
+            JSON.stringify(
+              complete
+                ? {
+                    id,
+                    status: 'completed',
+                    output: [
+                      {
+                        type: 'message',
+                        content: [{ type: 'output_text', text: operation.content }]
+                      }
+                    ]
+                  }
+                : { id, status: 'in_progress', output: [] }
+            )
+          );
+          return;
+        }
+        if (request.url !== '/v1/responses' || request.method !== 'POST') {
           response.writeHead(404).end();
           return;
         }
@@ -42,24 +84,19 @@ const test = baseTest.extend<{ syntheticProvider: SyntheticProvider }>({
         }
 
         const next = queue.shift() ?? { status: 503 };
-        const send = () => {
-          if (response.destroyed) return;
-          if (next.status && next.status >= 400) {
-            response
-              .writeHead(next.status, { 'content-type': 'application/json' })
-              .end(JSON.stringify({ error: 'Synthetic provider failure' }));
-            return;
-          }
-
-          const content =
-            typeof next.content === 'string' ? next.content : JSON.stringify(next.content ?? {});
+        if (next.status && next.status >= 400) {
           response
-            .writeHead(200, { 'content-type': 'application/json' })
-            .end(JSON.stringify({ choices: [{ message: { content } }] }));
-        };
-
-        if (next.delayMs) setTimeout(send, next.delayMs);
-        else send();
+            .writeHead(next.status, { 'content-type': 'application/json' })
+            .end(JSON.stringify({ error: 'Synthetic provider failure' }));
+          return;
+        }
+        const content =
+          typeof next.content === 'string' ? next.content : JSON.stringify(next.content ?? {});
+        const id = `resp_recipe_${++responseSequence}`;
+        operations.set(id, { content, completeAt: Date.now() + (next.delayMs ?? 0) });
+        response
+          .writeHead(202, { 'content-type': 'application/json' })
+          .end(JSON.stringify({ id, status: 'in_progress', output: [] }));
       });
     });
 
@@ -1019,7 +1056,9 @@ test.describe('Generación de recetas IA', () => {
     }) => {
       const pageErrors: string[] = [];
       page.on('pageerror', (error) => pageErrors.push(`${error.name}: ${error.message}`));
-      syntheticProvider.enqueue({ content: singleRecipe, delayMs: 900 }, { content: singleRecipe });
+      // Provider fails explicitly; a background create returns immediately, so a short delay no
+      // longer represents the synchronous timeout this regression originally used.
+      syntheticProvider.enqueue({ status: 503 }, { content: singleRecipe });
       await openGenerator(page, viewport, syntheticProvider.baseUrl);
 
       const generate = page.getByRole('button', { name: 'Generar 1 receta' });
@@ -1038,9 +1077,7 @@ test.describe('Generación de recetas IA', () => {
       );
       expect((await firstResponse).status()).toBe(500);
       expect(syntheticProvider.requests).toHaveLength(1);
-      expect(JSON.stringify(syntheticProvider.requests[0].messages)).toContain(
-        'Zanahoria QA recetas'
-      );
+      expect(JSON.stringify(syntheticProvider.requests[0].input)).toContain('Zanahoria QA recetas');
       // The global interceptor owns the user-facing server-error copy; assert the
       // error state, not wording that varies by API response/language.
       await expect(page.locator('.toast--error')).toBeVisible();

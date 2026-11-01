@@ -199,8 +199,7 @@ householdPlanRoutes.post(
           prompt,
           currentPlan: snapshot.plan,
           draftPlan: input.data.draftPlan,
-          attachment,
-          signal: c.req.raw.signal
+          attachment
         },
         callAI
       );

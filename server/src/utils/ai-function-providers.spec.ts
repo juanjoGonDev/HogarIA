@@ -108,6 +108,7 @@ describe('AI function provider assignment backfill', () => {
   });
 
   it('maps server job kinds to exactly one AI function', () => {
+    expect(aiFunctionForJobKind('assistant')).toBe('assistant');
     expect(aiFunctionForJobKind('recipe')).toBe('recipes');
     expect(aiFunctionForJobKind('multiple_recipes')).toBe('recipes');
     expect(aiFunctionForJobKind('recommendations')).toBe('recipes');

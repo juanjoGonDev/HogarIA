@@ -289,6 +289,7 @@ async function processClaimedRun(
     const priorTasks = scopes.includes('tasks')
       ? readLatestTaskWeek(db, run.householdId, run.targetWeekStart, planZones, activeMemberIds)
       : null;
+    let providerCallSequence = 0;
     const invokeProvider: HouseholdPlanningAutomationProvider = async (
       messages,
       responseFormat,
@@ -310,7 +311,9 @@ async function processClaimedRun(
       providerInvoked = true;
       return dependencies.provider
         ? dependencies.provider(messages, responseFormat, signal)
-        : callAIWithConfig(config as AiConfigRow, messages, responseFormat, signal);
+        : callAIWithConfig(config as AiConfigRow, messages, responseFormat, signal, {
+            jobId: `automation-${run.id}-${++providerCallSequence}`
+          });
     };
 
     const renewBeforeProvider = () => {

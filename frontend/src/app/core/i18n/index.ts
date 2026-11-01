@@ -20,10 +20,12 @@ import {
   aiActionAssistantShellEs,
   aiActionAssistantShellEn
 } from './dict/ai_action_assistant_shell';
+import { aiActivityEs, aiActivityEn } from './dict/ai_activity';
 
 const es = {
   ...householdSharedEs,
   ...receiptsEs,
+  ...aiActivityEs,
   ...aiActionAssistantShellEs,
   ...navEs,
   ...uiEs
@@ -32,6 +34,7 @@ const es = {
 const en: Record<keyof typeof es, string> = {
   ...householdSharedEn,
   ...receiptsEn,
+  ...aiActivityEn,
   ...aiActionAssistantShellEn,
   ...navEn,
   ...uiEn
