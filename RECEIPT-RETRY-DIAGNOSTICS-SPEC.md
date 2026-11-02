@@ -66,6 +66,9 @@ Explicar por qué falla un intento de lectura de ticket y permitir copiar única
 - El motivo solo podrá proceder de plantillas reconocidas; eliminar valores entrecomillados y valores recibidos, y normalizar rutas del adjunto. Si no puede garantizarse la normalización, usar un motivo genérico y mantener los códigos seguros.
 - La copia debe contener exclusivamente eventos del `jobId` actual, en orden temporal, con campos allowlisted; nunca API key, prompt, texto de recibo, archivo, contenido de respuesta, URL completa ni headers arbitrarios.
 - Mantener formato legible similar a WebApi (`fecha nivel evento campos`), conservar historial acotado a los intentos del trabajo y evitar registrar cada ciclo de polling repetido.
+- Cada evento expuesto/copiado tendrá `timestamp`, `level`, `event`, `attempt`, `stage`, `transport`, método/status/duración opcionales y códigos seguros opcionales; retención máxima: 32 eventos por trabajo, deduplicando sondeos idénticos.
+- Registrar solo metadatos del request: modelo validado, uso de background y conteos de partes por tipo (`text`/`image`/`file`). No registrar prompt, nombre/ruta/tamaño del fichero, host/base URL ni contenido de partes.
+- Capturar `x-request-id` (o cabecera equivalente del proveedor) solo si coincide con gramática acotada; el detalle de error se deriva de `type`/`code`/`param` y plantillas reconocidas, nunca del mensaje libre.
 - Primero validar con respuestas sintéticas. Luego, si el preflight WebApi local está disponible, ejecutar el smoke real de recibo con la imagen facilitada en DB aislada temporal y carpeta efímera fuera de Git. El smoke puede enviar la imagen al proveedor configurado; no registrar su contenido ni credenciales.
 
 ### Criterios de aceptación
