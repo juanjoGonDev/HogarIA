@@ -343,17 +343,66 @@ describe('ReceiptDetailComponent', () => {
     expect(fixture.nativeElement.querySelector('[data-test="receipt-copy-diagnostic"]')).toBeNull();
   });
 
-  it('copies only the allowlisted diagnostic for this ticket and announces success accessibly', async () => {
+  it('copies this ticket’s WebApi-style diagnostic events in time order and excludes sensitive data', async () => {
+    const diagnosticLog = [
+      {
+        timestamp: '2026-11-02T12:16:47.167Z',
+        level: 'error',
+        event: 'provider_error',
+        attempt: 1,
+        stage: 'failed',
+        method: 'POST',
+        provider_transport: 'responses_background',
+        provider_request_id: 'req_synthetic123',
+        provider_response_id: null,
+        provider_http_status: 400,
+        provider_error_type: 'invalid_request_error',
+        provider_error_code: 'unsupported_parameter',
+        provider_error_param: 'temperature',
+        provider_error_reason: 'unsupported_parameter',
+        elapsed_ms: 167,
+        request_metadata: {
+          model: 'gpt-5',
+          background: true,
+          output_format: 'json_schema',
+          input_part_counts: { text: 1, image: 1, file: 1 }
+        }
+      },
+      {
+        timestamp: '2026-11-02T12:16:47.000Z',
+        level: 'info',
+        event: 'request_started',
+        attempt: 1,
+        stage: 'submitting',
+        method: 'POST',
+        provider_transport: 'responses_background',
+        provider_request_id: null,
+        provider_response_id: null,
+        provider_http_status: null,
+        provider_error_type: null,
+        provider_error_code: null,
+        provider_error_param: null,
+        provider_error_reason: null,
+        elapsed_ms: 0,
+        request_metadata: {
+          model: 'gpt-5',
+          background: true,
+          output_format: 'json_schema',
+          input_part_counts: { text: 1, image: 1, file: 1 }
+        }
+      }
+    ];
     const job = {
       ...makeJob(),
       provider_response_id: 'resp_synthetic123',
       provider_transport: 'responses_background',
-      provider_http_status: 401,
+      provider_http_status: 400,
       provider_error_type: 'invalid_request_error',
       provider_error_code: 'unsupported_parameter',
       provider_error_param: 'temperature',
-      elapsed_ms: 451,
+      elapsed_ms: 167,
       diagnostic_stage: 'failed',
+      diagnostic_log: diagnosticLog,
       error_detail: 'raw provider body and synthetic-secret-sentinel',
       provider_url: 'https://private.invalid/v1',
       api_key: 'synthetic-secret-sentinel',
@@ -380,29 +429,153 @@ describe('ReceiptDetailComponent', () => {
 
     expect(clipboard.copy).toHaveBeenCalledOnceWith(jasmine.any(String));
     const copied = clipboard.copy.calls.argsFor(0)[0] as string;
-    expect(JSON.parse(copied)).toEqual({
-      jobId: 'job-receipt-17',
-      kind: 'receipt',
-      status: 'failed',
-      attempts: 4,
-      maxAttempts: 4,
-      createdAt: '2026-11-01T17:34:59.000Z',
-      error: 'PROVIDER',
-      diagnosticStage: 'failed',
-      providerResponseId: 'resp_synthetic123',
-      providerTransport: 'responses_background',
-      providerHttpStatus: 401,
-      providerErrorType: 'invalid_request_error',
-      providerErrorCode: 'unsupported_parameter',
-      providerErrorParam: 'temperature',
-      elapsedMs: 451
-    });
+    const startedAt = copied.indexOf('[SRV] INFO [AI] request_started');
+    const failedAt = copied.indexOf('[SRV] ERROR [AI] provider_error');
+    expect(startedAt).toBeGreaterThanOrEqual(0);
+    expect(failedAt).toBeGreaterThan(startedAt);
+    expect(copied).toContain('job=job-receipt-17 attempt=1 stage=submitting method=POST');
+    expect(copied).toContain('transport=responses_background');
+    expect(copied).toContain('model=gpt-5 background=true');
+    expect(copied).toContain('input_parts=text:1,image:1,file:1');
+    expect(copied).toContain('http_status=400 elapsed_ms=167');
+    expect(copied).toContain('provider_request_id=req_synthetic123');
+    expect(copied).toContain('provider_error_code=unsupported_parameter');
     expect(copied).not.toContain(RECEIPT_ID);
     expect(copied).not.toContain('synthetic-secret-sentinel');
     expect(copied).not.toContain('private.invalid');
     expect(copied).not.toContain('private prompt sentinel');
     expect(copied).not.toContain('private output sentinel');
     expect(feedback?.textContent).toContain('receipts.copy_diagnostic_success');
+  });
+
+  it('copies safe unknown provider codes and nested params, but drops credential-shaped request IDs', async () => {
+    service.receipt.set(
+      makeReceipt({
+        status: 'failed',
+        error: 'PROVIDER',
+        job: makeJob({
+          diagnostic_log: [
+            {
+              timestamp: '2026-11-02T12:16:47.167Z',
+              level: 'error',
+              event: 'provider_error',
+              attempt: 1,
+              stage: 'failed',
+              method: 'POST',
+              provider_transport: 'responses_background',
+              provider_request_id: 'req_credential_sentinel',
+              provider_response_id: null,
+              provider_http_status: 400,
+              provider_error_type: 'invalid_request_error',
+              provider_error_code: 'invalid_image_format',
+              provider_error_param: 'input[0].content[0].image_url',
+              provider_error_reason: 'file_input_rejected',
+              elapsed_ms: 167,
+              request_metadata: null
+            }
+          ] as unknown as ReceiptJob['diagnostic_log']
+        })
+      })
+    );
+    fixture.detectChanges();
+
+    const action = fixture.nativeElement.querySelector(
+      '[data-test="receipt-copy-diagnostic"]'
+    ) as HTMLElement | null;
+    const button = action?.matches('button')
+      ? (action as HTMLButtonElement)
+      : (action?.querySelector('button') as HTMLButtonElement | null);
+    button?.click();
+    await fixture.whenStable();
+
+    const copied = clipboard.copy.calls.argsFor(0)[0] as string;
+    expect(copied).toContain('provider_error_code=invalid_image_format');
+    expect(copied).toContain('provider_error_param=input[0].content[0].image_url');
+    expect(copied).not.toContain('req_credential_sentinel');
+  });
+
+  it('redacts API-key-shaped provider metadata before copying the diagnostic', async () => {
+    const keyMarker = 'sk-test-key-sentinel';
+    service.receipt.set(
+      makeReceipt({
+        status: 'failed',
+        error: 'PROVIDER',
+        job: makeJob({
+          diagnostic_log: [
+            {
+              timestamp: '2026-11-02T12:16:47.167Z',
+              level: 'error',
+              event: 'provider_error',
+              attempt: 1,
+              stage: 'failed',
+              method: 'POST',
+              provider_transport: 'responses_background',
+              provider_request_id: keyMarker,
+              provider_response_id: null,
+              provider_http_status: 400,
+              provider_error_type: 'invalid_request_error',
+              provider_error_code: 'invalid_image_format',
+              provider_error_param: 'input_image',
+              provider_error_reason: 'invalid_value',
+              elapsed_ms: 167,
+              request_metadata: {
+                model: keyMarker,
+                background: true,
+                output_format: 'json_schema',
+                input_part_counts: { text: 1, image: 1, file: 1 }
+              }
+            }
+          ] as unknown as ReceiptJob['diagnostic_log']
+        })
+      })
+    );
+    fixture.detectChanges();
+
+    const action = fixture.nativeElement.querySelector(
+      '[data-test="receipt-copy-diagnostic"]'
+    ) as HTMLElement | null;
+    const button = action?.matches('button')
+      ? (action as HTMLButtonElement)
+      : (action?.querySelector('button') as HTMLButtonElement | null);
+    button?.click();
+    await fixture.whenStable();
+
+    const copied = clipboard.copy.calls.argsFor(0)[0] as string;
+    expect(copied).not.toContain(keyMarker);
+    expect(copied).toContain('provider_error_code=invalid_image_format');
+  });
+
+  it('builds a safe one-line fallback for older job DTOs without persisted events', async () => {
+    service.receipt.set(
+      makeReceipt({
+        status: 'failed',
+        error: 'PROVIDER',
+        job: makeJob({
+          provider_transport: 'responses_background',
+          provider_http_status: 400,
+          provider_error_code: 'unsupported_parameter',
+          provider_error_param: 'temperature',
+          elapsed_ms: 167,
+          diagnostic_stage: 'failed'
+        })
+      })
+    );
+    fixture.detectChanges();
+
+    const action = fixture.nativeElement.querySelector(
+      '[data-test="receipt-copy-diagnostic"]'
+    ) as HTMLElement | null;
+    const button = action?.matches('button')
+      ? (action as HTMLButtonElement)
+      : (action?.querySelector('button') as HTMLButtonElement | null);
+    button?.click();
+    await fixture.whenStable();
+
+    const copied = clipboard.copy.calls.argsFor(0)[0] as string;
+    expect(copied).toContain('[SRV] ERROR [AI] provider_error');
+    expect(copied).toContain('provider_error_code=unsupported_parameter');
+    expect(copied).toContain('provider_error_param=temperature');
+    expect(copied).not.toContain(RECEIPT_ID);
   });
 
   it('announces clipboard rejection without exposing the browser error', async () => {
@@ -455,11 +628,60 @@ describe('ReceiptDetailComponent', () => {
     await fixture.whenStable();
 
     const copied = clipboard.copy.calls.argsFor(0)[0] as string;
-    const diagnostic = JSON.parse(copied) as Record<string, unknown>;
     expect(copied).not.toContain(marker);
-    expect(Object.hasOwn(diagnostic, 'providerErrorType')).toBeFalse();
-    expect(Object.hasOwn(diagnostic, 'providerErrorCode')).toBeFalse();
-    expect(Object.hasOwn(diagnostic, 'providerErrorParam')).toBeFalse();
+    expect(copied).not.toContain('provider_error_code=');
+  });
+
+  it('drops malformed event fields and does not copy arbitrary event text', async () => {
+    const marker = 'private-secret-token-sentinel';
+    service.receipt.set(
+      makeReceipt({
+        status: 'failed',
+        error: 'PROVIDER',
+        job: makeJob({
+          diagnostic_log: [
+            {
+              timestamp: 'not-a-time',
+              level: 'error',
+              event: marker,
+              attempt: 1,
+              stage: 'failed',
+              method: 'POST',
+              provider_transport: 'responses_background',
+              provider_request_id: marker,
+              provider_response_id: null,
+              provider_http_status: 400,
+              provider_error_type: marker,
+              provider_error_code: marker,
+              provider_error_param: marker,
+              provider_error_reason: marker,
+              elapsed_ms: 12,
+              request_metadata: {
+                model: 'https://private.invalid/v1',
+                background: true,
+                output_format: 'json_schema',
+                input_part_counts: { text: 1, image: 1, file: 1 }
+              }
+            }
+          ] as unknown as ReceiptJob['diagnostic_log']
+        })
+      })
+    );
+    fixture.detectChanges();
+
+    const action = fixture.nativeElement.querySelector(
+      '[data-test="receipt-copy-diagnostic"]'
+    ) as HTMLElement | null;
+    const button = action?.matches('button')
+      ? (action as HTMLButtonElement)
+      : (action?.querySelector('button') as HTMLButtonElement | null);
+    button?.click();
+    await fixture.whenStable();
+
+    const copied = clipboard.copy.calls.argsFor(0)[0] as string;
+    expect(copied).not.toContain(marker);
+    expect(copied).not.toContain('private.invalid');
+    expect(copied).toContain('job=job-receipt-17');
   });
 
   it('resolves category names with a key fallback and exposes category picker options', () => {

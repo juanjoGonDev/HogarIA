@@ -828,6 +828,7 @@ async function runMigrations(db: Database.Database): Promise<void> {
       provider_error_type TEXT,
       provider_error_code TEXT,
       provider_error_param TEXT,
+      diagnostic_log TEXT NOT NULL DEFAULT '[]',
       elapsed_ms INTEGER,
       diagnostic_stage TEXT,
       dismissed_at DATETIME,
@@ -1094,6 +1095,7 @@ async function runMigrations(db: Database.Database): Promise<void> {
   addColumnIfMissing('ai_jobs', 'provider_error_type', 'TEXT');
   addColumnIfMissing('ai_jobs', 'provider_error_code', 'TEXT');
   addColumnIfMissing('ai_jobs', 'provider_error_param', 'TEXT');
+  addColumnIfMissing('ai_jobs', 'diagnostic_log', "TEXT NOT NULL DEFAULT '[]'");
   addColumnIfMissing('ai_jobs', 'elapsed_ms', 'INTEGER');
   addColumnIfMissing('ai_jobs', 'diagnostic_stage', 'TEXT');
   addColumnIfMissing('ai_jobs', 'dismissed_at', 'DATETIME');

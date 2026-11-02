@@ -1105,6 +1105,68 @@ describe('callAI: el cuerpo lleva solo lo configurado', () => {
     expect(diagnostics.at(-1)).not.toHaveProperty('providerErrorParam');
   });
 
+  it('registra metadatos seguros y motivo normalizado para códigos nuevos del proveedor', async () => {
+    const secret = 'ticket-private-purchase-data';
+    const diagnostics: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      'fetch',
+      async () =>
+        new Response(
+          JSON.stringify({
+            error: {
+              type: 'invalid_request_error',
+              code: 'invalid_image_format',
+              param: 'input[0].content[1].image_url.url',
+              message: `Invalid value for image_url: ${secret}`
+            }
+          }),
+          {
+            status: 400,
+            headers: {
+              'content-type': 'application/json',
+              'x-request-id': 'req_synthetic123'
+            }
+          }
+        )
+    );
+    const messages: any[] = [
+      {
+        role: 'user' as const,
+        content: [
+          { type: 'text', text: secret },
+          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${secret}` } },
+          {
+            type: 'file',
+            file: { filename: 'inventario.json', file_data: `data:application/json,${secret}` }
+          }
+        ]
+      }
+    ];
+
+    await callAITransportRaw(CONFIG, messages, TEST_RESPONSE_FORMAT, undefined, {
+      jobId: 'receipt-diagnostic-1',
+      onDiagnostic: (diagnostic) => diagnostics.push({ ...diagnostic })
+    }).catch(() => undefined);
+
+    expect(diagnostics.at(-1)).toMatchObject({
+      requestMethod: 'POST',
+      providerRequestId: 'req_synthetic123',
+      providerErrorType: 'invalid_request_error',
+      providerErrorCode: 'invalid_image_format',
+      providerErrorParam: 'input_image',
+      providerErrorReason: 'invalid_value',
+      requestMetadata: {
+        model: 'gpt-vision',
+        background: true,
+        outputFormat: 'json_schema',
+        inputPartCounts: { text: 1, image: 1, file: 1 }
+      },
+      diagnosticStage: 'failed'
+    });
+    expect(JSON.stringify(diagnostics)).not.toContain(secret);
+    expect(JSON.stringify(diagnostics)).not.toContain('inventario.json');
+  });
+
   it('preserva un 400 seguro del polling y normaliza paths de adjuntos sin guardar el mensaje', async () => {
     const secret = 'synthetic private file contents';
     const diagnostics: Array<Record<string, unknown>> = [];
@@ -1128,7 +1190,10 @@ describe('callAI: el cuerpo lleva solo lo configurado', () => {
                 message: secret
               }
             }),
-            { status: 400, headers: { 'content-type': 'application/json' } }
+            {
+              status: 400,
+              headers: { 'content-type': 'application/json', 'x-request-id': 'req_poll400123' }
+            }
           )
         )
     );
@@ -1149,6 +1214,8 @@ describe('callAI: el cuerpo lleva solo lo configurado', () => {
       providerHttpStatus: 400,
       providerErrorCode: 'invalid_type',
       providerErrorParam: 'input_file',
+      providerRequestId: 'req_poll400123',
+      requestMethod: 'GET',
       diagnosticStage: 'failed'
     });
     expect(JSON.stringify({ error, diagnostics })).not.toContain(secret);

@@ -460,6 +460,7 @@ export const aiJobs = sqliteTable('ai_jobs', {
   providerErrorType: text('provider_error_type'),
   providerErrorCode: text('provider_error_code'),
   providerErrorParam: text('provider_error_param'),
+  diagnosticLog: text('diagnostic_log').notNull().default('[]'),
   elapsedMs: integer('elapsed_ms'),
   diagnosticStage: text('diagnostic_stage'),
   dismissedAt: text('dismissed_at'),

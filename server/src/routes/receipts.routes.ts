@@ -18,6 +18,7 @@ import {
   isSafeProviderErrorParam,
   isSafeProviderErrorType
 } from '../utils/ai-provider-diagnostic.js';
+import { parseAiJobDiagnosticLog } from '../utils/ai-job-diagnostic-log.js';
 import { encolarTicket, pararTrabajo, reencolar, registrarTienda } from '../utils/ticket-queue.js';
 
 /**
@@ -75,6 +76,7 @@ interface ReceiptJobRow {
   provider_error_type: unknown;
   provider_error_code: unknown;
   provider_error_param: unknown;
+  diagnostic_log: unknown;
   elapsed_ms: unknown;
   diagnostic_stage: unknown;
 }
@@ -152,6 +154,7 @@ function receiptJobForResponse(row: ReceiptJobRow | undefined) {
     provider_error_param: isSafeProviderErrorParam(row.provider_error_param)
       ? row.provider_error_param
       : null,
+    diagnostic_log: parseAiJobDiagnosticLog(row.diagnostic_log),
     elapsed_ms:
       typeof row.elapsed_ms === 'number' &&
       Number.isSafeInteger(row.elapsed_ms) &&
@@ -431,7 +434,7 @@ receiptsRoutes.get('/:id', async (c) => {
     .prepare(
       `SELECT id, status, attempts, max_attempts, error_code, created_at, provider_response_id,
               provider_transport, provider_http_status, provider_error_type, provider_error_code,
-              provider_error_param, elapsed_ms, diagnostic_stage
+              provider_error_param, diagnostic_log, elapsed_ms, diagnostic_stage
        FROM ai_jobs WHERE receipt_id = ? ORDER BY created_at DESC LIMIT 1`
     )
     .get(String(recibo.id)) as ReceiptJobRow | undefined;
