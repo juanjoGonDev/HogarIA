@@ -91,4 +91,5 @@ Explicar por qué falla un intento de lectura de ticket y permitir copiar única
 - [x] `pnpm run check:ui`, `pnpm run typecheck:e2e`, `pnpm run test:config` y `pnpm run build`.
 - [x] `pnpm run test:e2e:full-stack -- --grep "quita un fallo de la cola sin borrar el ticket" --project=chromium --project=mobile-chrome`: 2/2; stack de producción con SQLite aislada y proveedor sintético.
 - [x] GitHub CI del commit funcional `61db37c`: server tests, typecheck, build, smokes de imagen amd64/arm64, 4 shards E2E y full-stack E2E pasaron. El run previo falló solo por una aserción de estado `queued` transitorio; `test(queue): make provider retry test deterministic` lo corrigió.
+- [x] CI posterior detectó una aserción fecha-dependiente en `tests/e2e/calendar.spec.ts`: el día elegido era hoy y la URL canónica omite `date`; el test ahora comprueba esa excepción explícitamente. Playwright aislado pasó 1/1.
 - [x] `git diff --check`; ningún proveedor real ni datos de producción.
