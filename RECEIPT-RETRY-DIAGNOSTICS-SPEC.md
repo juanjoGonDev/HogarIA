@@ -48,4 +48,48 @@ Explicar por qué falla un intento de lectura de ticket y permitir copiar única
 ## Fuera de alcance
 
 - Cambiar el transporte/background de solicitudes de IA, modificar otros flujos de IA o recuperar logs históricos que no se correlacionaron con este trabajo.
-- Inferir una causa concreta del job aportado: el log compartido no incluye evidencia suficiente.
+- Afirmar el código/param exacto del último `HTTP 400`: el diagnóstico recibido no incluye el cuerpo ni el campo `param` del proveedor.
+
+## Seguimiento: HTTP 400 y quitar de la cola
+
+### Evidencia vigente
+
+- El último intento terminó en `responses_background`, HTTP `400`, en `123 ms`; el servidor aún conserva solo el status y descarta el código/parámetro del error remoto.
+- Antes de llamar al proveedor, el worker lee el fichero local y, si falta, termina como `FILE_MISSING`. Si existe, incluye la imagen como `input_image` o el PDF como `input_file` y adjunta `inventario.json` en la petición (`server/src/utils/ticket-queue.ts`). Por tanto, el dato aportado no apunta a que falte el fichero local; el proveedor todavía puede rechazar el formato o algún parámetro.
+- La captura previa de configuración mostraba modelo `gpt-5` y temperatura `0.7`; el contrato añade `temperature` configurada al request aunque el modelo use reasoning por defecto. La guía oficial de GPT-5 indica retirar `temperature` y `top_p` cuando reasoning effort no es `none`: [GPT-5 API guide](https://developers.openai.com/api/docs/guides/latest-model?model=gpt-5). La guía de archivos confirma que Responses admite `file_data` y `.json`: [File inputs](https://developers.openai.com/api/docs/guides/file-inputs).
+- La incompatibilidad de parámetros es hipótesis fuerte, no causa confirmada del intento ya terminado: falta el `code`/`param` que devolvió el proveedor.
+- La implementación conserva `type`/`code`/`param` allowlisted también en errores HTTP de polling; normaliza los paths `input[n].content[n].file_data`/`image_url` a `input_file`/`input_image`, sin guardar texto remoto.
+- Un 4xx permanente falla al primer intento; 408/409/425/429 y 5xx siguen siendo reintentables. El worker adjunta el fichero original y `inventario.json`.
+
+### Decisiones
+
+- Para los modelos GPT-5 con reasoning por defecto, omitir `temperature` y `top_p` del payload (salvo que el request solicite explícitamente `reasoning.effort: 'none'`). Mantener el request en background y preservar imagen/PDF, inventario y salida estructurada.
+- Persistir y copiar solo `error.type`, `error.code` y `error.param` si pasan allowlist estricta. Nunca guardar ni devolver el mensaje/cuerpo remoto, porque puede repetir prompts, adjuntos, URLs o datos sensibles.
+- Quitar una lectura de la cola debe ocultar solo su entrada terminal `failed`/`stopped`; conservar el ticket, trabajo y diagnóstico en su ficha. No reutilizar `DELETE /receipts/:id`, que borra el ticket.
+- Rechazar quitar trabajos `queued`/`running`; al reintentar, limpiar la marca de ocultación para que vuelva a la cola.
+
+### Criterios de aceptación
+
+- [x] Los requests GPT-5 no envían `temperature`/`top_p` por defecto; tests verifican que sí adjuntan el ticket y el inventario y que los demás modelos conservan controles compatibles.
+- [x] Para HTTP 400 de POST y polling se guardan/copían solo `type`/`code`/`param` validados; jamás mensaje/body remoto. Paths de adjunto se normalizan y la ficha explica rechazo de archivo y `unsupported_parameter` para `temperature`/`top_p`.
+- [x] El botón accesible «Quitar de la cola» oculta trabajos `failed`/`stopped` y mantiene intactos ticket, líneas, ficha y diagnóstico.
+- [x] El backend protege el scope usuario/hogar (incluido mismo usuario con otro hogar activo), devuelve 409 para trabajos activos, y reintentar restaura el trabajo en la cola.
+- [x] Pruebas API/UI cubren migración desde BD existente, repetición, carrera con reintento, aislamiento, y no borrado del ticket; E2E sintético valida escritorio y móvil.
+- [x] Coverage de todos los ficheros ejecutables afectados ≥70 % en statements/branches/functions/lines; server incluye test propio para el sanitizador de diagnósticos.
+- [x] Build de producción, `check:ui`, `typecheck:e2e` y pruebas de configuración completados.
+- [x] E2E sintético tras el último ajuste de foco en Chromium escritorio y Chrome móvil; capturas revisadas.
+- [x] CI del commit funcional `61db37c` en PR #67: todos los jobs pasaron; el test de retry se hizo determinista después del primer CI.
+- [ ] Lint local: scripts actuales no ejecutables en este checkout (`ng lint` requiere `@angular-eslint/builder`, no declarado/instalado; ESLint server rechaza `--ext` y no encuentra config flat). No se cambió tooling fuera del alcance.
+
+### Plan de verificación
+
+- [x] Unit/API con 400 sintético `unsupported_parameter` para `temperature`, 400 en polling y paths de adjuntos; ningún proveedor real.
+- [x] Rutas/worker/SQLite temporal: dismiss terminal, 409 activo, 404 fuera de scope, ticket/job conservados y retry vuelve a mostrarlo.
+- [x] `pnpm --filter @hogaria/server run test:coverage`: 2173 pasaron, 1 omitido; total 89.51/81.90/95.66/92.41 % (statements/branches/functions/lines). Nuevos `ai-provider-diagnostic.ts`: 100 % en las cuatro métricas.
+- [x] `pnpm run test:client:coverage`: 1801/1801; global 90.58/81.03/91.88/93.19 %. Ficheros UI afectados: servicio 100/71.43/100/100 %, ficha 100/88.27/100/100 %, cola 92.31/76.92/95/92.31 %, modelo 100/80/100/100 %.
+- [x] UI dirigida: 55/55; su comando con coverage específico devuelve código 1 solo porque el runner evalúa el gate global de 80 % usando únicamente tres specs. La suite completa de coverage pasa.
+- [x] `pnpm run check:ui`, `pnpm run typecheck:e2e`, `pnpm run test:config` y `pnpm run build`.
+- [x] `pnpm run test:e2e:full-stack -- --grep "quita un fallo de la cola sin borrar el ticket" --project=chromium --project=mobile-chrome`: 2/2; stack de producción con SQLite aislada y proveedor sintético.
+- [x] GitHub CI del commit funcional `61db37c`: server tests, typecheck, build, smokes de imagen amd64/arm64, 4 shards E2E y full-stack E2E pasaron. El run previo falló solo por una aserción de estado `queued` transitorio; `test(queue): make provider retry test deterministic` lo corrigió.
+- [x] CI posterior detectó una aserción fecha-dependiente en `tests/e2e/calendar.spec.ts`: el día elegido era hoy y la URL canónica omite `date`; el test ahora comprueba esa excepción explícitamente. Playwright aislado pasó 1/1.
+- [x] `git diff --check`; ningún proveedor real ni datos de producción.

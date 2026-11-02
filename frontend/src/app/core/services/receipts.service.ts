@@ -265,6 +265,12 @@ export class ReceiptsService {
     return this.first(this.http.post<{ data: unknown }>(`${this.apiUrl}/${id}/retry`, {}));
   }
 
+  dismissQueueJob(jobId: string): Promise<unknown> {
+    return this.first(
+      this.http.delete<{ data: unknown }>(`${this.apiUrl}/queue/${encodeURIComponent(jobId)}`)
+    );
+  }
+
   stopAll(): Promise<unknown> {
     this.queueBusy.set(true);
     return this.first(this.http.post<{ data: unknown }>(`${this.apiUrl}/queue/stop`, {})).finally(

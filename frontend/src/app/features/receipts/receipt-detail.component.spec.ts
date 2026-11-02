@@ -307,6 +307,22 @@ describe('ReceiptDetailComponent', () => {
     expect(textoDeError('PROVIDER', diagnostics(403))).toBe('receipts.error.PROVIDER_AUTH');
     expect(textoDeError('PROVIDER', diagnostics(429))).toBe('receipts.error.PROVIDER_RATE_LIMIT');
     expect(textoDeError('PROVIDER', diagnostics(503))).toBe('receipts.error.PROVIDER_SERVER');
+    expect(
+      textoDeError(
+        'PROVIDER',
+        makeJob({
+          provider_http_status: 400,
+          provider_error_code: 'unsupported_parameter',
+          provider_error_param: 'temperature'
+        })
+      )
+    ).toBe('receipts.error.PROVIDER_UNSUPPORTED_PARAMETER');
+    expect(
+      textoDeError(
+        'PROVIDER',
+        makeJob({ provider_http_status: 400, provider_error_param: 'input_file' })
+      )
+    ).toBe('receipts.error.PROVIDER_FILE_INPUT');
   });
 
   it('shows a per-ticket diagnostic copy action only for a failed ticket with a job', () => {
@@ -333,6 +349,9 @@ describe('ReceiptDetailComponent', () => {
       provider_response_id: 'resp_synthetic123',
       provider_transport: 'responses_background',
       provider_http_status: 401,
+      provider_error_type: 'invalid_request_error',
+      provider_error_code: 'unsupported_parameter',
+      provider_error_param: 'temperature',
       elapsed_ms: 451,
       diagnostic_stage: 'failed',
       error_detail: 'raw provider body and synthetic-secret-sentinel',
@@ -373,6 +392,9 @@ describe('ReceiptDetailComponent', () => {
       providerResponseId: 'resp_synthetic123',
       providerTransport: 'responses_background',
       providerHttpStatus: 401,
+      providerErrorType: 'invalid_request_error',
+      providerErrorCode: 'unsupported_parameter',
+      providerErrorParam: 'temperature',
       elapsedMs: 451
     });
     expect(copied).not.toContain(RECEIPT_ID);
@@ -411,6 +433,33 @@ describe('ReceiptDetailComponent', () => {
     expect(fixture.nativeElement.textContent).not.toContain(
       'synthetic clipboard permission detail'
     );
+  });
+
+  it('does not copy arbitrary provider error strings from a malformed DTO', async () => {
+    const marker = 'private-provider-error-sentinel';
+    const job = makeJob({
+      provider_error_type: marker,
+      provider_error_code: marker,
+      provider_error_param: marker
+    });
+    service.receipt.set(makeReceipt({ status: 'failed', error: 'PROVIDER', job }));
+    fixture.detectChanges();
+
+    const action = fixture.nativeElement.querySelector(
+      '[data-test="receipt-copy-diagnostic"]'
+    ) as HTMLElement | null;
+    const button = action?.matches('button')
+      ? (action as HTMLButtonElement)
+      : (action?.querySelector('button') as HTMLButtonElement | null);
+    button?.click();
+    await fixture.whenStable();
+
+    const copied = clipboard.copy.calls.argsFor(0)[0] as string;
+    const diagnostic = JSON.parse(copied) as Record<string, unknown>;
+    expect(copied).not.toContain(marker);
+    expect(Object.hasOwn(diagnostic, 'providerErrorType')).toBeFalse();
+    expect(Object.hasOwn(diagnostic, 'providerErrorCode')).toBeFalse();
+    expect(Object.hasOwn(diagnostic, 'providerErrorParam')).toBeFalse();
   });
 
   it('resolves category names with a key fallback and exposes category picker options', () => {

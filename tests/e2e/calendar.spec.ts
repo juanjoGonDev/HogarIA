@@ -199,12 +199,20 @@ test.describe('Calendario', () => {
 
     const target = page.locator('.cal-cell:not(.is-outside) .cal-cell__num').nth(1);
     const dayNumber = (await target.innerText()).trim();
+    const targetIsToday = await target.evaluate(
+      (button) => button.closest('.cal-cell')?.classList.contains('is-today') ?? false
+    );
     await target.click();
 
     await expect(page).toHaveURL(/[?&]view=day/);
-    await expect(page).toHaveURL(
-      new RegExp(`[?&]date=\\d{4}-\\d{2}-${dayNumber.padStart(2, '0')}`)
-    );
+    if (targetIsToday) {
+      // Today's date is omitted from canonical URLs by writeViewInUrl().
+      await expect(page).not.toHaveURL(/[?&]date=/);
+    } else {
+      await expect(page).toHaveURL(
+        new RegExp(`[?&]date=\\d{4}-\\d{2}-${dayNumber.padStart(2, '0')}`)
+      );
+    }
     await expect(page.locator('h1.calendar__title')).toContainText(dayNumber);
   });
 

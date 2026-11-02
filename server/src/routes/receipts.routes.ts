@@ -13,6 +13,11 @@ import { ensureDefaultCategories as ensurePantryCategories } from '../utils/pant
 import { productKeyOf } from '../utils/product-key.js';
 import { activeHouseholdId } from '../utils/household-context.js';
 import { queueProductImageSearch } from '../utils/product-image-search.js';
+import {
+  isSafeProviderErrorCode,
+  isSafeProviderErrorParam,
+  isSafeProviderErrorType
+} from '../utils/ai-provider-diagnostic.js';
 import { encolarTicket, pararTrabajo, reencolar, registrarTienda } from '../utils/ticket-queue.js';
 
 /**
@@ -67,6 +72,9 @@ interface ReceiptJobRow {
   provider_response_id: unknown;
   provider_transport: unknown;
   provider_http_status: unknown;
+  provider_error_type: unknown;
+  provider_error_code: unknown;
+  provider_error_param: unknown;
   elapsed_ms: unknown;
   diagnostic_stage: unknown;
 }
@@ -135,6 +143,15 @@ function receiptJobForResponse(row: ReceiptJobRow | undefined) {
       row.provider_http_status <= 599
         ? row.provider_http_status
         : null,
+    provider_error_type: isSafeProviderErrorType(row.provider_error_type)
+      ? row.provider_error_type
+      : null,
+    provider_error_code: isSafeProviderErrorCode(row.provider_error_code)
+      ? row.provider_error_code
+      : null,
+    provider_error_param: isSafeProviderErrorParam(row.provider_error_param)
+      ? row.provider_error_param
+      : null,
     elapsed_ms:
       typeof row.elapsed_ms === 'number' &&
       Number.isSafeInteger(row.elapsed_ms) &&
@@ -254,6 +271,7 @@ receiptsRoutes.get('/queue', async (c) => {
        FROM ai_jobs j LEFT JOIN receipts r ON r.id = j.receipt_id
        WHERE j.user_id = ? AND j.kind = 'receipt'
        AND (r.household_id = ? OR (r.household_id IS NULL AND r.user_id = ?))
+       AND j.dismissed_at IS NULL
        AND j.status IN ('queued', 'running', 'failed', 'stopped')
        ORDER BY j.created_at DESC LIMIT 50`
     )
@@ -269,6 +287,66 @@ receiptsRoutes.get('/queue', async (c) => {
       }
     }
   });
+});
+
+receiptsRoutes.delete('/queue/:jobId', async (c) => {
+  const userId = c.get('userId');
+  const jobId = c.req.param('jobId');
+  const db = getDatabase();
+  const householdId = activeHouseholdId(db, userId);
+  const visibleJob = `SELECT j.status, j.dismissed_at
+    FROM ai_jobs j JOIN receipts r ON r.id = j.receipt_id
+    WHERE j.id = ? AND j.user_id = ? AND j.kind = 'receipt'
+      AND (r.household_id = ? OR (r.household_id IS NULL AND r.user_id = ?))`;
+
+  const outcome = db
+    .transaction(() => {
+      const row = db.prepare(visibleJob).get(jobId, userId, householdId, userId) as
+        { status: string; dismissed_at: string | null } | undefined;
+      if (!row) return 'not-found';
+      if (row.status === 'failed' || row.status === 'stopped') {
+        if (row.dismissed_at) return 'dismissed';
+        const changed = db
+          .prepare(
+            `UPDATE ai_jobs SET dismissed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+             WHERE id = ? AND user_id = ? AND kind = 'receipt'
+               AND status IN ('failed', 'stopped') AND dismissed_at IS NULL
+               AND EXISTS (
+                 SELECT 1 FROM receipts r WHERE r.id = ai_jobs.receipt_id
+                   AND (r.household_id = ? OR (r.household_id IS NULL AND r.user_id = ?))
+               )`
+          )
+          .run(jobId, userId, householdId, userId);
+        if (changed.changes > 0) return 'dismissed';
+      }
+
+      const current = db.prepare(visibleJob).get(jobId, userId, householdId, userId) as
+        { status: string; dismissed_at: string | null } | undefined;
+      if (!current) return 'not-found';
+      if ((current.status === 'failed' || current.status === 'stopped') && current.dismissed_at) {
+        return 'dismissed';
+      }
+      return 'not-dismissible';
+    })
+    .immediate();
+
+  if (outcome === 'not-found') {
+    return c.json(
+      { success: false, error: 'JOB_NOT_FOUND', message: 'Trabajo no encontrado' },
+      404
+    );
+  }
+  if (outcome === 'not-dismissible') {
+    return c.json(
+      {
+        success: false,
+        error: 'JOB_NOT_DISMISSABLE',
+        message: 'Solo se pueden quitar trabajos fallidos o parados'
+      },
+      409
+    );
+  }
+  return c.json({ success: true, data: { dismissed: true } });
 });
 
 receiptsRoutes.post('/queue/stop', async (c) => {
@@ -352,7 +430,8 @@ receiptsRoutes.get('/:id', async (c) => {
   const trabajo = db
     .prepare(
       `SELECT id, status, attempts, max_attempts, error_code, created_at, provider_response_id,
-              provider_transport, provider_http_status, elapsed_ms, diagnostic_stage
+              provider_transport, provider_http_status, provider_error_type, provider_error_code,
+              provider_error_param, elapsed_ms, diagnostic_stage
        FROM ai_jobs WHERE receipt_id = ? ORDER BY created_at DESC LIMIT 1`
     )
     .get(String(recibo.id)) as ReceiptJobRow | undefined;

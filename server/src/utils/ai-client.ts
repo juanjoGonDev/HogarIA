@@ -19,6 +19,13 @@ import {
 } from './household-context.js';
 import { resolveAiFunctionProvider, type AiFunctionKey } from './ai-function-providers.js';
 import { aiOperationTimeoutMs, effectiveAiTimeoutMs } from './ai-timeout.js';
+import {
+  isPermanentProviderClientError,
+  sanitizeProviderErrorFields,
+  type SafeProviderErrorCode,
+  type SafeProviderErrorParam,
+  type SafeProviderErrorType
+} from './ai-provider-diagnostic.js';
 import type { AiCallResponseFormat, AiResponseFormat } from '../schemas/ai-response-format.js';
 
 export type AiMessagePart =
@@ -50,6 +57,15 @@ export type AiProviderRequestOptions = {
   /** Sanitized lifecycle metadata; callback failures never affect the provider request. */
   onDiagnostic?: (diagnostic: AiConnectionTestDiagnostic) => void;
 };
+
+function safeProviderError(payload: any) {
+  const error = payload?.error ?? payload;
+  return sanitizeProviderErrorFields({
+    type: error?.type,
+    code: error?.code,
+    param: error?.param
+  });
+}
 
 export interface AiConfigRow {
   id: string;
@@ -87,10 +103,27 @@ export class AiCallError extends Error {
   constructor(
     readonly code: AiErrorCode,
     message: string,
-    readonly detail?: string
+    readonly detail?: string,
+    readonly providerHttpStatus?: number,
+    readonly providerErrorType?: SafeProviderErrorType,
+    readonly providerErrorCode?: SafeProviderErrorCode,
+    readonly providerErrorParam?: SafeProviderErrorParam
   ) {
     super(message);
     this.name = 'AiCallError';
+  }
+
+  get retryable(): boolean {
+    if (this.code === 'TIMEOUT') return true;
+    if (this.code !== 'PROVIDER') return false;
+    if (
+      ['BACKGROUND_UNSUPPORTED', 'FILE_MISSING', 'RECEIPT_NOT_FOUND', 'INPUT_EXPIRED'].includes(
+        this.detail ?? ''
+      )
+    ) {
+      return false;
+    }
+    return !isPermanentProviderClientError(this.providerHttpStatus);
   }
 }
 
@@ -292,10 +325,19 @@ function responsesBody(
   if (active.max_tokens !== null && active.max_tokens !== undefined) {
     body.max_output_tokens = active.max_tokens;
   }
-  if (active.temperature !== null && active.temperature !== undefined) {
+  const gpt5ReasoningDefault = /(?:^|[^a-z\d])gpt-5(?:$|[.-])/i.test(active.model.trim());
+  const samplingControlsSupported =
+    !gpt5ReasoningDefault || requestOptions?.reasoning_effort === 'none';
+  if (
+    samplingControlsSupported &&
+    active.temperature !== null &&
+    active.temperature !== undefined
+  ) {
     body.temperature = active.temperature;
   }
-  if (active.top_p !== null && active.top_p !== undefined) body.top_p = active.top_p;
+  if (samplingControlsSupported && active.top_p !== null && active.top_p !== undefined) {
+    body.top_p = active.top_p;
+  }
   if (requestOptions?.reasoning_effort) {
     body.reasoning = { effort: requestOptions.reasoning_effort };
   }
@@ -307,6 +349,9 @@ export type AiConnectionTestDiagnostic = Readonly<{
   providerTransport: 'responses_background';
   providerHttpStatus: number | null;
   elapsedMs: number;
+  providerErrorType?: SafeProviderErrorType;
+  providerErrorCode?: SafeProviderErrorCode;
+  providerErrorParam?: SafeProviderErrorParam;
   diagnosticStage:
     'submitting' | 'queued' | 'polling' | 'completed' | 'failed' | 'timed_out' | 'cancelled';
 }>;
@@ -408,12 +453,16 @@ async function awaitBackgroundResponse(input: BackgroundRequest): Promise<Backgr
   const idempotencyKey = providerIdempotencyKey(input.jobId, input.body);
   let responseId: string | null = null;
   let status: number | null = null;
+  let providerError: ReturnType<typeof safeProviderError> = {};
   const report = (diagnosticStage: AiConnectionTestDiagnostic['diagnosticStage']) =>
     notifyConnectionTestDiagnostic(input.onDiagnostic, {
       providerResponseId: responseId,
       providerTransport: 'responses_background',
       providerHttpStatus: status,
       elapsedMs: Math.max(0, Date.now() - startTime),
+      ...(providerError.type ? { providerErrorType: providerError.type } : {}),
+      ...(providerError.code ? { providerErrorCode: providerError.code } : {}),
+      ...(providerError.param ? { providerErrorParam: providerError.param } : {}),
       diagnosticStage
     });
   const fail = async (
@@ -439,16 +488,29 @@ async function awaitBackgroundResponse(input: BackgroundRequest): Promise<Backgr
     status = response.status;
     if (!response.ok) {
       const providerPayload = await responsePayload(response);
+      providerError = safeProviderError(providerPayload);
       await response.body?.cancel().catch(() => undefined);
       if (responsesBackgroundUnsupported(response.status, providerPayload)) {
         throw new AiCallError(
           'PROVIDER',
           'AI provider does not support Responses background requests',
-          'BACKGROUND_UNSUPPORTED'
+          'BACKGROUND_UNSUPPORTED',
+          response.status,
+          providerError.type,
+          providerError.code,
+          providerError.param
         );
       }
       const detail = `HTTP ${response.status}`;
-      throw new AiCallError('PROVIDER', `AI API error: ${detail}`, detail);
+      throw new AiCallError(
+        'PROVIDER',
+        `AI API error: ${detail}`,
+        detail,
+        response.status,
+        providerError.type,
+        providerError.code,
+        providerError.param
+      );
     }
     const payload = await responsePayload(response);
     if (!payload) throw new AiCallError('BAD_JSON', 'Invalid AI response format');
@@ -594,14 +656,26 @@ async function awaitBackgroundResponse(input: BackgroundRequest): Promise<Backgr
     }
     status = current.status;
     if (!current.ok) {
+      const providerPayload = await responsePayload(current);
+      providerError = safeProviderError(providerPayload);
       await current.body?.cancel().catch(() => undefined);
-      if (current.status === 429 || current.status >= 500) {
+      if ([408, 409, 425, 429].includes(current.status) || current.status >= 500) {
         report('polling');
         delayMs = Math.min(delayMs * 2, RESPONSES_POLL_MAX_MS);
         continue;
       }
       const detail = `HTTP ${current.status}`;
-      return fail(new AiCallError('PROVIDER', `AI API error: ${detail}`, detail));
+      return fail(
+        new AiCallError(
+          'PROVIDER',
+          `AI API error: ${detail}`,
+          detail,
+          current.status,
+          providerError.type,
+          providerError.code,
+          providerError.param
+        )
+      );
     }
     const currentPayload = await responsePayload(current);
     if (!currentPayload || currentPayload.id !== responseId) {
