@@ -1,7 +1,7 @@
 # Recuperación de trabajos IA bloqueados
 
-**Estado:** trabajo en curso; spec publicada antes de implementar.
-**Base:** origin/master (5765cd438d9c5d25a400e20b64620663caf410e4).
+**Estado:** Draft PR pre-implementación; implementación no iniciada.
+**Base:** origin/master (b7a754e8bbcc9524d5d2d08d0197101abc46e635).
 **Rama:** fix/ai-queue-stale-job-recovery.
 **Alcance:** evitar que excepciones inesperadas o leases vencidas dejen jobs IA en running, bloqueen concurrencia o dejen el test de proveedor en testing. No cambiar protocolos ni degradar Responses background.
 
