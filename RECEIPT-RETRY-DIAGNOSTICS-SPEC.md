@@ -56,8 +56,9 @@ Explicar por qué falla un intento de lectura de ticket y permitir copiar única
 
 - El nuevo intento comunicado (`receipt`, `failed`, `attempts: 1`, `responses_background`, HTTP `400`, `167 ms`) sigue sin `providerErrorType`, `providerErrorCode` ni `providerErrorParam`; el DTO allowlisted y su copia ya exponen esos campos cuando existen.
 - `awaitBackgroundResponse()` parsea el JSON de error, pero descarta `error.message`; `safeProviderError()` y `sanitizeProviderErrorFields()` también descartan códigos/parámetros fuera de listas cerradas. No se puede inferir la causa de este HTTP 400 solo con los datos conservados.
-- WebApi ofrece copia de logs filtrados/seleccionados como líneas fechadas y con nivel (`frontend/src/app/features/logs/logs.component.ts`). La ficha de ticket hoy copia un resumen JSON compacto del trabajo, no eventos cronológicos.
-- El recibo de ejemplo es dato real de compra. Solo se usará fuera del repositorio en un smoke aislado y no se incluirá en capturas, fixtures, logs ni commits.
+- WebApi ofrece copia de logs filtrados/seleccionados como líneas fechadas y con nivel (`frontend/src/app/features/logs/logs.component.ts`). La ficha de ticket copiaba un resumen JSON compacto del trabajo, no eventos cronológicos.
+- La WebApi loopback no escucha en `127.0.0.1:3001`; existe un archivo de lease antiguo/ambiguo para su perfil. Para no tocar la sesión o BD habitual, no se ejecuta smoke real contra ese servicio.
+- La imagen facilitada es un recibo real con datos de compra. Se usó solo como referencia visual; no se enviará al proveedor ni se incluirá en capturas, fixtures, logs o commits. El smoke real, si pasa preflight aislado, usará una imagen sintética equivalente.
 
 ### Decisiones
 
@@ -67,20 +68,21 @@ Explicar por qué falla un intento de lectura de ticket y permitir copiar única
 - La copia debe contener exclusivamente eventos del `jobId` actual, en orden temporal, con campos allowlisted; nunca API key, prompt, texto de recibo, archivo, contenido de respuesta, URL completa ni headers arbitrarios.
 - Mantener formato legible similar a WebApi (`fecha nivel evento campos`), conservar historial acotado a los intentos del trabajo y evitar registrar cada ciclo de polling repetido.
 - Cada evento expuesto/copiado tendrá `timestamp`, `level`, `event`, `attempt`, `stage`, `transport`, método/status/duración opcionales y códigos seguros opcionales; retención máxima: 32 eventos por trabajo, deduplicando sondeos idénticos.
-- Registrar solo metadatos del request: modelo validado, uso de background y conteos de partes por tipo (`text`/`image`/`file`). No registrar prompt, nombre/ruta/tamaño del fichero, host/base URL ni contenido de partes.
+- Registrar solo metadatos del request: modelo validado, uso de background y conteos de partes por tipo (`text`/`image`/`file`). No registrar prompt, nombre/ruta/tamaño del fichero, host/base URL ni contenido de partes. Rechazar también modelo/ID con forma de clave o marcadores sensibles.
 - Capturar `x-request-id` (o cabecera equivalente del proveedor) solo si coincide con gramática acotada; el detalle de error se deriva de `type`/`code`/`param` y plantillas reconocidas, nunca del mensaje libre.
-- Primero validar con respuestas sintéticas. Luego, si el preflight WebApi local está disponible, ejecutar el smoke real de recibo con la imagen facilitada en DB aislada temporal y carpeta efímera fuera de Git. El smoke puede enviar la imagen al proveedor configurado; no registrar su contenido ni credenciales.
+- Validar primero con respuestas sintéticas. Si el preflight WebApi local está disponible y su perfil puede usarse sin interferir con otra sesión, ejecutar smoke real con recibo sintético, DB temporal y carpeta efímera fuera de Git. No enviar recibos privados ni registrar contenido o credenciales.
 
 ### Criterios de aceptación
 
-- [ ] Un HTTP 400 del proveedor produce eventos por trabajo con etapa/transporte/status/duración y `request_id` validado si proveedor lo ofrece; la ficha puede volver a leerlos tras refresco.
-- [ ] Errores con tipos/códigos/params válidos pero no previstos en listas actuales no desaparecen si cumplen la gramática segura; campos arbitrarios no se almacenan.
-- [ ] Motivos de proveedor solo se derivan de plantillas probadas y nunca contienen valores del body, secretos, URLs, nombres/rutas de archivos, prompts ni contenido del recibo.
-- [ ] «Copiar diagnóstico» copia eventos del trabajo actual en orden cronológico, con estructura/legibilidad WebApi y sin eventos de otros jobs.
-- [ ] Pruebas cubren POST y polling fallidos, campos no estándar, mensajes con datos sensibles, sanitización, orden/límite de eventos, persistencia, scope y copia UI.
-- [ ] E2E sintética verifica escritorio/móvil sin datos personales; capturas sintéticas se guardan solo en artefactos ignorados.
-- [ ] Smoke real, si el WebApi loopback y credenciales configuradas pasan preflight, usa DB aislada y la imagen temporal externa al repo; documenta el diagnóstico retornado sin conservar datos del recibo ni afirmar éxito si falla.
-- [ ] Gates requeridos por el repo pasan; evidencia y límites se anotan aquí antes de marcar casillas.
+- [x] Un HTTP 400 del proveedor produce eventos por trabajo con etapa/transporte/status/duración y `request_id` validado si proveedor lo ofrece; el GET de detalle vuelve a leerlos tras refresco.
+- [x] Errores con tipos/códigos/params válidos pero no previstos en listas actuales no desaparecen si cumplen la gramática segura; campos arbitrarios no se almacenan.
+- [x] Modelos e IDs de proveedor con forma de credencial (`sk-`/`rk-`/`pk-` o marcadores sensibles) se descartan en servidor y al copiar en UI.
+- [x] Motivos de proveedor solo se derivan de plantillas probadas y nunca contienen valores del body, secretos, URLs, nombres/rutas de archivos, prompts ni contenido del recibo.
+- [x] «Copiar diagnóstico» copia eventos del trabajo actual en orden cronológico, con estructura/legibilidad WebApi y sin eventos de otros jobs.
+- [x] Pruebas cubren POST y polling fallidos, campos no estándar, mensajes con datos sensibles, sanitización, orden/límite de eventos, persistencia y copia UI.
+- [x] E2E sintética verifica escritorio/móvil sin datos personales; capturas sintéticas quedan en artefactos ignorados.
+- [ ] Smoke real, si WebApi loopback y perfil configurado pasan preflight sin interferencia, usa DB aislada y fixture sintético externo al repo; documenta resultado sin conservar contenido ni afirmar éxito si falla.
+- [x] Gates locales requeridos pasan; CI final pendiente sobre SHA del PR.
 
 ## Seguimiento: HTTP 400 y quitar de la cola
 
@@ -125,3 +127,13 @@ Explicar por qué falla un intento de lectura de ticket y permitir copiar única
 - [x] GitHub CI del commit funcional `61db37c`: server tests, typecheck, build, smokes de imagen amd64/arm64, 4 shards E2E y full-stack E2E pasaron. El run previo falló solo por una aserción de estado `queued` transitorio; `test(queue): make provider retry test deterministic` lo corrigió.
 - [x] CI posterior detectó una aserción fecha-dependiente en `tests/e2e/calendar.spec.ts`: el día elegido era hoy y la URL canónica omite `date`; el test ahora comprueba esa excepción explícitamente. Playwright aislado pasó 1/1.
 - [x] `git diff --check`; ningún proveedor real ni datos de producción.
+
+### Verificación del seguimiento: diagnóstico operativo
+
+- `pnpm --filter @hogaria/server run test:coverage` — 2180 pasaron, 1 omitido; total 89.49/81.98/95.72/92.42 % (statements/branches/functions/lines). `ai-job-diagnostic-log.ts` 91.93/90.74/100/94.11 %; todos los ficheros ejecutables del alcance superan 70 % en cada métrica.
+- `pnpm run test:client:coverage` — 1805/1805; global 90.54/80.88/91.91/93.21 %. `receipt-detail.component.ts` 99.6/100/100/99.6 % y `receipt.model.ts` 100 % en líneas/ramas/funciones.
+- API dirigida con seis specs — 176/176; ficha dirigida — 35/35; `pnpm run check:ui`, `pnpm run typecheck:e2e` y `pnpm run test:config` — 120/120.
+- `pnpm run build` — correcto; warnings Angular preexistentes.
+- E2E stack de producción: `pnpm run test:e2e:full-stack -- --grep "copia solo el diagnóstico seguro del ticket fallido desde su ficha" --project=chromium --project=mobile-chrome` — 2/2; SQLite temporal y proveedor sintético. Capturas revisadas: `.e2e-screenshots/receipt-queue-actions-qa/receipt-diagnostic-chromium.png`, `receipt-diagnostic-mobile-chrome.png`.
+- El smoke real no se ejecutó: no hay WebApi en `127.0.0.1:3001` y su lease de perfil está presente pero no permite demostrar exclusividad. No se tocó perfil/BD normal ni se envió la imagen privada.
+- CI final del PR pendiente.

@@ -20,9 +20,14 @@ import {
 import { resolveAiFunctionProvider, type AiFunctionKey } from './ai-function-providers.js';
 import { aiOperationTimeoutMs, effectiveAiTimeoutMs } from './ai-timeout.js';
 import {
+  isSafeProviderRequestId,
   isPermanentProviderClientError,
+  safeProviderErrorReason,
+  sanitizeAiProviderRequestMetadata,
   sanitizeProviderErrorFields,
   type SafeProviderErrorCode,
+  type SafeAiProviderRequestMetadata,
+  type SafeProviderErrorReason,
   type SafeProviderErrorParam,
   type SafeProviderErrorType
 } from './ai-provider-diagnostic.js';
@@ -60,11 +65,20 @@ export type AiProviderRequestOptions = {
 
 function safeProviderError(payload: any) {
   const error = payload?.error ?? payload;
-  return sanitizeProviderErrorFields({
+  const fields = sanitizeProviderErrorFields({
     type: error?.type,
     code: error?.code,
     param: error?.param
   });
+  return {
+    ...fields,
+    reason: safeProviderErrorReason({
+      type: error?.type,
+      code: error?.code,
+      param: error?.param,
+      message: error?.message
+    })
+  };
 }
 
 export interface AiConfigRow {
@@ -349,9 +363,13 @@ export type AiConnectionTestDiagnostic = Readonly<{
   providerTransport: 'responses_background';
   providerHttpStatus: number | null;
   elapsedMs: number;
+  providerRequestId?: string | null;
   providerErrorType?: SafeProviderErrorType;
   providerErrorCode?: SafeProviderErrorCode;
   providerErrorParam?: SafeProviderErrorParam;
+  providerErrorReason?: SafeProviderErrorReason | null;
+  requestMethod?: 'POST' | 'GET';
+  requestMetadata?: SafeAiProviderRequestMetadata;
   diagnosticStage:
     'submitting' | 'queued' | 'polling' | 'completed' | 'failed' | 'timed_out' | 'cancelled';
 }>;
@@ -393,6 +411,44 @@ function providerIdempotencyKey(jobId: string | undefined, body: Record<string, 
 
 function validResponsesId(value: unknown): value is string {
   return typeof value === 'string' && value.length <= 133 && SAFE_RESPONSES_ID.test(value);
+}
+
+function safeProviderRequestId(response: Response): string | null {
+  const value =
+    response.headers.get('x-request-id') ??
+    response.headers.get('request-id') ??
+    response.headers.get('openai-request-id');
+  return isSafeProviderRequestId(value) ? value : null;
+}
+
+function requestMetadata(body: Record<string, unknown>): SafeAiProviderRequestMetadata {
+  const counts = { text: 0, image: 0, file: 0 };
+  const input = Array.isArray(body.input) ? body.input : [];
+  for (const item of input) {
+    if (typeof item?.content === 'string') {
+      counts.text += 1;
+      continue;
+    }
+    if (!Array.isArray(item?.content)) continue;
+    for (const part of item.content) {
+      if (part?.type === 'input_text') counts.text += 1;
+      if (part?.type === 'input_image') counts.image += 1;
+      if (part?.type === 'input_file') counts.file += 1;
+    }
+  }
+  return (
+    sanitizeAiProviderRequestMetadata({
+      model: body.model,
+      background: body.background === true,
+      outputFormat: (body.text as any)?.format?.type,
+      inputPartCounts: counts
+    }) ?? {
+      model: null,
+      background: false,
+      outputFormat: 'unknown',
+      inputPartCounts: { text: 0, image: 0, file: 0 }
+    }
+  );
 }
 
 function extractResponsesText(payload: any): string | undefined {
@@ -453,16 +509,23 @@ async function awaitBackgroundResponse(input: BackgroundRequest): Promise<Backgr
   const idempotencyKey = providerIdempotencyKey(input.jobId, input.body);
   let responseId: string | null = null;
   let status: number | null = null;
-  let providerError: ReturnType<typeof safeProviderError> = {};
+  let requestId: string | null = null;
+  let requestMethod: 'POST' | 'GET' = 'POST';
+  const metadata = requestMetadata(input.body);
+  let providerError: Partial<ReturnType<typeof safeProviderError>> = {};
   const report = (diagnosticStage: AiConnectionTestDiagnostic['diagnosticStage']) =>
     notifyConnectionTestDiagnostic(input.onDiagnostic, {
       providerResponseId: responseId,
       providerTransport: 'responses_background',
       providerHttpStatus: status,
       elapsedMs: Math.max(0, Date.now() - startTime),
+      providerRequestId: requestId,
       ...(providerError.type ? { providerErrorType: providerError.type } : {}),
       ...(providerError.code ? { providerErrorCode: providerError.code } : {}),
       ...(providerError.param ? { providerErrorParam: providerError.param } : {}),
+      providerErrorReason: providerError.reason ?? null,
+      requestMethod,
+      requestMetadata: metadata,
       diagnosticStage
     });
   const fail = async (
@@ -486,6 +549,7 @@ async function awaitBackgroundResponse(input: BackgroundRequest): Promise<Backgr
     );
   const parseCreate = async (response: Response): Promise<any> => {
     status = response.status;
+    requestId = safeProviderRequestId(response);
     if (!response.ok) {
       const providerPayload = await responsePayload(response);
       providerError = safeProviderError(providerPayload);
@@ -512,6 +576,7 @@ async function awaitBackgroundResponse(input: BackgroundRequest): Promise<Backgr
         providerError.param
       );
     }
+    providerError = {};
     const payload = await responsePayload(response);
     if (!payload) throw new AiCallError('BAD_JSON', 'Invalid AI response format');
     if (!validResponsesId(payload.id)) {
@@ -524,6 +589,7 @@ async function awaitBackgroundResponse(input: BackgroundRequest): Promise<Backgr
   if (input.signal?.aborted) {
     throw new AiCallError('PROVIDER', 'AI request was cancelled', 'CANCELLED');
   }
+  requestMethod = 'POST';
   report('submitting');
   let created: Response;
   try {
@@ -637,6 +703,10 @@ async function awaitBackgroundResponse(input: BackgroundRequest): Promise<Backgr
     }
 
     let current: Response;
+    requestMethod = 'GET';
+    status = null;
+    requestId = null;
+    providerError = {};
     try {
       current = await fetch(`${url}/${encodeURIComponent(responseId!)}`, {
         method: 'GET',
@@ -655,6 +725,7 @@ async function awaitBackgroundResponse(input: BackgroundRequest): Promise<Backgr
       continue;
     }
     status = current.status;
+    requestId = safeProviderRequestId(current);
     if (!current.ok) {
       const providerPayload = await responsePayload(current);
       providerError = safeProviderError(providerPayload);
@@ -677,6 +748,7 @@ async function awaitBackgroundResponse(input: BackgroundRequest): Promise<Backgr
         )
       );
     }
+    providerError = {};
     const currentPayload = await responsePayload(current);
     if (!currentPayload || currentPayload.id !== responseId) {
       return fail(

@@ -18,7 +18,12 @@ import { PickerComponent } from '../../shared/components/ui/picker/picker.compon
 import { LoadingComponent } from '../../shared/components/ui/loading/loading.component';
 import { TranslatePipe } from '../../core/pipes/translate.pipe';
 import type { TranslationKey } from '../../core/i18n';
-import type { ReceiptItem, ReceiptJob, ReceiptStatus } from '../../shared/models/receipt.model';
+import type {
+  ReceiptItem,
+  ReceiptJob,
+  ReceiptJobDiagnosticEntry,
+  ReceiptStatus
+} from '../../shared/models/receipt.model';
 import { revisable, sumaDeLineas } from '../../shared/models/receipt.model';
 
 /**
@@ -77,7 +82,33 @@ const SAFE_DIAGNOSTIC_STAGES = new Set([
   'fallback'
 ]);
 const SAFE_DIAGNOSTIC_TRANSPORTS = new Set(['responses_background', 'chat_completions']);
-const SAFE_JOB_STATUSES = new Set(['queued', 'running', 'done', 'failed', 'stopped']);
+const SAFE_DIAGNOSTIC_LEVELS = new Set(['info', 'warn', 'error']);
+const SAFE_DIAGNOSTIC_EVENTS = new Set([
+  'request_started',
+  'provider_accepted',
+  'response_polling',
+  'provider_retrying',
+  'provider_error',
+  'request_completed',
+  'request_failed',
+  'request_timed_out',
+  'request_cancelled',
+  'fallback'
+]);
+const SAFE_PROVIDER_ERROR_REASONS = new Set([
+  'unsupported_parameter',
+  'invalid_value',
+  'invalid_type',
+  'model_not_found',
+  'authentication',
+  'permission',
+  'rate_limit',
+  'quota',
+  'background_not_supported',
+  'file_input_rejected',
+  'invalid_request',
+  'provider_rejected'
+]);
 const SAFE_PROVIDER_ERROR_TYPES = new Set([
   'api_error',
   'invalid_request_error',
@@ -116,6 +147,7 @@ const SAFE_PROVIDER_ERROR_PARAMS = new Set([
   'store',
   'reasoning.effort'
 ]);
+const SENSITIVE_PROVIDER_TOKEN = /(?:bearer|password|secret|token|credential)|^(?:sk|rk|pk)-/i;
 
 @Component({
   selector: 'app-receipt-detail',
@@ -1184,60 +1216,243 @@ export class ReceiptDetailComponent implements OnInit, OnDestroy {
     if (!job) return;
     this.diagnosticCopyStatus.set(null);
     try {
-      await this.clipboard.copy(JSON.stringify(this.safeDiagnosticFor(job), null, 2));
+      await this.clipboard.copy(this.safeDiagnosticFor(job));
       this.diagnosticCopyStatus.set('copied');
     } catch {
       this.diagnosticCopyStatus.set('failed');
     }
   }
 
-  private safeDiagnosticFor(job: ReceiptJob): Record<string, unknown> {
-    const diagnostic: Record<string, unknown> = {
-      jobId: this.safeIdentifier(job.id),
-      kind: 'receipt',
-      status: SAFE_JOB_STATUSES.has(job.status) ? job.status : 'unknown',
-      attempts: this.safeCount(job.attempts),
-      maxAttempts: this.safeCount(job.max_attempts),
-      createdAt: this.safeTimestamp(job.created_at),
-      error: SAFE_DIAGNOSTIC_ERRORS.has(job.error_code ?? '') ? job.error_code : null
+  private safeDiagnosticFor(job: ReceiptJob): string {
+    const jobId = this.safeIdentifier(job.id) ?? 'unknown';
+    const events = Array.isArray(job.diagnostic_log)
+      ? job.diagnostic_log
+          .map((entry) => this.safeDiagnosticEvent(entry))
+          .filter((entry): entry is ReceiptJobDiagnosticEntry => entry !== null)
+          .sort((left, right) => Date.parse(left.timestamp) - Date.parse(right.timestamp))
+          .slice(-32)
+      : [];
+
+    const safeEvents = events.length ? events : [this.legacyDiagnosticEvent(job)];
+    return safeEvents.map((entry) => this.formatDiagnosticLine(jobId, entry)).join('\n');
+  }
+
+  private safeDiagnosticEvent(value: unknown): ReceiptJobDiagnosticEntry | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const entry = value as Partial<ReceiptJobDiagnosticEntry>;
+    const timestamp = this.safeTimestamp(entry.timestamp);
+    const level =
+      typeof entry.level === 'string' && SAFE_DIAGNOSTIC_LEVELS.has(entry.level)
+        ? (entry.level as ReceiptJobDiagnosticEntry['level'])
+        : null;
+    const event =
+      typeof entry.event === 'string' && SAFE_DIAGNOSTIC_EVENTS.has(entry.event)
+        ? entry.event
+        : null;
+    const stage =
+      typeof entry.stage === 'string' && SAFE_DIAGNOSTIC_STAGES.has(entry.stage)
+        ? entry.stage
+        : null;
+    const attempt = this.safeCount(entry.attempt);
+    if (!timestamp || !level || !event || !stage || attempt === null) return null;
+
+    return {
+      timestamp,
+      level,
+      event,
+      attempt,
+      stage,
+      method: entry.method === 'POST' || entry.method === 'GET' ? entry.method : null,
+      provider_transport:
+        typeof entry.provider_transport === 'string' &&
+        SAFE_DIAGNOSTIC_TRANSPORTS.has(entry.provider_transport)
+          ? (entry.provider_transport as ReceiptJobDiagnosticEntry['provider_transport'])
+          : null,
+      provider_request_id: this.safeProviderRequestId(entry.provider_request_id),
+      provider_response_id: this.safeResponseId(entry.provider_response_id),
+      provider_http_status: this.safeHttpStatus(entry.provider_http_status),
+      provider_error_type: this.safeProviderToken(
+        entry.provider_error_type,
+        SAFE_PROVIDER_ERROR_TYPES
+      ),
+      provider_error_code: this.safeProviderToken(
+        entry.provider_error_code,
+        SAFE_PROVIDER_ERROR_CODES
+      ),
+      provider_error_param: this.safeProviderParam(entry.provider_error_param),
+      provider_error_reason:
+        typeof entry.provider_error_reason === 'string' &&
+        SAFE_PROVIDER_ERROR_REASONS.has(entry.provider_error_reason)
+          ? entry.provider_error_reason
+          : null,
+      elapsed_ms: this.safeElapsedMs(entry.elapsed_ms),
+      request_metadata: this.safeRequestMetadata(entry.request_metadata)
     };
+  }
 
-    if (job.diagnostic_stage && SAFE_DIAGNOSTIC_STAGES.has(job.diagnostic_stage)) {
-      diagnostic['diagnosticStage'] = job.diagnostic_stage;
+  private legacyDiagnosticEvent(job: ReceiptJob): ReceiptJobDiagnosticEntry {
+    const stage =
+      typeof job.diagnostic_stage === 'string' && SAFE_DIAGNOSTIC_STAGES.has(job.diagnostic_stage)
+        ? job.diagnostic_stage
+        : 'failed';
+    const errorCode = SAFE_DIAGNOSTIC_ERRORS.has(job.error_code ?? '') ? job.error_code : null;
+    const event =
+      stage === 'failed'
+        ? errorCode === 'PROVIDER'
+          ? 'provider_error'
+          : 'request_failed'
+        : stage === 'timed_out'
+          ? 'request_timed_out'
+          : stage === 'cancelled'
+            ? 'request_cancelled'
+            : stage === 'completed'
+              ? 'request_completed'
+              : stage === 'queued'
+                ? 'provider_accepted'
+                : stage === 'polling'
+                  ? 'response_polling'
+                  : stage === 'submitting'
+                    ? 'request_started'
+                    : 'fallback';
+    const code = this.safeProviderToken(job.provider_error_code, SAFE_PROVIDER_ERROR_CODES);
+    const type = this.safeProviderToken(job.provider_error_type, SAFE_PROVIDER_ERROR_TYPES);
+
+    return {
+      timestamp: this.safeTimestamp(job.created_at) ?? 'unknown-time',
+      level: stage === 'failed' || stage === 'timed_out' ? 'error' : 'info',
+      event,
+      attempt: this.safeCount(job.attempts) ?? 0,
+      stage,
+      method: null,
+      provider_transport:
+        typeof job.provider_transport === 'string' &&
+        SAFE_DIAGNOSTIC_TRANSPORTS.has(job.provider_transport)
+          ? job.provider_transport
+          : null,
+      provider_request_id: null,
+      provider_response_id: this.safeResponseId(job.provider_response_id),
+      provider_http_status: this.safeHttpStatus(job.provider_http_status),
+      provider_error_type: type,
+      provider_error_code: code,
+      provider_error_param: this.safeProviderParam(job.provider_error_param),
+      provider_error_reason: this.providerReason(code, type),
+      elapsed_ms: this.safeElapsedMs(job.elapsed_ms),
+      request_metadata: null
+    };
+  }
+
+  private formatDiagnosticLine(jobId: string, entry: ReceiptJobDiagnosticEntry): string {
+    const fields = [
+      `job=${jobId}`,
+      `attempt=${entry.attempt}`,
+      `stage=${entry.stage}`,
+      ...(entry.method ? [`method=${entry.method}`] : []),
+      ...(entry.provider_transport ? [`transport=${entry.provider_transport}`] : []),
+      ...(entry.provider_http_status !== null ? [`http_status=${entry.provider_http_status}`] : []),
+      ...(entry.elapsed_ms !== null ? [`elapsed_ms=${entry.elapsed_ms}`] : []),
+      ...(entry.provider_request_id ? [`provider_request_id=${entry.provider_request_id}`] : []),
+      ...(entry.provider_response_id ? [`provider_response_id=${entry.provider_response_id}`] : []),
+      ...(entry.provider_error_type ? [`provider_error_type=${entry.provider_error_type}`] : []),
+      ...(entry.provider_error_code ? [`provider_error_code=${entry.provider_error_code}`] : []),
+      ...(entry.provider_error_param ? [`provider_error_param=${entry.provider_error_param}`] : []),
+      ...(entry.provider_error_reason
+        ? [`provider_error_reason=${entry.provider_error_reason}`]
+        : [])
+    ];
+    const metadata = entry.request_metadata;
+    if (metadata) {
+      if (metadata.model) fields.push(`model=${metadata.model}`);
+      fields.push(`background=${metadata.background}`);
+      fields.push(`output_format=${metadata.output_format}`);
+      const counts = metadata.input_part_counts;
+      fields.push(`input_parts=text:${counts.text},image:${counts.image},file:${counts.file}`);
     }
+    return `${entry.timestamp} [SRV] ${entry.level.toUpperCase()} [AI] ${entry.event} ${fields.join(' ')}`;
+  }
 
-    const responseId = this.safeResponseId(job.provider_response_id);
-    if (responseId) diagnostic['providerResponseId'] = responseId;
+  private safeRequestMetadata(value: unknown): ReceiptJobDiagnosticEntry['request_metadata'] {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const metadata = value as Partial<NonNullable<ReceiptJobDiagnosticEntry['request_metadata']>>;
+    const counts = metadata.input_part_counts;
+    if (!counts || typeof counts !== 'object') return null;
+    const text = this.safeCount(counts.text);
+    const image = this.safeCount(counts.image);
+    const file = this.safeCount(counts.file);
+    if (text === null || image === null || file === null) return null;
+    const outputFormat =
+      metadata.output_format === 'json_schema' || metadata.output_format === 'json_object'
+        ? metadata.output_format
+        : 'unknown';
+    return {
+      model: this.safeModelName(metadata.model),
+      background: metadata.background === true,
+      output_format: outputFormat,
+      input_part_counts: { text, image, file }
+    };
+  }
 
-    if (job.provider_transport && SAFE_DIAGNOSTIC_TRANSPORTS.has(job.provider_transport)) {
-      diagnostic['providerTransport'] = job.provider_transport;
+  private safeModelName(value: unknown): string | null {
+    return typeof value === 'string' &&
+      value.length <= 80 &&
+      /^[A-Za-z0-9][A-Za-z0-9_.:/-]*$/.test(value) &&
+      !SENSITIVE_PROVIDER_TOKEN.test(value) &&
+      !/https?:\/\//i.test(value)
+      ? value
+      : null;
+  }
+
+  private safeProviderRequestId(value: unknown): string | null {
+    if (typeof value !== 'string' || value.length > 128 || !/^[A-Za-z0-9._:-]+$/.test(value)) {
+      return null;
     }
+    return /^(?:sk|rk|pk)-/i.test(value) || SENSITIVE_PROVIDER_TOKEN.test(value) ? null : value;
+  }
 
-    if (job.provider_error_type && SAFE_PROVIDER_ERROR_TYPES.has(job.provider_error_type)) {
-      diagnostic['providerErrorType'] = job.provider_error_type;
+  private safeHttpStatus(value: unknown): number | null {
+    return Number.isInteger(value) && Number(value) >= 100 && Number(value) <= 599
+      ? Number(value)
+      : null;
+  }
+
+  private safeElapsedMs(value: unknown): number | null {
+    return Number.isSafeInteger(value) && Number(value) >= 0 && Number(value) <= 604_800_000
+      ? Number(value)
+      : null;
+  }
+
+  private safeProviderToken(value: unknown, allowlist: ReadonlySet<string>): string | null {
+    if (typeof value !== 'string') return null;
+    if (allowlist.has(value)) return value;
+    return /^[a-z][a-z0-9_]{0,63}$/.test(value) && !SENSITIVE_PROVIDER_TOKEN.test(value)
+      ? value
+      : null;
+  }
+
+  private safeProviderParam(value: unknown): string | null {
+    if (typeof value !== 'string' || value.length > 160) return null;
+    if (SAFE_PROVIDER_ERROR_PARAMS.has(value)) return value;
+    return /^[A-Za-z][A-Za-z0-9_]*(?:\[\d{1,4}\])?(?:\.[A-Za-z][A-Za-z0-9_]*(?:\[\d{1,4}\])?)*$/.test(
+      value
+    ) && !SENSITIVE_PROVIDER_TOKEN.test(value)
+      ? value
+      : null;
+  }
+
+  private providerReason(code: string | null, type: string | null): string | null {
+    if (code && SAFE_PROVIDER_ERROR_REASONS.has(code)) return code;
+    if (code === 'responses_not_supported' || code === 'background_not_supported') {
+      return 'background_not_supported';
     }
-
-    if (job.provider_error_code && SAFE_PROVIDER_ERROR_CODES.has(job.provider_error_code)) {
-      diagnostic['providerErrorCode'] = job.provider_error_code;
-    }
-
-    if (job.provider_error_param && SAFE_PROVIDER_ERROR_PARAMS.has(job.provider_error_param)) {
-      diagnostic['providerErrorParam'] = job.provider_error_param;
-    }
-
-    if (
-      Number.isInteger(job.provider_http_status) &&
-      Number(job.provider_http_status) >= 100 &&
-      Number(job.provider_http_status) <= 599
-    ) {
-      diagnostic['providerHttpStatus'] = job.provider_http_status;
-    }
-
-    if (Number.isSafeInteger(job.elapsed_ms) && Number(job.elapsed_ms) >= 0) {
-      diagnostic['elapsedMs'] = job.elapsed_ms;
-    }
-
-    return diagnostic;
+    if (type === 'authentication_error') return 'authentication';
+    if (type === 'permission_error') return 'permission';
+    if (type === 'rate_limit_error') return 'rate_limit';
+    if (type === 'insufficient_quota') return 'quota';
+    if (type === 'invalid_request_error') return 'invalid_request';
+    if (type && SAFE_PROVIDER_ERROR_REASONS.has(type)) return type;
+    if (code === 'invalid_api_key') return 'authentication';
+    if (code === 'insufficient_quota' || code === 'rate_limit_exceeded') return 'quota';
+    if (code || type) return 'provider_rejected';
+    return null;
   }
 
   private safeIdentifier(value: unknown): string | null {

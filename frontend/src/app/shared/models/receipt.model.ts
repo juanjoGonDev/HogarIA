@@ -62,6 +62,30 @@ export interface ReceiptDetail extends Receipt {
 
 export type ReceiptJobStatus = 'queued' | 'running' | 'done' | 'failed' | 'stopped';
 
+export interface ReceiptJobDiagnosticEntry {
+  timestamp: string;
+  level: 'info' | 'warn' | 'error';
+  event: string;
+  attempt: number;
+  stage: string;
+  method: 'POST' | 'GET' | null;
+  provider_transport: 'responses_background' | 'chat_completions' | null;
+  provider_request_id: string | null;
+  provider_response_id: string | null;
+  provider_http_status: number | null;
+  provider_error_type: string | null;
+  provider_error_code: string | null;
+  provider_error_param: string | null;
+  provider_error_reason: string | null;
+  elapsed_ms: number | null;
+  request_metadata: {
+    model: string | null;
+    background: boolean;
+    output_format: 'json_schema' | 'json_object' | 'unknown';
+    input_part_counts: { text: number; image: number; file: number };
+  } | null;
+}
+
 /** Un trabajo de la cola local de IA: lo que el icono de la cabecera ensena. */
 export interface ReceiptJob {
   id: string;
@@ -88,6 +112,8 @@ export interface ReceiptJob {
     | 'cancelled'
     | 'fallback'
     | null;
+  /** Bounded, per-attempt operational events. Values are revalidated before clipboard copy. */
+  diagnostic_log?: ReceiptJobDiagnosticEntry[] | null;
 }
 
 /** Campos adicionales que devuelve la cola global; no forman parte del GET de detalle. */

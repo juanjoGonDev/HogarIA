@@ -933,7 +933,10 @@ describe('AI provider queue dispatcher', () => {
             message: 'synthetic provider detail'
           }
         }),
-        { status: 400, headers: { 'content-type': 'application/json' } }
+        {
+          status: 400,
+          headers: { 'content-type': 'application/json', 'x-request-id': 'req_queue400123' }
+        }
       )
     );
 
@@ -963,6 +966,36 @@ describe('AI provider queue dispatcher', () => {
       status: 'failed',
       attempts: 1
     });
+    const persistedDiagnostics = JSON.parse(
+      String(
+        (
+          db
+            .prepare(
+              "SELECT diagnostic_log FROM ai_jobs WHERE kind = 'recipe' AND status = 'failed'"
+            )
+            .get() as { diagnostic_log: string }
+        ).diagnostic_log
+      )
+    );
+    expect(persistedDiagnostics).toHaveLength(2);
+    expect(persistedDiagnostics[0]).toMatchObject({
+      event: 'request_started',
+      level: 'info',
+      attempt: 1,
+      method: 'POST',
+      request_metadata: { model: config.model, background: true, input_part_counts: { text: 1 } }
+    });
+    expect(persistedDiagnostics[1]).toMatchObject({
+      event: 'provider_error',
+      level: 'error',
+      stage: 'failed',
+      method: 'POST',
+      provider_http_status: 400,
+      provider_request_id: 'req_queue400123',
+      provider_error_code: 'unsupported_parameter',
+      provider_error_param: 'temperature'
+    });
+    expect(JSON.stringify(persistedDiagnostics)).not.toContain('synthetic permanent request');
 
     fakeFetch
       .mockResolvedValueOnce(new Response('synthetic unavailable', { status: 503 }))

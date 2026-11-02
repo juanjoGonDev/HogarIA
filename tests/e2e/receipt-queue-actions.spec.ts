@@ -504,6 +504,7 @@ test.describe('acciones reales del gestor de cola de tickets', () => {
       .getByRole('button', { name: 'Abrir', exact: true })
       .click();
     await expect(page).toHaveURL(new RegExp(`/receipts/${receiptId}$`));
+    await page.reload();
     await expect(page.locator('[data-test="ticket-error"]')).toBeVisible();
 
     const copyButton = page.locator('[data-test="receipt-copy-diagnostic"] button');
@@ -532,13 +533,9 @@ test.describe('acciones reales del gestor de cola de tickets', () => {
       () => (window as Window & { __copiedReceiptDiagnostic?: string }).__copiedReceiptDiagnostic
     );
     expect(copied).toBeTruthy();
-    const diagnostic = JSON.parse(copied!) as Record<string, unknown>;
-    expect(diagnostic).toMatchObject({
-      kind: 'receipt',
-      status: 'failed',
-      error: 'PROVIDER',
-      providerHttpStatus: 503
-    });
+    expect(copied).toContain('[SRV] ERROR [AI] provider_error');
+    expect(copied).toContain('stage=failed');
+    expect(copied).toContain('http_status=503');
     expect(copied).not.toContain('synthetic-key-not-for-display');
     expect(copied).not.toContain('synthetic provider failure');
     expect(copied).not.toContain(provider.baseUrl);

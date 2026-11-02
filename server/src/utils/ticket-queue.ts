@@ -39,6 +39,11 @@ import {
 } from './ai-client.js';
 import { aiFunctionForJobKind } from './ai-function-providers.js';
 import { sanitizeProviderErrorFields } from './ai-provider-diagnostic.js';
+import {
+  appendAiJobDiagnosticLog,
+  createAiJobDiagnosticLogEntry,
+  type AiProviderDiagnosticInput
+} from './ai-job-diagnostic-log.js';
 import type {
   AiConfigRow,
   AiConnectionTestDiagnostic,
@@ -328,6 +333,16 @@ export function persistAiProviderDiagnostic(
   jobId: string,
   diagnostic: AiConnectionTestDiagnostic
 ): void {
+  const job = db
+    .prepare("SELECT attempts, diagnostic_log FROM ai_jobs WHERE id = ? AND status = 'running'")
+    .get(jobId) as { attempts: number; diagnostic_log: string | null } | undefined;
+  if (!job) return;
+
+  const entry = createAiJobDiagnosticLogEntry(
+    diagnostic as AiProviderDiagnosticInput,
+    Number(job.attempts)
+  );
+  const diagnosticLog = JSON.stringify(appendAiJobDiagnosticLog(job.diagnostic_log, entry));
   const responseId =
     diagnostic.providerResponseId &&
     /^resp_[A-Za-z0-9_-]{1,128}$/.test(diagnostic.providerResponseId)
@@ -367,7 +382,7 @@ export function persistAiProviderDiagnostic(
   db.prepare(
     `UPDATE ai_jobs SET provider_response_id = ?, provider_transport = ?, provider_http_status = ?,
        provider_error_type = ?, provider_error_code = ?, provider_error_param = ?,
-       elapsed_ms = ?, diagnostic_stage = ?, updated_at = CURRENT_TIMESTAMP
+       diagnostic_log = ?, elapsed_ms = ?, diagnostic_stage = ?, updated_at = CURRENT_TIMESTAMP
      WHERE id = ? AND status = 'running'`
   ).run(
     responseId,
@@ -376,6 +391,7 @@ export function persistAiProviderDiagnostic(
     providerError.type ?? null,
     providerError.code ?? null,
     providerError.param ?? null,
+    diagnosticLog,
     elapsedMs,
     stage,
     jobId

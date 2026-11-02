@@ -539,6 +539,35 @@ describe('la cola', () => {
          'responses_background', 400, 'invalid_request_error', 'unsupported_parameter',
          'temperature', 1234, 'failed')`
     ).run(jobId, alice.id, receiptId, secret);
+    db.prepare('UPDATE ai_jobs SET diagnostic_log = ? WHERE id = ?').run(
+      JSON.stringify([
+        {
+          timestamp: '2026-11-02T12:16:47.167Z',
+          level: 'error',
+          event: 'provider_error',
+          attempt: 1,
+          stage: 'failed',
+          method: 'POST',
+          provider_transport: 'responses_background',
+          provider_request_id: 'req_synthetic123',
+          provider_response_id: null,
+          provider_http_status: 400,
+          provider_error_type: 'invalid_request_error',
+          provider_error_code: 'invalid_image_format',
+          provider_error_param: 'input[0].content[1].image_url.url',
+          provider_error_reason: 'file_input_rejected',
+          elapsed_ms: 167,
+          request_metadata: {
+            model: 'gpt-vision',
+            background: true,
+            output_format: 'json_schema',
+            input_part_counts: { text: 2, image: 1, file: 1 }
+          },
+          provider_body: secret
+        }
+      ]),
+      jobId
+    );
 
     const ownDetail = await call('GET', `/${receiptId}`);
     const other = await makeUser(
@@ -560,7 +589,32 @@ describe('la cola', () => {
       provider_error_code: 'unsupported_parameter',
       provider_error_param: 'temperature',
       elapsed_ms: 1234,
-      diagnostic_stage: 'failed'
+      diagnostic_stage: 'failed',
+      diagnostic_log: [
+        {
+          timestamp: '2026-11-02T12:16:47.167Z',
+          level: 'error',
+          event: 'provider_error',
+          attempt: 1,
+          stage: 'failed',
+          method: 'POST',
+          provider_transport: 'responses_background',
+          provider_request_id: 'req_synthetic123',
+          provider_response_id: null,
+          provider_http_status: 400,
+          provider_error_type: 'invalid_request_error',
+          provider_error_code: 'invalid_image_format',
+          provider_error_param: 'input_image',
+          provider_error_reason: 'file_input_rejected',
+          elapsed_ms: 167,
+          request_metadata: {
+            model: 'gpt-vision',
+            background: true,
+            output_format: 'json_schema',
+            input_part_counts: { text: 2, image: 1, file: 1 }
+          }
+        }
+      ]
     });
     expect(ownDetail.payload.data.job.created_at).toBeTruthy();
     expect(Object.keys(ownDetail.payload.data.job).sort()).toEqual(
@@ -578,6 +632,7 @@ describe('la cola', () => {
         'provider_error_param',
         'provider_response_id',
         'provider_transport',
+        'diagnostic_log',
         'status'
       ].sort()
     );
