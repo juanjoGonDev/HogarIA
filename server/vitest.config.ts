@@ -69,6 +69,7 @@ const COVERED = [
   'src/utils/photo-prompt.ts',
   'src/utils/live-hub.ts',
   'src/utils/ai-client.ts',
+  'src/utils/ai-provider-diagnostic.ts',
   'src/utils/ai-timeout.ts',
   'src/utils/ai-assistant-runtime.ts',
   'src/utils/assistant-action-idempotency.ts',

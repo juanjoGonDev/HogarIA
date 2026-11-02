@@ -183,6 +183,240 @@ describe('POST / (subir)', () => {
     }
   });
 
+  it('explica un HTTP 400 seguro, conserva adjuntos y falla sin repetir la petición inválida', async () => {
+    const configId = 'receipt-invalid-parameter-config';
+    const privateMessage = 'synthetic private provider response';
+    const filesBefore = archivosDeTickets();
+    let requestBody: any;
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      requestBody = JSON.parse(String(init.body));
+      return new Response(
+        JSON.stringify({
+          error: {
+            type: 'invalid_request_error',
+            code: 'unsupported_parameter',
+            param: 'temperature',
+            message: privateMessage
+          }
+        }),
+        { status: 400, headers: { 'content-type': 'application/json' } }
+      );
+    });
+    db.prepare(
+      `INSERT INTO ai_configs
+        (id, user_id, name, provider, base_url, api_key, model, temperature, retry_attempts, concurrency, is_active)
+       VALUES (?, ?, 'GPT-5 synthetic', 'custom', 'https://receipt-400.invalid/v1', 'synthetic-key', 'gpt-5', 0.7, 3, 1, 1)`
+    ).run(configId, alice.id);
+
+    try {
+      const uploaded = await subirTicket();
+      expect(uploaded.status).toBe(201);
+      const detail = await esperarEstado(uploaded.payload.data.id, 'failed');
+      const stored = db
+        .prepare(
+          `SELECT attempts, max_attempts, provider_http_status, provider_error_type,
+                  provider_error_code, provider_error_param, error_detail
+           FROM ai_jobs WHERE receipt_id = ?`
+        )
+        .get(uploaded.payload.data.id) as Record<string, unknown>;
+      const userParts = requestBody.input.find((item: any) => item.role === 'user')?.content ?? [];
+
+      expect(stored).toMatchObject({
+        attempts: 1,
+        max_attempts: 4,
+        provider_http_status: 400,
+        provider_error_type: 'invalid_request_error',
+        provider_error_code: 'unsupported_parameter',
+        provider_error_param: 'temperature',
+        error_detail: 'AI API error: HTTP 400'
+      });
+      expect(userParts.some((part: any) => part.type === 'input_image')).toBe(true);
+      expect(userParts.some((part: any) => part.type === 'input_file')).toBe(true);
+      expect(requestBody).not.toHaveProperty('temperature');
+      expect(JSON.stringify(detail)).not.toContain(privateMessage);
+      expect(JSON.stringify(detail)).toContain('unsupported_parameter');
+      expect(JSON.stringify(detail)).not.toContain('synthetic-key');
+    } finally {
+      for (const file of archivosDeTickets()) {
+        if (!filesBefore.includes(file))
+          deleteUpload(`/api/uploads/receipts/${file}`, uploadsRoot(':memory:'));
+      }
+    }
+  });
+
+  it('quita fallidos y parados sin borrar ticket ni diagnóstico; retry restaura el fallido', async () => {
+    const receiptId = 'dismissed-receipt';
+    const jobId = 'dismissed-receipt-job';
+    db.prepare(
+      `INSERT INTO receipts (id, user_id, status, file_url, file_kind, file_name, error_code)
+       VALUES (?, ?, 'failed', '/api/uploads/receipts/synthetic.png', 'png', 'synthetic.png', 'PROVIDER')`
+    ).run(receiptId, alice.id);
+    db.prepare(
+      `INSERT INTO receipt_items (id, receipt_id, name, quantity, unit, category, price_minor)
+       VALUES ('dismissed-line', ?, 'Producto sintético', 1, 'ud', 'other', 123)`
+    ).run(receiptId);
+    db.prepare(
+      `INSERT INTO ai_jobs
+        (id, user_id, kind, receipt_id, status, attempts, max_attempts, error_code,
+         provider_http_status, provider_error_code, provider_error_param, diagnostic_stage)
+       VALUES (?, ?, 'receipt', ?, 'failed', 4, 4, 'PROVIDER', 400,
+               'unsupported_parameter', 'temperature', 'failed')`
+    ).run(jobId, alice.id, receiptId);
+    db.prepare(
+      `INSERT INTO receipts (id, user_id, status, file_url, file_kind, file_name)
+       VALUES ('dismissed-stopped-receipt', ?, 'stopped', '/api/uploads/receipts/stopped.png', 'png', 'stopped.png')`
+    ).run(alice.id);
+    db.prepare(
+      `INSERT INTO ai_jobs (id, user_id, kind, receipt_id, status)
+       VALUES ('dismissed-stopped-job', ?, 'receipt', 'dismissed-stopped-receipt', 'stopped')`
+    ).run(alice.id);
+
+    const firstDismiss = await call('DELETE', `/queue/${jobId}`);
+    const repeatedDismiss = await call('DELETE', `/queue/${jobId}`);
+    const stoppedDismiss = await call('DELETE', '/queue/dismissed-stopped-job');
+    const queueAfterDismiss = await call('GET', '/queue');
+    const detail = await call('GET', `/${receiptId}`);
+    const persisted = db
+      .prepare(
+        `SELECT r.status AS receipt_status, r.error_code AS receipt_error,
+                j.status AS job_status, j.dismissed_at, j.provider_error_code
+         FROM receipts r JOIN ai_jobs j ON j.receipt_id = r.id WHERE r.id = ?`
+      )
+      .get(receiptId) as Record<string, unknown>;
+
+    expect(firstDismiss).toMatchObject({ status: 200, payload: { data: { dismissed: true } } });
+    expect(repeatedDismiss).toMatchObject({ status: 200, payload: { data: { dismissed: true } } });
+    expect(stoppedDismiss).toMatchObject({ status: 200, payload: { data: { dismissed: true } } });
+    expect(queueAfterDismiss.payload.data.jobs).toEqual([]);
+    expect(detail.payload.data.status).toBe('failed');
+    expect(detail.payload.data.lines).toHaveLength(1);
+    expect(detail.payload.data.job).toMatchObject({
+      id: jobId,
+      provider_error_code: 'unsupported_parameter',
+      provider_error_param: 'temperature'
+    });
+    expect(persisted).toMatchObject({
+      receipt_status: 'failed',
+      receipt_error: 'PROVIDER',
+      job_status: 'failed',
+      provider_error_code: 'unsupported_parameter'
+    });
+    expect(persisted.dismissed_at).toBeTruthy();
+
+    const retry = await call('POST', `/${receiptId}/retry`);
+    expect(retry.payload.data.requeued).toBe(true);
+    const queueAfterRetry = await call('GET', '/queue');
+    expect(queueAfterRetry.payload.data.jobs.map((job: any) => job.id)).toContain(jobId);
+    expect(db.prepare('SELECT dismissed_at FROM ai_jobs WHERE id = ?').get(jobId)).toEqual({
+      dismissed_at: null
+    });
+  });
+
+  it('rechaza quitar trabajos activos y oculta los de otro usuario', async () => {
+    const runningReceipt = 'active-dismiss-receipt';
+    const runningJob = 'active-dismiss-job';
+    db.prepare(
+      `INSERT INTO receipts (id, user_id, status, file_url, file_kind)
+       VALUES (?, ?, 'analyzing', '/api/uploads/receipts/active.png', 'png')`
+    ).run(runningReceipt, alice.id);
+    db.prepare(
+      `INSERT INTO ai_jobs (id, user_id, kind, receipt_id, status)
+       VALUES (?, ?, 'receipt', ?, 'running')`
+    ).run(runningJob, alice.id, runningReceipt);
+
+    const active = await call('DELETE', `/queue/${runningJob}`);
+    expect(active.status).toBe(409);
+    expect(
+      db.prepare('SELECT status, dismissed_at FROM ai_jobs WHERE id = ?').get(runningJob)
+    ).toEqual({
+      status: 'running',
+      dismissed_at: null
+    });
+
+    const otherUser = await makeUser('other-dismiss@test.local');
+    const hidden = await call('DELETE', `/queue/${runningJob}`, undefined, otherUser.token);
+    expect(hidden.status).toBe(404);
+  });
+
+  it('oculta del hogar activo los trabajos de otro hogar del mismo usuario', async () => {
+    const previousHousehold = 'dismiss-previous-household';
+    const activeHousehold = 'dismiss-active-household';
+    db.prepare('INSERT INTO households (id, name, invite_code) VALUES (?, ?, ?)').run(
+      previousHousehold,
+      'Casa anterior',
+      'invite-dismiss-previous'
+    );
+    db.prepare('INSERT INTO households (id, name, invite_code) VALUES (?, ?, ?)').run(
+      activeHousehold,
+      'Casa activa',
+      'invite-dismiss-active'
+    );
+    for (const [householdId, memberId] of [
+      [previousHousehold, 'dismiss-previous-member'],
+      [activeHousehold, 'dismiss-active-member']
+    ]) {
+      db.prepare(
+        `INSERT INTO household_members (id, household_id, user_id, role, permissions)
+         VALUES (?, ?, ?, 'admin', '{}')`
+      ).run(memberId, householdId, alice.id);
+    }
+    db.prepare(
+      `INSERT INTO receipts (id, user_id, household_id, status, file_url, file_kind)
+       VALUES ('previous-household-receipt', ?, ?, 'failed', '/api/uploads/receipts/old.png', 'png')`
+    ).run(alice.id, previousHousehold);
+    db.prepare(
+      `INSERT INTO ai_jobs (id, user_id, household_id, kind, receipt_id, status)
+       VALUES ('previous-household-job', ?, ?, 'receipt', 'previous-household-receipt', 'failed')`
+    ).run(alice.id, previousHousehold);
+    db.prepare('UPDATE users SET household_id = ? WHERE id = ?').run(activeHousehold, alice.id);
+
+    const queue = await call('GET', '/queue');
+    const dismiss = await call('DELETE', '/queue/previous-household-job');
+    const persisted = db
+      .prepare('SELECT status, dismissed_at FROM ai_jobs WHERE id = ?')
+      .get('previous-household-job');
+
+    expect(queue.status).toBe(200);
+    expect(queue.payload.data.jobs).toEqual([]);
+    expect(dismiss.status).toBe(404);
+    expect(persisted).toEqual({ status: 'failed', dismissed_at: null });
+  });
+
+  it('serializa quitar y reintentar sin dejar un trabajo activo oculto', async () => {
+    const receiptId = 'dismiss-retry-race-receipt';
+    const jobId = 'dismiss-retry-race-job';
+    db.prepare(
+      `INSERT INTO receipts (id, user_id, status, file_url, file_kind)
+       VALUES (?, ?, 'failed', '/api/uploads/receipts/race.png', 'png')`
+    ).run(receiptId, alice.id);
+    db.prepare(
+      `INSERT INTO ai_jobs (id, user_id, kind, receipt_id, status, attempts, max_attempts)
+       VALUES (?, ?, 'receipt', ?, 'failed', 1, 1)`
+    ).run(jobId, alice.id, receiptId);
+
+    const [dismiss, retry] = await Promise.all([
+      call('DELETE', `/queue/${jobId}`),
+      call('POST', `/${receiptId}/retry`)
+    ]);
+    const row = db.prepare('SELECT status, dismissed_at FROM ai_jobs WHERE id = ?').get(jobId) as {
+      status: string;
+      dismissed_at: string | null;
+    };
+    const queue = await call('GET', '/queue');
+    const visible = queue.payload.data.jobs.some((job: any) => job.id === jobId);
+
+    expect([200, 409]).toContain(dismiss.status);
+    expect([200, 409]).toContain(retry.status);
+    if (row.status === 'queued' || row.status === 'running') {
+      expect(row.dismissed_at).toBeNull();
+      expect(visible).toBe(true);
+    } else if (row.dismissed_at) {
+      expect(visible).toBe(false);
+    } else {
+      expect(visible).toBe(true);
+    }
+  });
+
   it('no persiste excerpts del parseador si el proveedor devuelve un body 200 que no es JSON', async () => {
     const secret = 'synthetic-malformed-receipt-secret';
     const configId = 'receipt-malformed-redaction-config';
@@ -298,10 +532,12 @@ describe('la cola', () => {
     db.prepare(
       `INSERT INTO ai_jobs
         (id, user_id, kind, receipt_id, status, attempts, max_attempts, error_code, error_detail,
-         provider_response_id, provider_transport, provider_http_status, elapsed_ms,
+         provider_response_id, provider_transport, provider_http_status, provider_error_type,
+         provider_error_code, provider_error_param, elapsed_ms,
          diagnostic_stage)
        VALUES (?, ?, 'receipt', ?, 'failed', 4, 4, 'PROVIDER', ?, 'resp_diagnostic_123',
-         'responses_background', 429, 1234, 'failed')`
+         'responses_background', 400, 'invalid_request_error', 'unsupported_parameter',
+         'temperature', 1234, 'failed')`
     ).run(jobId, alice.id, receiptId, secret);
 
     const ownDetail = await call('GET', `/${receiptId}`);
@@ -319,7 +555,10 @@ describe('la cola', () => {
       error_code: 'PROVIDER',
       provider_response_id: 'resp_diagnostic_123',
       provider_transport: 'responses_background',
-      provider_http_status: 429,
+      provider_http_status: 400,
+      provider_error_type: 'invalid_request_error',
+      provider_error_code: 'unsupported_parameter',
+      provider_error_param: 'temperature',
       elapsed_ms: 1234,
       diagnostic_stage: 'failed'
     });
@@ -334,6 +573,9 @@ describe('la cola', () => {
         'id',
         'max_attempts',
         'provider_http_status',
+        'provider_error_type',
+        'provider_error_code',
+        'provider_error_param',
         'provider_response_id',
         'provider_transport',
         'status'
@@ -341,6 +583,19 @@ describe('la cola', () => {
     );
     expect(JSON.stringify(ownDetail.payload.data.job)).not.toContain(secret);
     expect(ownDetail.payload.data.job.error_detail).toBeUndefined();
+
+    const unsafeMarker = 'raw-provider-param-must-not-leak';
+    db.prepare(
+      `UPDATE ai_jobs SET provider_error_type = ?, provider_error_code = ?, provider_error_param = ?
+       WHERE id = ?`
+    ).run(unsafeMarker, unsafeMarker, unsafeMarker, jobId);
+    const unsafeDetail = await call('GET', `/${receiptId}`);
+    expect(unsafeDetail.payload.data.job).toMatchObject({
+      provider_error_type: null,
+      provider_error_code: null,
+      provider_error_param: null
+    });
+    expect(JSON.stringify(unsafeDetail.payload.data.job)).not.toContain(unsafeMarker);
     expect(otherDetail.status).toBe(404);
     expect(JSON.stringify(otherDetail.payload)).not.toContain(secret);
   });
@@ -366,9 +621,11 @@ describe('la cola', () => {
     db.prepare(
       `INSERT INTO ai_jobs
         (id, user_id, config_id, kind, receipt_id, status, max_attempts, queue_order,
-         provider_response_id, provider_transport, provider_http_status, elapsed_ms, diagnostic_stage)
+         provider_response_id, provider_transport, provider_http_status, provider_error_type,
+         provider_error_code, provider_error_param, elapsed_ms, diagnostic_stage)
        VALUES (?, ?, ?, 'receipt', ?, 'queued', 4, 1, 'resp_stale_attempt',
-         'responses_background', 429, 987, 'failed')`
+         'responses_background', 429, 'invalid_request_error', 'unsupported_parameter',
+         'temperature', 987, 'failed')`
     ).run(jobId, alice.id, configId, receiptId);
 
     try {
@@ -380,7 +637,8 @@ describe('la cola', () => {
         job = db
           .prepare(
             `SELECT status, attempts, error_code, provider_response_id, provider_transport,
-                    provider_http_status, elapsed_ms, diagnostic_stage
+                    provider_http_status, provider_error_type, provider_error_code,
+                    provider_error_param, elapsed_ms, diagnostic_stage
              FROM ai_jobs WHERE id = ?`
           )
           .get(jobId);
@@ -395,6 +653,9 @@ describe('la cola', () => {
         provider_response_id: null,
         provider_transport: null,
         provider_http_status: null,
+        provider_error_type: null,
+        provider_error_code: null,
+        provider_error_param: null,
         elapsed_ms: null,
         diagnostic_stage: null
       });

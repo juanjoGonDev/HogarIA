@@ -78,6 +78,44 @@ const SAFE_DIAGNOSTIC_STAGES = new Set([
 ]);
 const SAFE_DIAGNOSTIC_TRANSPORTS = new Set(['responses_background', 'chat_completions']);
 const SAFE_JOB_STATUSES = new Set(['queued', 'running', 'done', 'failed', 'stopped']);
+const SAFE_PROVIDER_ERROR_TYPES = new Set([
+  'api_error',
+  'invalid_request_error',
+  'authentication_error',
+  'permission_error',
+  'rate_limit_error',
+  'server_error',
+  'insufficient_quota'
+]);
+const SAFE_PROVIDER_ERROR_CODES = new Set([
+  'unsupported_parameter',
+  'unsupported_value',
+  'invalid_value',
+  'invalid_type',
+  'model_not_found',
+  'context_length_exceeded',
+  'insufficient_quota',
+  'rate_limit_exceeded',
+  'invalid_api_key',
+  'invalid_prompt',
+  'responses_not_supported',
+  'responses_endpoint_not_supported',
+  'background_not_supported'
+]);
+const SAFE_PROVIDER_ERROR_PARAMS = new Set([
+  'model',
+  'temperature',
+  'top_p',
+  'max_output_tokens',
+  'input',
+  'input_image',
+  'input_file',
+  'text.format',
+  'text.format.type',
+  'background',
+  'store',
+  'reasoning.effort'
+]);
 
 @Component({
   selector: 'app-receipt-detail',
@@ -1106,6 +1144,19 @@ export class ReceiptDetailComponent implements OnInit, OnDestroy {
     }
     if (codigo === 'PROVIDER') {
       const status = job?.provider_http_status;
+      if (
+        status === 400 &&
+        ['input_file', 'input_image'].includes(job?.provider_error_param ?? '')
+      ) {
+        return this.i18n.t('receipts.error.PROVIDER_FILE_INPUT');
+      }
+      if (
+        status === 400 &&
+        job?.provider_error_code === 'unsupported_parameter' &&
+        ['temperature', 'top_p'].includes(job.provider_error_param ?? '')
+      ) {
+        return this.i18n.t('receipts.error.PROVIDER_UNSUPPORTED_PARAMETER');
+      }
       if (status === 401 || status === 403) {
         return this.i18n.t('receipts.error.PROVIDER_AUTH');
       }
@@ -1160,6 +1211,18 @@ export class ReceiptDetailComponent implements OnInit, OnDestroy {
 
     if (job.provider_transport && SAFE_DIAGNOSTIC_TRANSPORTS.has(job.provider_transport)) {
       diagnostic['providerTransport'] = job.provider_transport;
+    }
+
+    if (job.provider_error_type && SAFE_PROVIDER_ERROR_TYPES.has(job.provider_error_type)) {
+      diagnostic['providerErrorType'] = job.provider_error_type;
+    }
+
+    if (job.provider_error_code && SAFE_PROVIDER_ERROR_CODES.has(job.provider_error_code)) {
+      diagnostic['providerErrorCode'] = job.provider_error_code;
+    }
+
+    if (job.provider_error_param && SAFE_PROVIDER_ERROR_PARAMS.has(job.provider_error_param)) {
+      diagnostic['providerErrorParam'] = job.provider_error_param;
     }
 
     if (

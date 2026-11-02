@@ -38,6 +38,7 @@ import {
   pingDeConexionTransport
 } from './ai-client.js';
 import { aiFunctionForJobKind } from './ai-function-providers.js';
+import { sanitizeProviderErrorFields } from './ai-provider-diagnostic.js';
 import type {
   AiConfigRow,
   AiConnectionTestDiagnostic,
@@ -358,11 +359,27 @@ export function persistAiProviderDiagnostic(
   ]).has(diagnostic.diagnosticStage)
     ? diagnostic.diagnosticStage
     : 'failed';
+  const providerError = sanitizeProviderErrorFields({
+    type: diagnostic.providerErrorType,
+    code: diagnostic.providerErrorCode,
+    param: diagnostic.providerErrorParam
+  });
   db.prepare(
     `UPDATE ai_jobs SET provider_response_id = ?, provider_transport = ?, provider_http_status = ?,
+       provider_error_type = ?, provider_error_code = ?, provider_error_param = ?,
        elapsed_ms = ?, diagnostic_stage = ?, updated_at = CURRENT_TIMESTAMP
      WHERE id = ? AND status = 'running'`
-  ).run(responseId, transport, status, elapsedMs, stage, jobId);
+  ).run(
+    responseId,
+    transport,
+    status,
+    providerError.type ?? null,
+    providerError.code ?? null,
+    providerError.param ?? null,
+    elapsedMs,
+    stage,
+    jobId
+  );
 }
 
 /** Tickets keep their durable file/receipt reference while sharing the same provider scheduler. */
@@ -666,6 +683,7 @@ function reclamarTrabajo(db: SqlDb, jobId: string, leaseSeconds: number): number
         .prepare(
           `UPDATE ai_jobs SET status = 'running', attempts = attempts + 1, claim_generation = ?,
            provider_response_id = NULL, provider_transport = NULL, provider_http_status = NULL,
+           provider_error_type = NULL, provider_error_code = NULL, provider_error_param = NULL,
            elapsed_ms = NULL, diagnostic_stage = NULL,
            started_at = CURRENT_TIMESTAMP, lease_until = datetime('now', ?),
            updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'queued'`
@@ -899,7 +917,8 @@ async function correr(
       fila.attempts < fila.max_attempts &&
       codigo !== 'BAD_JSON' &&
       codigo !== 'NO_CONFIG' &&
-      codigo !== 'FILE_MISSING';
+      codigo !== 'FILE_MISSING' &&
+      !(error instanceof AiCallError && !error.retryable);
     const actualizado = db
       .prepare(
         `UPDATE ai_jobs SET status = ?, error_code = ?, error_detail = ?, updated_at = CURRENT_TIMESTAMP,
@@ -1020,6 +1039,7 @@ async function correrTrabajoGenerico(
     const reintentable =
       errorCode !== 'NO_CONFIG' &&
       errorCode !== 'BAD_JSON' &&
+      !(error instanceof AiCallError && !error.retryable) &&
       !(error instanceof AiCallError && error.detail === 'BACKGROUND_UNSUPPORTED');
     if (kind !== 'connection_test' && reintentable && row.attempts < row.max_attempts) {
       db.prepare(
@@ -1236,6 +1256,7 @@ export function queueForConfig(db: SqlDb, userId: string, configId: string): AiQ
         `SELECT id, config_id, kind, status, attempts, max_attempts, error_code, created_at, queue_order,
            provider_response_id, provider_transport, provider_http_status, elapsed_ms, diagnostic_stage
          FROM ai_jobs WHERE user_id = ? AND household_id IS ? AND config_id = ?
+           AND dismissed_at IS NULL
            AND status IN ('queued', 'running', 'failed')
          ORDER BY CASE status WHEN 'queued' THEN 0 WHEN 'running' THEN 1 ELSE 2 END,
            queue_order, created_at, id`
@@ -1462,7 +1483,9 @@ export function reintentarTrabajo(
         .prepare(
           `UPDATE ai_jobs SET status = 'queued', attempts = 0, max_attempts = ?, error_code = NULL,
            error_detail = NULL, provider_response_id = NULL, provider_transport = NULL,
-           provider_http_status = NULL, elapsed_ms = NULL, diagnostic_stage = NULL,
+           provider_http_status = NULL, provider_error_type = NULL, provider_error_code = NULL,
+           provider_error_param = NULL, elapsed_ms = NULL, diagnostic_stage = NULL,
+           dismissed_at = NULL,
            finished_at = NULL, lease_until = NULL, queue_order = ?,
            updated_at = CURRENT_TIMESTAMP
          WHERE id = ? AND user_id = ? AND household_id IS ? AND config_id = ? AND status = 'failed'`
@@ -1526,7 +1549,9 @@ export function reencolar(jobId: string): boolean {
     .prepare(
       `UPDATE ai_jobs SET status = 'queued', attempts = 0, max_attempts = ?, error_code = NULL,
          error_detail = NULL, provider_response_id = NULL, provider_transport = NULL,
-         provider_http_status = NULL, elapsed_ms = NULL, diagnostic_stage = NULL,
+         provider_http_status = NULL, provider_error_type = NULL, provider_error_code = NULL,
+         provider_error_param = NULL, elapsed_ms = NULL, diagnostic_stage = NULL,
+         dismissed_at = NULL,
          finished_at = NULL, queue_order = ?, updated_at = CURRENT_TIMESTAMP
        WHERE id = ? AND status IN ('failed', 'stopped', 'done')`
     )

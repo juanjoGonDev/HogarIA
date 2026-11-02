@@ -74,6 +74,9 @@ export interface ReceiptJob {
   provider_response_id?: string | null;
   provider_transport?: 'responses_background' | 'chat_completions' | null;
   provider_http_status?: number | null;
+  provider_error_type?: string | null;
+  provider_error_code?: string | null;
+  provider_error_param?: string | null;
   elapsed_ms?: number | null;
   diagnostic_stage?:
     | 'submitting'

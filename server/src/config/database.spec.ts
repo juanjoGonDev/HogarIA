@@ -727,7 +727,7 @@ describe('AI connection-test restart recovery', () => {
         'ALTER TABLE ai_configs DROP COLUMN test_started_at; ALTER TABLE ai_configs DROP COLUMN test_latency_ms'
       );
       db.exec(
-        'ALTER TABLE ai_jobs DROP COLUMN provider_response_id; ALTER TABLE ai_jobs DROP COLUMN provider_transport; ALTER TABLE ai_jobs DROP COLUMN provider_http_status; ALTER TABLE ai_jobs DROP COLUMN elapsed_ms; ALTER TABLE ai_jobs DROP COLUMN diagnostic_stage'
+        'ALTER TABLE ai_jobs DROP COLUMN provider_response_id; ALTER TABLE ai_jobs DROP COLUMN provider_transport; ALTER TABLE ai_jobs DROP COLUMN provider_http_status; ALTER TABLE ai_jobs DROP COLUMN elapsed_ms; ALTER TABLE ai_jobs DROP COLUMN diagnostic_stage; ALTER TABLE ai_jobs DROP COLUMN dismissed_at; ALTER TABLE ai_jobs DROP COLUMN provider_error_type; ALTER TABLE ai_jobs DROP COLUMN provider_error_code; ALTER TABLE ai_jobs DROP COLUMN provider_error_param'
       );
       db.prepare('INSERT INTO users (id, email, name, password_hash) VALUES (?, ?, ?, ?)').run(
         'connection-test-user',
@@ -773,7 +773,11 @@ describe('AI connection-test restart recovery', () => {
           'provider_transport',
           'provider_http_status',
           'elapsed_ms',
-          'diagnostic_stage'
+          'diagnostic_stage',
+          'dismissed_at',
+          'provider_error_type',
+          'provider_error_code',
+          'provider_error_param'
         ])
       );
       const recovered = restarted

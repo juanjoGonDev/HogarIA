@@ -44,6 +44,7 @@ describe('ReceiptQueueComponent actions', () => {
     stopAll: jasmine.Spy;
     stopJob: jasmine.Spy;
     retryJob: jasmine.Spy;
+    dismissQueueJob: jasmine.Spy;
     refreshQueue: jasmine.Spy;
   };
 
@@ -57,6 +58,9 @@ describe('ReceiptQueueComponent actions', () => {
       stopAll: jasmine.createSpy('stopAll').and.resolveTo(null),
       stopJob: jasmine.createSpy('stopJob').and.resolveTo(null),
       retryJob: jasmine.createSpy('retryJob').and.resolveTo(null),
+      dismissQueueJob: jasmine
+        .createSpy('dismissQueueJob')
+        .and.resolveTo({ success: true, data: { dismissed: true } }),
       refreshQueue: jasmine.createSpy('refreshQueue').and.returnValue(of(null))
     };
 
@@ -210,6 +214,23 @@ describe('ReceiptQueueComponent actions', () => {
     expect(service.retryJob).toHaveBeenCalledWith('receipt-failed');
     expect(service.retryJob).toHaveBeenCalledWith('receipt-stopped');
     expect(service.refreshQueue).toHaveBeenCalledTimes(2);
+  });
+
+  it('dismisses failed or stopped queue entries by job id and refreshes the snapshot', async () => {
+    await component.quitarUno(job('failed'));
+    await component.quitarUno(job('stopped'));
+
+    expect(service.dismissQueueJob.calls.allArgs()).toEqual([['job-failed'], ['job-stopped']]);
+    expect(service.refreshQueue).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not announce removal or refresh when the dismissal request fails', async () => {
+    service.dismissQueueJob.and.resolveTo(null);
+
+    await component.quitarUno(job('failed'));
+
+    expect(service.refreshQueue).not.toHaveBeenCalled();
+    expect(component.queueActionStatus()).toBeNull();
   });
 
   it('does not call stop/retry APIs for detached jobs without a receipt id', async () => {

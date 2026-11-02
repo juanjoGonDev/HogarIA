@@ -1,12 +1,14 @@
 import {
   Component,
+  ElementRef,
   computed,
   DestroyRef,
   HostListener,
   inject,
   OnDestroy,
   OnInit,
-  signal
+  signal,
+  ViewChild
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { NavigationEnd, Router, RouterLink } from '@angular/router';
@@ -73,6 +75,11 @@ import {
           [style.max-height.px]="panelPosition()?.maxHeight"
           data-test="receipt-queue-panel"
         >
+          @if (queueActionStatus()) {
+            <span class="visually-hidden" role="status" aria-live="polite" aria-atomic="true">
+              {{ 'receipts.queue_entry_removed_announcement' | t }}
+            </span>
+          }
           <header class="rq__panel-head">
             <span class="rq__panel-title">
               {{ 'receipts.cola_de_lectura' | t }}
@@ -102,7 +109,14 @@ import {
           </header>
 
           @if (trabajos().length === 0) {
-            <div class="rq__empty">
+            <div
+              #queueEmptyMessage
+              class="rq__empty"
+              role="status"
+              aria-live="polite"
+              tabindex="-1"
+              data-test="receipt-queue-empty"
+            >
               <span class="rq__empty-title">{{ 'receipts.nada_en_cola' | t }}</span>
               <span class="rq__empty-hint">{{ 'receipts.nada_en_cola_hint' | t }}</span>
             </div>
@@ -169,6 +183,16 @@ import {
                         (onClick)="reintentarUno(trabajo)"
                       >
                         {{ 'receipts.reintentar' | t }}
+                      </app-button>
+                      <app-button
+                        variant="ghost"
+                        size="sm"
+                        type="button"
+                        [touchTarget]="true"
+                        [attr.data-test]="'queue-job-dismiss-' + trabajo.id"
+                        (onClick)="quitarUno(trabajo)"
+                      >
+                        {{ 'receipts.quitar_de_la_cola' | t }}
                       </app-button>
                     }
                     <app-button
@@ -336,7 +360,8 @@ import {
 
       .rq__job {
         display: flex;
-        align-items: center;
+        align-items: flex-start;
+        flex-wrap: wrap;
         gap: var(--space-2, 8px);
         padding: var(--space-2, 8px) 0;
         border-top: 1px solid var(--border-default, #eef0f3);
@@ -370,7 +395,7 @@ import {
       }
 
       .rq__job-main {
-        flex: 1;
+        flex: 1 1 calc(100% - 18px);
         min-width: 0;
         display: grid;
         gap: 1px;
@@ -403,7 +428,10 @@ import {
         display: flex;
         align-items: center;
         gap: 4px;
-        flex: none;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        flex: 0 0 calc(100% - 18px);
+        margin-left: 18px;
       }
     `
   ]
@@ -415,6 +443,9 @@ export class ReceiptQueueComponent implements OnInit, OnDestroy {
 
   readonly panelOpen = signal(false);
   readonly panelPosition = signal<ReceiptQueuePanelPosition | null>(null);
+  readonly queueActionStatus = signal<'removed' | null>(null);
+  @ViewChild('queueEmptyMessage') private queueEmptyMessage?: ElementRef<HTMLElement>;
+  private readonly host = inject(ElementRef<HTMLElement>);
   private activeTrigger: HTMLElement | null = null;
 
   /** Los trabajos que aún cuentan para el badge: en cola, corriendo o con fallo. */
@@ -451,6 +482,7 @@ export class ReceiptQueueComponent implements OnInit, OnDestroy {
     }
 
     this.activeTrigger = event.currentTarget as HTMLElement;
+    this.queueActionStatus.set(null);
     this.repositionPanel();
     this.panelOpen.set(true);
   }
@@ -509,5 +541,24 @@ export class ReceiptQueueComponent implements OnInit, OnDestroy {
     if (!trabajo.receipt_id) return;
     await this.service.retryJob(trabajo.receipt_id);
     await firstValueFrom(this.service.refreshQueue());
+  }
+
+  async quitarUno(trabajo: ReceiptQueueJob): Promise<void> {
+    const focused = this.host.nativeElement.ownerDocument.activeElement;
+    const previouslyFocused = focused instanceof HTMLElement ? focused : null;
+    const restoreActionFocus = Boolean(previouslyFocused?.closest('.rq__job-actions'));
+    this.queueActionStatus.set(null);
+    const dismissed = await this.service.dismissQueueJob(trabajo.id);
+    if (dismissed === null) return;
+    await firstValueFrom(this.service.refreshQueue());
+    this.queueActionStatus.set('removed');
+    if (!restoreActionFocus || !this.panelOpen()) return;
+    setTimeout(() => {
+      if (!this.panelOpen()) return;
+      const nextAction = this.host.nativeElement.querySelector(
+        '.rq__job-actions button'
+      ) as HTMLElement | null;
+      (nextAction ?? this.queueEmptyMessage?.nativeElement)?.focus();
+    });
   }
 }

@@ -236,6 +236,14 @@ async function screenshotQueue(page: Page): Promise<void> {
   });
 }
 
+async function screenshotDismissedQueue(page: Page): Promise<void> {
+  const directory = join(process.cwd(), '.e2e-screenshots', 'receipt-queue-actions-qa');
+  await mkdir(directory, { recursive: true });
+  await page.screenshot({
+    path: join(directory, `receipt-queue-dismissed-${test.info().project.name}.png`)
+  });
+}
+
 async function screenshotReceiptDiagnostic(page: Page): Promise<void> {
   const directory = join(process.cwd(), '.e2e-screenshots', 'receipt-queue-actions-qa');
   await mkdir(directory, { recursive: true });
@@ -425,6 +433,62 @@ test.describe('acciones reales del gestor de cola de tickets', () => {
     await expect.poll(() => provider.abortCount).toBe(1);
     expect((await receiptDetail(page, runningReceiptId)).lines).toEqual([]);
     expect((await receiptDetail(page, queuedReceiptId)).lines).toEqual([]);
+  });
+
+  test('quita un fallo de la cola sin borrar el ticket y lo muestra de nuevo al reintentar', async ({
+    page
+  }) => {
+    provider.setNextBehaviors('failure', 'hold');
+    const receiptId = await uploadSyntheticReceipt(page);
+    await expect
+      .poll(async () => (await receiptDetail(page, receiptId)).job?.status)
+      .toBe('failed');
+
+    const panel = await openQueue(page);
+    const failedRow = panel.locator('[data-test="queue-job-failed"]');
+    await expect(failedRow).toBeVisible();
+    if ((page.viewportSize()?.width ?? 0) < 600) {
+      const mainBounds = await failedRow.locator('.rq__job-main').boundingBox();
+      const actionsBounds = await failedRow.locator('.rq__job-actions').boundingBox();
+      expect(actionsBounds?.y).toBeGreaterThanOrEqual(
+        (mainBounds?.y ?? 0) + (mainBounds?.height ?? 0) - 1
+      );
+    }
+    const dismissButton = failedRow.getByRole('button', { name: 'Quitar de la cola', exact: true });
+    await expectTouchTargets(panel);
+    await dismissButton.focus();
+    await expect(dismissButton).toBeFocused();
+    await screenshotQueue(page);
+    await dismissButton.click();
+
+    const emptyQueue = page.locator('[data-test="receipt-queue-empty"]');
+    await expect(panel.getByText('Nada en la cola', { exact: true })).toBeVisible();
+    await expect(emptyQueue).toBeFocused();
+    await screenshotDismissedQueue(page);
+    const preserved = await receiptDetail(page, receiptId);
+    expect(preserved.status).toBe('failed');
+    expect(preserved.job?.status).toBe('failed');
+
+    const retried = await api<{ requeued: boolean }>(
+      page,
+      `/api/receipts/${encodeURIComponent(receiptId)}/retry`,
+      'POST',
+      {}
+    );
+    expect(retried.status).toBe(200);
+    expect(retried.body.data.requeued).toBe(true);
+    await expect
+      .poll(async () => (await receiptDetail(page, receiptId)).job?.status)
+      .toBe('running');
+
+    const restoredPanel = page.locator('[data-test="receipt-queue-panel"]');
+    const runningRow = restoredPanel.locator('[data-test="queue-job-running"]');
+    await expect(runningRow).toBeVisible();
+    await runningRow.getByRole('button', { name: 'Parar', exact: true }).click();
+    await expect
+      .poll(async () => (await receiptDetail(page, receiptId)).job?.status)
+      .toBe('stopped');
+    await expect.poll(() => provider.abortCount).toBe(1);
   });
 
   test('copia solo el diagnóstico seguro del ticket fallido desde su ficha', async ({ page }) => {

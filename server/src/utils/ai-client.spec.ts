@@ -852,6 +852,24 @@ describe('endpoint', () => {
 });
 
 describe('callAI: el cuerpo lleva solo lo configurado', () => {
+  it.each([400, 401, 403, 404, 413])(
+    'marca HTTP %i como error permanente del proveedor',
+    (status) => {
+      expect(
+        new AiCallError('PROVIDER', 'provider error', `HTTP ${status}`, status).retryable
+      ).toBe(false);
+    }
+  );
+
+  it.each([408, 409, 425, 429, 500, 503])(
+    'permite reintentar HTTP %i como fallo temporal del proveedor',
+    (status) => {
+      expect(
+        new AiCallError('PROVIDER', 'provider error', `HTTP ${status}`, status).retryable
+      ).toBe(true);
+    }
+  );
+
   it('incluye el response_format JSON Schema estricto solicitado por la tarea', async () => {
     const responseFormat = {
       type: 'json_schema' as const,
@@ -964,6 +982,176 @@ describe('callAI: el cuerpo lleva solo lo configurado', () => {
     vi.unstubAllGlobals();
     expect(cuerpo.temperature).toBe(0.2);
     expect(cuerpo.max_output_tokens).toBe(500);
+  });
+
+  it.each(['gpt-5', 'gpt-5.2', 'GPT-5-mini', 'ft:gpt-5.2:org:model', 'azure:gpt-5-mini'])(
+    'omite temperature/top_p en modelos de razonamiento %s por defecto',
+    async (model) => {
+      let cuerpo: any;
+      vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+        cuerpo = JSON.parse(String(init.body));
+        return responsesResult('resp_gpt5_settings', 'completed', 'ok');
+      });
+
+      await callAITransportRaw(
+        { ...CONFIG, model, temperature: 0.7, top_p: 0.9 },
+        [{ role: 'user', content: 'hola' }],
+        TEST_RESPONSE_FORMAT
+      );
+
+      expect(cuerpo).not.toHaveProperty('temperature');
+      expect(cuerpo).not.toHaveProperty('top_p');
+      expect(cuerpo.max_output_tokens).toBe(CONFIG.max_tokens);
+      expect(cuerpo.background).toBe(true);
+    }
+  );
+
+  it('mantiene sampling para otros modelos y GPT-5 cuando reasoning effort es none', async () => {
+    const bodies: any[] = [];
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      bodies.push(JSON.parse(String(init.body)));
+      return responsesResult(`resp_sampling_${bodies.length}`, 'completed', 'ok');
+    });
+
+    await callAITransportRaw(
+      { ...CONFIG, model: 'gpt-4.1', temperature: 0.2, top_p: 0.8 },
+      [{ role: 'user', content: 'hola' }],
+      TEST_RESPONSE_FORMAT
+    );
+    await callAITransportRaw(
+      { ...CONFIG, model: 'gpt-5', temperature: 0.2, top_p: 0.8 },
+      [{ role: 'user', content: 'hola' }],
+      TEST_RESPONSE_FORMAT,
+      undefined,
+      { reasoning_effort: 'none' }
+    );
+
+    expect(bodies[0]).toMatchObject({ temperature: 0.2, top_p: 0.8 });
+    expect(bodies[1]).toMatchObject({
+      temperature: 0.2,
+      top_p: 0.8,
+      reasoning: { effort: 'none' }
+    });
+  });
+
+  it('conserva solo códigos de error HTTP allowlisted y no reintenta 400 permanente', async () => {
+    const secret = 'synthetic-private-provider-message';
+    const diagnostics: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      'fetch',
+      async () =>
+        new Response(
+          JSON.stringify({
+            error: {
+              type: 'invalid_request_error',
+              code: 'unsupported_parameter',
+              param: 'temperature',
+              message: secret
+            }
+          }),
+          { status: 400, headers: { 'content-type': 'application/json' } }
+        )
+    );
+
+    const error = await callAITransportRaw(CONFIG, [], TEST_RESPONSE_FORMAT, undefined, {
+      onDiagnostic: (diagnostic) => diagnostics.push({ ...diagnostic })
+    }).catch((reason) => reason);
+
+    expect(error).toMatchObject({
+      code: 'PROVIDER',
+      detail: 'HTTP 400',
+      providerHttpStatus: 400,
+      providerErrorType: 'invalid_request_error',
+      providerErrorCode: 'unsupported_parameter',
+      providerErrorParam: 'temperature',
+      retryable: false
+    });
+    expect(diagnostics.at(-1)).toMatchObject({
+      providerHttpStatus: 400,
+      providerErrorType: 'invalid_request_error',
+      providerErrorCode: 'unsupported_parameter',
+      providerErrorParam: 'temperature',
+      diagnosticStage: 'failed'
+    });
+    expect(JSON.stringify({ error, diagnostics })).not.toContain(secret);
+  });
+
+  it('descarta parámetros arbitrarios de error del proveedor', async () => {
+    const secret = 'private-marker-must-not-leak';
+    const diagnostics: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      'fetch',
+      async () =>
+        new Response(
+          JSON.stringify({
+            error: {
+              type: secret,
+              code: secret,
+              param: secret,
+              message: secret
+            }
+          }),
+          { status: 400, headers: { 'content-type': 'application/json' } }
+        )
+    );
+
+    await callAITransportRaw(CONFIG, [], TEST_RESPONSE_FORMAT, undefined, {
+      onDiagnostic: (diagnostic) => diagnostics.push({ ...diagnostic })
+    }).catch(() => undefined);
+
+    expect(JSON.stringify(diagnostics)).not.toContain(secret);
+    expect(diagnostics.at(-1)).not.toHaveProperty('providerErrorType');
+    expect(diagnostics.at(-1)).not.toHaveProperty('providerErrorCode');
+    expect(diagnostics.at(-1)).not.toHaveProperty('providerErrorParam');
+  });
+
+  it('preserva un 400 seguro del polling y normaliza paths de adjuntos sin guardar el mensaje', async () => {
+    const secret = 'synthetic private file contents';
+    const diagnostics: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ id: 'resp_poll_400', status: 'queued' }), {
+            status: 202,
+            headers: { 'content-type': 'application/json' }
+          })
+        )
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              error: {
+                type: 'invalid_request_error',
+                code: 'invalid_type',
+                param: 'input[1].content[1].file_data',
+                message: secret
+              }
+            }),
+            { status: 400, headers: { 'content-type': 'application/json' } }
+          )
+        )
+    );
+
+    const error = await callAITransportRaw(CONFIG, [], TEST_RESPONSE_FORMAT, undefined, {
+      onDiagnostic: (diagnostic) => diagnostics.push({ ...diagnostic })
+    }).catch((reason) => reason);
+
+    expect(error).toMatchObject({
+      detail: 'HTTP 400',
+      providerHttpStatus: 400,
+      providerErrorType: 'invalid_request_error',
+      providerErrorCode: 'invalid_type',
+      providerErrorParam: 'input_file',
+      retryable: false
+    });
+    expect(diagnostics.at(-1)).toMatchObject({
+      providerHttpStatus: 400,
+      providerErrorCode: 'invalid_type',
+      providerErrorParam: 'input_file',
+      diagnosticStage: 'failed'
+    });
+    expect(JSON.stringify({ error, diagnostics })).not.toContain(secret);
   });
 });
 
