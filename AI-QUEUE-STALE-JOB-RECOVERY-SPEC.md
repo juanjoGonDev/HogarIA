@@ -156,7 +156,7 @@
 - [x] TDD reproduce un resultado SQLite legacy `claim_generation TEXT` (`"1.0"`): el worker llega a `runtime_started`, ejecuta el runtime una vez y alcanza estado terminal; antes del fix abandonaba el job antes del runtime.
 - [x] Normalizar de forma segura los valores `claim_generation` leídos de SQLite antes de compararlos en worker, callbacks genéricos y recuperación de leases; valores fraccionarios/inválidos no inician runtime.
 - [x] En filas `queued` legacy con `claim_generation = NULL`, interpretar null solo como generación inicial 0 para reclamar; active claims null/inválidos no deben coincidir con una generación vigente.
-- [ ] Navegador real contra el servicio local ya actualizado y WebApi real: test de conexión background terminal exitoso, trace completo, concurrencia liberada y sin nuevo `WORKER_STALLED`.
+- [x] Navegador real contra el servicio local ya actualizado y WebApi real: test de conexión background terminal exitoso, trace completo, concurrencia liberada y sin nuevo `WORKER_STALLED`.
 
 ### Evidencia de corrección de generaciones legacy
 
@@ -172,3 +172,11 @@
 - El esquema antiguo permite `NULL` en esa columna. La primera normalización lo rechazaba también al leer la generación inicial de una fila queued, así que el worker no reclamaba el job. La corrección debe tratar `NULL` como 0 solo durante la reclamación queued; los valores nulos/fraccionarios en claims activos deben seguir fallando cerrados.
 - Reproducir primero en test aislado; después del fix, ejecutar una prueba nueva desde navegador/WebApi reales. La revisión local del servidor invalida jobs genéricos/connection-test en memoria al reiniciar (`INPUT_EXPIRED`), por eso no se reutilizará esta closure perdida ni se editará manualmente la DB.
 - TDD: el nuevo test de `queued + NULL` falló antes del fix (`INVALID_CLAIM_GENERATION`, runtime nunca arrancó) y pasa ahora; el test parametrizado confirma que claims activos `NULL` y fraccionarios no inician runtime. `ai-queue.spec.ts`: 49/49; suite servidor: 2.192 pasaron, 1 omitida; coverage 89,47 % statements / 81,90 % branches / 95,67 % functions / 92,34 % lines; `tsc --noEmit` pasa.
+
+### Prueba real final en navegador (2026-11-03)
+
+- Desde la web HogarIA, botón «Probar», se creó el job real `hFMFM6g-Z9KkX4oAfMscs`; quedó `done`, `attempts=1`, `provider_transport=responses_background`, HTTP 200 y `elapsed_ms=15897`.
+- Traza del mismo job: `worker_claimed → worker_started → runtime_started → provider_submitting → provider_queued → provider_polling → provider_completed → runtime_finished`; `config.test_status=success`, `test_error=null`; cola `0 esperando / 0 en curso`. La UI mostró «¡Conexión exitosa!» para `gpt-5`.
+- WebApi registró la ejecución real `resp_93f4d1a9ea1f4ef79a31163e788c6715`, estado `success`, validación `validated`, modelo `gpt-5`, duración ~15 s. No se usaron mocks.
+- Un intento real anterior llegó a WebApi, pero expiró con `validated_output_timeout` tras 120 s sin respuesta terminal; era un timeout aguas arriba, no un fallo de claim ni una duplicación de puertos. Se conserva como fallo transitorio observado, no se presenta como éxito.
+- Confirmación de puertos locales de desarrollo: HogarIA inicia frontend Angular en `4200` y API en `3000`; el proxy del frontend envía `/api` y `/health` a `3000`. `WebApi` escucha en `3001`. Son servicios distintos, no un mismo listener duplicado.
