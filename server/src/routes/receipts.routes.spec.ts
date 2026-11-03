@@ -1175,6 +1175,26 @@ describe('la revision y el confirm', () => {
     expect((await call('PATCH', `/${id}`, { store: 'Lidl' })).status).toBe(200);
   });
 
+  it('conserva en el inventario una categoría nueva del catálogo al confirmar el ticket', async () => {
+    const id = await ticketEnRevision();
+    db.prepare(
+      `INSERT INTO pantry_categories (id, user_id, household_id, key, name, color, position)
+       VALUES (?, ?, NULL, ?, ?, '#8E5AC8', 30)`
+    ).run('receipt-care-category', alice.id, 'cuidado personal', 'Cuidado personal');
+    const detail = await call('GET', `/${id}`);
+    const lineId = detail.payload.data.lines[0].id;
+    const categorized = await call('PATCH', `/${id}/items/${lineId}`, {
+      category: 'cuidado personal'
+    });
+    expect(categorized.status).toBe(200);
+
+    const confirmed = await call('POST', `/${id}/confirm`);
+    expect(confirmed.status).toBe(200);
+    expect(
+      db.prepare('SELECT category FROM ingredients WHERE name = ?').get('Leche entera')
+    ).toEqual({ category: 'cuidado personal' });
+  });
+
   it('separa sucursales con el mismo nombre y vincula cada precio a su dirección', async () => {
     const locations = new Map([
       ['Mercadona Almería Centro', { lat: '36.8400', lon: '-2.4590' }],

@@ -41,6 +41,17 @@ describe('buildTicketPrompt (## 12aj)', () => {
     expect(system).toContain('createCategory: true');
   });
 
+  it('classifies personal care and cleaning outside food without using other as a shortcut', () => {
+    const { system } = buildTicketPrompt({ esPdf: false });
+
+    expect(system).toContain('Cuidado personal');
+    expect(system).toContain('Limpieza del hogar');
+    expect(system).toContain('Papel y desechables');
+    expect(system).toContain('rollos de papel');
+    expect(system).toContain('nombre breve y legible');
+    expect(system).toContain('No uses `other`');
+  });
+
   it('la forma prometida tiene todo lo que el esquema va a validar', () => {
     expect(TICKET_SHAPE).toContain('"store"');
     expect(TICKET_SHAPE).toContain('"storeAddress"');
@@ -78,6 +89,9 @@ describe('buildTicketPrompt (## 12aj)', () => {
     const { system } = buildTicketPrompt({ esPdf: false, language: 'en' });
 
     expect(system).toContain('English (United Kingdom)');
+    expect(system).toContain('`Personal care`');
+    expect(system).toContain('`Household cleaning`');
+    expect(system).toContain('`Household paper and disposables`');
     expect(system).toContain('warnings');
     expect(system).toContain('Do not translate');
   });

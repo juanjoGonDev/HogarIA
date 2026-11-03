@@ -21,7 +21,12 @@ import type { Database as SqlDb } from 'better-sqlite3';
 import { nanoid } from 'nanoid';
 import { getDatabase } from '../config/database.js';
 import { activeHouseholdId } from './household-context.js';
-import { ensureDefaultCategories } from './pantry-categories.js';
+import {
+  createCategory,
+  ensureDefaultCategories,
+  findCategoryByKey,
+  pantryCategoryKey
+} from './pantry-categories.js';
 import {
   aiConfigByIdInScope,
   aiConfigForPinnedJob,
@@ -66,6 +71,7 @@ import { storeGeocoder } from './store-geocoder-runtime.js';
 // The queue is local to this process/database. Jobs wake it directly; the slow
 // interval is only a recovery sweep for durable rows changed outside the API.
 const QUEUE_RECONCILIATION_INTERVAL_MS = 30_000;
+const MAX_NEW_RECEIPT_CATEGORIES = 12;
 const AI_JOB_TRACE_LIMIT = 32;
 const AI_JOB_TRACE_ANCHOR_STAGES = new Set([
   'worker_claimed',
@@ -1467,8 +1473,17 @@ async function correr(
       if (!sigueActivo) return;
       db.prepare('DELETE FROM receipt_items WHERE receipt_id = ?').run(recibo.id);
       let posicion = 0;
+      const categoriasCreadas = new Set<string>();
       for (const linea of deduplicateTicketLines(validado.data.lines, validado.data.totalMinor)) {
-        insertarLinea(db, recibo.id, linea as unknown as Record<string, unknown>, posicion);
+        const lineaNormalizada = linea as unknown as Record<string, unknown>;
+        const category = resolverCategoriaTicket(
+          db,
+          userId,
+          recibo.household_id,
+          lineaNormalizada,
+          categoriasCreadas
+        );
+        insertarLinea(db, recibo.id, { ...lineaNormalizada, category }, posicion);
         posicion += 1;
       }
 
@@ -1804,6 +1819,108 @@ function insertarLinea(
 }
 
 /** El «inventario.json» de la casa: tiendas, categorias de la despensa y sus productos. */
+/** Rescate determinista de familias no alimentarias que OCR/abreviaturas suelen dejar como «other». */
+function categoriaReconociblePorNombre(nombre: unknown): string | null {
+  if (typeof nombre !== 'string') return null;
+  const normalizado = nombre
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/gu, '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+
+  if (
+    /\b(?:aloe|hidratante|dent(?:al|ifrico|ifrica)?|colgate|champu|shampoo|desodorante|desmaquillante|limpiador facial|nivea|jabon)\b/u.test(
+      normalizado
+    ) ||
+    /\b(?:crema|gel)\s+(?:facial|hidratante|corporal|de manos|solar|de ducha|aloe)\b/u.test(
+      normalizado
+    ) ||
+    /\bpasta\s+dental\b/u.test(normalizado)
+  ) {
+    return 'Cuidado personal';
+  }
+  if (
+    /\b(?:detergente|lejia|suavizante|lavavajillas|limpiador|limpieza|desengrasante|limpiacristales|fregasuelos|estropajo|bayeta)\b/u.test(
+      normalizado
+    )
+  ) {
+    return 'Limpieza del hogar';
+  }
+  if (
+    /\b(?:papel higienico|papel de cocina|servilleta|servilletas|panuelo|panuelos|kleenex|celulosa)\b/u.test(
+      normalizado
+    ) ||
+    /\brollo\s+(?:multi|(?:de\s+)?cocina)\b/u.test(normalizado)
+  ) {
+    return 'Papel y desechables';
+  }
+  return null;
+}
+
+function crearCategoriaTicketSiCabe(
+  db: SqlDb,
+  scope: { userId: string; householdId: string | null },
+  propuesta: string,
+  categoriasCreadas: Set<string>
+): string {
+  // Algunos modelos devuelven una clave legible por máquina; conviértela en etiqueta sencilla.
+  const nombre = propuesta.replace(/[_-]+/gu, ' ').replace(/\s+/gu, ' ').trim();
+  if (nombre.length < 3 || nombre.length > 64 || !/\p{L}/u.test(nombre)) return 'other';
+
+  const clave = pantryCategoryKey(nombre);
+  if (clave === 'other' || clave === 'otros') return 'other';
+  const existente = findCategoryByKey(db, scope, clave);
+  if (existente) return existente.key;
+  if (categoriasCreadas.has(clave)) return clave;
+  if (categoriasCreadas.size >= MAX_NEW_RECEIPT_CATEGORIES) return 'other';
+
+  try {
+    const creada = createCategory(db, {
+      ...scope,
+      name: nombre,
+      idFactory: () => `pcat-${nanoid()}`
+    });
+    categoriasCreadas.add(creada.key);
+    return creada.key;
+  } catch (error) {
+    // Una propuesta mal formada no debe hacer fallar el resto del ticket.
+    if (error instanceof RangeError) return 'other';
+    throw error;
+  }
+}
+
+/**
+ * Resuelve la salida IA contra el catálogo del hogar. Una categoría explícita válida prevalece;
+ * si el modelo devuelve «other»/desconocida para una familia reconocible, el servidor la crea.
+ */
+function resolverCategoriaTicket(
+  db: SqlDb,
+  userId: string,
+  householdId: string | null,
+  linea: Record<string, unknown>,
+  categoriasCreadas: Set<string>
+): string {
+  const propuesta = typeof linea.category === 'string' ? linea.category.trim() : '';
+  const scope = { userId, householdId };
+  const claveLiteral = propuesta ? pantryCategoryKey(propuesta) : '';
+  const existente = claveLiteral ? findCategoryByKey(db, scope, claveLiteral) : undefined;
+  const propuestaReservada = claveLiteral === 'other' || claveLiteral === 'otros';
+
+  if (existente && existente.key !== 'other') return existente.key;
+  if (linea.createCategory === true && propuesta && !propuestaReservada) {
+    return crearCategoriaTicketSiCabe(db, scope, propuesta, categoriasCreadas);
+  }
+
+  const sugerida = categoriaReconociblePorNombre(linea.name);
+  if (sugerida) return crearCategoriaTicketSiCabe(db, scope, sugerida, categoriasCreadas);
+
+  if (linea.createCategory === true && propuesta) {
+    return crearCategoriaTicketSiCabe(db, scope, propuesta, categoriasCreadas);
+  }
+  return existente?.key ?? 'other';
+}
+
 export function inventarioDeLaCasa(
   db: SqlDb,
   userId: string,
