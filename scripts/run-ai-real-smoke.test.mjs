@@ -5,12 +5,18 @@ import { runAiLiveSmoke } from './run-ai-real-smoke.mjs';
 import {
   AI_LIVE_ASSISTANT_SCHEMA_NAME,
   AI_LIVE_ASSISTANT_SMOKE_COMPLETION_BUDGET,
+  AI_LIVE_HOUSEHOLD_PLAN_SCHEMA_NAME,
+  AI_LIVE_HOUSEHOLD_PLAN_SMOKE_COMPLETION_BUDGET,
   AI_LIVE_RECEIPT_SMOKE_MAX_REQUEST_BYTES,
   AI_LIVE_RECEIPT_SMOKE_TICKET_COUNT,
   AI_LIVE_SMOKE_ENV,
   isSuccessfulAiLiveSmokeResult
 } from './ai-live-smoke-safety.mjs';
-import { AI_LIVE_SMOKE_DEADLINES } from './ai-live-smoke-contract.mjs';
+import {
+  AI_LIVE_SMOKE_DEADLINES,
+  AI_LIVE_WORKFLOWS_SMOKE_COMPLETION_BUDGET,
+  AI_LIVE_WORKFLOWS_SMOKE_SCHEMA_NAMES
+} from './ai-live-smoke-contract.mjs';
 
 function createGuardedDependencies(calls) {
   const untouched = (name) => async () => {
@@ -65,21 +71,63 @@ test('coordinator rejects an incomplete receipt-only request before any live set
   assert.deepEqual(calls, []);
 });
 
+test('connection-only success reports the configured loopback WebAPI port', async () => {
+  const successes = [];
+  const errors = [];
+  const proxyMetrics = {
+    calls: [{ status: 200, stream: false, providerTransport: 'responses_background', elapsedMs: 50 }],
+    requestAttempts: 1,
+    rejectedRequests: 0,
+    failed: false
+  };
+  const result = await runAiLiveSmoke({
+    env: { [AI_LIVE_SMOKE_ENV.optIn]: '1', [AI_LIVE_SMOKE_ENV.connectionOnly]: '1' },
+    dependencies: {
+      prepareExistingAiLiveSmokeSession: async () => ({
+        origin: 'http://127.0.0.1:3456',
+        token: 'synthetic-existing-webapi-token',
+        model: 'gpt-5',
+        cleanup: async () => {}
+      }),
+      createAiLiveProxy: async () => ({
+        clientToken: 'synthetic-proxy-token',
+        baseUrl: 'http://127.0.0.1:43210/v1',
+        metrics: proxyMetrics,
+        close: async () => {}
+      }),
+      createAiLiveSmokeRunnerEnvironment: async () => ({ runnerOnly: true }),
+      runAiLiveSmokeRunner: async () => ({
+        code: 0,
+        cancelled: false,
+        timedOut: false,
+        runnerCleaned: true
+      }),
+      isSuccessfulAiLiveSmokeResult
+    },
+    writeError: (message) => errors.push(message),
+    writeSuccess: (message) => successes.push(message),
+    writeProgress: () => {}
+  });
+
+  assert.equal(result, 0, errors.join(' | '));
+  assert.deepEqual(errors, []);
+  assert.deepEqual(JSON.parse(successes[0]), {
+    result: 'passed',
+    provider: 'local WebAPI :3456',
+    model: 'gpt-5',
+    connectionTests: 1,
+    transport: 'responses_background',
+    httpStatus: 200,
+    elapsedMs: 50
+  });
+});
+
 test('long-ticket-only coordinator budgets and validates exactly one safe receipt', async () => {
   const proxyCalls = [
     {
-      status: 400,
-      stream: true,
-      schemaName: 'receipt',
-      requestContract: {
-        strictJsonSchema: true,
-        inventoryJsonAttachmentCount: 1,
-        receiptAttachmentCount: 1
-      }
-    },
-    {
       status: 200,
       stream: false,
+      providerTransport: 'responses_background',
       schemaName: 'receipt',
       requestContract: {
         strictJsonSchema: true,
@@ -107,7 +155,7 @@ test('long-ticket-only coordinator budgets and validates exactly one safe receip
         cleanup: async () => {}
       }),
       createAiLiveProxy: async (input) => {
-        assert.equal(input.maxCalls, 2);
+        assert.equal(input.maxCalls, 1);
         assert.equal(input.maxRequestBytes, AI_LIVE_RECEIPT_SMOKE_MAX_REQUEST_BYTES);
         assert.equal(input.requireReceiptAttachments, true);
         return {
@@ -134,7 +182,7 @@ test('long-ticket-only coordinator budgets and validates exactly one safe receip
     writeProgress: () => {}
   });
 
-  assert.equal(result, 0);
+  assert.equal(result, 0, errors.join(' | '));
   assert.deepEqual(errors, []);
   assert.equal(successes.length, 1);
   assert.deepEqual(JSON.parse(successes[0]), {
@@ -143,13 +191,13 @@ test('long-ticket-only coordinator budgets and validates exactly one safe receip
     model: 'gpt-5',
     sourceCount: 6,
     tickets: 1,
-    requests: 2,
+    requests: 1,
     completions: 1,
-    verifiedStrictSchemaRequests: 2,
-    verifiedInventoryJsonAttachments: 2,
-    verifiedReceiptAttachments: 2,
+    verifiedStrictSchemaRequests: 1,
+    verifiedInventoryJsonAttachments: 1,
+    verifiedReceiptAttachments: 1,
     elapsedMs: 0,
-    recoveredFallbacks: 1
+    recoveredFallbacks: 0
   });
 });
 
@@ -159,6 +207,8 @@ test('recipe-only coordinator pins a strict generated_recipe smoke to one comple
   const errors = [];
   const recipeCall = {
     status: 200,
+    stream: false,
+    providerTransport: 'responses_background',
     schemaName: 'generated_recipe',
     requestContract: { strictJsonSchema: true, recipeTextUnbounded: true },
     responseFormat: {
@@ -215,7 +265,7 @@ test('recipe-only coordinator pins a strict generated_recipe smoke to one comple
     writeProgress: () => {}
   });
 
-  assert.equal(result, 0);
+  assert.equal(result, 0, errors.join(' | '));
   assert.deepEqual(errors, []);
   assert.deepEqual(calls, [
     'proxy:create',
@@ -238,6 +288,153 @@ test('recipe-only coordinator pins a strict generated_recipe smoke to one comple
   });
 });
 
+test('workflow-only coordinator reserves exactly two live schema completions and cleans credentials', async () => {
+  const events = [];
+  const successMessages = [];
+  const errors = [];
+  const calls = AI_LIVE_WORKFLOWS_SMOKE_SCHEMA_NAMES.map((schemaName) => ({
+    status: 200,
+    stream: false,
+    providerTransport: 'responses_background',
+    schemaName,
+    requestContract: { strictJsonSchema: true },
+    elapsedMs: 23,
+    usage: { promptTokens: 30, completionTokens: 40, totalTokens: 70 }
+  }));
+  const proxyMetrics = { calls, requestAttempts: AI_LIVE_WORKFLOWS_SMOKE_COMPLETION_BUDGET, rejectedRequests: 0, failed: false };
+  const result = await runAiLiveSmoke({
+    env: {
+      [AI_LIVE_SMOKE_ENV.optIn]: '1',
+      [AI_LIVE_SMOKE_ENV.workflowsOnly]: '1'
+    },
+    dependencies: {
+      prepareExistingAiLiveSmokeSession: async () => ({
+        origin: 'http://127.0.0.1:3001',
+        token: 'synthetic-existing-webapi-token',
+        model: 'gpt-5',
+        cleanup: async () => events.push('session:cleanup')
+      }),
+      createAiLiveProxy: async (input) => {
+        events.push('proxy:create');
+        assert.equal(input.maxCalls, AI_LIVE_WORKFLOWS_SMOKE_COMPLETION_BUDGET);
+        assert.equal(input.expectedSchemaName, undefined);
+        return {
+          clientToken: 'synthetic-proxy-token',
+          baseUrl: 'http://127.0.0.1:43210/v1',
+          metrics: proxyMetrics,
+          close: async () => events.push('proxy:close')
+        };
+      },
+      createAiLiveSmokeRunnerEnvironment: (_parentEnv, options) => {
+        events.push('runner:environment');
+        assert.equal(options.workflowsOnly, true);
+        return { isolated: true };
+      },
+      runAiLiveSmokeRunner: async () => {
+        events.push('runner:start');
+        return { code: 0, cancelled: false, timedOut: false, runnerCleaned: true };
+      },
+      isSuccessfulAiLiveSmokeResult
+    },
+    writeError: (message) => errors.push(message),
+    writeSuccess: (message) => successMessages.push(message),
+    writeProgress: () => {}
+  });
+
+  assert.equal(result, 0);
+  assert.deepEqual(errors, []);
+  assert.deepEqual(events, [
+    'proxy:create',
+    'runner:environment',
+    'runner:start',
+    'proxy:close',
+    'session:cleanup'
+  ]);
+  assert.deepEqual(JSON.parse(successMessages[0]), {
+    result: 'passed',
+    provider: 'local WebAPI :3001',
+    model: 'gpt-5',
+    completions: 2,
+    verifiedBackgroundRecipeImprovement: true,
+    verifiedBackgroundMealReplacement: true,
+    verifiedRealCommonsImageSearch: true,
+    elapsedMs: 46,
+    usage: { promptTokens: 60, completionTokens: 80, totalTokens: 140 }
+  });
+});
+
+test('household-plan-only coordinator reserves one strict completion and cleans credentials', async () => {
+  const events = [];
+  const successMessages = [];
+  const errors = [];
+  const call = {
+    status: 200,
+    stream: false,
+    providerTransport: 'responses_background',
+    schemaName: AI_LIVE_HOUSEHOLD_PLAN_SCHEMA_NAME,
+    requestContract: { strictJsonSchema: true },
+    elapsedMs: 31
+  };
+  const proxyMetrics = { calls: [call], requestAttempts: 1, rejectedRequests: 0, failed: false };
+  const result = await runAiLiveSmoke({
+    env: {
+      [AI_LIVE_SMOKE_ENV.optIn]: '1',
+      [AI_LIVE_SMOKE_ENV.householdPlanOnly]: '1'
+    },
+    dependencies: {
+      prepareExistingAiLiveSmokeSession: async () => ({
+        origin: 'http://127.0.0.1:3001',
+        token: 'synthetic-existing-webapi-token',
+        model: 'gpt-5',
+        cleanup: async () => events.push('session:cleanup')
+      }),
+      createAiLiveProxy: async (input) => {
+        events.push('proxy:create');
+        assert.equal(input.maxCalls, AI_LIVE_HOUSEHOLD_PLAN_SMOKE_COMPLETION_BUDGET);
+        assert.equal(input.expectedSchemaName, AI_LIVE_HOUSEHOLD_PLAN_SCHEMA_NAME);
+        return {
+          clientToken: 'synthetic-proxy-token',
+          baseUrl: 'http://127.0.0.1:43210/v1',
+          metrics: proxyMetrics,
+          close: async () => events.push('proxy:close')
+        };
+      },
+      createAiLiveSmokeRunnerEnvironment: (_parentEnv, options) => {
+        events.push('runner:environment');
+        assert.equal(options.householdPlanOnly, true);
+        return { isolated: true };
+      },
+      runAiLiveSmokeRunner: async () => {
+        events.push('runner:start');
+        return { code: 0, cancelled: false, timedOut: false, runnerCleaned: true };
+      },
+      isSuccessfulAiLiveSmokeResult
+    },
+    writeError: (message) => errors.push(message),
+    writeSuccess: (message) => successMessages.push(message),
+    writeProgress: () => {}
+  });
+
+  assert.equal(result, 0, errors.join(' | '));
+  assert.deepEqual(errors, []);
+  assert.deepEqual(events, [
+    'proxy:create',
+    'runner:environment',
+    'runner:start',
+    'proxy:close',
+    'session:cleanup'
+  ]);
+  assert.deepEqual(JSON.parse(successMessages[0]), {
+    result: 'passed',
+    provider: 'local WebApi :3001',
+    model: 'gpt-5',
+    completions: 1,
+    verifiedHouseholdPlanStrictSchema: true,
+    verifiedNoConfirmedPlanMutation: true,
+    elapsedMs: 31
+  });
+});
+
 test('assistant-only coordinator requires the complete strict action-plan matrix and cleans credentials', async () => {
   const events = [];
   const successMessages = [];
@@ -245,6 +442,8 @@ test('assistant-only coordinator requires the complete strict action-plan matrix
   const secretSentinel = 'synthetic-existing-webapi-token-not-for-logs';
   const call = {
     status: 200,
+    stream: false,
+    providerTransport: 'responses_background',
     schemaName: AI_LIVE_ASSISTANT_SCHEMA_NAME,
     requestContract: { strictJsonSchema: true },
     responseFormat: {
@@ -328,7 +527,8 @@ test('preferred-jpeg-only coordinator budgets and validates exactly one safe rec
   const proxyCalls = [
     {
       status: 200,
-      stream: true,
+      stream: false,
+      providerTransport: 'responses_background',
       schemaName: 'receipt',
       requestContract: {
         strictJsonSchema: true,
@@ -514,6 +714,18 @@ test('live coordinator uses the existing WebAPI and never starts the legacy supe
           ordinal: 1,
           status: 200,
           elapsedMs: 10,
+          providerError: {
+            type: 'invalid_request_error',
+            code: 'unsupported_parameter',
+            param: 'temperature',
+            message: secretSentinel
+          },
+          providerErrorEnvelope: {
+            contentType: 'json',
+            bodyFormat: 'json',
+            errorShape: 'object',
+            knownFields: ['type', 'code', 'param', 'message', secretSentinel]
+          },
           responseFormat: {
             messageContentType: 'text',
             isJsonObject: false,
@@ -568,7 +780,7 @@ test('live coordinator uses the existing WebAPI and never starts the legacy supe
     'Validando el servicio IA local y sus controles de privacidad.',
     'Servicio IA local validado; preparando la prueba aislada.',
     'Solicitud IA 1/10 enviada al servicio local.',
-    'Respuesta IA 1/10 completada (HTTP 200; texto no JSON; cierre stop).',
+    'Respuesta IA 1/10 completada (HTTP 200; invalid_request_error/unsupported_parameter/param=temperature; upstream=json/json/object[code,message,param,type]; texto no JSON; cierre stop).',
     'Iniciando los escenarios contra la aplicación aislada.',
     'Escenarios aislados terminados; verificando limpieza.'
   ]);

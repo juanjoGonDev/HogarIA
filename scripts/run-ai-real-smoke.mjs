@@ -1,9 +1,12 @@
 import {
+  aiLiveWebApiProviderLabel,
   AI_LIVE_RECEIPT_SMOKE_REQUEST_BUDGET,
   AI_LIVE_RECEIPT_SMOKE_MAX_REQUEST_BYTES,
   AI_LIVE_RECEIPT_SMOKE_TICKET_COUNT,
   AI_LIVE_ASSISTANT_SCHEMA_NAME,
   AI_LIVE_ASSISTANT_SMOKE_COMPLETION_BUDGET,
+  AI_LIVE_HOUSEHOLD_PLAN_SCHEMA_NAME,
+  AI_LIVE_HOUSEHOLD_PLAN_SMOKE_COMPLETION_BUDGET,
   AI_LIVE_SMOKE_ENV,
   AI_LIVE_SMOKE_COMPLETION_BUDGET,
   AI_LIVE_RECIPE_SMOKE_COMPLETION_BUDGET,
@@ -12,6 +15,9 @@ import {
   createAiLiveProxy,
   isSuccessfulAiLiveSmokeResult,
   validateAiLiveReceiptSmokeRequest,
+  validateAiLiveConnectionSmokeRequest,
+  validateAiLiveWorkflowSmokeRequest,
+  validateAiLiveHouseholdPlanSmokeRequest,
   validateAiLiveAssistantSmokeRequest,
   validateAiLiveRecipeSmokeRequest,
   validateAiLiveSmokeOptIn
@@ -28,6 +34,8 @@ import { prepareExistingAiLiveSmokeSession } from './ai-live-existing-webapi.mjs
 import { runAiLiveSmokeRunner } from './ai-live-smoke-runner-control.mjs';
 import {
   AI_LIVE_SMOKE_DEADLINES,
+  AI_LIVE_WORKFLOWS_SMOKE_COMPLETION_BUDGET,
+  AI_LIVE_WORKFLOWS_SMOKE_SCHEMA_NAMES,
   assertAiLiveSmokeDeadlineContract
 } from './ai-live-smoke-contract.mjs';
 import { fileURLToPath } from 'node:url';
@@ -56,6 +64,101 @@ const defaultDependencies = {
   isSuccessfulAiLiveSmokeResult
 };
 
+const SAFE_PROVIDER_ERROR_TYPES = new Set([
+  'api_error',
+  'invalid_request_error',
+  'authentication_error',
+  'permission_error',
+  'rate_limit_error',
+  'server_error',
+  'insufficient_quota'
+]);
+const SAFE_PROVIDER_ERROR_CODES = new Set([
+  'unsupported_parameter',
+  'unsupported_value',
+  'invalid_value',
+  'invalid_type',
+  'invalid_json_schema',
+  'json_schema_validation_error',
+  'model_not_found',
+  'context_length_exceeded',
+  'insufficient_quota',
+  'rate_limit_exceeded',
+  'invalid_api_key',
+  'invalid_prompt',
+  'responses_not_supported',
+  'responses_endpoint_not_supported',
+  'background_not_supported',
+  'responses_input_unsupported',
+  'bad_request',
+  'idempotency_conflict',
+  'idempotency_key_invalid',
+  'internal_error',
+  'payload_too_large',
+  'response_cancelled',
+  'response_not_cancellable',
+  'response_not_found',
+  'response_store_unavailable',
+  'responses_attachment_reference_unsupported',
+  'responses_text_format_required',
+  'responses_background_required',
+  'responses_field_unsupported',
+  'responses_runtime_unavailable',
+  'responses_storage_unavailable',
+  'responses_tool_choice_unsupported',
+  'responses_tools_unsupported',
+  'responses_store_required',
+  'responses_streaming_unsupported',
+  'responses_unexpected_tool_output'
+]);
+const SAFE_PROVIDER_ERROR_PARAMS = new Set([
+  'model',
+  'temperature',
+  'top_p',
+  'max_output_tokens',
+  'input',
+  'input_image',
+  'input_file',
+  'text.format',
+  'text.format.type',
+  'background',
+  'store',
+  'reasoning.effort'
+]);
+const SAFE_PROVIDER_ERROR_ENVELOPES = Object.freeze({
+  contentTypes: new Set(['json', 'text', 'other', 'missing']),
+  bodyFormats: new Set(['json', 'invalid-json', 'opaque', 'empty', 'oversized', 'read-failed']),
+  shapes: new Set(['object', 'string', 'missing', 'scalar', 'unknown']),
+  fields: new Set(['type', 'code', 'param', 'message', 'error', 'success', 'status'])
+});
+
+function safeProviderErrorSummary(providerError) {
+  if (!providerError || typeof providerError !== 'object') return '';
+  const fields = [
+    SAFE_PROVIDER_ERROR_TYPES.has(providerError.type) ? providerError.type : null,
+    SAFE_PROVIDER_ERROR_CODES.has(providerError.code) ? providerError.code : null,
+    SAFE_PROVIDER_ERROR_PARAMS.has(providerError.param) ? `param=${providerError.param}` : null
+  ].filter(Boolean);
+  return fields.join('/');
+}
+
+function safeProviderErrorEnvelopeSummary(envelope) {
+  if (!envelope || typeof envelope !== 'object') return '';
+  const contentType = SAFE_PROVIDER_ERROR_ENVELOPES.contentTypes.has(envelope.contentType)
+    ? envelope.contentType
+    : 'unknown';
+  const bodyFormat = SAFE_PROVIDER_ERROR_ENVELOPES.bodyFormats.has(envelope.bodyFormat)
+    ? envelope.bodyFormat
+    : 'unknown';
+  const shape = SAFE_PROVIDER_ERROR_ENVELOPES.shapes.has(envelope.errorShape)
+    ? envelope.errorShape
+    : 'unknown';
+  const knownFields = Array.isArray(envelope.knownFields)
+    ? [...new Set(envelope.knownFields.filter((field) => SAFE_PROVIDER_ERROR_ENVELOPES.fields.has(field)))].sort()
+    : [];
+  return `upstream=${contentType}/${bodyFormat}/${shape}${knownFields.length ? `[${knownFields.join(',')}]` : ''}`;
+}
+
 export async function runAiLiveSmoke({
   env = process.env,
   signal,
@@ -68,6 +171,9 @@ export async function runAiLiveSmoke({
   const receiptsOnly = validateAiLiveReceiptSmokeRequest(env);
   const recipeOnly = validateAiLiveRecipeSmokeRequest(env);
   const assistantOnly = validateAiLiveAssistantSmokeRequest(env);
+  const connectionOnly = validateAiLiveConnectionSmokeRequest(env);
+  const workflowsOnly = validateAiLiveWorkflowSmokeRequest(env);
+  const householdPlanOnly = validateAiLiveHouseholdPlanSmokeRequest(env);
   const longTicketOnly =
     env[AI_LIVE_SMOKE_ENV.receiptSelection] === AI_LIVE_RECEIPT_LONG_TICKET_ONLY_SELECTION;
   const preferredJpegOnly =
@@ -79,17 +185,18 @@ export async function runAiLiveSmoke({
         ? AI_LIVE_RECEIPT_PREFERRED_JPEG_ONLY_TICKET_COUNT
         : AI_LIVE_RECEIPT_SMOKE_TICKET_COUNT
     : undefined;
-  const requestBudget = assistantOnly
-    ? AI_LIVE_ASSISTANT_SMOKE_COMPLETION_BUDGET
-    : receiptsOnly
-      ? longTicketOnly
-        ? AI_LIVE_RECEIPT_LONG_TICKET_ONLY_COMPLETION_BUDGET
-        : preferredJpegOnly
-          ? AI_LIVE_RECEIPT_PREFERRED_JPEG_ONLY_COMPLETION_BUDGET
-          : AI_LIVE_RECEIPT_SMOKE_REQUEST_BUDGET
-      : recipeOnly
-        ? AI_LIVE_RECIPE_SMOKE_COMPLETION_BUDGET
-        : AI_LIVE_SMOKE_COMPLETION_BUDGET;
+  let requestBudget = AI_LIVE_SMOKE_COMPLETION_BUDGET;
+  if (connectionOnly) requestBudget = 1;
+  else if (householdPlanOnly) requestBudget = AI_LIVE_HOUSEHOLD_PLAN_SMOKE_COMPLETION_BUDGET;
+  else if (workflowsOnly) requestBudget = AI_LIVE_WORKFLOWS_SMOKE_COMPLETION_BUDGET;
+  else if (assistantOnly) requestBudget = AI_LIVE_ASSISTANT_SMOKE_COMPLETION_BUDGET;
+  else if (receiptsOnly) {
+    requestBudget = longTicketOnly
+      ? AI_LIVE_RECEIPT_LONG_TICKET_ONLY_COMPLETION_BUDGET
+      : preferredJpegOnly
+        ? AI_LIVE_RECEIPT_PREFERRED_JPEG_ONLY_COMPLETION_BUDGET
+        : AI_LIVE_RECEIPT_SMOKE_REQUEST_BUDGET;
+  } else if (recipeOnly) requestBudget = AI_LIVE_RECIPE_SMOKE_COMPLETION_BUDGET;
   assertAiLiveSmokeDeadlineContract();
   signal?.throwIfAborted();
 
@@ -110,6 +217,7 @@ export async function runAiLiveSmoke({
       requireReceiptAttachments: receiptsOnly,
       ...(recipeOnly ? { expectedSchemaName: AI_LIVE_RECIPE_SCHEMA_NAME } : {}),
       ...(assistantOnly ? { expectedSchemaName: AI_LIVE_ASSISTANT_SCHEMA_NAME } : {}),
+      ...(householdPlanOnly ? { expectedSchemaName: AI_LIVE_HOUSEHOLD_PLAN_SCHEMA_NAME } : {}),
       ...(receiptsOnly ? { maxRequestBytes: AI_LIVE_RECEIPT_SMOKE_MAX_REQUEST_BYTES } : {}),
       timeoutMs: AI_LIVE_SMOKE_DEADLINES.proxyMs,
       onRequest: ({ ordinal }) => {
@@ -117,7 +225,7 @@ export async function runAiLiveSmoke({
           writeProgress(`Solicitud IA ${ordinal}/${requestBudget} enviada al servicio local.`);
         }
       },
-      onCompletion: ({ ordinal, status, responseFormat }) => {
+      onCompletion: ({ ordinal, status, responseFormat, providerError, providerErrorEnvelope }) => {
         if (
           Number.isInteger(ordinal) &&
           ordinal > 0 &&
@@ -144,8 +252,13 @@ export async function runAiLiveSmoke({
           const finishReason = safeFinishReasons.has(responseFormat?.finishReason)
             ? responseFormat.finishReason
             : 'no disponible';
+          const providerErrorDetails = safeProviderErrorSummary(providerError);
+          const errorEnvelopeDetails = safeProviderErrorEnvelopeSummary(providerErrorEnvelope);
+          const diagnosticDetails = [providerErrorDetails, errorEnvelopeDetails]
+            .filter(Boolean)
+            .join('; ');
           writeProgress(
-            `Respuesta IA ${ordinal}/${requestBudget} completada (HTTP ${status}; ${responseShape}; cierre ${finishReason}).`
+            `Respuesta IA ${ordinal}/${requestBudget} completada (HTTP ${status}; ${diagnosticDetails ? `${diagnosticDetails}; ` : ''}${responseShape}; cierre ${finishReason}).`
           );
         }
       }
@@ -157,7 +270,10 @@ export async function runAiLiveSmoke({
       model: session.model,
       deadlines: AI_LIVE_SMOKE_DEADLINES,
       recipeOnly,
-      assistantOnly
+      assistantOnly,
+      connectionOnly,
+      workflowsOnly,
+      householdPlanOnly
     });
     writeProgress('Iniciando los escenarios contra la aplicación aislada.');
     runnerExit = await dependencies.runAiLiveSmokeRunner({
@@ -195,6 +311,9 @@ export async function runAiLiveSmoke({
     expectedReceiptTicketCount,
     recipeOnly,
     assistantOnly,
+    connectionOnly,
+    workflowsOnly,
+    householdPlanOnly,
     proxyMetrics: proxy?.metrics
   });
   if (!liveSuccess) {
@@ -205,18 +324,67 @@ export async function runAiLiveSmoke({
           ? 'Smoke real cancelado; se intentó cerrar el runner y limpiar los recursos propios.'
           : runnerExit.timedOut
             ? 'Smoke real fallido: se agotó el límite de tiempo; se intentó cerrar y limpiar.'
-            : `Smoke real fallido: resultado del runner=${runnerExit.code}, peticiones=${calls.length}/${requestBudget} (mínimo permitido ${assistantOnly ? AI_LIVE_ASSISTANT_SMOKE_COMPLETION_BUDGET : recipeOnly ? 1 : (expectedReceiptTicketCount ?? 9)}).`
+          : `Smoke real fallido: resultado del runner=${runnerExit.code}, peticiones=${calls.length}/${requestBudget} (mínimo permitido ${assistantOnly ? AI_LIVE_ASSISTANT_SMOKE_COMPLETION_BUDGET : workflowsOnly ? AI_LIVE_WORKFLOWS_SMOKE_COMPLETION_BUDGET : recipeOnly || connectionOnly || householdPlanOnly ? 1 : (expectedReceiptTicketCount ?? 9)}).`
     );
     return 1;
   }
 
   const usage = safeMetrics(calls);
+  const provider = aiLiveWebApiProviderLabel(session.origin);
+  if (connectionOnly) {
+    const call = calls[0];
+    writeSuccess(
+      JSON.stringify({
+        result: 'passed',
+        provider,
+        model: session.model,
+        connectionTests: 1,
+        transport: call.providerTransport,
+        httpStatus: call.status,
+        elapsedMs: call.elapsedMs,
+        ...(usage ? { usage } : {})
+      })
+    );
+    return 0;
+  }
+  if (householdPlanOnly) {
+    writeSuccess(
+      JSON.stringify({
+        result: 'passed',
+        provider,
+        model: session.model,
+        completions: calls.length,
+        verifiedHouseholdPlanStrictSchema: true,
+        verifiedNoConfirmedPlanMutation: true,
+        elapsedMs: calls[0].elapsedMs,
+        ...(usage ? { usage } : {})
+      })
+    );
+    return 0;
+  }
+  if (workflowsOnly) {
+    const schemas = calls.map((call) => call.schemaName);
+    writeSuccess(
+      JSON.stringify({
+        result: 'passed',
+        provider,
+        model: session.model,
+        completions: calls.length,
+        verifiedBackgroundRecipeImprovement: schemas.includes(AI_LIVE_WORKFLOWS_SMOKE_SCHEMA_NAMES[0]),
+        verifiedBackgroundMealReplacement: schemas.includes(AI_LIVE_WORKFLOWS_SMOKE_SCHEMA_NAMES[1]),
+        verifiedRealCommonsImageSearch: true,
+        elapsedMs: calls.reduce((sum, call) => sum + (call.elapsedMs ?? 0), 0),
+        ...(usage ? { usage } : {})
+      })
+    );
+    return 0;
+  }
   if (recipeOnly) {
     const call = calls[0];
     writeSuccess(
       JSON.stringify({
         result: 'passed',
-        provider: 'local WebAPI :3001',
+        provider,
         model: session.model,
         completions: 1,
         verifiedStrictJsonSchema: true,
@@ -232,7 +400,7 @@ export async function runAiLiveSmoke({
     writeSuccess(
       JSON.stringify({
         result: 'passed',
-        provider: 'local WebAPI :3001',
+        provider,
         model: session.model,
         proposals: calls.length,
         verifiedStrictJsonSchemaRequests: calls.filter(
@@ -254,7 +422,7 @@ export async function runAiLiveSmoke({
     writeSuccess(
       JSON.stringify({
         result: 'passed',
-        provider: 'local WebAPI :3001',
+        provider,
         model: session.model,
         sourceCount: 6,
         tickets: expectedReceiptTicketCount,
@@ -298,7 +466,7 @@ export async function runAiLiveSmoke({
   writeSuccess(
     JSON.stringify({
       result: 'passed',
-      provider: 'local WebAPI :3001',
+      provider,
       model: session.model,
       completions: calls.length,
       elapsedMs: calls.map((call) => call.elapsedMs),

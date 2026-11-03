@@ -8,6 +8,17 @@ export const AI_LIVE_SMOKE_DEADLINES = Object.freeze({
   watchdogMs: 22 * 60_000
 });
 
+export const AI_LIVE_CONNECTION_SMOKE_GREP = 'HogarIA connection-only real test';
+export const AI_LIVE_HOUSEHOLD_PLAN_SMOKE_GREP =
+  'HogarIA household plan proposal real workflow';
+export const AI_LIVE_WORKFLOWS_SMOKE_GREP =
+  'HogarIA real recipe improvement replacement and Commons image search';
+export const AI_LIVE_WORKFLOWS_SMOKE_COMPLETION_BUDGET = 2;
+export const AI_LIVE_WORKFLOWS_SMOKE_SCHEMA_NAMES = Object.freeze([
+  'generated_recipe',
+  'meal_replacement'
+]);
+
 export const AI_LIVE_ASSISTANT_ACTION_KINDS = Object.freeze([
   'pantry.add_ingredient',
   'pantry.update_ingredient',

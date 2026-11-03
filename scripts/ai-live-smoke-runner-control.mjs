@@ -1,20 +1,36 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
+  AI_LIVE_CONNECTION_SMOKE_GREP,
+  AI_LIVE_HOUSEHOLD_PLAN_SMOKE_GREP,
+  AI_LIVE_WORKFLOWS_SMOKE_GREP,
   AI_LIVE_ASSISTANT_ACTION_KINDS,
   AI_LIVE_SMOKE_DEADLINES
 } from './ai-live-smoke-contract.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const runner = fileURLToPath(new URL('./run-isolated-playwright.mjs', import.meta.url));
-const runnerArgs = (env) =>
-  env?.HOGARIA_AI_REAL_SMOKE_HOUSEHOLD_MEAL_ONLY === '1'
-    ? [
-        runner,
-        '--config=playwright.ai-household-meal-real-smoke.config.ts',
-        'tests/e2e/household-meal-planning-live-smoke.spec.ts'
-      ]
-    : [runner, '--config=playwright.ai-real-smoke.config.ts', 'tests/e2e/ai-real-smoke.spec.ts'];
+const runnerArgs = (env) => {
+  if (env?.HOGARIA_AI_REAL_SMOKE_HOUSEHOLD_MEAL_ONLY === '1') {
+    return [
+      runner,
+      '--config=playwright.ai-household-meal-real-smoke.config.ts',
+      'tests/e2e/household-meal-planning-live-smoke.spec.ts'
+    ];
+  }
+  return [
+    runner,
+    '--config=playwright.ai-real-smoke.config.ts',
+    'tests/e2e/ai-real-smoke.spec.ts',
+    ...(env?.HOGARIA_AI_REAL_SMOKE_CONNECTION_ONLY === '1'
+      ? [`--grep=${AI_LIVE_CONNECTION_SMOKE_GREP}`]
+      : env?.HOGARIA_AI_REAL_SMOKE_WORKFLOWS_ONLY === '1'
+        ? [`--grep=${AI_LIVE_WORKFLOWS_SMOKE_GREP}`]
+        : env?.HOGARIA_AI_REAL_SMOKE_HOUSEHOLD_PLAN_ONLY === '1'
+          ? [`--grep=${AI_LIVE_HOUSEHOLD_PLAN_SMOKE_GREP}`]
+        : [])
+  ];
+};
 export const AI_LIVE_SMOKE_RUNNER_WATCHDOG_MS = AI_LIVE_SMOKE_DEADLINES.watchdogMs;
 export const AI_LIVE_SMOKE_RUNNER_SHUTDOWN_MESSAGE = 'ai-live-smoke-shutdown';
 export const AI_LIVE_SMOKE_RUNNER_COMPLETE_MESSAGE = 'ai-live-smoke-runner-complete';
@@ -96,9 +112,39 @@ const SAFE_RUNNER_PROGRESS = Object.freeze({
   'test-phase:profiles-ready': 'Último hito E2E: preferencias blandas sintéticas configuradas.',
   'test-phase:calendar-empty': 'Último hito E2E: calendario aislado vacío antes de proponer.',
   'test-phase:proposal-returned': 'Último hito E2E: la API validó una propuesta semanal.',
+  'test-phase:proposal-request-start': 'Último hito E2E: enviando propuesta semanal al servidor.',
+  'test-phase:proposal-response-error':
+    'Último hito E2E: el servidor rechazó la propuesta semanal antes de validarla.',
   'test-phase:calendar-still-empty': 'Último hito E2E: propuesta sin escritura en calendario.',
   'test-phase:config-start': 'Último hito E2E: guardando configuración IA de prueba.',
   'test-phase:configured': 'Último hito E2E: configuración IA de prueba guardada.',
+  'test-phase:connection-only-start': 'Hito E2E: comienza el caso de conexión real aislado.',
+  'test-phase:connection-only-registered': 'Hito E2E: usuario sintético conectado en el navegador.',
+  'test-phase:connection-only-configured': 'Hito E2E: configuración aislada guardada.',
+  'test-phase:connection-only-accepted': 'Hito E2E: WebApi aceptó la prueba de conexión en background.',
+  'test-phase:connection-only-restored-after-tab-close': 'Hito E2E: se recuperó la prueba tras cerrar y reabrir la pestaña.',
+  'test-phase:connection-only-terminal': 'Hito E2E: se leyó el estado final persistido de la conexión.',
+  'test-phase:connection-only-success': 'Hito E2E: el estado final de conexión es correcto.',
+  'test-phase:connection-only-latency': 'Hito E2E: la latencia del test quedó guardada.',
+  'test-phase:connection-only-badge': 'Hito E2E: la UI muestra la conexión OK tras reabrir la pestaña.',
+  'test-phase:connection-only-queue': 'Hito E2E: se recuperó la cola de conexión del usuario aislado.',
+  'test-phase:connection-only-single-job': 'Hito E2E: existe un único job y un solo intento.',
+  'test-phase:connection-only-restored-success': 'Hito E2E: prueba completada tras reabrir la pestaña.',
+  'test-phase:household-plan-only-register-start': 'Hito E2E: iniciando la cuenta sintética para propuesta de plano.',
+  'test-phase:household-plan-only-baseline-ready': 'Hito E2E: plano sintético vacío confirmado como baseline.',
+  'test-phase:household-plan-only-proposal-validated': 'Hito E2E: propuesta real de plano validada por HogarIA.',
+  'test-phase:household-plan-only-not-committed': 'Hito E2E: plano confirmado intacto; propuesta no guardada.',
+  'test-phase:workflow-only-register-start': 'Hito E2E: iniciando cuenta sintética para workflows IA.',
+  'test-phase:workflow-only-registered': 'Hito E2E: cuenta sintética lista.',
+  'test-phase:workflow-only-improve-start': 'Hito E2E: enviando mejora de receta al proveedor real.',
+  'test-phase:workflow-only-improve-completed': 'Hito E2E: mejora real validada sin persistir cambios.',
+  'test-phase:workflow-only-meal-seeded': 'Hito E2E: comida sintética preparada para reemplazo.',
+  'test-phase:workflow-only-replace-start': 'Hito E2E: enviando reemplazo de comida al proveedor real.',
+  'test-phase:workflow-only-replace-completed': 'Hito E2E: alternativa real validada sin persistirla.',
+  'test-phase:workflow-only-image-search-start': 'Hito E2E: iniciando búsqueda real en Commons.',
+  'test-phase:workflow-only-image-search-queued': 'Hito E2E: job real de búsqueda en Commons en cola.',
+  'test-phase:workflow-only-image-search-completed': 'Hito E2E: Commons devolvió candidatos con licencia.',
+  'test-phase:workflow-only-all-completed': 'Hito E2E: mejora, reemplazo y búsqueda real completados.',
   'test-phase:ingredients-created': 'Último hito E2E: ingredientes sintéticos preparados.',
   'test-phase:ingredients-api-verified':
     'Último hito E2E: API devuelve todos los ingredientes sintéticos.',
@@ -319,22 +365,175 @@ const SAFE_RUNNER_PROGRESS = Object.freeze({
 
 function safeRunnerProgressMessage(phase) {
   if (typeof phase !== 'string') return undefined;
+  const changedTablesPrefix = 'test-phase:assistant-proposal-snapshot-changed:';
+  if (phase.startsWith(changedTablesPrefix)) {
+    const tables = phase.slice(changedTablesPrefix.length).split('|');
+    if (
+      tables.length > 0 &&
+      tables.length <= 32 &&
+      tables.every((table) => /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(table))
+    ) {
+      return `Último hito E2E: propuesta cambió tablas SQLite temporales: ${tables.join(', ')}.`;
+    }
+    return 'Último hito E2E: la propuesta alteró una tabla SQLite.';
+  }
   const staticMessage = SAFE_RUNNER_PROGRESS[phase];
   if (staticMessage) return staticMessage;
 
+  const connectionDiagnosticPrefix = 'test-phase:connection-only-diagnostic:';
+  if (phase.startsWith(connectionDiagnosticPrefix)) {
+    const encoded = phase.slice(connectionDiagnosticPrefix.length);
+    if (encoded.length > 4096) return undefined;
+    let diagnostic;
+    try {
+      diagnostic = JSON.parse(decodeURIComponent(encoded));
+    } catch {
+      return undefined;
+    }
+    if (!diagnostic || typeof diagnostic !== 'object' || Array.isArray(diagnostic)) {
+      return undefined;
+    }
+    const safeEnum = (value, allowed) =>
+      typeof value === 'string' && allowed.includes(value) ? value : undefined;
+    const safeNumber = (value, min, max) =>
+      Number.isSafeInteger(value) && value >= min && value <= max ? value : undefined;
+    const parts = [];
+    const testStatus = safeEnum(diagnostic.testStatus, [
+      'testing',
+      'success',
+      'failed',
+      'interrupted',
+      'unknown'
+    ]);
+    const testError = safeEnum(diagnostic.testError, [
+      'PROVIDER',
+      'TIMEOUT',
+      'CANCELLED',
+      'WORKER_EXCEPTION',
+      'WORKER_STALLED',
+      'unknown'
+    ]);
+    const providerError = [
+      safeEnum(diagnostic.type, [
+        'api_error',
+        'invalid_request_error',
+        'authentication_error',
+        'permission_error',
+        'rate_limit_error',
+        'server_error',
+        'insufficient_quota'
+      ]),
+      safeEnum(diagnostic.code, [
+        'unsupported_parameter',
+        'unsupported_value',
+        'invalid_value',
+        'invalid_type',
+        'model_not_found',
+        'context_length_exceeded',
+        'insufficient_quota',
+        'rate_limit_exceeded',
+        'invalid_api_key',
+        'invalid_prompt',
+        'responses_not_supported',
+        'responses_endpoint_not_supported',
+        'background_not_supported',
+        'responses_input_unsupported',
+        'bad_request',
+        'idempotency_conflict',
+        'idempotency_key_invalid',
+        'internal_error',
+        'payload_too_large',
+        'response_cancelled',
+        'response_not_cancellable',
+        'response_not_found',
+        'response_store_unavailable',
+        'responses_attachment_reference_unsupported',
+        'responses_text_format_required',
+        'responses_background_required',
+        'responses_field_unsupported',
+        'responses_runtime_unavailable',
+        'responses_storage_unavailable',
+        'responses_tool_choice_unsupported',
+        'responses_tools_unsupported',
+        'responses_store_required',
+        'responses_streaming_unsupported',
+        'responses_unexpected_tool_output'
+      ])
+    ].filter(Boolean);
+    parts.push(`estado=${testStatus ?? 'unknown'}`);
+    if (testError && testError !== 'unknown') parts.push(`error=${testError}`);
+    const status = safeNumber(diagnostic.status, 100, 599);
+    if (status !== undefined) parts.push(`HTTP ${status}`);
+    if (diagnostic.transport === 'responses_background') parts.push(diagnostic.transport);
+    if (providerError.length) parts.push(providerError.join('/'));
+    const param = safeEnum(diagnostic.param, [
+      'model',
+      'temperature',
+      'top_p',
+      'max_output_tokens',
+      'input',
+      'input_image',
+      'input_file',
+      'text.format',
+      'text.format.type',
+      'background',
+      'store',
+      'reasoning.effort'
+    ]);
+    if (param) parts.push(`param=${param}`);
+    const stage = safeEnum(diagnostic.stage, [
+      'submitting',
+      'queued',
+      'polling',
+      'completed',
+      'failed',
+      'timed_out',
+      'cancelled'
+    ]);
+    if (stage) parts.push(`fase=${stage}`);
+    const elapsedMs = safeNumber(diagnostic.elapsedMs, 0, 86_400_000);
+    if (elapsedMs !== undefined) parts.push(`${elapsedMs} ms`);
+    const attempts = safeNumber(diagnostic.attempts, 0, 4);
+    if (attempts !== undefined) parts.push(`intentos=${attempts}`);
+    if (typeof diagnostic.responseId === 'string' && /^resp_[A-Za-z0-9_-]{1,128}$/.test(diagnostic.responseId)) {
+      parts.push(`id=${diagnostic.responseId}`);
+    }
+    return `Diagnóstico seguro de conexión: ${parts.join('; ')}.`;
+  }
+
   const prefix = 'test-phase:assistant-proposal-action-kinds-mismatch-';
   if (phase.startsWith(prefix)) {
-    const summary = phase.slice(prefix.length);
-    if (summary === 'none')
-      return 'Último hito E2E: WebAPI no devolvió acciones para el escenario.';
+    let summary = phase.slice(prefix.length);
+    let scenarioOrdinal;
+    if (summary.startsWith('scenario-')) {
+      const scenarioMatch = /^scenario-(\d{1,2})-(.+)$/.exec(summary);
+      if (!scenarioMatch) return undefined;
+      scenarioOrdinal = Number(scenarioMatch[1]);
+      if (!Number.isSafeInteger(scenarioOrdinal) || scenarioOrdinal < 1 || scenarioOrdinal > 10) {
+        return undefined;
+      }
+      summary = scenarioMatch[2];
+    }
+    const scenario = scenarioOrdinal ? ` en el escenario ${scenarioOrdinal}` : '';
+    if (summary === 'none') {
+      return scenarioOrdinal
+        ? `Último hito E2E: WebAPI no devolvió acciones${scenario}.`
+        : 'Último hito E2E: WebAPI no devolvió acciones para el escenario.';
+    }
     if (summary === 'none-with-questions') {
-      return 'Último hito E2E: WebAPI pidió aclaración y no propuso acciones para el escenario.';
+      return scenarioOrdinal
+        ? `Último hito E2E: WebAPI pidió aclaración${scenario} y no propuso acciones.`
+        : 'Último hito E2E: WebAPI pidió aclaración y no propuso acciones para el escenario.';
     }
     if (summary === 'unrecognized') {
-      return 'Último hito E2E: WebAPI devolvió un tipo de acción no reconocido.';
+      return scenarioOrdinal
+        ? `Último hito E2E: WebAPI devolvió un tipo de acción no reconocido${scenario}.`
+        : 'Último hito E2E: WebAPI devolvió un tipo de acción no reconocido.';
     }
     if (summary === 'too-many') {
-      return 'Último hito E2E: WebAPI devolvió más acciones que tipos allowlist.';
+      return scenarioOrdinal
+        ? `Último hito E2E: WebAPI devolvió más acciones que tipos allowlist${scenario}.`
+        : 'Último hito E2E: WebAPI devolvió más acciones que tipos allowlist.';
     }
 
     const kinds = summary.split('|');
@@ -344,7 +543,9 @@ function safeRunnerProgressMessage(phase) {
     ) {
       return undefined;
     }
-    return `Último hito E2E: tipos allowlist devueltos por WebAPI no coinciden: ${kinds.join(', ')}.`;
+    return scenarioOrdinal
+      ? `Último hito E2E: tipos allowlist devueltos por WebAPI${scenario} no coinciden: ${kinds.join(', ')}.`
+      : `Último hito E2E: tipos allowlist devueltos por WebAPI no coinciden: ${kinds.join(', ')}.`;
   }
 
   const statePrefix = 'test-phase:assistant-proposal-action-state-invalid:';

@@ -100,7 +100,7 @@ test('meal-only coordinator spends one strict-schema call, cleans up and reports
     prepareExistingAiLiveSmokeSession: async () => {
       calls.push('session');
       return {
-        origin: 'http://127.0.0.1:3001',
+        origin: 'http://127.0.0.1:3457',
         token: 'synthetic-existing-webapi-token',
         model: 'gpt-5',
         cleanup: async () => calls.push('session-cleanup')
@@ -158,7 +158,7 @@ test('meal-only coordinator spends one strict-schema call, cleans up and reports
   const summary = JSON.parse(successes[0]);
   assert.deepEqual(summary, {
     result: 'passed',
-    provider: 'local WebAPI :3001',
+    provider: 'local WebAPI :3457',
     model: 'gpt-5',
     scenario: 'household-meal-proposal',
     completions: 1,
@@ -254,7 +254,13 @@ test('distinguishes a local proxy contract rejection from a provider completion'
       createAiLiveProxy: async () => ({
         clientToken: 'synthetic-local-proxy-token',
         baseUrl: 'http://127.0.0.1:43210/v1',
-        metrics: { calls: [], requestAttempts: 1, rejectedRequests: 1, failed: true },
+        metrics: {
+          calls: [],
+          requestAttempts: 1,
+          rejectedRequests: 1,
+          rejectionCodes: ['meal_context_member_likes'],
+          failed: true
+        },
         close: async () => {}
       }),
       createAiLiveSmokeRunnerEnvironment: () => ({}),
@@ -272,6 +278,7 @@ test('distinguishes a local proxy contract rejection from a provider completion'
 
   assert.equal(result, 1);
   assert.match(errors.join('\n'), /rechazó la petición antes de contactar WebAPI/i);
+  assert.match(errors.join('\n'), /causa=meal_context_member_likes/);
   assert.match(errors.join('\n'), /ninguna completion/i);
   assert.equal(errors.join('\n').includes('synthetic-local-proxy-token'), false);
 });

@@ -1,6 +1,6 @@
 # Recuperación de trabajos IA bloqueados
 
-**Estado:** Draft PR; diagnóstico e implementación en curso.
+**Estado:** Draft PR; implementación y verificación local completadas; CI final pendiente.
 **Base:** origin/master (b7a754e8bbcc9524d5d2d08d0197101abc46e635).
 **Rama:** fix/ai-queue-stale-job-recovery.
 **Alcance:** evitar que excepciones inesperadas o leases vencidas dejen jobs IA en running, bloqueen concurrencia o dejen el test de proveedor en testing. No cambiar protocolos ni degradar Responses background.
@@ -42,31 +42,35 @@
 
 ### Cola y recuperación
 
-- [ ] Una excepción de preflight antes de provider termina job y promesa; lease queda limpia; no hace request externo duplicado.
-- [ ] Un HTTP 400 de creación o polling preserva tipo/código/parámetro allowlist, status, etapa y response ID cuando exista; no filtra mensaje/body del proveedor.
-- [ ] Excepción inesperada en jobs genéricos y receipts termina fila mediante CAS, actualiza estado dependiente y no filtra datos sensibles.
-- [ ] El barrido detecta leases vencidas y ausentes, libera concurrencia y actualiza receipt/config asociada; no toca jobs con lease futura.
-- [ ] Una recuperación no reintenta automáticamente ni pisa estados/cambios de una generación más nueva; aborto/resolución repetidos son idempotentes.
-- [ ] Un HTTP 4xx permanente del proveedor no mantiene abierto el POST hasta vencer la ventana manual; HTTP queda resuelto con error seguro y el job no figura como reintentable. Fallos transitorios y `BAD_JSON` conservan la semántica manual existente.
-- [ ] Tests cubren estado terminal previo, claim_generation nuevo, cancelación/resultado tardío, disponibilidad de provider y ausencia de llamadas duplicadas.
-- [ ] Contrato WebApi: serializador no envía roles `system`/`assistant` en `input`, no emite campos de imagen rechazados y nunca supera 4.000 caracteres en `instructions`; tests TDD demuestran compatibilidad antes de usar el proveedor real.
+- [x] Una excepción de preflight antes de provider termina job y promesa; lease queda limpia; no hace request externo duplicado.
+- [x] Un HTTP 400 de creación o polling preserva tipo/código/parámetro allowlist, status, etapa y response ID cuando exista; no filtra mensaje/body del proveedor.
+- [x] Excepción inesperada en jobs genéricos y receipts termina fila mediante CAS, actualiza estado dependiente y no filtra datos sensibles.
+- [x] El barrido detecta leases vencidas y ausentes, libera concurrencia y actualiza receipt/config asociada; no toca jobs con lease futura.
+- [x] Una recuperación no reintenta automáticamente ni pisa estados/cambios de una generación más nueva; aborto/resolución repetidos son idempotentes.
+- [x] Un HTTP 4xx permanente del proveedor no mantiene abierto el POST hasta vencer la ventana manual; HTTP queda resuelto con error seguro y el job no figura como reintentable. Fallos transitorios y `BAD_JSON` conservan la semántica manual existente.
+- [x] Tests cubren estado terminal previo, claim_generation nuevo, cancelación/resultado tardío, disponibilidad de provider y ausencia de llamadas duplicadas.
+- [x] Contrato WebApi: serializador no envía roles `system`/`assistant` en `input`, no emite campos de imagen rechazados y nunca supera 4.000 caracteres en `instructions`; tests TDD demuestran compatibilidad antes de usar el proveedor real.
 
 ### Navegador + proveedor real, aislados
 
-- [ ] Ejecutar Playwright real contra stack local aislado, sin mock de provider, con WebApi y sesión/modelo reales. Un POST de test de conexión devuelve 202; al cerrar/recargar la vista, la cola y configuración siguen mostrando el mismo job activo hasta terminal.
-- [ ] El smoke real puede apuntar a un puerto loopback alternativo para WebApi parcheada; el default permanece `:3001`, y destinos no loopback, URL con credenciales o path/query se rechazan antes de tocar tokens.
-- [ ] Confirmar una sola ejecución de connection test, diagnóstico final legible, concurrencia liberada y ningún job colgado.
-- [ ] Ejecutar secuencialmente la matriz live de workflows habilitados (recetas, múltiples recetas, mejora, reemplazo, recomendaciones, planificación, estimación de caducidad, foto de compra, lectura de ticket sintético, plan de hogar, asistente y búsqueda real de imágenes). Cada resultado debe ser terminal/usable; se documentan rutas que requieren fixture o no son llamadas LLM.
-- [ ] Ejecutar un caso live dedicado `household_plan` con propuesta temporal validada y una sola llamada Responses background; no confirmar ni persistir el plano sugerido.
-- [ ] Añadir smoke aislado explícito para mejora, reemplazo y Commons real; exigir 2 completions Responses background con schemas esperados, imagen Commons terminal con candidatos y cero mutaciones no confirmadas.
-- [ ] El smoke real de planificación usa un contexto válido según el constructor real y alcanza el WebApi/modelo; no vale la respuesta 400 generada localmente por el proxy del harness.
-- [ ] Las llamadas live usan solamente DB temporal/usuario/hogar semilla; presupuesto acotado, proveedor y servicios preexistentes no reiniciados. Token desde env/almacén, jamás persistido o mostrado.
-- [ ] Guardar evidencia sintética desktop/móvil solo si se cambia UI; no guardar screenshots/logs/traces con datos personales o secretos.
+- [x] Ejecutar Playwright real contra stack local aislado, sin mock de provider, con WebApi y sesión/modelo reales. Un POST de test de conexión devuelve 202; al cerrar/recargar la vista, la cola y configuración siguen mostrando el mismo job activo hasta terminal.
+- [x] El smoke real puede apuntar a un puerto loopback alternativo para WebApi parcheada; el default permanece `:3001`, y destinos no loopback, URL con credenciales o path/query se rechazan antes de tocar tokens.
+- [x] Confirmar una sola ejecución de connection test, diagnóstico final legible, concurrencia liberada y ningún job colgado.
+- [x] Ejecutar secuencialmente la matriz live de workflows habilitados (recetas, múltiples recetas, mejora, reemplazo, recomendaciones, planificación, estimación de caducidad, foto de compra, lectura de ticket sintético, plan de hogar, asistente y búsqueda real de imágenes). Cada resultado debe ser terminal/usable; se documentan rutas que requieren fixture o no son llamadas LLM.
+- [x] Ejecutar un caso live dedicado `household_plan` con propuesta temporal validada y una sola llamada Responses background; no confirmar ni persistir el plano sugerido.
+- [x] Añadir smoke aislado explícito para mejora, reemplazo y Commons real; exigir 2 completions Responses background con schemas esperados, imagen Commons terminal con candidatos y cero mutaciones no confirmadas.
+- [x] El smoke real de planificación usa un contexto válido según el constructor real y alcanza el WebApi/modelo; no vale la respuesta 400 generada localmente por el proxy del harness.
+- [x] Un rechazo local de preferencias de comidas identifica solo campo/causa allowlist (shape, alergias estrictas, gustos, desagrados), sin registrar valores del perfil.
+- [x] El proxy valida los dos perfiles sintéticos como conjunto; los alias `P1`/`P2` no se ligan a una identidad ni a un orden SQL sin contrato.
+- [x] La matriz real de acciones relativas calcula `referenceDate` y las fechas esperadas desde el día local del navegador, igual que el cliente; no conserva fechas históricas fijas que falseen la validación live.
+- [x] Si una propuesta real no coincide, el último hito del smoke informa el ordinal y el tipo allowlist discrepante, nunca texto/payload del proveedor.
+- [x] Las llamadas live usan solamente DB temporal/usuario/hogar semilla; presupuesto acotado, proveedor y servicios preexistentes no reiniciados. Token desde env/almacén, jamás persistido o mostrado.
+- [x] Guardar evidencia sintética desktop/móvil solo si se cambia UI; no guardar screenshots/logs/traces con datos personales o secretos.
 
 ### Entrega
 
-- [ ] Regresión TDD falla antes y pasa después.
-- [ ] Suite focal server, cobertura >=70 % en métricas aplicables, suite requerida, build y typecheck pasan.
+- [x] Regresión TDD falla antes y pasa después.
+- [x] Suite focal server, cobertura >=70 % en métricas aplicables, suite requerida, build y typecheck pasan.
 - [ ] PR único desde origin/master, CI verde y Ready for review solo tras completar criterios; no merge.
 
 ## Evidencia de implementación
@@ -79,3 +83,17 @@
 - El smoke live de mejora/reemplazo + Commons llegó al provider para dos requests. La mejora terminó 200; el reemplazo fue rechazado por la API al no completar WebApi la segunda respuesta. Sesión WebApi correlacionada: aceptación `/backend-api/f/conversation` HTTP 200, salida incompleta, `validated_output_timeout`/504 tras ~129 s de inactividad, `validationStatus=incomplete`, 0 requests terminales; el stream terminó en `network_loading_failed`/`stream_aborted_for_reload`, sin llamada `/conversation/resume`. Es un fallo real interno de WebApi, no timeout HTTP de 30 s ni un rechazo del contrato local de HogarIA. No se reintentó para evitar coste/duplicación; el smoke sigue fallando hasta resolver la recuperación/stream de WebApi.
 - Primer intento del nuevo smoke `household_plan` tuvo 0 llamadas porque el `--grep` no coincidía con el nombre del test; corregido el título del test y repetido con una llamada real exitosa. Ninguna llamada de proveedor se contó como éxito por aceptación HTTP solamente.
 - No se cambia el comportamiento de la imagen Commons para otros tests: su fixture se quita solo en el nuevo smoke opt-in live y la búsqueda quedará separada del presupuesto de completions de WebApi.
+- Hallazgo al reanudar la matriz real: el test de asistente enviaba `referenceDate: 2026-10-17`, pero mantenía una aserción hardcodeada para `2026-10-18`; debe usar fecha local del navegador (como `toDayKey`) y verificar mañana derivado, evitando depender del calendario de octubre.
+- Corrida actual assistant-only en Chromium + WebApi/modelo reales: 8 completions Responses background devolvieron HTTP 200; una acción no coincidió y el test paró antes de completar 10 escenarios. El hito sanitizado omitió ordinal, así que se añade identificación segura del caso antes de repetir llamadas.
+- Corrida actual household-meal: WebApi recibió 0 solicitudes; proxy local rechazó el contexto sintético antes de egress con `meal_context_member_preferences`. No hubo completion ni coste; falta distinguir qué campo de preferencia discrepa sin exponer el valor.
+- Fuente de orden: `GET /api/household` consulta miembros sin `ORDER BY`; el smoke pedía tofu a índice 0 y pollo a índice 1, pero el servidor asigna alias desde el orden recibido. Por tanto, el fixture de preferencias de planificación debe validar el par de perfiles, no asumir qué alias ocupa cada miembro.
+
+## Cierre de verificación (2026-11-03)
+
+- La prueba real más reciente del test de conexión pasó con Chromium, SQLite temporal, WebApi local `127.0.0.1:3001` y `gpt-5`, sin mocks: POST `202` con estado `testing`; se cerró la pestaña, se reabrió y el polling encontró el mismo job terminal `done`, un intento, `responses_background`, HTTP `200`, latencia 15.965 s y badge `OK`.
+- Se guardaron capturas sintéticas de escritorio y móvil en `.e2e-screenshots/ai-connection-47216-1793677006792/`; contienen solo el usuario/configuración sintéticos de la corrida aislada.
+- Matriz de navegador real sin mocks: default 9/9 completions; `WORKFLOWS_ONLY` 2/2 completions para mejora/reemplazo y búsqueda de imágenes Commons terminal; `HOUSEHOLD_PLAN_ONLY` 1/1 sin persistir; `HOUSEHOLD_MEAL` 1/1 con contexto válido; `ASSISTANT_ONLY` 10/10 completions que ejercitaron los 13 tipos de herramienta de propuesta. Las propuestas del asistente se validaron sin aplicar acciones no confirmadas; el snapshot de la DB temporal permaneció intacto. La foto de ticket fue validada en una corrida aislada, sin guardar imagen ni texto personal en Git/logs.
+- `pnpm test`: config 146/146; frontend 1.801/1.801, cobertura 90,56 % statements / 80,99 % branches / 91,88 % funcs / 93,17 % lines; server 2.185 pass, 1 skipped. `pnpm --filter @hogaria/server run test:coverage`: 89,53 % / 81,93 % / 95,64 % / 92,41 % (statements / branches / funcs / lines). `pnpm build` y `pnpm typecheck:e2e` pasan.
+- `pnpm lint` no se puede ejecutar en este checkout: Angular CLI falla porque no está instalado/declarado `@angular-eslint/builder`; `check:ui` sí pasa (276 ficheros, 21 reglas). No se alteraron dependencias ajenas a esta corrección. El workflow de CI actual no incluye `pnpm lint`; sus gates relevantes se validarán tras publicar este commit.
+- La recuperación de stream de la PR WebApi #176 no se ha probado con un proveedor real usando la imagen de esa rama: el contenedor aislado de esa PR chocó con el reto de autenticación del proveedor. La prueba HIA usa el servicio WebApi local preexistente sin reiniciarlo. Mantener #176 en Draft hasta cerrar esa limitación y los gates.
+- Revisión independiente encontró que el resumen de los smokes fijaba el puerto `:3001` aunque el destino loopback alternativo estuviera configurado. Se corrigió usando el origen validado; TDD falló antes y ahora pasa para los coordinadores IA y `household-meal` (puertos sintéticos `3456`/`3457`).

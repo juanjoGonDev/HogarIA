@@ -9,7 +9,12 @@ import {
   AI_LIVE_RECEIPT_UNSUBMITTED_TICKET_COUNT
 } from './ai-live-receipt-inputs.mjs';
 import {
+  AI_LIVE_CONNECTION_SMOKE_GREP,
   AI_LIVE_SMOKE_DEADLINES,
+  AI_LIVE_WORKFLOWS_SMOKE_COMPLETION_BUDGET,
+  AI_LIVE_WORKFLOWS_SMOKE_GREP,
+  AI_LIVE_HOUSEHOLD_PLAN_SMOKE_GREP,
+  AI_LIVE_WORKFLOWS_SMOKE_SCHEMA_NAMES,
   assertAiLiveSmokeDeadlineContract
 } from './ai-live-smoke-contract.mjs';
 
@@ -26,6 +31,7 @@ export const AI_LIVE_SMOKE_ENV = Object.freeze({
   requestTimeoutMs: 'HOGARIA_AI_REAL_SMOKE_REQUEST_TIMEOUT_MS',
   testTimeoutMs: 'HOGARIA_AI_REAL_SMOKE_TEST_TIMEOUT_MS',
   globalTimeoutMs: 'HOGARIA_AI_REAL_SMOKE_GLOBAL_TIMEOUT_MS',
+  webApiOrigin: 'HOGARIA_AI_REAL_SMOKE_WEB_API_ORIGIN',
   receiptPath: 'HOGARIA_AI_REAL_SMOKE_RECEIPT_PATH',
   receiptsOnly: 'HOGARIA_AI_REAL_SMOKE_RECEIPTS_ONLY',
   receiptSelection: 'HOGARIA_AI_REAL_SMOKE_RECEIPT_SELECTION',
@@ -33,7 +39,10 @@ export const AI_LIVE_SMOKE_ENV = Object.freeze({
   preferredJpegOrdinal: 'HOGARIA_AI_REAL_SMOKE_PREFERRED_JPEG_ORDINAL',
   householdMealOnly: 'HOGARIA_AI_REAL_SMOKE_HOUSEHOLD_MEAL_ONLY',
   recipeOnly: 'HOGARIA_AI_REAL_SMOKE_RECIPE_ONLY',
-  assistantOnly: 'HOGARIA_AI_REAL_SMOKE_ASSISTANT_ONLY'
+  assistantOnly: 'HOGARIA_AI_REAL_SMOKE_ASSISTANT_ONLY',
+  connectionOnly: 'HOGARIA_AI_REAL_SMOKE_CONNECTION_ONLY',
+  workflowsOnly: 'HOGARIA_AI_REAL_SMOKE_WORKFLOWS_ONLY',
+  householdPlanOnly: 'HOGARIA_AI_REAL_SMOKE_HOUSEHOLD_PLAN_ONLY'
 });
 
 export const AI_LIVE_SMOKE_KEY_MARKER = '__HOGARIA_AI_REAL_SMOKE_PROVIDER_KEY__';
@@ -45,6 +54,8 @@ export const AI_LIVE_RECEIPT_SMOKE_TICKET_COUNT = AI_LIVE_RECEIPT_UNSUBMITTED_TI
 export const AI_LIVE_RECEIPT_SMOKE_MAX_REQUEST_BYTES = 15 * 1024 * 1024;
 export const AI_LIVE_HOUSEHOLD_MEAL_SMOKE_COMPLETION_BUDGET = 1;
 export const AI_LIVE_HOUSEHOLD_MEAL_SCHEMA_NAME = 'weekly_meal_proposal';
+export const AI_LIVE_HOUSEHOLD_PLAN_SMOKE_COMPLETION_BUDGET = 1;
+export const AI_LIVE_HOUSEHOLD_PLAN_SCHEMA_NAME = 'household_plan';
 export const AI_LIVE_RECIPE_SMOKE_COMPLETION_BUDGET = 1;
 export const AI_LIVE_RECIPE_SCHEMA_NAME = 'generated_recipe';
 export const AI_LIVE_ASSISTANT_SMOKE_COMPLETION_BUDGET = 10;
@@ -58,6 +69,27 @@ export const AI_LIVE_HOUSEHOLD_MEAL_PROMPT_CONTRACT = Object.freeze({
     'HogarIA smoke hogar'
   ])
 });
+
+export function resolveAiLiveWebApiOrigin(env = process.env) {
+  const configuredOrigin = env[AI_LIVE_SMOKE_ENV.webApiOrigin];
+  if (configuredOrigin === undefined) return WEB_API_ORIGIN;
+  const match =
+    typeof configuredOrigin === 'string' &&
+    /^http:\/\/127\.0\.0\.1:(\d{1,5})\/?$/.exec(configuredOrigin);
+  const port = match ? Number(match[1]) : 0;
+  if (!match || port < 1 || port > 65_535 || String(port) !== match[1]) {
+    throw new Error('The AI smoke WebAPI origin must be an allowed local URL.');
+  }
+
+  return `http://127.0.0.1:${port}`;
+}
+
+export function aiLiveWebApiProviderLabel(origin) {
+  const resolvedOrigin = resolveAiLiveWebApiOrigin({
+    [AI_LIVE_SMOKE_ENV.webApiOrigin]: origin
+  });
+  return `local WebAPI :${new URL(resolvedOrigin).port}`;
+}
 
 const RECEIPT_SMOKE_INPUT_KEYS = Object.freeze([
   AI_LIVE_SMOKE_ENV.receiptPath,
@@ -105,6 +137,67 @@ export function validateAiLiveAssistantSmokeRequest(env = process.env) {
     env[AI_LIVE_SMOKE_ENV.recipeOnly] === '1'
   ) {
     throw new Error('Assistant-only smoke cannot combine with other smoke inputs.');
+  }
+  return true;
+}
+
+export function validateAiLiveConnectionSmokeRequest(env = process.env) {
+  const requested = env[AI_LIVE_SMOKE_ENV.connectionOnly];
+  if (requested === undefined || requested === '0' || requested === '') return false;
+  if (requested !== '1') {
+    throw new Error('Connection-only smoke requires the exact opt-in value.');
+  }
+  if (
+    RECEIPT_SMOKE_INPUT_KEYS.some((key) => env[key] !== undefined) ||
+    [
+      AI_LIVE_SMOKE_ENV.receiptsOnly,
+      AI_LIVE_SMOKE_ENV.householdMealOnly,
+      AI_LIVE_SMOKE_ENV.recipeOnly,
+      AI_LIVE_SMOKE_ENV.assistantOnly
+    ].some((key) => env[key] === '1')
+  ) {
+    throw new Error('Connection-only smoke cannot combine with other smoke inputs.');
+  }
+  return true;
+}
+
+export function validateAiLiveWorkflowSmokeRequest(env = process.env) {
+  const requested = env[AI_LIVE_SMOKE_ENV.workflowsOnly];
+  if (requested === undefined || requested === '0' || requested === '') return false;
+  if (requested !== '1') throw new Error('Workflow-only smoke requires the exact opt-in value.');
+  if (
+    RECEIPT_SMOKE_INPUT_KEYS.some((key) => env[key] !== undefined) ||
+    [
+      AI_LIVE_SMOKE_ENV.receiptsOnly,
+      AI_LIVE_SMOKE_ENV.householdMealOnly,
+      AI_LIVE_SMOKE_ENV.recipeOnly,
+      AI_LIVE_SMOKE_ENV.assistantOnly,
+      AI_LIVE_SMOKE_ENV.connectionOnly
+    ].some((key) => env[key] === '1')
+  ) {
+    throw new Error('Workflow-only smoke cannot combine with other smoke inputs.');
+  }
+  return true;
+}
+
+export function validateAiLiveHouseholdPlanSmokeRequest(env = process.env) {
+  const requested = env[AI_LIVE_SMOKE_ENV.householdPlanOnly];
+  if (requested === undefined || requested === '0' || requested === '') return false;
+  if (requested !== '1') {
+    throw new Error('Household plan smoke requires the exact opt-in value.');
+  }
+  if (
+    RECEIPT_SMOKE_INPUT_KEYS.some((key) => env[key] !== undefined) ||
+    [
+      AI_LIVE_SMOKE_ENV.receiptsOnly,
+      AI_LIVE_SMOKE_ENV.householdMealOnly,
+      AI_LIVE_SMOKE_ENV.recipeOnly,
+      AI_LIVE_SMOKE_ENV.assistantOnly,
+      AI_LIVE_SMOKE_ENV.connectionOnly,
+      AI_LIVE_SMOKE_ENV.workflowsOnly
+    ].some((key) => env[key] === '1')
+  ) {
+    throw new Error('Household plan smoke cannot combine with other smoke inputs.');
   }
   return true;
 }
@@ -171,7 +264,20 @@ export function validateAiLiveSmokeRunner(env, args) {
   const receiptsOnly = validateAiLiveReceiptSmokeRequest(env);
   const recipeOnly = validateAiLiveRecipeSmokeRequest(env);
   const assistantOnly = validateAiLiveAssistantSmokeRequest(env);
-  if ([householdMealOnly, receiptsOnly, recipeOnly, assistantOnly].filter(Boolean).length > 1) {
+  const connectionOnly = validateAiLiveConnectionSmokeRequest(env);
+  const workflowsOnly = validateAiLiveWorkflowSmokeRequest(env);
+  const householdPlanOnly = validateAiLiveHouseholdPlanSmokeRequest(env);
+  if (
+    [
+      householdMealOnly,
+      receiptsOnly,
+      recipeOnly,
+      assistantOnly,
+      connectionOnly,
+      workflowsOnly,
+      householdPlanOnly
+    ].filter(Boolean).length > 1
+  ) {
     throw new Error('AI live smoke modes cannot be combined.');
   }
   if (env[AI_LIVE_SMOKE_ENV.providerToken]) {
@@ -208,7 +314,17 @@ export function validateAiLiveSmokeRunner(env, args) {
         '--config=playwright.ai-household-meal-real-smoke.config.ts',
         'tests/e2e/household-meal-planning-live-smoke.spec.ts'
       ]
-    : ['--config=playwright.ai-real-smoke.config.ts', 'tests/e2e/ai-real-smoke.spec.ts'];
+    : [
+        '--config=playwright.ai-real-smoke.config.ts',
+        'tests/e2e/ai-real-smoke.spec.ts',
+        ...(connectionOnly
+          ? [`--grep=${AI_LIVE_CONNECTION_SMOKE_GREP}`]
+          : workflowsOnly
+            ? [`--grep=${AI_LIVE_WORKFLOWS_SMOKE_GREP}`]
+            : householdPlanOnly
+              ? [`--grep=${AI_LIVE_HOUSEHOLD_PLAN_SMOKE_GREP}`]
+              : [])
+      ];
   if (args.length !== expectedArgs.length || expectedArgs.some((arg) => !args.includes(arg))) {
     throw new Error('The dedicated AI smoke runner only accepts its isolated config and test.');
   }
@@ -269,18 +385,14 @@ function validStrictResponseFormat(value) {
 }
 
 function normalizeResponsesInput(input) {
+  if (typeof input === 'string') {
+    return input.length > 0 ? [{ role: 'user', content: input }] : null;
+  }
   if (!Array.isArray(input) || input.length === 0 || input.length > 200) return null;
   const messages = [];
   for (const message of input) {
-    if (
-      !hasAllowedKeys(message, ['role', 'content']) ||
-      !['system', 'developer', 'user', 'assistant'].includes(message.role)
-    ) {
+    if (!hasAllowedKeys(message, ['role', 'content']) || message.role !== 'user') {
       return null;
-    }
-    if (typeof message.content === 'string') {
-      messages.push({ role: message.role, content: message.content });
-      continue;
     }
     if (!Array.isArray(message.content) || message.content.length === 0) return null;
     const parts = [];
@@ -330,7 +442,7 @@ function normalizeBackgroundResponsesRequest(payload, state) {
     !hasAllowedKeys(
       payload,
       ['model', 'background', 'store', 'input', 'text'],
-      ['max_output_tokens', 'temperature', 'top_p', 'reasoning']
+      ['instructions', 'max_output_tokens', 'temperature', 'top_p', 'reasoning']
     ) ||
     payload.model !== state.model ||
     payload.background !== true ||
@@ -339,6 +451,12 @@ function normalizeBackgroundResponsesRequest(payload, state) {
     !hasExactKeys(payload.text.format, ['type', 'name', 'strict', 'schema']) ||
     payload.text.format.type !== 'json_schema' ||
     payload.text.format.strict !== true
+  ) {
+    return null;
+  }
+  if (
+    Object.hasOwn(payload, 'instructions') &&
+    (typeof payload.instructions !== 'string' || payload.instructions.length > 4_000)
   ) {
     return null;
   }
@@ -715,6 +833,10 @@ export function isolatedProcessEnvironments(env) {
   delete browser[AI_LIVE_SMOKE_ENV.recipeOnly];
   delete server[AI_LIVE_SMOKE_ENV.assistantOnly];
   delete browser[AI_LIVE_SMOKE_ENV.assistantOnly];
+  delete server[AI_LIVE_SMOKE_ENV.connectionOnly];
+  delete browser[AI_LIVE_SMOKE_ENV.connectionOnly];
+  delete server[AI_LIVE_SMOKE_ENV.workflowsOnly];
+  delete browser[AI_LIVE_SMOKE_ENV.workflowsOnly];
   delete server[AI_LIVE_SMOKE_ENV.receiptPath];
   delete browser[AI_LIVE_SMOKE_ENV.receiptPath];
   for (const key of [
@@ -740,7 +862,10 @@ export function createAiLiveSmokeRunnerEnvironment(
     deadlines = AI_LIVE_SMOKE_DEADLINES,
     householdMealOnly = false,
     recipeOnly = false,
-    assistantOnly = false
+    assistantOnly = false,
+    connectionOnly = false,
+    workflowsOnly = false,
+    householdPlanOnly = false
   }
 ) {
   assertAiLiveSmokeDeadlineContract(deadlines);
@@ -758,6 +883,7 @@ export function createAiLiveSmokeRunnerEnvironment(
     'HOME',
     'PLAYWRIGHT_BROWSERS_PATH',
     'E2E_CHROME_BIN',
+    'HOGARIA_AI_REAL_SMOKE_CAPTURE_DIR',
     AI_LIVE_SMOKE_ENV.receiptPath,
     AI_LIVE_SMOKE_ENV.receiptsOnly,
     AI_LIVE_SMOKE_ENV.receiptSelection,
@@ -768,7 +894,15 @@ export function createAiLiveSmokeRunnerEnvironment(
   const env = Object.fromEntries(
     allowedInherited
       .filter(
-        (key) => !(householdMealOnly || recipeOnly || assistantOnly) || !receiptInputs.has(key)
+        (key) =>
+          !(
+            householdMealOnly ||
+            recipeOnly ||
+            assistantOnly ||
+            connectionOnly ||
+            workflowsOnly ||
+            householdPlanOnly
+          ) || !receiptInputs.has(key)
       )
       .filter((key) => typeof parentEnv[key] === 'string')
       .map((key) => [key, parentEnv[key]])
@@ -789,6 +923,9 @@ export function createAiLiveSmokeRunnerEnvironment(
     ...(householdMealOnly ? { [AI_LIVE_SMOKE_ENV.householdMealOnly]: '1' } : {}),
     ...(recipeOnly ? { [AI_LIVE_SMOKE_ENV.recipeOnly]: '1' } : {}),
     ...(assistantOnly ? { [AI_LIVE_SMOKE_ENV.assistantOnly]: '1' } : {}),
+    ...(connectionOnly ? { [AI_LIVE_SMOKE_ENV.connectionOnly]: '1' } : {}),
+    ...(workflowsOnly ? { [AI_LIVE_SMOKE_ENV.workflowsOnly]: '1' } : {}),
+    ...(householdPlanOnly ? { [AI_LIVE_SMOKE_ENV.householdPlanOnly]: '1' } : {}),
     E2E_RATE_LIMIT: 'off'
   };
 }
@@ -801,8 +938,35 @@ export function isSuccessfulAiLiveSmokeResult({
   expectedReceiptTicketCount = AI_LIVE_RECEIPT_SMOKE_TICKET_COUNT,
   recipeOnly = false,
   assistantOnly = false,
+  connectionOnly = false,
+  workflowsOnly = false,
+  householdPlanOnly = false,
   proxyMetrics
 }) {
+  if (householdPlanOnly) {
+    return isSuccessfulAiLiveHouseholdPlanSmokeResult({
+      runnerExit,
+      cleanupFailed,
+      calls,
+      proxyMetrics
+    });
+  }
+  if (workflowsOnly) {
+    return isSuccessfulAiLiveWorkflowSmokeResult({
+      runnerExit,
+      cleanupFailed,
+      calls,
+      proxyMetrics
+    });
+  }
+  if (connectionOnly) {
+    return isSuccessfulAiLiveConnectionSmokeResult({
+      runnerExit,
+      cleanupFailed,
+      calls,
+      proxyMetrics
+    });
+  }
   if (assistantOnly) {
     return isSuccessfulAiLiveAssistantSmokeResult({
       runnerExit,
@@ -838,6 +1002,75 @@ export function isSuccessfulAiLiveSmokeResult({
     calls.length <= AI_LIVE_SMOKE_COMPLETION_BUDGET &&
     calls.every(isSuccessfulBackgroundCompletion) &&
     proxyMetrics?.failed !== true
+  );
+}
+
+export function isSuccessfulAiLiveHouseholdPlanSmokeResult({
+  runnerExit,
+  cleanupFailed,
+  calls,
+  proxyMetrics
+}) {
+  const call = Array.isArray(calls) && calls.length === 1 ? calls[0] : undefined;
+  return (
+    runnerExit?.code === 0 &&
+    runnerExit.cancelled !== true &&
+    runnerExit.timedOut !== true &&
+    runnerExit.runnerCleaned === true &&
+    cleanupFailed !== true &&
+    isSuccessfulBackgroundCompletion(call) &&
+    call?.schemaName === AI_LIVE_HOUSEHOLD_PLAN_SCHEMA_NAME &&
+    call?.requestContract?.strictJsonSchema === true &&
+    proxyMetrics?.requestAttempts === AI_LIVE_HOUSEHOLD_PLAN_SMOKE_COMPLETION_BUDGET &&
+    proxyMetrics.rejectedRequests === 0 &&
+    proxyMetrics.failed !== true
+  );
+}
+
+export function isSuccessfulAiLiveConnectionSmokeResult({
+  runnerExit,
+  cleanupFailed,
+  calls,
+  proxyMetrics
+}) {
+  const call = Array.isArray(calls) && calls.length === 1 ? calls[0] : undefined;
+  return (
+    runnerExit?.code === 0 &&
+    runnerExit.cancelled !== true &&
+    runnerExit.timedOut !== true &&
+    runnerExit.runnerCleaned === true &&
+    cleanupFailed !== true &&
+    isSuccessfulBackgroundCompletion(call) &&
+    proxyMetrics?.requestAttempts === 1 &&
+    proxyMetrics.rejectedRequests === 0 &&
+    proxyMetrics.failed !== true
+  );
+}
+
+export function isSuccessfulAiLiveWorkflowSmokeResult({
+  runnerExit,
+  cleanupFailed,
+  calls,
+  proxyMetrics
+}) {
+  const schemas = Array.isArray(calls) ? calls.map((call) => call?.schemaName).sort() : [];
+  const expectedSchemas = [...AI_LIVE_WORKFLOWS_SMOKE_SCHEMA_NAMES].sort();
+  return (
+    runnerExit?.code === 0 &&
+    runnerExit.cancelled !== true &&
+    runnerExit.timedOut !== true &&
+    runnerExit.runnerCleaned === true &&
+    cleanupFailed !== true &&
+    Array.isArray(calls) &&
+    calls.length === AI_LIVE_WORKFLOWS_SMOKE_COMPLETION_BUDGET &&
+    calls.every(
+      (call) =>
+        isSuccessfulBackgroundCompletion(call) && call.requestContract?.strictJsonSchema === true
+    ) &&
+    schemas.join('|') === expectedSchemas.join('|') &&
+    proxyMetrics?.requestAttempts === AI_LIVE_WORKFLOWS_SMOKE_COMPLETION_BUDGET &&
+    proxyMetrics.rejectedRequests === 0 &&
+    proxyMetrics.failed !== true
   );
 }
 
@@ -1226,6 +1459,202 @@ function sendJson(response, status, message) {
   response.end(body);
 }
 
+const SAFE_PROVIDER_ERROR_TYPES = new Set([
+  'api_error',
+  'invalid_request_error',
+  'authentication_error',
+  'permission_error',
+  'rate_limit_error',
+  'server_error',
+  'insufficient_quota'
+]);
+const SAFE_PROVIDER_ERROR_CODES = new Set([
+  'unsupported_parameter',
+  'unsupported_value',
+  'invalid_value',
+  'invalid_type',
+  'invalid_json_schema',
+  'json_schema_validation_error',
+  'model_not_found',
+  'context_length_exceeded',
+  'insufficient_quota',
+  'rate_limit_exceeded',
+  'invalid_api_key',
+  'invalid_prompt',
+  'responses_not_supported',
+  'responses_endpoint_not_supported',
+  'background_not_supported',
+  'responses_input_unsupported',
+  'bad_request',
+  'idempotency_conflict',
+  'idempotency_key_invalid',
+  'internal_error',
+  'payload_too_large',
+  'response_cancelled',
+  'response_not_cancellable',
+  'response_not_found',
+  'response_store_unavailable',
+  'responses_attachment_reference_unsupported',
+  'responses_text_format_required',
+  'responses_background_required',
+  'responses_field_unsupported',
+  'responses_runtime_unavailable',
+  'responses_storage_unavailable',
+  'responses_tool_choice_unsupported',
+  'responses_tools_unsupported',
+  'responses_store_required',
+  'responses_streaming_unsupported',
+  'responses_unexpected_tool_output'
+]);
+const SAFE_PROVIDER_ERROR_PARAMS = new Set([
+  'model',
+  'temperature',
+  'top_p',
+  'max_output_tokens',
+  'input',
+  'input_image',
+  'input_file',
+  'text.format',
+  'text.format.type',
+  'background',
+  'store',
+  'reasoning.effort'
+]);
+
+function sanitizeProviderError(payload) {
+  const error = payload?.error && typeof payload.error === 'object' ? payload.error : payload;
+  if (!error || typeof error !== 'object' || Array.isArray(error)) return {};
+  return Object.fromEntries(
+    [
+      ['type', SAFE_PROVIDER_ERROR_TYPES],
+      ['code', SAFE_PROVIDER_ERROR_CODES],
+      ['param', SAFE_PROVIDER_ERROR_PARAMS]
+    ].flatMap(([key, allowed]) =>
+      typeof error[key] === 'string' && allowed.has(error[key]) ? [[key, error[key]]] : []
+    )
+  );
+}
+
+async function readSafeProviderError(response, contentType) {
+  const maxBytes = 64 * 1024;
+  const chunks = [];
+  let byteLength = 0;
+  let tooLarge = false;
+  const contentTypeClass = contentType.includes('application/json')
+    ? 'json'
+    : contentType.startsWith('text/')
+      ? 'text'
+      : contentType
+        ? 'other'
+        : 'missing';
+  try {
+    for await (const chunk of response) {
+      if (contentTypeClass !== 'json' || tooLarge) continue;
+      byteLength += chunk.length;
+      if (byteLength > maxBytes) {
+        tooLarge = true;
+        chunks.length = 0;
+        continue;
+      }
+      chunks.push(chunk);
+    }
+  } catch {
+    return {
+      fields: {},
+      envelope: {
+        contentType: contentTypeClass,
+        bodyFormat: 'read-failed',
+        errorShape: 'unknown',
+        knownFields: []
+      }
+    };
+  }
+  if (contentTypeClass !== 'json') {
+    return {
+      fields: {},
+      envelope: {
+        contentType: contentTypeClass,
+        bodyFormat: tooLarge ? 'oversized' : byteLength > 0 ? 'opaque' : 'empty',
+        errorShape: 'unknown',
+        knownFields: []
+      }
+    };
+  }
+  if (tooLarge) {
+    return {
+      fields: {},
+      envelope: {
+        contentType: contentTypeClass,
+        bodyFormat: 'oversized',
+        errorShape: 'unknown',
+        knownFields: []
+      }
+    };
+  }
+  if (chunks.length === 0) {
+    return {
+      fields: {},
+      envelope: {
+        contentType: contentTypeClass,
+        bodyFormat: 'empty',
+        errorShape: 'unknown',
+        knownFields: []
+      }
+    };
+  }
+  try {
+    const payload = JSON.parse(Buffer.concat(chunks, byteLength).toString('utf8'));
+    const error = payload?.error && typeof payload.error === 'object' ? payload.error : payload;
+    const safeKeys = new Set(['type', 'code', 'param', 'message', 'error', 'success', 'status']);
+    const knownFields =
+      error && typeof error === 'object' && !Array.isArray(error)
+        ? Object.keys(error)
+            .filter((key) => safeKeys.has(key))
+            .sort()
+        : [];
+    return {
+      fields: sanitizeProviderError(payload),
+      envelope: {
+        contentType: contentTypeClass,
+        bodyFormat: 'json',
+        errorShape:
+          error && typeof error === 'object' && !Array.isArray(error)
+            ? 'object'
+            : typeof error === 'string'
+              ? 'string'
+              : error === null || error === undefined
+                ? 'missing'
+                : 'scalar',
+        knownFields
+      }
+    };
+  } catch {
+    return {
+      fields: {},
+      envelope: {
+        contentType: contentTypeClass,
+        bodyFormat: 'invalid-json',
+        errorShape: 'unknown',
+        knownFields: []
+      }
+    };
+  }
+}
+
+function sendSafeProviderError(response, status, providerError) {
+  const safeError =
+    providerError && Object.keys(providerError).length > 0
+      ? providerError
+      : 'Local AI provider returned a non-success status.';
+  const body = Buffer.from(JSON.stringify({ error: safeError }), 'utf8');
+  response.writeHead(status, {
+    'content-type': 'application/json',
+    'content-length': body.length,
+    'cache-control': 'no-store'
+  });
+  response.end(body);
+}
+
 function collectRequestBody(request, maxBytes) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -1250,11 +1679,34 @@ function collectRequestBody(request, maxBytes) {
   });
 }
 
-function rejectLiveProxyRequest(response, state, status, message) {
+function rejectLiveProxyRequest(response, state, status, message, rejectionCode) {
   if (state.expectedSchemaName || state.requireReceiptAttachments) state.failed = true;
   if (state.expectedSchemaName) {
     state.metrics.failed = true;
     state.metrics.rejectedRequests += 1;
+    if (
+      [
+        'background_contract',
+        'meal_context_contract',
+        'meal_context_attachments',
+        'meal_context_shape',
+        'meal_context_member_shape',
+        'meal_context_member_aliases',
+        'meal_context_member_preferences_shape',
+        'meal_context_member_strict_allergies',
+        'meal_context_member_likes',
+        'meal_context_member_dislikes',
+        'meal_context_member_objectives',
+        'meal_context_member_schedules',
+        'meal_context_planning_inputs',
+        'meal_context_previous_plan',
+        'meal_context_identity_guard',
+        'prompt_contract',
+        'schema_contract'
+      ].includes(rejectionCode)
+    ) {
+      state.metrics.rejectionCodes.push(rejectionCode);
+    }
   }
   sendJson(response, status, message);
 }
@@ -1581,43 +2033,74 @@ function validMealContextAttachment(messages) {
   };
 }
 
-function validEffectiveMemberProfiles(context) {
+function effectiveMemberProfilesFailure(context) {
   if (
     !Array.isArray(context.participants) ||
     context.participants.length !== 2 ||
     !hasExactKeys(context.household, ['objective', 'schedule'])
   ) {
-    return false;
+    return 'meal_context_member_shape';
   }
   const byAlias = new Map(context.participants.map((member) => [member?.alias, member]));
-  if (byAlias.size !== 2 || !byAlias.has('P1') || !byAlias.has('P2')) return false;
-  const expected = {
-    P1: { likes: ['tofu'], dislikes: ['pollo'] },
-    P2: { likes: ['pollo'], dislikes: ['tofu'] }
-  };
-  return ['P1', 'P2'].every((alias) => {
+  if (byAlias.size !== 2 || !byAlias.has('P1') || !byAlias.has('P2')) {
+    return 'meal_context_member_aliases';
+  }
+  const expectedPreferences = [
+    { likes: ['tofu'], dislikes: ['pollo'] },
+    { likes: ['pollo'], dislikes: ['tofu'] }
+  ];
+  for (const alias of ['P1', 'P2']) {
     const member = byAlias.get(alias);
-    const preference = expected[alias];
-    return (
-      hasExactKeys(member, ['alias', 'preferences', 'effectiveObjective', 'effectiveSchedule']) &&
-      hasExactKeys(member.preferences, ['strictAllergies', 'likes', 'dislikes']) &&
-      Array.isArray(member.preferences.strictAllergies) &&
-      member.preferences.strictAllergies.length === 0 &&
-      JSON.stringify(member.preferences.likes) === JSON.stringify(preference.likes) &&
-      JSON.stringify(member.preferences.dislikes) === JSON.stringify(preference.dislikes) &&
-      hasExactKeys(member.effectiveObjective, ['source', 'goals', 'notes']) &&
-      member.effectiveObjective.source === 'household' &&
-      Array.isArray(member.effectiveObjective.goals) &&
-      member.effectiveObjective.goals.includes('balanced') &&
-      typeof member.effectiveObjective.notes === 'string' &&
-      hasExactKeys(member.effectiveSchedule, ['source', 'mealTypes', 'mealTimes']) &&
-      member.effectiveSchedule.source === 'household' &&
-      isRecord(member.effectiveSchedule.mealTypes) &&
-      member.effectiveSchedule.mealTypes.lunch === true &&
-      isRecord(member.effectiveSchedule.mealTimes) &&
-      typeof member.effectiveSchedule.mealTimes.lunch === 'string'
+    if (
+      !hasExactKeys(member, ['alias', 'preferences', 'effectiveObjective', 'effectiveSchedule'])
+    ) {
+      return 'meal_context_member_shape';
+    }
+    if (
+      !hasExactKeys(member.preferences, ['strictAllergies', 'likes', 'dislikes']) ||
+      !Array.isArray(member.preferences.strictAllergies) ||
+      !Array.isArray(member.preferences.likes) ||
+      !Array.isArray(member.preferences.dislikes)
+    ) {
+      return 'meal_context_member_preferences_shape';
+    }
+    if (member.preferences.strictAllergies.length !== 0) {
+      return 'meal_context_member_strict_allergies';
+    }
+    const matchingProfile = expectedPreferences.findIndex(
+      (preference) =>
+        JSON.stringify(member.preferences.likes) === JSON.stringify(preference.likes) &&
+        JSON.stringify(member.preferences.dislikes) === JSON.stringify(preference.dislikes)
     );
-  });
+    if (matchingProfile < 0) {
+      const likesMatch = expectedPreferences.some(
+        (preference) =>
+          JSON.stringify(member.preferences.likes) === JSON.stringify(preference.likes)
+      );
+      return likesMatch ? 'meal_context_member_dislikes' : 'meal_context_member_likes';
+    }
+    expectedPreferences.splice(matchingProfile, 1);
+    if (
+      !hasExactKeys(member.effectiveObjective, ['source', 'goals', 'notes']) ||
+      member.effectiveObjective.source !== 'household' ||
+      !Array.isArray(member.effectiveObjective.goals) ||
+      !member.effectiveObjective.goals.includes('balanced') ||
+      typeof member.effectiveObjective.notes !== 'string'
+    ) {
+      return 'meal_context_member_objectives';
+    }
+    if (
+      !hasExactKeys(member.effectiveSchedule, ['source', 'mealTypes', 'mealTimes']) ||
+      member.effectiveSchedule.source !== 'household' ||
+      !isRecord(member.effectiveSchedule.mealTypes) ||
+      member.effectiveSchedule.mealTypes.lunch !== true ||
+      !isRecord(member.effectiveSchedule.mealTimes) ||
+      typeof member.effectiveSchedule.mealTimes.lunch !== 'string'
+    ) {
+      return 'meal_context_member_schedules';
+    }
+  }
+  return undefined;
 }
 
 function validRequiredMealTurns(context) {
@@ -1712,8 +2195,13 @@ function validPreviousPlan(context) {
 }
 
 function mealContextContract(messages, state) {
+  state.mealContextRejectionCode = undefined;
+  const reject = (code) => {
+    state.mealContextRejectionCode = code;
+    return undefined;
+  };
   const attachment = validMealContextAttachment(messages);
-  if (!attachment) return undefined;
+  if (!attachment) return reject('meal_context_attachments');
   const { context, text, catalog, catalogText, selectableRecipeAliases } = attachment;
   const topLevelValid =
     hasExactKeys(context, [
@@ -1732,7 +2220,8 @@ function mealContextContract(messages, state) {
       hasExactKeys(context.household.objective, ['goals', 'notes'])) &&
     (context.household.schedule === null ||
       hasExactKeys(context.household.schedule, ['mealTypes', 'mealTimes']));
-  const memberProfilesValid = topLevelValid && validEffectiveMemberProfiles(context);
+  const memberFailure = topLevelValid ? effectiveMemberProfilesFailure(context) : undefined;
+  const memberProfilesValid = topLevelValid && !memberFailure;
   const turnsValid = topLevelValid && validRequiredMealTurns(context);
   const planningInputsValid =
     topLevelValid &&
@@ -1750,15 +2239,11 @@ function mealContextContract(messages, state) {
     !containsPrivateIdentityKey(context) &&
     !containsPrivateIdentityKey(catalog) &&
     forbiddenTerms.every((term) => !fullText.includes(term));
-  if (
-    !topLevelValid ||
-    !memberProfilesValid ||
-    !planningInputsValid ||
-    !previousPlanValid ||
-    !forbiddenIdentityTermsAbsent
-  ) {
-    return undefined;
-  }
+  if (!topLevelValid) return reject('meal_context_shape');
+  if (!memberProfilesValid) return reject(memberFailure ?? 'meal_context_shape');
+  if (!planningInputsValid) return reject('meal_context_planning_inputs');
+  if (!previousPlanValid) return reject('meal_context_previous_plan');
+  if (!forbiddenIdentityTermsAbsent) return reject('meal_context_identity_guard');
   return {
     contextJsonAttachmentCount: 1,
     contextJsonAttachmentValid: true,
@@ -2120,7 +2605,10 @@ async function handleProxyRequest(request, response, state) {
       response,
       state,
       400,
-      'Live AI smoke request does not match its expected JSON Schema contract.'
+      'Live AI smoke request does not match its expected JSON Schema contract.',
+      requestSchemaName === AI_LIVE_HOUSEHOLD_MEAL_SCHEMA_NAME && !contextContract
+        ? (state.mealContextRejectionCode ?? 'meal_context_contract')
+        : 'schema_contract'
     );
     return;
   }
@@ -2133,7 +2621,8 @@ async function handleProxyRequest(request, response, state) {
       response,
       state,
       400,
-      'Live household meal prompt is outside its synthetic profile contract.'
+      'Live household meal prompt is outside its synthetic profile contract.',
+      'prompt_contract'
     );
     return;
   }
@@ -2172,7 +2661,13 @@ async function handleProxyRequest(request, response, state) {
   const startedAt = Date.now();
   let settled = false;
   let upstream;
-  const completeMetrics = (status, usage = null, responseFormat = null) => {
+  const completeMetrics = (
+    status,
+    usage = null,
+    responseFormat = null,
+    providerError = null,
+    providerErrorEnvelope = null
+  ) => {
     if (settled) return;
     settled = true;
     if (upstream) state.upstreamRequests.delete(upstream);
@@ -2209,9 +2704,18 @@ async function handleProxyRequest(request, response, state) {
       },
       elapsedMs,
       usage,
-      responseFormat
+      responseFormat,
+      ...(providerError && Object.keys(providerError).length > 0 ? { providerError } : {}),
+      ...(providerErrorEnvelope ? { providerErrorEnvelope } : {})
     });
-    notifySafeProgress(state.onCompletion, { ordinal, status, elapsedMs, responseFormat });
+    notifySafeProgress(state.onCompletion, {
+      ordinal,
+      status,
+      elapsedMs,
+      responseFormat,
+      ...(providerError && Object.keys(providerError).length > 0 ? { providerError } : {}),
+      ...(providerErrorEnvelope ? { providerErrorEnvelope } : {})
+    });
   };
   const upstreamPath = responsesBackground ? '/v1/responses' : '/v1/chat/completions';
   upstream = httpRequest(
@@ -2236,12 +2740,12 @@ async function handleProxyRequest(request, response, state) {
       const status = upstreamResponse.statusCode ?? 502;
       const contentType = String(upstreamResponse.headers['content-type'] ?? '').toLowerCase();
       if (status < 200 || status >= 300) {
-        upstreamResponse.resume();
-        completeMetrics(status);
-        sendJson(
+        const providerDiagnostic = await readSafeProviderError(upstreamResponse, contentType);
+        completeMetrics(status, null, null, providerDiagnostic.fields, providerDiagnostic.envelope);
+        sendSafeProviderError(
           response,
           status >= 300 && status < 400 ? 502 : status,
-          'Local AI provider returned a non-success status.'
+          providerDiagnostic.fields
         );
         return;
       }
@@ -2431,7 +2935,13 @@ export async function createAiLiveProxy({
     onCompletion,
     responses: new Map(),
     upstreamRequests: new Set(),
-    metrics: { calls: [], requestAttempts: 0, rejectedRequests: 0, failed: false }
+    metrics: {
+      calls: [],
+      requestAttempts: 0,
+      rejectedRequests: 0,
+      rejectionCodes: [],
+      failed: false
+    }
   };
   let closePromise;
   const server = createServer((request, response) => {

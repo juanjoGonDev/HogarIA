@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { prepareExistingAiLiveSmokeSession } from './ai-live-existing-webapi.mjs';
 import { runAiLiveSmokeRunner } from './ai-live-smoke-runner-control.mjs';
 import {
+  aiLiveWebApiProviderLabel,
   AI_LIVE_HOUSEHOLD_MEAL_SMOKE_COMPLETION_BUDGET,
   AI_LIVE_HOUSEHOLD_MEAL_SCHEMA_NAME,
   AI_LIVE_HOUSEHOLD_MEAL_PROMPT_CONTRACT,
@@ -145,7 +146,30 @@ export async function runHouseholdMealRealSmoke({
     if (cleanupFailed)
       safeFailure = 'No se pudo verificar la limpieza de los recursos propios del smoke.';
     else if (proxy?.metrics.rejectedRequests > 0 && calls.length === 0) {
-      safeFailure = `El proxy local rechazó la petición antes de contactar WebAPI (${proxy.metrics.rejectedRequests} rechazo(s)); no se registró ninguna completion.`;
+      const safeRejectionCodes = new Set([
+        'background_contract',
+        'meal_context_contract',
+        'meal_context_attachments',
+        'meal_context_shape',
+        'meal_context_member_shape',
+        'meal_context_member_aliases',
+        'meal_context_member_preferences_shape',
+        'meal_context_member_strict_allergies',
+        'meal_context_member_likes',
+        'meal_context_member_dislikes',
+        'meal_context_member_objectives',
+        'meal_context_member_schedules',
+        'meal_context_planning_inputs',
+        'meal_context_previous_plan',
+        'meal_context_identity_guard',
+        'prompt_contract',
+        'schema_contract'
+      ]);
+      const rejectionCodes = Array.isArray(proxy.metrics.rejectionCodes)
+        ? [...new Set(proxy.metrics.rejectionCodes.filter((code) => safeRejectionCodes.has(code)))]
+        : [];
+      const reason = rejectionCodes.length > 0 ? `; causa=${rejectionCodes.join(',')}` : '';
+      safeFailure = `El proxy local rechazó la petición antes de contactar WebAPI (${proxy.metrics.rejectedRequests} rechazo(s)${reason}); no se registró ninguna completion.`;
     } else if (calls.length || proxy?.metrics.requestAttempts) {
       const statuses = calls
         .map((call) => (Number.isInteger(call.status) ? call.status : 'sin estado'))
@@ -160,10 +184,11 @@ export async function runHouseholdMealRealSmoke({
   }
 
   const usage = safeUsage(calls);
+  const provider = aiLiveWebApiProviderLabel(session.origin);
   writeSuccess(
     JSON.stringify({
       result: 'passed',
-      provider: 'local WebAPI :3001',
+      provider,
       model: session.model,
       scenario: 'household-meal-proposal',
       completions: AI_LIVE_HOUSEHOLD_MEAL_SMOKE_COMPLETION_BUDGET,

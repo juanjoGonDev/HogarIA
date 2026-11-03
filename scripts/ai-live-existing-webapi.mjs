@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import { AI_LIVE_SMOKE_ENV, WEB_API_ORIGIN } from './ai-live-smoke-safety.mjs';
+import { AI_LIVE_SMOKE_ENV, resolveAiLiveWebApiOrigin } from './ai-live-smoke-safety.mjs';
 
 const REQUEST_TIMEOUT_MS = 8_000;
 const MAX_JSON_RESPONSE_BYTES = 128 * 1024;
@@ -21,6 +21,7 @@ export async function prepareExistingAiLiveSmokeSession({
   signal,
   tokenName = `HogarIA real smoke ${randomUUID()}`
 } = {}) {
+  const origin = resolveAiLiveWebApiOrigin(env);
   let token = readSecureBearer(env);
   let ownedTokenId;
   let tokenCreationAttempted = false;
@@ -33,7 +34,7 @@ export async function prepareExistingAiLiveSmokeSession({
     const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
     const requestSignal = signal && !cleanup ? AbortSignal.any([signal, timeout]) : timeout;
     try {
-      return await fetchImpl(new URL(path, WEB_API_ORIGIN), {
+      return await fetchImpl(new URL(path, origin), {
         ...options,
         headers: { accept: 'application/json', ...options.headers },
         redirect: 'error',
@@ -133,7 +134,7 @@ export async function prepareExistingAiLiveSmokeSession({
     assertGpt5TextImageModel(catalog);
 
     return Object.freeze({
-      origin: WEB_API_ORIGIN,
+      origin,
       token,
       model: 'gpt-5',
       cleanup

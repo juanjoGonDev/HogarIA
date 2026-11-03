@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { join, resolve } from 'node:path';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { writeFileSync } from 'node:fs';
 import { expect, test } from './fixtures';
 import { registerAndGoto, registerWithHousehold } from './helpers/auth';
@@ -12,7 +12,10 @@ import {
   AI_LIVE_RECEIPT_PREFERRED_JPEG_ONLY_SELECTION,
   loadAiLiveReceiptPlan
 } from '../../scripts/ai-live-receipt-inputs.mjs';
-import { AI_LIVE_ASSISTANT_ACTION_KINDS } from '../../scripts/ai-live-smoke-contract.mjs';
+import {
+  AI_LIVE_ASSISTANT_ACTION_KINDS,
+  AI_LIVE_WORKFLOWS_SMOKE_GREP
+} from '../../scripts/ai-live-smoke-contract.mjs';
 
 const TOKEN_KEY = 'hogar:v1:auth_token';
 const PROVIDER_KEY_MARKER = '__HOGARIA_AI_REAL_SMOKE_PROVIDER_KEY__';
@@ -52,6 +55,9 @@ const LIVE_SMOKE_ENABLED =
 const LIVE_RECEIPTS_ONLY = process.env.HOGARIA_AI_REAL_SMOKE_RECEIPTS_ONLY === '1';
 const LIVE_RECIPE_ONLY = process.env.HOGARIA_AI_REAL_SMOKE_RECIPE_ONLY === '1';
 const LIVE_ASSISTANT_ONLY = process.env.HOGARIA_AI_REAL_SMOKE_ASSISTANT_ONLY === '1';
+const LIVE_CONNECTION_ONLY = process.env.HOGARIA_AI_REAL_SMOKE_CONNECTION_ONLY === '1';
+const LIVE_WORKFLOWS_ONLY = process.env.HOGARIA_AI_REAL_SMOKE_WORKFLOWS_ONLY === '1';
+const LIVE_HOUSEHOLD_PLAN_ONLY = process.env.HOGARIA_AI_REAL_SMOKE_HOUSEHOLD_PLAN_ONLY === '1';
 const LIVE_RECEIPT_SELECTION = process.env.HOGARIA_AI_REAL_SMOKE_RECEIPT_SELECTION;
 const LIVE_SMOKE_PHASE_FILE = process.env.E2E_RUN_DIR
   ? join(process.env.E2E_RUN_DIR, 'ai-live-smoke-phase')
@@ -77,7 +83,9 @@ function liveAssistantDatabaseSnapshot(): Record<string, string[]> {
   const database = new Database(databasePath, { readonly: true, fileMustExist: true });
   try {
     const tables = database
-      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name != 'ai_jobs'"
+      )
       .all() as { name: string }[];
     return Object.fromEntries(
       tables.map(({ name }) => {
@@ -89,6 +97,27 @@ function liveAssistantDatabaseSnapshot(): Record<string, string[]> {
         return [name, rows.map((row) => JSON.stringify(row)).sort()];
       })
     );
+  } finally {
+    database.close();
+  }
+}
+
+function liveAssistantQueueSnapshot(configId: string): Array<Record<string, unknown>> {
+  const runDirectory = process.env.E2E_RUN_DIR;
+  const databasePath = process.env.DATABASE_PATH;
+  if (!runDirectory || !databasePath) throw new Error('E2E requiere SQLite temporal aislada');
+  if (resolve(databasePath) !== resolve(runDirectory, 'hogaria.sqlite')) {
+    throw new Error('DATABASE_PATH debe ser la SQLite temporal de este smoke');
+  }
+
+  const database = new Database(databasePath, { readonly: true, fileMustExist: true });
+  try {
+    return database
+      .prepare(
+        `SELECT kind, status, attempts, max_attempts AS maxAttempts
+           FROM ai_jobs WHERE config_id = ? AND kind = 'assistant' ORDER BY queue_order, id`
+      )
+      .all(configId) as Array<Record<string, unknown>>;
   } finally {
     database.close();
   }
@@ -451,8 +480,10 @@ async function authToken(page: Parameters<typeof registerAndGoto>[0]): Promise<s
 
 async function saveLiveAiConfig(
   page: Parameters<typeof registerAndGoto>[0],
-  token: string
+  token: string,
+  options: { concurrency?: number } = {}
 ): Promise<string> {
+  const concurrency = options.concurrency ?? 1;
   const proxyUrl = process.env.HOGARIA_AI_REAL_SMOKE_PROXY_URL;
   const model = process.env.HOGARIA_AI_REAL_SMOKE_MODEL;
   expect(proxyUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/v1$/);
@@ -469,7 +500,7 @@ async function saveLiveAiConfig(
       maxTokens: LIVE_RECIPE_MAX_TOKENS,
       timeout: LIVE_CONFIG_TIMEOUT_MS,
       retryAttempts: 0,
-      concurrency: 1
+      concurrency
     }
   });
   expect(created.status()).toBe(201);
@@ -482,7 +513,7 @@ async function saveLiveAiConfig(
     };
   };
   expect(config.data?.id).toBeTruthy();
-  expect(config.data).toMatchObject({ retryAttempts: 0, concurrency: 1, isActive: true });
+  expect(config.data).toMatchObject({ retryAttempts: 0, concurrency, isActive: true });
 
   // GPT-5 does not accept a custom temperature. The UI config schema permits null
   // as “leave this provider option out”, but create defaults it, so clear it here.
@@ -498,6 +529,587 @@ async function saveLiveAiConfig(
   expect(updated.ok()).toBeTruthy();
   return config.data!.id!;
 }
+
+type LiveAiConfigStatus = {
+  id: string;
+  testStatus: 'testing' | 'success' | 'failed' | 'interrupted' | null;
+  testError: string | null;
+  testLatencyMs: number | null;
+};
+
+async function liveAiConfigStatus(
+  page: Parameters<typeof registerAndGoto>[0],
+  token: string,
+  configId: string
+): Promise<LiveAiConfigStatus> {
+  const response = await page.request.get('/api/ai/configs', {
+    headers: { authorization: `Bearer ${token}` }
+  });
+  expect(response.status()).toBe(200);
+  const configs = (await response.json()).data as LiveAiConfigStatus[];
+  const config = configs.find(({ id }) => id === configId);
+  expect(config, 'la configuración aislada debe seguir existiendo tras recargar').toBeTruthy();
+  return config!;
+}
+
+async function waitForLiveConnectionTest(
+  page: Parameters<typeof registerAndGoto>[0],
+  token: string,
+  configId: string
+): Promise<LiveAiConfigStatus> {
+  await expect
+    .poll(async () => (await liveAiConfigStatus(page, token, configId)).testStatus, {
+      timeout: LIVE_REQUEST_TIMEOUT_MS,
+      intervals: [250, 500, 1000, 2000]
+    })
+    .toMatch(/^(success|failed|interrupted)$/);
+  return liveAiConfigStatus(page, token, configId);
+}
+
+async function liveConnectionFailureDiagnostic(
+  page: Parameters<typeof registerAndGoto>[0],
+  token: string,
+  configId: string,
+  config: LiveAiConfigStatus
+): Promise<string> {
+  const response = await page.request.get(`/api/ai/configs/${configId}/queue`, {
+    headers: { authorization: `Bearer ${token}` }
+  });
+  const queue = response.ok() ? ((await response.json()).data?.jobs ?? []) : [];
+  const jobs = queue
+    .filter((job: Record<string, unknown>) => job.kind === 'connection_test')
+    .map((job: Record<string, unknown>) => ({
+      status: job.status,
+      attempts: job.attempts,
+      error: job.error,
+      providerResponseId: job.providerResponseId,
+      providerTransport: job.providerTransport,
+      providerHttpStatus: job.providerHttpStatus,
+      providerErrorType: job.providerErrorType,
+      providerErrorCode: job.providerErrorCode,
+      providerErrorParam: job.providerErrorParam,
+      elapsedMs: job.elapsedMs,
+      diagnosticStage: job.diagnosticStage
+    }));
+  const latest = jobs[0] as Record<string, unknown> | undefined;
+  if (latest) {
+    const safe = {
+      testStatus: ['testing', 'success', 'failed', 'interrupted'].includes(
+        String(config.testStatus)
+      )
+        ? config.testStatus
+        : 'unknown',
+      testError: [
+        'PROVIDER',
+        'TIMEOUT',
+        'CANCELLED',
+        'WORKER_EXCEPTION',
+        'WORKER_STALLED'
+      ].includes(String(config.testError))
+        ? config.testError
+        : 'unknown',
+      status:
+        Number.isInteger(latest.providerHttpStatus) &&
+        Number(latest.providerHttpStatus) >= 100 &&
+        Number(latest.providerHttpStatus) <= 599
+          ? latest.providerHttpStatus
+          : null,
+      error: ['PROVIDER', 'TIMEOUT', 'CANCELLED', 'WORKER_EXCEPTION', 'WORKER_STALLED'].includes(
+        String(latest.error)
+      )
+        ? latest.error
+        : 'unknown',
+      transport:
+        latest.providerTransport === 'responses_background' ? latest.providerTransport : null,
+      type: [
+        'api_error',
+        'invalid_request_error',
+        'authentication_error',
+        'permission_error',
+        'rate_limit_error',
+        'server_error',
+        'insufficient_quota'
+      ].includes(String(latest.providerErrorType))
+        ? latest.providerErrorType
+        : null,
+      code: [
+        'unsupported_parameter',
+        'unsupported_value',
+        'invalid_value',
+        'invalid_type',
+        'model_not_found',
+        'context_length_exceeded',
+        'insufficient_quota',
+        'rate_limit_exceeded',
+        'invalid_api_key',
+        'invalid_prompt',
+        'responses_not_supported',
+        'responses_endpoint_not_supported',
+        'background_not_supported'
+      ].includes(String(latest.providerErrorCode))
+        ? latest.providerErrorCode
+        : null,
+      param: [
+        'model',
+        'temperature',
+        'top_p',
+        'max_output_tokens',
+        'input',
+        'input_image',
+        'input_file',
+        'text.format',
+        'text.format.type',
+        'background',
+        'store',
+        'reasoning.effort'
+      ].includes(String(latest.providerErrorParam))
+        ? latest.providerErrorParam
+        : null,
+      stage: [
+        'submitting',
+        'queued',
+        'polling',
+        'completed',
+        'failed',
+        'timed_out',
+        'cancelled'
+      ].includes(String(latest.diagnosticStage))
+        ? latest.diagnosticStage
+        : null,
+      elapsedMs:
+        Number.isSafeInteger(latest.elapsedMs) && Number(latest.elapsedMs) >= 0
+          ? latest.elapsedMs
+          : null,
+      responseId:
+        typeof latest.providerResponseId === 'string' &&
+        /^resp_[A-Za-z0-9_-]{1,128}$/.test(latest.providerResponseId)
+          ? latest.providerResponseId
+          : null,
+      attempts:
+        Number.isSafeInteger(latest.attempts) &&
+        Number(latest.attempts) >= 0 &&
+        Number(latest.attempts) <= 4
+          ? latest.attempts
+          : null
+    };
+    reportLiveSmokePhase(`connection-only-diagnostic:${encodeURIComponent(JSON.stringify(safe))}`);
+  }
+  return JSON.stringify({ testStatus: config.testStatus, testError: config.testError, jobs });
+}
+
+function liveConnectionJobSnapshot(configId: string): Array<Record<string, unknown>> {
+  const runDirectory = process.env.E2E_RUN_DIR;
+  const databasePath = process.env.DATABASE_PATH;
+  if (!runDirectory || !databasePath) throw new Error('E2E requiere SQLite temporal aislada');
+  if (resolve(databasePath) !== resolve(runDirectory, 'hogaria.sqlite')) {
+    throw new Error('DATABASE_PATH debe ser la SQLite temporal de este smoke');
+  }
+  const database = new Database(databasePath, { readonly: true, fileMustExist: true });
+  try {
+    return database
+      .prepare(
+        `SELECT kind, status, attempts, max_attempts
+           FROM ai_jobs
+          WHERE config_id = ? AND kind = 'connection_test'
+          ORDER BY created_at, id`
+      )
+      .all(configId) as Array<Record<string, unknown>>;
+  } finally {
+    database.close();
+  }
+}
+
+function liveRecipeWorkflowJobSnapshot(configId: string): Array<Record<string, unknown>> {
+  const runDirectory = process.env.E2E_RUN_DIR;
+  const databasePath = process.env.DATABASE_PATH;
+  if (!runDirectory || !databasePath) throw new Error('E2E requiere SQLite temporal aislada');
+  if (resolve(databasePath) !== resolve(runDirectory, 'hogaria.sqlite')) {
+    throw new Error('DATABASE_PATH debe ser la SQLite temporal de este smoke');
+  }
+  const database = new Database(databasePath, { readonly: true, fileMustExist: true });
+  try {
+    return database
+      .prepare(
+        `SELECT kind, status, attempts, max_attempts
+           FROM ai_jobs
+          WHERE config_id = ? AND kind = 'recipe'
+          ORDER BY created_at, id`
+      )
+      .all(configId) as Array<Record<string, unknown>>;
+  } finally {
+    database.close();
+  }
+}
+
+function liveHouseholdPlanJobSnapshot(configId: string): Array<Record<string, unknown>> {
+  const runDirectory = process.env.E2E_RUN_DIR;
+  const databasePath = process.env.DATABASE_PATH;
+  if (!runDirectory || !databasePath) throw new Error('E2E requiere SQLite temporal aislada');
+  if (resolve(databasePath) !== resolve(runDirectory, 'hogaria.sqlite')) {
+    throw new Error('DATABASE_PATH debe ser la SQLite temporal de este smoke');
+  }
+  const database = new Database(databasePath, { readonly: true, fileMustExist: true });
+  try {
+    return database
+      .prepare(
+        `SELECT kind, status, attempts, max_attempts
+           FROM ai_jobs
+          WHERE config_id = ? AND kind = 'household_plan'
+          ORDER BY created_at, id`
+      )
+      .all(configId) as Array<Record<string, unknown>>;
+  } finally {
+    database.close();
+  }
+}
+
+test('HogarIA connection-only real test survives closing and re-opening the browser tab', async ({
+  page
+}) => {
+  test.skip(
+    !LIVE_SMOKE_ENABLED || !LIVE_CONNECTION_ONLY,
+    'El diagnóstico real de conexión requiere su opt-in aislado.'
+  );
+  test.setTimeout(LIVE_TEST_TIMEOUT_MS);
+  page.setDefaultTimeout(LIVE_REQUEST_TIMEOUT_MS);
+  reportLiveSmokePhase('connection-only-start');
+  await registerAndGoto(page, '/ai-config', 'ai-live-connection-only');
+  reportLiveSmokePhase('connection-only-registered');
+  const token = await authToken(page);
+  const configId = await saveLiveAiConfig(page, token);
+  reportLiveSmokePhase('connection-only-configured');
+
+  await page.goto('/ai-config');
+  const connectionConfig = page.locator('.config-card').filter({ hasText: 'Smoke real aislado' });
+  await expect(connectionConfig).toBeVisible();
+  const connectionResponsePromise = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === '/api/ai/test-connection' &&
+      response.request().method() === 'POST'
+  );
+  await connectionConfig.getByRole('button', { name: /Probar/ }).click();
+  const connectionResponse = await connectionResponsePromise;
+  expect(connectionResponse.status()).toBe(202);
+  expect((await connectionResponse.json()).data).toMatchObject({ status: 'testing', configId });
+  reportLiveSmokePhase('connection-only-accepted');
+
+  await page.close();
+  const reopenedPage = await page.context().newPage();
+  reopenedPage.setDefaultTimeout(LIVE_REQUEST_TIMEOUT_MS);
+  await reopenedPage.goto('/ai-config');
+  const restoredConfig = reopenedPage
+    .locator('.config-card')
+    .filter({ hasText: 'Smoke real aislado' });
+  await expect(restoredConfig).toBeVisible();
+  const restoredStatus = await liveAiConfigStatus(reopenedPage, token, configId);
+  expect(restoredStatus.testStatus).toMatch(/^(testing|success|failed|interrupted)$/);
+  reportLiveSmokePhase('connection-only-restored-after-tab-close');
+
+  const connectionResult = await waitForLiveConnectionTest(reopenedPage, token, configId);
+  reportLiveSmokePhase('connection-only-terminal');
+  const connectionFailure =
+    connectionResult.testStatus === 'success'
+      ? ''
+      : await liveConnectionFailureDiagnostic(reopenedPage, token, configId, connectionResult);
+  expect(
+    connectionResult.testStatus,
+    `La conexión real falló después de cerrar y reabrir la pestaña: ${connectionFailure}`
+  ).toBe('success');
+  reportLiveSmokePhase('connection-only-success');
+  expect(connectionResult.testLatencyMs).toEqual(expect.any(Number));
+  reportLiveSmokePhase('connection-only-latency');
+  await expect(restoredConfig.locator('.config-card__status')).toContainText('OK');
+  reportLiveSmokePhase('connection-only-badge');
+
+  const jobs = liveConnectionJobSnapshot(configId);
+  expect(jobs).toHaveLength(1);
+  expect(jobs[0]).toMatchObject({
+    kind: 'connection_test',
+    status: 'done',
+    attempts: 1,
+    max_attempts: 1
+  });
+  reportLiveSmokePhase('connection-only-single-job');
+
+  const evidenceDir = join(
+    process.cwd(),
+    '.e2e-screenshots',
+    `ai-connection-${process.pid}-${Date.now()}`
+  );
+  await mkdir(evidenceDir, { recursive: true });
+  await reopenedPage.screenshot({
+    path: join(evidenceDir, 'desktop.png'),
+    fullPage: true,
+    animations: 'disabled'
+  });
+  await reopenedPage.setViewportSize({ width: 390, height: 844 });
+  await expect(restoredConfig).toBeVisible();
+  await reopenedPage.screenshot({
+    path: join(evidenceDir, 'mobile.png'),
+    fullPage: true,
+    animations: 'disabled'
+  });
+  reportLiveSmokePhase('connection-only-desktop-mobile-evidence-saved');
+
+  reportLiveSmokePhase('connection-only-restored-success');
+});
+
+test('HogarIA household plan proposal real workflow reaches the provider and stays uncommitted', async ({
+  page
+}) => {
+  test.skip(
+    !LIVE_SMOKE_ENABLED || !LIVE_HOUSEHOLD_PLAN_ONLY,
+    'El plano de hogar real requiere su opt-in aislado.'
+  );
+  test.setTimeout(LIVE_TEST_TIMEOUT_MS);
+  page.setDefaultTimeout(LIVE_REQUEST_TIMEOUT_MS);
+  reportLiveSmokePhase('household-plan-only-register-start');
+  await registerWithHousehold(page, '/household', 'ai-live-household-plan-only');
+  const token = await authToken(page);
+  const configId = await saveLiveAiConfig(page, token);
+  const memberships = await page.request.get('/api/household/memberships', {
+    headers: { authorization: `Bearer ${token}` }
+  });
+  expect(memberships.status()).toBe(200);
+  const householdId = (await memberships.json()).data.activeHouseholdId as string;
+  expect(householdId).toBeTruthy();
+  const headers = {
+    authorization: `Bearer ${token}`,
+    'x-household-id': householdId
+  };
+
+  const beforeResponse = await page.request.get('/api/household/plan', { headers });
+  expect(beforeResponse.status()).toBe(200);
+  const before = (await beforeResponse.json()).data as { version: number; plan: unknown };
+  expect(before).toEqual({ version: 0, plan: null });
+  reportLiveSmokePhase('household-plan-only-baseline-ready');
+
+  const proposalResponse = await page.request.post('/api/household/plan/proposal', {
+    headers,
+    data: {
+      baseVersion: before.version,
+      prompt:
+        'Prepara un primer borrador sencillo de un piso: planta baja, salón y cocina. Usa polígonos válidos y no guardes el resultado.'
+    },
+    timeout: LIVE_REQUEST_TIMEOUT_MS
+  });
+  expect(proposalResponse.status()).toBe(200);
+  const proposalEnvelope = (await proposalResponse.json()) as {
+    success: boolean;
+    data: {
+      baseVersion: number;
+      proposal: {
+        schemaVersion: number;
+        summary: string;
+        floors: Array<{ spaces: Array<{ id: string; polygon: Array<{ x: number; y: number }> }> }>;
+      };
+    };
+  };
+  expect(proposalEnvelope.success).toBe(true);
+  expect(proposalEnvelope.data.baseVersion).toBe(before.version);
+  expect(proposalEnvelope.data.proposal.schemaVersion).toBe(1);
+  expect(proposalEnvelope.data.proposal.summary.trim()).not.toBe('');
+  expect(proposalEnvelope.data.proposal.floors.length).toBeGreaterThan(0);
+  expect(
+    proposalEnvelope.data.proposal.floors.some((floor) =>
+      floor.spaces.some((space) => space.id && space.polygon.length >= 3)
+    )
+  ).toBe(true);
+  reportLiveSmokePhase('household-plan-only-proposal-validated');
+
+  const afterResponse = await page.request.get('/api/household/plan', { headers });
+  expect(afterResponse.status()).toBe(200);
+  expect((await afterResponse.json()).data).toEqual(before);
+  expect(liveHouseholdPlanJobSnapshot(configId)).toEqual([
+    expect.objectContaining({ kind: 'household_plan', status: 'done', attempts: 1 })
+  ]);
+  reportLiveSmokePhase('household-plan-only-not-committed');
+});
+
+test(AI_LIVE_WORKFLOWS_SMOKE_GREP, async ({ page }) => {
+  test.skip(
+    !LIVE_SMOKE_ENABLED || !LIVE_WORKFLOWS_ONLY,
+    'El smoke de mejora/reemplazo/Commons requiere su opt-in aislado.'
+  );
+  test.setTimeout(LIVE_TEST_TIMEOUT_MS);
+  page.setDefaultTimeout(LIVE_REQUEST_TIMEOUT_MS);
+  expect(process.env.NODE_ENV).not.toBe('test');
+  expect(process.env.PANTRY_IMAGE_SEARCH_FIXTURE).not.toBe('1');
+
+  reportLiveSmokePhase('workflow-only-register-start');
+  await registerWithHousehold(page, '/recipes', 'ai-live-workflows-only');
+  reportLiveSmokePhase('workflow-only-registered');
+  const token = await authToken(page);
+  // Workflow-only is sequential, and unlimited mode settles permanent provider errors
+  // immediately instead of holding the browser request open for the manual-retry window.
+  const configId = await saveLiveAiConfig(page, token, { concurrency: 0 });
+  const headers = { authorization: `Bearer ${token}` };
+
+  reportLiveSmokePhase('workflow-only-improve-start');
+  const recipeBefore = complexRecipeFixture();
+  const improvement = await page.request.post('/api/ai/improve-recipe', {
+    headers,
+    data: { recipe: recipeBefore, scopes: ['details'] },
+    timeout: LIVE_REQUEST_TIMEOUT_MS
+  });
+  expect(improvement.status()).toBe(200);
+  const improvementResult = (await improvement.json()) as {
+    success: boolean;
+    data: { proposal: SmokeRecipe; patch: Record<string, unknown>; scopes: string[] };
+  };
+  expect(improvementResult.success).toBe(true);
+  expect(improvementResult.data.scopes).toEqual(['details']);
+  expect(improvementResult.data.proposal.name.trim()).not.toBe('');
+  expect(improvementResult.data.proposal.baseServings).toBe(1);
+  expect(improvementResult.data.proposal.ingredients.length).toBeGreaterThan(0);
+  expect(Object.keys(improvementResult.data.patch).length).toBeGreaterThan(0);
+  reportLiveSmokePhase('workflow-only-improve-completed');
+
+  const mealDate = new Date().toISOString().slice(0, 10);
+  const seededMeal = await page.request.post('/api/calendar/meals', {
+    headers,
+    data: {
+      date: mealDate,
+      mealType: 'dinner',
+      customMeal: 'Cena sintética QA para sustitución',
+      time: '20:00',
+      servings: 2
+    }
+  });
+  expect(seededMeal.status()).toBe(201);
+  const seededMealId = (await seededMeal.json()).data.id as string;
+  expect(seededMealId).toBeTruthy();
+  reportLiveSmokePhase('workflow-only-meal-seeded');
+
+  reportLiveSmokePhase('workflow-only-replace-start');
+  const replacement = await page.request.post('/api/ai/replace-meal', {
+    headers,
+    data: { mealId: seededMealId },
+    timeout: LIVE_REQUEST_TIMEOUT_MS
+  });
+  expect(replacement.status()).toBe(200);
+  const replacementResult = (await replacement.json()) as {
+    success: boolean;
+    data: {
+      name: string;
+      description: string;
+      ingredients: string[];
+      estimatedTime: number;
+      servings: number;
+    };
+  };
+  expect(replacementResult.success).toBe(true);
+  expect(replacementResult.data.name.trim()).not.toBe('');
+  expect(replacementResult.data.description.trim()).not.toBe('');
+  expect(replacementResult.data.ingredients.length).toBeGreaterThan(0);
+  expect(replacementResult.data.estimatedTime).toBeGreaterThan(0);
+  expect(replacementResult.data.servings).toBe(2);
+  const mealAfterProposal = await page.request.get(
+    `/api/calendar/range?startDate=${mealDate}&endDate=${mealDate}`,
+    { headers }
+  );
+  expect(mealAfterProposal.status()).toBe(200);
+  const mealAfterProposalRows = (await mealAfterProposal.json()).data.meals as Array<{
+    id: string;
+    custom_meal: string | null;
+  }>;
+  expect(mealAfterProposalRows.find(({ id }) => id === seededMealId)?.custom_meal).toBe(
+    'Cena sintética QA para sustitución'
+  );
+  reportLiveSmokePhase('workflow-only-replace-completed');
+
+  reportLiveSmokePhase('workflow-only-image-search-start');
+  const ingredient = await page.request.post('/api/pantry/ingredients', {
+    headers,
+    data: {
+      name: 'Tomate',
+      category: 'other',
+      quantity: 1,
+      unit: 'unit',
+      location: 'pantry'
+    }
+  });
+  expect(ingredient.status()).toBe(201);
+  const ingredientId = (await ingredient.json()).data.id as string;
+  expect(ingredientId).toBeTruthy();
+  const imageSearchPath = `/api/pantry/ingredients/${ingredientId}/image-search`;
+  let imageSearchResponse = await page.request.get(imageSearchPath, { headers });
+  expect(imageSearchResponse.status()).toBe(200);
+  let imageSearch = (await imageSearchResponse.json()).data as {
+    status: string;
+    jobId: string | null;
+    candidates: Array<{
+      id: string;
+      altText: string;
+      author: string;
+      licenseName: string;
+      licenseUrl: string;
+      sourceUrl: string;
+    }>;
+    errorCode: string | null;
+  };
+  if (imageSearch.status === 'idle') {
+    const queued = await page.request.post(
+      `/api/pantry/ingredients/${ingredientId}/image-search/retry`,
+      { headers }
+    );
+    expect(queued.status()).toBe(202);
+    imageSearch = (await queued.json()).data;
+  }
+  expect(imageSearch.jobId).toBeTruthy();
+  reportLiveSmokePhase('workflow-only-image-search-queued');
+  await expect
+    .poll(
+      async () => {
+        imageSearchResponse = await page.request.get(imageSearchPath, { headers });
+        if (!imageSearchResponse.ok()) return 'http_error';
+        imageSearch = (await imageSearchResponse.json()).data;
+        if (imageSearch.status === 'failed' || imageSearch.status === 'cancelled') {
+          throw new Error(`La búsqueda real de Commons terminó en ${imageSearch.status}.`);
+        }
+        return imageSearch.status;
+      },
+      { timeout: 120_000, intervals: [250, 500, 1000, 2000] }
+    )
+    .toBe('complete');
+  expect(imageSearch.candidates.length).toBeGreaterThan(0);
+  expect(imageSearch.candidates[0]).toMatchObject({
+    id: expect.any(String),
+    altText: expect.any(String),
+    author: expect.any(String),
+    licenseName: expect.any(String),
+    licenseUrl: expect.stringMatching(/^https:\/\//),
+    sourceUrl: expect.stringMatching(/^https:\/\//)
+  });
+  reportLiveSmokePhase('workflow-only-image-search-completed');
+
+  expect(liveRecipeWorkflowJobSnapshot(configId)).toEqual([
+    { kind: 'recipe', status: 'done', attempts: 1, max_attempts: 1 },
+    { kind: 'recipe', status: 'done', attempts: 1, max_attempts: 1 }
+  ]);
+  const persistedSearch = new Database(process.env.DATABASE_PATH!, {
+    readonly: true,
+    fileMustExist: true
+  });
+  try {
+    expect(
+      persistedSearch
+        .prepare('SELECT kind, status FROM ai_jobs WHERE id = ?')
+        .get(imageSearch.jobId)
+    ).toEqual({ kind: 'product_image_search', status: 'done' });
+    expect(
+      persistedSearch.prepare('SELECT image FROM ingredients WHERE id = ?').get(ingredientId)
+    ).toEqual({ image: null });
+    expect(
+      persistedSearch
+        .prepare('SELECT COUNT(*) AS count FROM recipes WHERE name = ?')
+        .get(recipeBefore.name)
+    ).toEqual({ count: 0 });
+  } finally {
+    persistedSearch.close();
+  }
+  reportLiveSmokePhase('workflow-only-all-completed');
+});
 
 async function syntheticReceiptPng(page: Parameters<typeof registerAndGoto>[0]): Promise<Buffer> {
   const dataUrl = await page.evaluate(() => {
@@ -649,7 +1261,7 @@ test('procesa solo los tickets reales seleccionados y verifica la revisión sin 
 
   await registerWithHousehold(page, '/receipts', 'ai-live-receipts-only');
   const token = await authToken(page);
-  await saveLiveAiConfig(page, token);
+  const configId = await saveLiveAiConfig(page, token);
   reportLiveSmokePhase('real-receipts-started');
 
   for (const [index, ticket] of plan.tickets.entries()) {
@@ -905,22 +1517,31 @@ test('recorre los ocho AiJobKind con WebAPI real y ticket sintético editable', 
     generatedRecipe.instructionsByLevel.basic[0].instruction
   );
 
-  const connectionResponse = await page.request.post('/api/ai/test-connection', {
-    headers: { authorization: `Bearer ${token}` },
-    data: { configId },
-    timeout: LIVE_REQUEST_TIMEOUT_MS
-  });
-  expect(connectionResponse.status()).toBe(200);
-  const connection = (await connectionResponse.json()).data as {
-    success: boolean;
-    model: string;
-    message: string;
-  };
-  expect(connection).toMatchObject({
-    success: true,
-    model: process.env.HOGARIA_AI_REAL_SMOKE_MODEL
-  });
-  expect(connection.message.trim()).not.toBe('');
+  await page.goto('/ai-config');
+  const connectionConfig = page.locator('.config-card').filter({ hasText: 'Smoke real aislado' });
+  await expect(connectionConfig).toBeVisible();
+  const connectionResponsePromise = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === '/api/ai/test-connection' &&
+      response.request().method() === 'POST'
+  );
+  await connectionConfig.getByRole('button', { name: /Probar/ }).click();
+  const connectionResponse = await connectionResponsePromise;
+  expect(connectionResponse.status()).toBe(202);
+  expect((await connectionResponse.json()).data).toMatchObject({ status: 'testing', configId });
+  reportLiveSmokePhase('connection-test-accepted-background');
+  await page.reload();
+  const connectionResult = await waitForLiveConnectionTest(page, token, configId);
+  const connectionFailure =
+    connectionResult.testStatus === 'success'
+      ? ''
+      : await liveConnectionFailureDiagnostic(page, token, configId, connectionResult);
+  expect(
+    connectionResult.testStatus,
+    `La conexión real falló tras el polling: ${connectionFailure}`
+  ).toBe('success');
+  expect(connectionResult.testLatencyMs).toEqual(expect.any(Number));
+  await expect(connectionConfig.locator('.config-card__status')).toContainText('OK');
   reportLiveSmokePhase('connection-tested');
 
   reportLiveSmokePhase('multiple-recipes-request-start');
@@ -1461,10 +2082,19 @@ test('valida toda la matriz de acciones transitorias del asistente con WebAPI re
   reportLiveSmokePhase('assistant-only-register-start');
   await registerWithHousehold(page, '/dashboard', 'ai-live-assistant-only');
   const token = await authToken(page);
-  await saveLiveAiConfig(page, token);
+  const configId = await saveLiveAiConfig(page, token);
   reportLiveSmokePhase('assistant-only-configured');
 
   const headers = { authorization: `Bearer ${token}` };
+  const assistantReferenceDate = await page.evaluate(() => {
+    const now = new Date();
+    return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
+  });
+  const expectedTomorrow = new Date(
+    Date.parse(`${assistantReferenceDate}T00:00:00.000Z`) + 24 * 60 * 60 * 1000
+  )
+    .toISOString()
+    .slice(0, 10);
   const memberships = await page.request.get('/api/household/memberships', { headers });
   expect(memberships.status(), 'lectura del hogar sintético').toBe(200);
   const householdId = (await memberships.json()).data.activeHouseholdId as string;
@@ -1612,7 +2242,7 @@ test('valida toda la matriz de acciones transitorias del asistente con WebAPI re
     reportLiveSmokePhase('assistant-proposal-request-start');
     const response = await page.request.post('/api/ai/assistant/proposals', {
       headers: householdHeaders,
-      data: { prompt, route, referenceDate: '2026-10-17' },
+      data: { prompt, route, referenceDate: assistantReferenceDate },
       timeout: LIVE_REQUEST_TIMEOUT_MS
     });
     const responseStatus = response.status();
@@ -1679,7 +2309,9 @@ test('valida toda la matriz de acciones transitorias del asistente con WebAPI re
             : actualKinds.every((kind) => AI_LIVE_ASSISTANT_ACTION_KINDS.includes(kind))
               ? actualKinds.join('|')
               : 'unrecognized';
-      reportLiveSmokePhase(`assistant-proposal-action-kinds-mismatch-${actionKindSummary}`);
+      reportLiveSmokePhase(
+        `assistant-proposal-action-kinds-mismatch-scenario-${ordinal}-${actionKindSummary}`
+      );
     } else {
       reportLiveSmokePhase('assistant-proposal-action-kinds-match');
     }
@@ -1723,14 +2355,40 @@ test('valida toda la matriz de acciones transitorias del asistente con WebAPI re
     validateActions?.(actions);
     reportLiveSmokePhase('assistant-proposal-semantics-valid');
 
+    const queueJobs = liveAssistantQueueSnapshot(configId);
+    const queueIsExpected =
+      queueJobs.length === ordinal &&
+      queueJobs.every(
+        (job) =>
+          job.kind === 'assistant' &&
+          job.status === 'done' &&
+          job.attempts === 1 &&
+          job.maxAttempts === 1
+      );
+    reportLiveSmokePhase(
+      queueIsExpected
+        ? 'assistant-proposal-background-job-verified'
+        : 'assistant-proposal-background-job-invalid'
+    );
+    expect(
+      queueIsExpected,
+      `La cola debe guardar un job background completado por propuesta ${ordinal}`
+    ).toBe(true);
+
     const afterProposal = liveAssistantDatabaseSnapshot();
     const snapshotUnchanged = isDeepStrictEqual(afterProposal, before);
+    const changedTables = [...new Set([...Object.keys(before), ...Object.keys(afterProposal)])]
+      .filter((table) => !isDeepStrictEqual(before[table], afterProposal[table]))
+      .sort();
     reportLiveSmokePhase(
       snapshotUnchanged
         ? 'assistant-proposal-snapshot-unchanged'
-        : 'assistant-proposal-snapshot-changed'
+        : `assistant-proposal-snapshot-changed:${changedTables.join('|')}`
     );
-    expect(snapshotUnchanged, `SQLite cambió al generar propuesta ${ordinal}`).toBe(true);
+    expect(
+      snapshotUnchanged,
+      `SQLite cambió al generar propuesta ${ordinal}: ${changedTables.join(', ') || 'desconocido'}`
+    ).toBe(true);
     reportLiveSmokePhase('assistant-proposal-response-validated');
     return actions;
   };
@@ -1764,9 +2422,9 @@ test('valida toda la matriz de acciones transitorias del asistente con WebAPI re
     ],
     validateActions: (actions) => {
       const task = actions.find((action) => action.kind === 'household.create_task');
-      assertSemantic('task-date', task?.payload?.scheduledDate === '2026-10-18');
+      assertSemantic('task-date', task?.payload?.scheduledDate === expectedTomorrow);
       const event = actions.find((action) => action.kind === 'calendar.create_event');
-      assertSemantic('event-date', event?.payload?.date === '2026-10-18');
+      assertSemantic('event-date', event?.payload?.date === expectedTomorrow);
       assertSemantic('event-time', event?.payload?.startTime === '21:00');
       const listAction = actions.find((action) => action.kind === 'shopping.create_list');
       const item = actions.find((action) => action.kind === 'shopping.add_item');
@@ -1926,12 +2584,10 @@ test('cubre los ocho AiJobKind con fixtures de proveedor loopback', async ({ pag
       headers,
       data: { configId }
     });
-    expect(connectionResponse.status()).toBe(200);
-    expect((await connectionResponse.json()).data).toMatchObject({
-      success: true,
-      model: 'synthetic-ai-model',
-      message: 'synthetic connection ok'
-    });
+    expect(connectionResponse.status()).toBe(202);
+    expect((await connectionResponse.json()).data).toMatchObject({ status: 'testing', configId });
+    const connectionResult = await waitForLiveConnectionTest(page, token, configId);
+    expect(connectionResult).toMatchObject({ testStatus: 'success' });
     expect(provider.requests[0].hasResponseFormat).toBe(true);
 
     const syntheticIngredients = COMPLEX_RECIPE_INGREDIENTS.map((ingredient, index) => ({
