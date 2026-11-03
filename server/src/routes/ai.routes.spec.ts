@@ -2160,6 +2160,34 @@ describe('POST /calendar-meals/:mealId/recipe', () => {
     expect(db.prepare('SELECT COUNT(*) AS count FROM recipes').get()).toEqual({ count: 1 });
   });
 
+  it('reutiliza una sola receta si dos solicitudes cocinan la misma comida a la vez', async () => {
+    createMealForReplacement(alice.id, 'calendar-recipe-concurrent');
+    await crearConfig(alice, 'Proveedor de planificación', 'http://127.0.0.1:9/v1', 0);
+    const requests = stubRecipeProvider(() =>
+      responsesFixture(JSON.stringify(recetaGenerada), 'resp_calendar_recipe_concurrent')
+    );
+
+    const responses = await Promise.all([
+      call(alice, 'POST', '/calendar-meals/calendar-recipe-concurrent/recipe'),
+      call(alice, 'POST', '/calendar-meals/calendar-recipe-concurrent/recipe')
+    ]);
+    const results = await Promise.all(responses.map(json));
+
+    expect(responses.map((response) => response.status)).toEqual([200, 200]);
+    expect(results.every((result) => result.success)).toBe(true);
+    expect(new Set(results.map((result) => result.data.recipeId)).size).toBe(1);
+    expect(results.map((result) => result.data.reused).sort()).toEqual([false, true]);
+    expect(requests).toHaveLength(2);
+    expect(recipeCount()).toBe(1);
+    expect(
+      db
+        .prepare(
+          'SELECT COUNT(*) AS count FROM recipes WHERE id NOT IN (SELECT recipe_id FROM meals WHERE recipe_id IS NOT NULL)'
+        )
+        .get()
+    ).toEqual({ count: 0 });
+  });
+
   it('rechaza una respuesta canónica incompleta sin modificar ni enlazar la comida', async () => {
     createMealForReplacement(alice.id, 'calendar-recipe-incomplete');
     await crearConfig(alice, 'Proveedor de planificación', 'http://127.0.0.1:9/v1', 0);

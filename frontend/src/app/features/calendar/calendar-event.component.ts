@@ -11,8 +11,8 @@ import { MEAL_LABEL_KEYS } from '../../core/i18n/labels';
  * Una comida dentro de la rejilla.
  *
  * `chip` (semana/día): bloque con acento de color, kcal y acciones al pasar por
- * encima. `row` (mes): una línea con punto de color —en Google Calendar el mes
- * no da para más— y sin acciones, que irían dentro del propio botón.
+ * encima. `row` (mes/agenda): una línea compacta; la acción de edición es hermana
+ * del botón de abrir, nunca anidada en él.
  *
  * Los clicks se cortan aqui (`stopPropagation`): en la vista de mes la celda
  * entera es boton de «añadir», y sin eso pulsar una comida abria a la vez el
@@ -37,6 +37,8 @@ import { MEAL_LABEL_KEYS } from '../../core/i18n/labels';
       <button
         type="button"
         class="cal-event__open"
+        [class.cal-event__open--with-edit]="showEditAction && mode === 'row'"
+        [attr.aria-label]="openActionLabel()"
         [title]="tooltip()"
         (click)="$event.stopPropagation(); open.emit()"
       >
@@ -63,27 +65,47 @@ import { MEAL_LABEL_KEYS } from '../../core/i18n/labels';
       }}</span>
     </ng-template>
 
-    <span class="cal-event__actions" *ngIf="mode !== 'row' && !meal?.isShared">
+    <span
+      class="cal-event__actions"
+      [class.cal-event__actions--row]="mode === 'row'"
+      *ngIf="meal && !meal.isShared && (mode !== 'row' || showEditAction)"
+    >
       <button
+        *ngIf="showEditAction"
         type="button"
-        class="cal-event__action"
-        [attr.aria-label]="
-          meal?.completed ? ('calendar.unmark_done' | t) : ('calendar.mark_done' | t)
-        "
-        [title]="meal?.completed ? ('calendar.unmark_done' | t) : ('calendar.mark_done' | t)"
-        (click)="$event.stopPropagation(); toggle.emit()"
+        class="cal-event__action cal-event__action--edit"
+        [attr.aria-label]="'calendar.edit_meal_named' | t: { meal: meal?.title ?? '' }"
+        [title]="'calendar.edit_meal_named' | t: { meal: meal?.title ?? '' }"
+        (click)="$event.stopPropagation(); edit.emit()"
       >
-        <app-icon [name]="meal?.completed ? 'check_circle' : 'check'" [size]="16" [label]="null" />
+        <app-icon name="edit" [size]="18" [label]="null" />
       </button>
-      <button
-        type="button"
-        class="cal-event__action cal-event__action--danger"
-        [attr.aria-label]="'calendar.quitar_comida' | t"
-        [attr.title]="'calendar.quitar_comida' | t"
-        (click)="$event.stopPropagation(); remove.emit()"
-      >
-        <app-icon name="close" [size]="16" [label]="null" />
-      </button>
+      <ng-container *ngIf="mode !== 'row'">
+        <button
+          type="button"
+          class="cal-event__action"
+          [attr.aria-label]="
+            meal?.completed ? ('calendar.unmark_done' | t) : ('calendar.mark_done' | t)
+          "
+          [title]="meal?.completed ? ('calendar.unmark_done' | t) : ('calendar.mark_done' | t)"
+          (click)="$event.stopPropagation(); toggle.emit()"
+        >
+          <app-icon
+            [name]="meal?.completed ? 'check_circle' : 'check'"
+            [size]="16"
+            [label]="null"
+          />
+        </button>
+        <button
+          type="button"
+          class="cal-event__action cal-event__action--danger"
+          [attr.aria-label]="'calendar.quitar_comida' | t"
+          [attr.title]="'calendar.quitar_comida' | t"
+          (click)="$event.stopPropagation(); remove.emit()"
+        >
+          <app-icon name="close" [size]="16" [label]="null" />
+        </button>
+      </ng-container>
     </span>
   `,
   styles: [
@@ -228,6 +250,18 @@ import { MEAL_LABEL_KEYS } from '../../core/i18n/labels';
         border-color: var(--error);
       }
 
+      .cal-event__action--edit {
+        width: 32px;
+        height: 32px;
+        border-radius: var(--radius-md);
+        background: var(--bg-secondary);
+      }
+
+      .cal-event__action--edit:focus-visible {
+        outline: 2px solid var(--primary);
+        outline-offset: 2px;
+      }
+
       /* Hecho: se retira el color, el texto se apaga. Menos ruido, más lectura. */
       :host([data-done='true']) .cal-event__open {
         background: var(--bg-tertiary);
@@ -257,6 +291,29 @@ import { MEAL_LABEL_KEYS } from '../../core/i18n/labels';
       }
       :host([data-mode='row']) .cal-event__time {
         font-size: 9px;
+      }
+      :host([data-mode='row']) .cal-event__open--with-edit {
+        padding-right: 36px;
+        min-height: 32px;
+      }
+      .cal-event__actions--row {
+        top: 50%;
+        right: 0;
+        transform: translateY(-50%);
+        display: flex;
+        opacity: 1;
+        pointer-events: auto;
+      }
+
+      @media (max-width: 767px) {
+        :host([data-mode='row']) .cal-event__open--with-edit {
+          padding-right: 48px;
+          min-height: 44px;
+        }
+        :host([data-mode='row']) .cal-event__actions--row .cal-event__action--edit {
+          width: 44px;
+          height: 44px;
+        }
       }
 
       /* ── Modo tarjeta (vista de día) ── */
@@ -300,8 +357,10 @@ export class CalendarEventComponent {
   @Input() meal: CalendarMeal | null = null;
   /** `chip` (semana) · `row` (mes) · `full` (día). */
   @Input() mode: 'chip' | 'row' | 'full' = 'chip';
+  @Input() showEditAction = false;
 
   @Output() open = new EventEmitter<void>();
+  @Output() edit = new EventEmitter<void>();
   @Output() toggle = new EventEmitter<void>();
   @Output() remove = new EventEmitter<void>();
 
@@ -313,6 +372,15 @@ export class CalendarEventComponent {
 
   canOpenMeal(): boolean {
     return this.meal?.isShared !== true || this.meal.canRecordConsumption === true;
+  }
+
+  openActionLabel(): string {
+    const meal = this.meal;
+    if (!meal) return this.i18n.t('calendar.cook_meal_named', { meal: '' });
+    return this.i18n.t(
+      meal.isShared ? 'calendar.record_consumption_for' : 'calendar.cook_meal_named',
+      { meal: meal.title }
+    );
   }
 
   /** El detalle que en el mes no cabe, por tooltip. */

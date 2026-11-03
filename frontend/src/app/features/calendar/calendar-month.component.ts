@@ -76,6 +76,8 @@ import { TranslatePipe } from '../../core/pipes/translate.pipe';
                 mode="row"
                 [meal]="meal"
                 (open)="openMeal.emit(meal)"
+                [showEditAction]="!meal.isShared"
+                (edit)="editMeal.emit(meal)"
               ></app-calendar-event>
 
               <button
@@ -326,6 +328,7 @@ export class CalendarMonthComponent {
 
   @Output() addMeal = new EventEmitter<{ date: string; mealType: MealType }>();
   @Output() openMeal = new EventEmitter<CalendarMeal>();
+  @Output() editMeal = new EventEmitter<CalendarMeal>();
   @Output() openDay = new EventEmitter<string>();
   /** Tocar un evento de la celda = editarlo (o verlo, si es de otra persona). */
   @Output() editEvent = new EventEmitter<HouseholdEvent>();
