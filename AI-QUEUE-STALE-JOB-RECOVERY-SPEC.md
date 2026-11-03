@@ -155,6 +155,7 @@
 
 - [x] TDD reproduce un resultado SQLite legacy `claim_generation TEXT` (`"1.0"`): el worker llega a `runtime_started`, ejecuta el runtime una vez y alcanza estado terminal; antes del fix abandonaba el job antes del runtime.
 - [x] Normalizar de forma segura los valores `claim_generation` leídos de SQLite antes de compararlos en worker, callbacks genéricos y recuperación de leases; valores fraccionarios/inválidos no inician runtime.
+- [ ] En filas `queued` legacy con `claim_generation = NULL`, interpretar null solo como generación inicial 0 para reclamar; active claims null/inválidos no deben coincidir con una generación vigente.
 - [ ] Navegador real contra el servicio local ya actualizado y WebApi real: test de conexión background terminal exitoso, trace completo, concurrencia liberada y sin nuevo `WORKER_STALLED`.
 
 ### Evidencia de corrección de generaciones legacy
@@ -164,3 +165,9 @@
 - El parser acepta solo enteros seguros (`number`, dígitos y sufijo decimal de ceros); rechaza strings vacíos, fracciones, negativos, desbordes y valores no numéricos. Cubre toma de trabajo, entrada al worker, pre/post ejecución y recuperación; no cambia el esquema ni reescribe datos.
 - Se verificó con `better-sqlite3` que el parámetro numérico usado por los predicados SQL conserva el fencing frente a `TEXT "1.0"`; por eso no se cambia SQL ni se añade migración de datos.
 - Suite completa del servidor con coverage: 2.190 pasaron, 1 omitida; 89,46 % statements / 81,89 % branches / 95,67 % functions / 92,34 % lines (todos los gates aplicables >70 %). `tsc --noEmit` pasa. Build y gates completos se repiten en el hook de push.
+
+### Segunda variante legacy detectada tras el primer fix (2026-11-03)
+
+- Desde el navegador real se aceptó otro test (`202`), pero quedó en cola: la UI mostró `1 esperando · 0 en curso`. La consulta readonly de la DB encontró el job `FLAHOhsn9LYvl4i8IGKsy` en `queued`, `attempts=0`, `claim_generation=NULL`, sin lease ni eventos de worker; no llegó al proveedor.
+- El esquema antiguo permite `NULL` en esa columna. La primera normalización lo rechazaba también al leer la generación inicial de una fila queued, así que el worker no reclamaba el job. La corrección debe tratar `NULL` como 0 solo durante la reclamación queued; los valores nulos/fraccionarios en claims activos deben seguir fallando cerrados.
+- Reproducir primero en test aislado; después del fix, ejecutar una prueba nueva desde navegador/WebApi reales. La revisión local del servidor invalida jobs genéricos/connection-test en memoria al reiniciar (`INPUT_EXPIRED`), por eso no se reutilizará esta closure perdida ni se editará manualmente la DB.
