@@ -1315,8 +1315,10 @@ export class RecipesComponent implements OnInit {
           if (this.isAiModalOpen()) this.closeAiModal();
           if (recipe) {
             if (this.selectedRecipe()?.id === recipe.id) {
-              if (intent.mode === 'cooking' && !this.enterCookingMode(false)) {
-                this.syncRecipeDetailsUrl(true);
+              if (intent.mode === 'cooking') {
+                if (!this.isCookingMode() && !this.enterCookingMode(false)) {
+                  this.syncRecipeDetailsUrl(true);
+                }
               } else if (this.isCookingMode()) {
                 this.exitCookingMode(false);
               }

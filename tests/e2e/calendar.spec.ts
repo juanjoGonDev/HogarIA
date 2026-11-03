@@ -47,7 +47,7 @@ async function openMealEditorFromTimeline(
 ): Promise<import('@playwright/test').Locator> {
   const meal = page.locator('[data-test="timeline-block-meal"]').filter({ hasText: dish });
   await expect(meal).toHaveCount(1);
-  await meal.click();
+  await page.getByRole('button', { name: `Editar ${dish}`, exact: true }).click();
 
   const editor = page.locator('app-modal:has(#meal-custom)');
   await expect(editor.locator('.modal__title')).toContainText('Editar Comida');
@@ -233,14 +233,12 @@ test.describe('Calendario', () => {
     await expect(page.locator('.cal-strip__value').first()).toContainText(/1\s*\/\s*28/);
   });
 
-  test('una comida se abre desde su bloque en la propia rejilla', async ({ page }) => {
+  test('la acción de editar del bloque abre el formulario sin iniciar la cocina', async ({
+    page
+  }) => {
     await addMealThroughModal(page, 'Pollo con arroz');
 
-    const meal = page.locator('.tl__block--meal');
-    await expect(meal).toContainText('Pollo con arroz');
-    await meal.click();
-    await expect(page.locator('.modal__title')).toContainText('Editar Comida');
-    await expect(page.locator('#meal-custom')).toHaveValue('Pollo con arroz');
+    await openMealEditorFromTimeline(page, 'Pollo con arroz');
   });
 
   test('conserva la comida y permite reintentar si falla el borrado', async ({

@@ -30,13 +30,13 @@ async function addMeal(page: Page, title: string): Promise<void> {
 async function openMealFromTimeline(page: Page, title: string): Promise<void> {
   const meal = page.locator('[data-test="timeline-block-meal"]').filter({ hasText: title });
   await expect(meal).toHaveCount(1);
-  await meal.click();
+  await page.getByRole('button', { name: `Editar ${title}`, exact: true }).click();
 }
 
 async function openMealFromRow(page: Page, title: string): Promise<void> {
   const meal = page.locator('app-calendar-event').filter({ hasText: title });
   await expect(meal).toHaveCount(1);
-  await meal.locator('.cal-event__open').click();
+  await page.getByRole('button', { name: `Editar ${title}`, exact: true }).click();
 }
 
 function isMealCompletionPatch(

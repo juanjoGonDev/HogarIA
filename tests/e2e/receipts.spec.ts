@@ -396,8 +396,8 @@ test.describe('tickets: la cola de lectura (## 12aj)', () => {
     await stoppedLink.click();
     await expect(page).toHaveURL(new RegExp(`/receipts/${stoppedId}$`));
     await expect(page.getByText('Parado', { exact: true })).toBeVisible();
-    const storeField = page.getByLabel('Tienda');
-    const purchaseDateField = page.getByLabel('Fecha de compra');
+    const storeField = page.getByLabel('Tienda', { exact: true });
+    const purchaseDateField = page.getByLabel('Fecha de compra', { exact: true });
     await storeField.fill('Tienda parada editada');
     await purchaseDateField.fill('2024-02-29');
     await page.getByRole('button', { name: 'Guardar cambios' }).click();
@@ -413,8 +413,8 @@ test.describe('tickets: la cola de lectura (## 12aj)', () => {
       purchaseDate: '2024-02-29'
     });
     await page.reload();
-    await expect(page.getByLabel('Tienda')).toHaveValue('Tienda parada editada');
-    await expect(page.getByLabel('Fecha de compra')).toHaveValue('2024-02-29');
+    await expect(page.getByLabel('Tienda', { exact: true })).toHaveValue('Tienda parada editada');
+    await expect(page.getByLabel('Fecha de compra', { exact: true })).toHaveValue('2024-02-29');
     await expect(page.getByText('Parado', { exact: true })).toBeVisible();
     await page.getByRole('link', { name: 'Volver a tickets' }).click();
     const reopenedHistory = page.locator('[data-test="receipt-history"]');
@@ -882,8 +882,10 @@ test.describe('metadatos e historial con zona horaria extrema', () => {
       store: null,
       purchaseDate: null,
       storeLabel: 'Tienda',
+      storeAddressLabel: 'Dirección de la tienda',
       dateLabel: 'Fecha de compra',
       emptyDateLabel: 'Sin fecha',
+      emptyOfferLabel: 'Añadir',
       uploadLabel: 'Subido',
       correctedStore: 'Mercado corregido QA',
       correctedDate: '2024-03-01',
@@ -895,8 +897,10 @@ test.describe('metadatos e historial con zona horaria extrema', () => {
       store: null,
       purchaseDate: null,
       storeLabel: 'Store',
+      storeAddressLabel: 'Store address',
       dateLabel: 'Purchase date',
       emptyDateLabel: 'No date',
+      emptyOfferLabel: 'Add',
       uploadLabel: 'Uploaded',
       correctedStore: 'Edited QA store',
       correctedDate: '2024-03-02',
@@ -1067,17 +1071,23 @@ test.describe('metadatos e historial con zona horaria extrema', () => {
         await expect(detectedRows.locator('input[id$="-cantidad"]')).toHaveValue('2');
         await expect(detectedRows.locator('input[id$="-unidad"]')).toHaveValue('kg');
         await expect(detectedRows.locator('input[id$="-precio"]')).toHaveValue('3.00');
-        await expect(detectedRows.locator('input[id$="-oferta"]')).toHaveValue('');
+        const offerButton = detectedRows.locator('[data-test="receipt-promotion-open"]');
+        await expect(offerButton).toHaveCount(1);
+        await expect(offerButton).toHaveText(scenario.emptyOfferLabel);
+        await expect(offerButton).toHaveAttribute('aria-label', /Naranjas QA/);
         await expect(page.locator('.ficha__no-cuadra')).toHaveCount(0);
 
-        const storeField = page.getByLabel(scenario.storeLabel);
-        const purchaseDateField = page.getByLabel(scenario.dateLabel);
+        const storeField = page.getByLabel(scenario.storeLabel, { exact: true });
+        const storeAddressField = page.getByLabel(scenario.storeAddressLabel, { exact: true });
+        const purchaseDateField = page.getByLabel(scenario.dateLabel, { exact: true });
         await expect(storeField).toHaveValue(scenario.store ?? '');
         await expect(storeField).toBeEnabled();
         await expect(purchaseDateField).toHaveValue(scenario.purchaseDate ?? '');
         await expect(purchaseDateField).toBeEnabled();
         await storeField.focus();
         await expect(storeField).toBeFocused();
+        await page.keyboard.press('Tab');
+        await expect(storeAddressField).toBeFocused();
         await page.keyboard.press('Tab');
         await expect(purchaseDateField).toBeFocused();
 
@@ -1433,8 +1443,8 @@ test.describe('metadatos manuales en reintentos de tickets', () => {
       expect(trabajosDeTicket(receiptId)).toBe(1);
 
       await page.goto(`/receipts/${receiptId}`);
-      const storeField = page.getByLabel('Tienda');
-      const purchaseDateField = page.getByLabel('Fecha de compra');
+      const storeField = page.getByLabel('Tienda', { exact: true });
+      const purchaseDateField = page.getByLabel('Fecha de compra', { exact: true });
       const manualStore = 'Tienda corregida antes del reintento';
       const manualPurchaseDate = '2024-02-29';
       await expect(storeField).toHaveValue('');
@@ -1504,6 +1514,7 @@ test.describe('metadatos editables mientras la IA trabaja', () => {
       language: 'es',
       heading: 'Tickets',
       storeLabel: 'Tienda',
+      storeAddressLabel: 'Dirección de la tienda',
       dateLabel: 'Fecha de compra',
       saveLabel: 'Guardar cambios',
       savedLabel: 'Cambios guardados',
@@ -1513,6 +1524,7 @@ test.describe('metadatos editables mientras la IA trabaja', () => {
       language: 'en',
       heading: 'Receipts',
       storeLabel: 'Store',
+      storeAddressLabel: 'Store address',
       dateLabel: 'Purchase date',
       saveLabel: 'Save changes',
       savedLabel: 'Changes saved',
@@ -1601,14 +1613,17 @@ test.describe('metadatos editables mientras la IA trabaja', () => {
         expect((await queuedResponse.json()).data.status).toBe('queued');
 
         await page.goto(`/receipts/${target.id}`);
-        const storeField = page.getByLabel(scenario.storeLabel);
-        const purchaseDateField = page.getByLabel(scenario.dateLabel);
+        const storeField = page.getByLabel(scenario.storeLabel, { exact: true });
+        const storeAddressField = page.getByLabel(scenario.storeAddressLabel, { exact: true });
+        const purchaseDateField = page.getByLabel(scenario.dateLabel, { exact: true });
         await expect(storeField).toHaveValue('');
         await expect(storeField).toBeEnabled();
         await expect(purchaseDateField).toHaveValue('');
         await expect(purchaseDateField).toBeEnabled();
         await storeField.focus();
         await expect(storeField).toBeFocused();
+        await page.keyboard.press('Tab');
+        await expect(storeAddressField).toBeFocused();
         await page.keyboard.press('Tab');
         await expect(purchaseDateField).toBeFocused();
         const llamadasAntesDeEditarEnCola = provider.solicitudes.length;

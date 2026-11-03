@@ -37,7 +37,7 @@ async function addMeal(page: Page, title: string): Promise<void> {
     .locator('.meal-form__actions')
     .getByRole('button', { name: 'Añadir', exact: true })
     .click();
-  await expect(page.getByRole('button', { name: title, exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: `Cocinar ${title}`, exact: true })).toBeVisible();
 }
 
 test('una respuesta tardía no reemplaza las comidas del rango visible', async ({
@@ -100,15 +100,23 @@ test('una respuesta tardía no reemplaza las comidas del rango visible', async (
     });
     await openDay(page, visibleDate);
     await currentResponse;
-    await expect(page.getByRole('button', { name: visibleTitle, exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: staleTitle, exact: true })).toHaveCount(0);
+    await expect(
+      page.getByRole('button', { name: `Cocinar ${visibleTitle}`, exact: true })
+    ).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: `Cocinar ${staleTitle}`, exact: true })
+    ).toHaveCount(0);
   } finally {
     releaseStale();
   }
   await staleCompleted;
   await waitForCalendarStable(page);
-  await expect(page.getByRole('button', { name: visibleTitle, exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: staleTitle, exact: true })).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: `Cocinar ${visibleTitle}`, exact: true })
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: `Cocinar ${staleTitle}`, exact: true })
+  ).toHaveCount(0);
   expect(pageErrors).toEqual([]);
 
   const toastCloseButtons = page.locator('.toast__close');
