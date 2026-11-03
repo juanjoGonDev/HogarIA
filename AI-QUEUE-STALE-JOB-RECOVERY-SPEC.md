@@ -97,3 +97,9 @@
 - `pnpm lint` no se puede ejecutar en este checkout: Angular CLI falla porque no está instalado/declarado `@angular-eslint/builder`; `check:ui` sí pasa (276 ficheros, 21 reglas). No se alteraron dependencias ajenas a esta corrección. El workflow de CI actual no incluye `pnpm lint`; sus gates relevantes se validarán tras publicar este commit.
 - La recuperación de stream de la PR WebApi #176 no se ha probado con un proveedor real usando la imagen de esa rama: el contenedor aislado de esa PR chocó con el reto de autenticación del proveedor. La prueba HIA usa el servicio WebApi local preexistente sin reiniciarlo. Mantener #176 en Draft hasta cerrar esa limitación y los gates.
 - Revisión independiente encontró que el resumen de los smokes fijaba el puerto `:3001` aunque el destino loopback alternativo estuviera configurado. Se corrigió usando el origen validado; TDD falló antes y ahora pasa para los coordinadores IA y `household-meal` (puertos sintéticos `3456`/`3457`).
+
+## Corrección de CI (2026-11-03)
+
+- El CI inicial `41574088977` tuvo un único fallo ajeno a la cola IA: `calendar-google-like-ui.spec.ts` asumía que `date=2026-11-03` se conservaría en URL. Ese día coincidía con “hoy” en el runner; el calendario omite correctamente `date` para la fecha actual. El resto de E2E shards, tests server, typecheck, build y smoke de contenedores pasaron.
+- La regresión del test se reprodujo con el runner aislado local: se esperaba `2026-11-03`, pero el estado canónico era `date=null`. El test ahora elige el 3 de octubre del año anterior desde la fecha local del navegador y mantiene las aserciones de URL, vista, cabecera e historial atrás/adelante.
+- Verificación posterior en Chromium con SQLite temporal: el test focal pasó 1/1; `pnpm typecheck:e2e` pasó. El CI completo de la nueva revisión sigue pendiente; mantener el PR Draft hasta su resultado.

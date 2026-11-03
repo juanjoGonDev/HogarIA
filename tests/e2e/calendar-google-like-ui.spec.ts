@@ -338,7 +338,35 @@ test('las capas seleccionadas se conservan al alternar las seis vistas', async (
 test('atrás y adelante del navegador restauran la vista y el periodo del calendario', async ({
   page
 }) => {
-  await registerAndGoto(page, '/calendar?view=week&date=2026-10-03');
+  const dates = await page.evaluate(() => {
+    const year = new Date().getFullYear() - 1;
+    const initial = new Date(year, 9, 3);
+    const nextMonth = new Date(year, 10, 3);
+    const weekStart = new Date(initial);
+    weekStart.setDate(initial.getDate() - ((initial.getDay() + 6) % 7));
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 6);
+    const dateKey = (date: Date) =>
+      `${date.getFullYear()}-${`${date.getMonth() + 1}`.padStart(2, '0')}-${`${date.getDate()}`.padStart(2, '0')}`;
+    const monthTitle = (date: Date) =>
+      new Intl.DateTimeFormat('es-ES', { month: 'long', year: 'numeric' }).format(date);
+    const weekTitle = () => {
+      if (weekStart.getMonth() === weekEnd.getMonth()) {
+        return `${new Intl.DateTimeFormat('es-ES', { day: 'numeric' }).format(weekStart)} – ${new Intl.DateTimeFormat('es-ES', { day: 'numeric', month: 'long' }).format(weekEnd)}`;
+      }
+      const short = new Intl.DateTimeFormat('es-ES', { day: 'numeric', month: 'short' });
+      return `${short.format(weekStart)} – ${short.format(weekEnd)}`;
+    };
+
+    return {
+      initialDate: dateKey(initial),
+      nextMonthDate: dateKey(nextMonth),
+      octoberTitle: monthTitle(initial),
+      novemberTitle: monthTitle(nextMonth),
+      weekTitle: weekTitle()
+    };
+  });
+  await registerAndGoto(page, `/calendar?view=week&date=${dates.initialDate}`);
 
   const viewPicker = page.locator('[data-test="calendar-view-select"]');
   const expectUrlState = async (view: string, date: string) => {
@@ -354,22 +382,22 @@ test('atrás y adelante del navegador restauran la vista y el periodo del calend
   await expect(viewPicker).toHaveAttribute('data-view', 'month');
 
   await page.locator('.cal-top__nav .cal-icon-btn').nth(1).click();
-  await expectUrlState('month', '2026-11-03');
-  await expect(page.locator('h1.calendar__title')).toContainText('noviembre de 2026');
+  await expectUrlState('month', dates.nextMonthDate);
+  await expect(page.locator('h1.calendar__title')).toContainText(dates.novemberTitle);
 
   await page.goBack();
-  await expectUrlState('month', '2026-10-03');
+  await expectUrlState('month', dates.initialDate);
   await expect(viewPicker).toHaveAttribute('data-view', 'month');
-  await expect(page.locator('h1.calendar__title')).toContainText('octubre de 2026');
+  await expect(page.locator('h1.calendar__title')).toContainText(dates.octoberTitle);
 
   await page.goBack();
-  await expectUrlState('week', '2026-10-03');
+  await expectUrlState('week', dates.initialDate);
   await expect(viewPicker).toHaveAttribute('data-view', 'week');
-  await expect(page.locator('h1.calendar__title')).toContainText('28 sept');
+  await expect(page.locator('h1.calendar__title')).toContainText(dates.weekTitle);
 
   await page.goForward();
   await expect(viewPicker).toHaveAttribute('data-view', 'month');
-  await expect(page.locator('h1.calendar__title')).toContainText('octubre de 2026');
+  await expect(page.locator('h1.calendar__title')).toContainText(dates.octoberTitle);
   await page.goForward();
-  await expect(page.locator('h1.calendar__title')).toContainText('noviembre de 2026');
+  await expect(page.locator('h1.calendar__title')).toContainText(dates.novemberTitle);
 });
