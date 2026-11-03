@@ -1,6 +1,6 @@
 # Recuperación de trabajos IA bloqueados
 
-**Estado:** Draft PR; implementación y pruebas locales/live completadas; CI verde para los cambios de código. Cualquier nuevo commit debe pasar CI antes de Ready.
+**Estado:** PR #70 Ready (mantener este estado por instrucción explícita del usuario); esta investigación adicional sigue en curso y cada nuevo commit debe pasar CI.
 **Base:** origin/master (b7a754e8bbcc9524d5d2d08d0197101abc46e635).
 **Rama:** fix/ai-queue-stale-job-recovery.
 **Alcance:** evitar que excepciones inesperadas o leases vencidas dejen jobs IA en running, bloqueen concurrencia o dejen el test de proveedor en testing. No cambiar protocolos ni degradar Responses background.
@@ -104,3 +104,24 @@
 - La regresión del test se reprodujo con el runner aislado local: se esperaba `2026-11-03`, pero el estado canónico era `date=null`. El test ahora elige el 3 de octubre del año anterior desde la fecha local del navegador y mantiene las aserciones de URL, vista, cabecera e historial atrás/adelante.
 - Verificación posterior en Chromium con SQLite temporal: el test focal pasó 1/1; `pnpm typecheck:e2e` pasó. En ese momento, el CI completo de la nueva revisión seguía pendiente y el PR se mantuvo Draft.
 - CI run `1089` pasó todos los jobs en el commit `6238499660a3fa99996aa706d64065ba2d694cae`, incluidos los cuatro shards E2E, full-stack E2E, Type Check, Server Tests, Production Build y ambos container smokes. El ajuste documentado aquí se publica como cambio solo de spec y su nuevo head también se validará antes de marcar el PR Ready.
+
+## Investigación adicional: test de conexión atascado (2026-11-03)
+
+- Reproducción en HogarIA real desde Chromium: el job `h2CZbMkrbSu1MQpdjva32` fue aceptado como `connection_test`, reclamado una vez (`claim_generation=1`) y terminó `failed / WORKER_STALLED` tras expirar el lease; `provider_transport`, `provider_http_status`, `provider_response_id` y `elapsed_ms` quedaron vacíos.
+- Consulta correlacionada de WebApi: entre 09:34 y 09:41 UTC no hubo `ai_executions` ni eventos `/v1/responses` para ese intento. La sesión `resp_f3cccf7cbac04aca996357a1a7367a00` es una prueba anterior (03:36 UTC), no debe usarse como evidencia del job anterior.
+- Evidencia disponible no localiza aún la fase del bloqueo. El callback de diagnóstico de `ai-client.ts` captura errores sin señalarlos y `persistAiProviderDiagnostic` no verifica si el `UPDATE` afectó la fila. Además, el job conserva solo el último diagnóstico del proveedor, no una traza de etapas del worker; tras reiniciar/expirar, el motivo queda opaco.
+- La prueba fue hecha contra el servicio local ya existente; no se modificó ni reinició. Los próximos smokes deben usar DB temporal y limpiar su propio stack.
+
+### Decisiones adicionales
+
+12. Persistir una traza breve y ordenada por job/claim generation para milestones del worker y transporte. Solo códigos/etapas allowlist; nunca prompt, cuerpo, archivo, URL sensible, credencial ni mensaje bruto del error. Rechazar escrituras tardías de generaciones anteriores.
+13. Un callback de diagnóstico que no actualice el job debe dejar una señal segura y medible, sin interrumpir la llamada al proveedor.
+14. La acción «Copiar diagnóstico» debe incluir la traza segura del job que el usuario seleccionó, como eventos con timestamp/etapa/resultado y no una volcada global de logs.
+
+### Criterios añadidos — diagnóstico de conexión
+
+- [ ] Un job guarda eventos `claimed`, `runtime_started`, `provider_submitting`, respuesta/progreso y estado terminal con fencing por job/claim; la consulta por usuario/config nunca mezcla jobs.
+- [ ] `WORKER_STALLED` conserva la última etapa alcanzada; el copy diagnostic explica si el worker no llegó a ejecutar el runtime o se detuvo antes/después del envío, sin inferir etapas ausentes.
+- [ ] Fallo o `UPDATE.changes=0` al escribir diagnóstico queda observable con código seguro; no se filtra texto/cuerpo del error ni se oculta silenciosamente.
+- [ ] Tests verifican orden, redacción, límite de eventos, aislamiento entre jobs y fencing de callbacks tardíos; prueban fallos pre-provider sin llamada duplicada.
+- [ ] Chromium contra stack aislado, SQLite temporal y WebApi/modelo real repite una conexión guardada: `202`, job único, trace visible tras cerrar/reabrir, respuesta terminal real y concurrencia liberada.
