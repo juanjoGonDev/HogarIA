@@ -131,12 +131,20 @@ describe('ticketAnswerSchema model output', () => {
 
     expect(amount.discount).toEqual({ kind: 'amount', valueMinor: 150, units: 2 });
     expect(percent.lines[0]?.discount).toEqual({ kind: 'percent', percentBps: 1250, units: 1 });
+    expect(
+      createReceiptItemSchema.safeParse({
+        name: 'Leche entera',
+        quantity: 1,
+        discount: { kind: 'percent', percentBps: 9999 }
+      }).success
+    ).toBe(true);
   });
 
   it.each([
     { kind: 'amount', valueMinor: 0 },
     { kind: 'amount', valueMinor: -1 },
     { kind: 'percent', percentBps: 0 },
+    { kind: 'percent', percentBps: 10000 },
     { kind: 'percent', percentBps: 10001 },
     { kind: 'percent', percentBps: 500, valueMinor: 100 }
   ])('rejects malformed discount payloads %j', (discount) => {

@@ -1,4 +1,5 @@
 import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
 import { signal } from '@angular/core';
 import { ActivatedRoute, provideRouter, Router } from '@angular/router';
 import { of } from 'rxjs';
@@ -158,6 +159,22 @@ describe('ReceiptDetailComponent', () => {
     expect(fixture.nativeElement.querySelector('#ticket-tienda')).not.toBeNull();
     expect(fixture.nativeElement.querySelector('#ticket-store-address')).not.toBeNull();
   });
+
+  it('reloads categories when background ticket reading enters review', fakeAsync(() => {
+    fixture.destroy();
+    service.receipt.set(makeReceipt({ status: 'analyzing', lines: [] }));
+    pantry.loadCategories.calls.reset();
+    fixture = TestBed.createComponent(ReceiptDetailComponent);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    service.receipt.set(
+      makeReceipt({ status: 'review', lines: [makeLine({ category: 'cuidado personal' })] })
+    );
+
+    tick(1000);
+
+    expect(pantry.loadCategories).toHaveBeenCalledTimes(2);
+  }));
 
   it('initializes null metadata as empty drafts and updates drafts only for a new receipt id', () => {
     fixture.destroy();
@@ -646,6 +663,68 @@ describe('ReceiptDetailComponent', () => {
     expect(dialog.textContent).toContain('receipts.descuento_importe_total_hint');
   });
 
+  it('uses a floating category picker and a bounded numeric discount input', () => {
+    const picker = fixture.debugElement.query(By.css('app-picker'));
+    expect(picker.componentInstance.floatingPanel).toBeTrue();
+
+    const line = component.lineas()[0];
+    component.abrirEditorPromocion(line);
+    component.seleccionarModoPromocion('percent');
+    fixture.detectChanges();
+
+    let value = fixture.nativeElement.querySelector(
+      '[data-test="receipt-promotion-value"]'
+    ) as HTMLInputElement;
+    expect(value.type).toBe('number');
+    expect(value.min).toBe('0.01');
+    expect(value.step).toBe('0.01');
+    expect(value.max).toBe('99.99');
+
+    component.seleccionarModoPromocion('amount');
+    fixture.detectChanges();
+    value = fixture.nativeElement.querySelector(
+      '[data-test="receipt-promotion-value"]'
+    ) as HTMLInputElement;
+    expect(value.type).toBe('number');
+    expect(value.min).toBe('0.01');
+    expect(value.step).toBe('0.01');
+    expect(value.hasAttribute('max')).toBeFalse();
+  });
+
+  it('reopens persisted discounts using the canonical decimal value required by number inputs', () => {
+    service.receipt.set(
+      makeReceipt({
+        lines: [makeLine({ discount: { kind: 'amount', valueMinor: 125, units: 1 } })]
+      })
+    );
+    fixture.detectChanges();
+    component.abrirEditorPromocion(component.lineas()[0]!);
+    fixture.detectChanges();
+    expect(
+      (
+        fixture.nativeElement.querySelector(
+          '[data-test="receipt-promotion-value"]'
+        ) as HTMLInputElement
+      ).value
+    ).toBe('1.25');
+
+    service.receipt.set(
+      makeReceipt({
+        lines: [makeLine({ discount: { kind: 'percent', percentBps: 1250, units: null } })]
+      })
+    );
+    fixture.detectChanges();
+    component.abrirEditorPromocion(component.lineas()[0]!);
+    fixture.detectChanges();
+    expect(
+      (
+        fixture.nativeElement.querySelector(
+          '[data-test="receipt-promotion-value"]'
+        ) as HTMLInputElement
+      ).value
+    ).toBe('12.50');
+  });
+
   it('previews valid offer and discount effects before saving, and hides invalid drafts', () => {
     const line = component.lineas()[0];
     component.abrirEditorPromocion(line);
@@ -670,6 +749,13 @@ describe('ReceiptDetailComponent', () => {
       percent: '12,5',
       units: '2/2'
     });
+
+    component.valorPromocionDraft.set('99.99');
+    expect(component.previsualizacionPromocion()).toBe('receipts.preview_promotion_percent');
+    component.valorPromocionDraft.set('100');
+    expect(component.previsualizacionPromocion()).toBeNull();
+    component.valorPromocionDraft.set('12.345');
+    expect(component.previsualizacionPromocion()).toBeNull();
 
     component.seleccionarModoPromocion('offer');
     component.compraPromocionDraft.set('3');
@@ -719,6 +805,22 @@ describe('ReceiptDetailComponent', () => {
     });
   });
 
+  it('accepts 99.99 percent but rejects 100 percent', async () => {
+    const line = component.lineas()[0];
+    component.abrirEditorPromocion(line);
+    component.seleccionarModoPromocion('percent');
+    component.valorPromocionDraft.set('100');
+    await component.guardarPromocion();
+    expect(service.updateLine).not.toHaveBeenCalled();
+
+    component.valorPromocionDraft.set('99.99');
+    await component.guardarPromocion();
+    expect(service.updateLine).toHaveBeenCalledOnceWith(RECEIPT_ID, 'line-1', {
+      offer: null,
+      discount: { kind: 'percent', percentBps: 9999, units: null }
+    });
+  });
+
   it('rejects invalid discount values, unit caps and custom offers without sending a patch', async () => {
     const line = component.lineas()[0];
     component.abrirEditorPromocion(line);
@@ -729,6 +831,10 @@ describe('ReceiptDetailComponent', () => {
 
     component.seleccionarModoPromocion('percent');
     component.valorPromocionDraft.set('101');
+    await component.guardarPromocion();
+    expect(service.updateLine).not.toHaveBeenCalled();
+
+    component.valorPromocionDraft.set('12.345');
     await component.guardarPromocion();
     expect(service.updateLine).not.toHaveBeenCalled();
 

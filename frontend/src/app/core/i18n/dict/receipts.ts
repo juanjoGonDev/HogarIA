@@ -95,9 +95,10 @@ export const receiptsEs = {
   'receipts.ofertas_rapidas': 'Ofertas rápidas',
   'receipts.descuento_porcentaje': 'Descuento (%)',
   'receipts.descuento_importe': 'Descuento total (€)',
-  'receipts.descuento_porcentaje_hint': 'El porcentaje se aplica a las unidades seleccionadas.',
+  'receipts.descuento_porcentaje_hint':
+    'Se aplica a las unidades seleccionadas. Debe ser mayor que 0 y menor que 100; máximo 2 decimales.',
   'receipts.descuento_importe_total_hint':
-    'Este importe se descuenta una sola vez del conjunto de unidades seleccionadas, no por unidad.',
+    'Debe ser mayor que 0. Se descuenta una sola vez del conjunto de unidades seleccionadas, no por unidad; máximo 2 decimales.',
   'receipts.unidades_afectadas': 'Unidades con descuento',
   'receipts.unidades_afectadas_hint':
     'De {quantity} unidades. Déjalo vacío para aplicarlo a todas.',
@@ -111,7 +112,8 @@ export const receiptsEs = {
   'receipts.preview_promotion_percent': '{percent} % de descuento sobre {units} unidades.',
   'receipts.preview_promotion_amount': 'Descuento total de {amount} € sobre {units} unidades.',
   'receipts.guardar_oferta': 'Guardar oferta',
-  'receipts.descuento_valor_invalido': 'Indica un descuento válido con hasta 2 decimales.',
+  'receipts.descuento_valor_invalido':
+    'El importe debe ser mayor que 0; el porcentaje, mayor que 0 y menor que 100. Usa hasta 2 decimales.',
   'receipts.descuento_unidades_invalidas':
     'Indica unidades mayores que cero y no superiores a la cantidad de la línea.',
   'receipts.oferta_personalizada_invalida':
@@ -246,9 +248,10 @@ export const receiptsEn: Record<keyof typeof receiptsEs, string> = {
   'receipts.ofertas_rapidas': 'Quick offers',
   'receipts.descuento_porcentaje': 'Discount (%)',
   'receipts.descuento_importe': 'Total discount (€)',
-  'receipts.descuento_porcentaje_hint': 'The percentage applies to the selected units.',
+  'receipts.descuento_porcentaje_hint':
+    'Applies to the selected units. Must be greater than 0 and below 100; up to 2 decimals.',
   'receipts.descuento_importe_total_hint':
-    'This amount is deducted once from the selected units as a whole, not per unit.',
+    'Must be greater than 0. Deducted once from the selected units as a whole, not per unit; up to 2 decimals.',
   'receipts.unidades_afectadas': 'Units with discount',
   'receipts.unidades_afectadas_hint': 'Out of {quantity} units. Leave blank to apply to all.',
   'receipts.unidades_compradas': 'You take',
@@ -260,7 +263,8 @@ export const receiptsEn: Record<keyof typeof receiptsEs, string> = {
   'receipts.preview_promotion_percent': '{percent}% discount on {units} units.',
   'receipts.preview_promotion_amount': 'Total discount of €{amount} on {units} units.',
   'receipts.guardar_oferta': 'Save offer',
-  'receipts.descuento_valor_invalido': 'Enter a valid discount with up to 2 decimal places.',
+  'receipts.descuento_valor_invalido':
+    'Amount must be greater than 0; percentage must be greater than 0 and below 100. Use up to 2 decimals.',
   'receipts.descuento_unidades_invalidas':
     'Enter units greater than zero and no greater than the line quantity.',
   'receipts.oferta_personalizada_invalida':

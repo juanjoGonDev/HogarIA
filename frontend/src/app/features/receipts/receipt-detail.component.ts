@@ -466,6 +466,7 @@ const SAFE_PROVIDER_ERROR_PARAMS = new Set([
                       <app-picker
                         [options]="opcionesCategoria()"
                         [value]="linea.category"
+                        [floatingPanel]="true"
                         (valueChange)="editarLinea(linea, { category: $event ?? 'other' })"
                       />
                     } @else {
@@ -716,9 +717,11 @@ const SAFE_PROVIDER_ERROR_PARAMS = new Set([
               <input
                 id="receipt-promotion-value"
                 class="linea__input"
-                type="text"
+                type="number"
+                min="0.01"
+                step="0.01"
+                [attr.max]="promocionModo() === 'percent' ? '99.99' : null"
                 inputmode="decimal"
-                maxlength="12"
                 [value]="valorPromocionDraft()"
                 (input)="valorPromocionDraft.set($any($event.target).value)"
                 [attr.aria-describedby]="
@@ -1526,7 +1529,7 @@ export class ReceiptDetailComponent implements OnInit, OnDestroy {
     }
 
     const value = this.numeroDecimal(this.valorPromocionDraft());
-    if (value === null || value <= 0 || (modo === 'percent' && value > 100)) return null;
+    if (value === null || value <= 0 || (modo === 'percent' && value >= 100)) return null;
     const units = this.unidadesAfectadas(linea);
     if (units === undefined) return null;
     const affected = units ?? linea.quantity;
@@ -1773,6 +1776,7 @@ export class ReceiptDetailComponent implements OnInit, OnDestroy {
     if (this.pollActivo) return;
     this.pollActivo = true;
     this.lineasPrevias = this.service.receipt()?.lines.length ?? 0;
+    let ultimoEstado = this.service.receipt()?.status ?? null;
     interval(1000)
       .pipe(
         switchMap(() => this.service.refreshReceipt(this.id)),
@@ -1784,6 +1788,8 @@ export class ReceiptDetailComponent implements OnInit, OnDestroy {
           const ahora = t?.lines.length ?? 0;
           if (ahora > this.lineasPrevias) this.ultimaNueva.set(t!.lines[ahora - 1]?.id ?? null);
           this.lineasPrevias = ahora;
+          if (t?.status === 'review' && ultimoEstado !== 'review') this.pantry.loadCategories();
+          if (t) ultimoEstado = t.status;
           // Parado el trabajo (review/failed/stopped/confirmed), el latido se apaga solo.
           if (t && t.status !== 'queued' && t.status !== 'analyzing') this.pollActivo = false;
         }
@@ -1864,8 +1870,8 @@ export class ReceiptDetailComponent implements OnInit, OnDestroy {
       this.promocionModo.set(linea.discount.kind);
       this.valorPromocionDraft.set(
         linea.discount.kind === 'amount'
-          ? this.formatearCantidad((linea.discount.valueMinor ?? 0) / 100, 2, 2)
-          : this.formatearCantidad((linea.discount.percentBps ?? 0) / 100, 2)
+          ? ((linea.discount.valueMinor ?? 0) / 100).toFixed(2)
+          : ((linea.discount.percentBps ?? 0) / 100).toFixed(2)
       );
       this.unidadesPromocionDraft.set(
         linea.discount.units === null || linea.discount.units === undefined
@@ -1975,7 +1981,7 @@ export class ReceiptDetailComponent implements OnInit, OnDestroy {
     }
 
     const value = this.numeroDecimal(this.valorPromocionDraft());
-    if (value === null || value <= 0 || (mode === 'percent' && value > 100)) {
+    if (value === null || value <= 0 || (mode === 'percent' && value >= 100)) {
       this.promocionError.set('receipts.descuento_valor_invalido');
       return;
     }

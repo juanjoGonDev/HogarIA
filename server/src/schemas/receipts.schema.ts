@@ -38,7 +38,7 @@ const receiptDiscount = z.discriminatedUnion('kind', [
       kind: z.literal('percent'),
       valueMinor: z.never().optional(),
       /** 1250 = 12,5 %; evitar floats en el contrato. */
-      percentBps: z.coerce.number().int().min(1).max(10000),
+      percentBps: z.coerce.number().int().min(1).max(9999),
       units: unitsDiscounted
     })
     .strict()
