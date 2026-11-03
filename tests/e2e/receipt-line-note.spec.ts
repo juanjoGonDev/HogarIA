@@ -35,7 +35,7 @@ function seedReceipts(databasePath: string, runDirectory: string, userId: string
       `INSERT INTO receipt_items (
         id, receipt_id, name, quantity, unit, category, price_minor,
         offer_buy, offer_take, note, confidence, position
-      ) VALUES (?, ?, 'Producto QA', 1, 'ud', 'other', 350, NULL, NULL, ?, 0.99, 0)`
+      ) VALUES (?, ?, 'Producto QA', 2, 'ud', 'other', 350, NULL, NULL, ?, 0.99, 0)`
     );
 
     insertReceipt.run(
@@ -171,7 +171,10 @@ async function expectAccessibleNamesNotToAffectGeometry(page: Page, ids: string[
       const originalValue = original[key];
       const nextValue = next[key];
       if (typeof originalValue === 'number' && typeof nextValue === 'number') {
-        expect(Math.abs(originalValue - nextValue)).toBeLessThanOrEqual(1);
+        expect(
+          Math.abs(originalValue - nextValue),
+          `${ids[index]}.${key} should not move when its accessible name changes`
+        ).toBeLessThanOrEqual(1);
       } else {
         expect(nextValue).toBe(originalValue);
       }
@@ -252,6 +255,15 @@ async function guardarCapturaCantidadPrecio(page: Page, testInfo: TestInfo, lang
   mkdirSync(directory, { recursive: true });
   await page.locator('.tabla').screenshot({
     path: join(directory, `receipt-line-quantity-price-${testInfo.project.name}-${language}.png`),
+    animations: 'disabled'
+  });
+}
+
+async function guardarCapturaDireccionTienda(page: Page, testInfo: TestInfo, language: string) {
+  const directory = process.env.E2E_SCREENSHOT_DIR ?? testInfo.outputPath('screenshots');
+  mkdirSync(directory, { recursive: true });
+  await page.locator('.ficha__cabecera').screenshot({
+    path: join(directory, `receipt-store-address-${testInfo.project.name}-${language}.png`),
     animations: 'disabled'
   });
 }
@@ -386,8 +398,18 @@ test.describe('edición de nota de línea del ticket', () => {
 
 test.describe('edición de unidad y oferta en línea de ticket', () => {
   for (const scenario of [
-    { language: 'es', unitLabel: 'Unidad: Producto QA', offerLabel: 'Oferta: Producto QA' },
-    { language: 'en', unitLabel: 'Unit: Producto QA', offerLabel: 'Offer: Producto QA' }
+    {
+      language: 'es',
+      unitLabel: 'Unidad: Producto QA',
+      amountValue: '1,25',
+      preview: 'Descuento total de 1,25 € sobre 1/2 unidades.'
+    },
+    {
+      language: 'en',
+      unitLabel: 'Unit: Producto QA',
+      amountValue: '1.25',
+      preview: 'Total discount of €1.25 on 1/2 units.'
+    }
   ]) {
     test(`persiste unidad y oferta con controles accesibles (${scenario.language})`, async ({
       page
@@ -417,9 +439,9 @@ test.describe('edición de unidad y oferta en línea de ticket', () => {
 
       await page.goto(`/receipts/${reviewId}`);
       const unit = page.getByLabel(scenario.unitLabel, { exact: true });
-      const offer = page.getByLabel(scenario.offerLabel, { exact: true });
+      const offer = page.locator('[data-test="receipt-promotion-open"]');
       await expect(unit).toHaveValue('ud');
-      await expect(offer).toHaveValue('');
+      await expect(offer).toHaveAttribute('aria-label', /Producto QA/);
 
       const linePath = `/api/receipts/${reviewId}/items/${reviewLineId}`;
       const unitId = `linea-${reviewLineId}-unidad`;
@@ -457,18 +479,72 @@ test.describe('edición de unidad y oferta en línea de ticket', () => {
       };
 
       await saveAndRead(unit, 'pack', { unit: 'pack' }, { unit: 'pack' });
-      await saveAndRead(
-        offer,
-        '3x2',
-        { offer: { buy: 3, take: 2 } },
-        {
-          unit: 'pack',
-          offer: { buy: 3, take: 2 }
-        }
+      const quickOfferPatch = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === linePath && response.request().method() === 'PATCH'
       );
+      await offer.click();
+      const offerEditor = page.locator('[data-test="receipt-promotion-editor"]');
+      await offerEditor.locator('[data-test="receipt-offer-preset-3x2"]').click();
+      const quickOfferResponse = await quickOfferPatch;
+      expect(quickOfferResponse.status()).toBe(200);
+      expect(quickOfferResponse.request().postDataJSON()).toEqual({
+        offer: { buy: 3, take: 2 },
+        discount: null
+      });
       await page.reload();
       await expect(unit).toHaveValue('pack');
-      await expect(offer).toHaveValue('3x2');
+      await expect(offer).toContainText('3x2');
+
+      await offer.click();
+      const reopenedEditor = page.locator('[data-test="receipt-promotion-editor"]');
+      const amountMode = reopenedEditor.locator('[data-test="receipt-promotion-mode-amount"]');
+      await amountMode.focus();
+      await expect(amountMode).toBeFocused();
+      await page.keyboard.press('Enter');
+      await reopenedEditor.locator('[data-test="receipt-promotion-value"]').fill('1,25');
+      await reopenedEditor.locator('[data-test="receipt-promotion-units"]').fill('1');
+      await expect(reopenedEditor.locator('[data-test="receipt-promotion-preview"]')).toHaveText(
+        scenario.preview
+      );
+      const amountPatch = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === linePath && response.request().method() === 'PATCH'
+      );
+      await page.locator('[data-test="receipt-promotion-save"]').click();
+      const amountResponse = await amountPatch;
+      expect(amountResponse.status()).toBe(200);
+      expect(amountResponse.request().postDataJSON()).toEqual({
+        offer: null,
+        discount: { kind: 'amount', valueMinor: 125, units: 1 }
+      });
+      const amountDetailResponse = await page.request.get(`/api/receipts/${reviewId}`, {
+        headers: { authorization: `Bearer ${token}` }
+      });
+      expect(amountDetailResponse.status()).toBe(200);
+      const amountDetail = (await amountDetailResponse.json()) as {
+        data: { lines: (Record<string, unknown> & { id: string })[] };
+      };
+      expect(amountDetail.data.lines.find((line) => line.id === reviewLineId)).toMatchObject({
+        priceMinor: 350,
+        offer: null,
+        discount: { kind: 'amount', valueMinor: 125, units: 1 }
+      });
+      await expect(offer).toContainText(/1[,.]25 €/);
+
+      await page.reload();
+      await offer.click();
+      const persistedEditor = page.locator('[data-test="receipt-promotion-editor"]');
+      await expect(
+        persistedEditor.locator('[data-test="receipt-promotion-mode-amount"]')
+      ).toHaveAttribute('aria-pressed', 'true');
+      await expect(persistedEditor.locator('[data-test="receipt-promotion-value"]')).toHaveValue(
+        scenario.amountValue
+      );
+      await expect(persistedEditor.locator('[data-test="receipt-promotion-units"]')).toHaveValue(
+        '1'
+      );
+      await page.locator('[data-test="receipt-promotion-cancel"]').click();
 
       if (info.project.name === 'chromium') {
         await expectNoHorizontalOverflow(page, 1440, 900);
@@ -489,16 +565,121 @@ test.describe('edición de unidad y oferta en línea de ticket', () => {
         await expectMobileTouchTargets(page);
       }
 
-      await saveAndRead(unit, '', { unit: null }, { unit: null, offer: { buy: 3, take: 2 } });
-      await saveAndRead(offer, '', { offer: null }, { unit: null, offer: null });
-      await saveAndRead(offer, 'oferta inválida', { offer: null }, { offer: null });
+      await saveAndRead(
+        unit,
+        '',
+        { unit: null },
+        { unit: null, discount: { kind: 'amount', valueMinor: 125, units: 1 } }
+      );
+      await offer.click();
+      const clearEditor = page.locator('[data-test="receipt-promotion-editor"]');
+      await clearEditor.locator('[data-test="receipt-promotion-mode-none"]').click();
+      const clearPatch = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === linePath && response.request().method() === 'PATCH'
+      );
+      await page.locator('[data-test="receipt-promotion-save"]').click();
+      const clearResponse = await clearPatch;
+      expect(clearResponse.status()).toBe(200);
+      expect(clearResponse.request().postDataJSON()).toEqual({ offer: null, discount: null });
       await page.reload();
       await expect(unit).toHaveValue('');
-      await expect(offer).toHaveValue('');
+      await expect(offer).not.toContainText(/1[,.]25|3x2/);
 
       await page.goto(`/receipts/${confirmedId}`);
       await expect(page.getByLabel(scenario.unitLabel, { exact: true })).toHaveCount(0);
-      await expect(page.getByLabel(scenario.offerLabel, { exact: true })).toHaveCount(0);
+      await expect(page.locator('[data-test="receipt-promotion-open"]')).toHaveCount(0);
+      expect(pageErrors).toEqual([]);
+    });
+  }
+});
+
+test.describe('edición de dirección y sucursal del ticket', () => {
+  for (const scenario of [
+    { language: 'es', addressLabel: 'Dirección de la tienda' },
+    { language: 'en', addressLabel: 'Store address' }
+  ]) {
+    test(`resuelve y conserva la dirección editada (${scenario.language})`, async ({
+      page
+    }, info) => {
+      test.skip(process.env.E2E_STACK !== 'dev', 'El fixture local de geocoding usa el stack dev.');
+      const pageErrors: string[] = [];
+      page.on('pageerror', (error) => pageErrors.push(`${error.name}: ${error.message}`));
+      await registerAndGoto(page, '/receipts');
+      await page.evaluate((language) => {
+        window.localStorage.setItem('hogar:v1:language', language);
+      }, scenario.language);
+      await page.reload();
+
+      const token = await tokenOf(page);
+      const profileResponse = await page.request.get('/api/auth/profile', {
+        headers: { authorization: `Bearer ${token}` }
+      });
+      expect(profileResponse.ok()).toBeTruthy();
+      const profile = (await profileResponse.json()) as { data: { id: string } };
+      const runDirectory = process.env.E2E_RUN_DIR;
+      const databasePath = process.env.DATABASE_PATH;
+      if (!runDirectory || !databasePath) throw new Error('E2E requiere rutas temporales aisladas');
+      const { reviewId } = seedReceipts(databasePath, runDirectory, profile.data.id);
+
+      await page.goto(`/receipts/${reviewId}`);
+      const address = page.getByLabel(scenario.addressLabel, { exact: true });
+      const addressValue = 'Avenida Sierra Alhamilla 12, 04007 Almería';
+      await expect(address).toHaveValue('');
+      await address.fill(addressValue);
+
+      const save = page.locator('[data-test="save-receipt-metadata"]');
+      await expect(save).toBeEnabled();
+      const saveResponse = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === `/api/receipts/${reviewId}` &&
+          response.request().method() === 'PATCH'
+      );
+      await save.click();
+      const saved = await saveResponse;
+      expect(saved.status()).toBe(200);
+      expect(saved.request().postDataJSON()).toEqual({ storeAddress: addressValue });
+
+      const detailResponse = await page.request.get(`/api/receipts/${reviewId}`, {
+        headers: { authorization: `Bearer ${token}` }
+      });
+      expect(detailResponse.status()).toBe(200);
+      const detail = (await detailResponse.json()) as {
+        data: {
+          storeAddress: string;
+          storeLatitude: number;
+          storeLongitude: number;
+          storeAttribution: string;
+          storeAttributionUrl: string;
+        };
+      };
+      expect(detail.data).toMatchObject({
+        storeAddress: addressValue,
+        storeLatitude: 36.834,
+        storeLongitude: -2.463,
+        storeAttribution: '© OpenStreetMap contributors',
+        storeAttributionUrl: 'https://www.openstreetmap.org/copyright'
+      });
+
+      await page.reload();
+      await expect(address).toHaveValue(addressValue);
+      await expect(
+        page.getByRole('link', { name: '© OpenStreetMap contributors', exact: true })
+      ).toHaveAttribute('href', 'https://www.openstreetmap.org/copyright');
+
+      if (info.project.name === 'chromium') {
+        await expectNoHorizontalOverflow(page, 1440, 900);
+        await expect(address).toBeVisible();
+        await guardarCapturaDireccionTienda(page, info, scenario.language);
+        await expectNoHorizontalOverflow(page, 320, 740);
+      } else {
+        await expectNoHorizontalOverflow(page, 390, 844);
+        await expect(address).toBeVisible();
+        await guardarCapturaDireccionTienda(page, info, scenario.language);
+        await expectNoHorizontalOverflow(page, 320, 740);
+      }
+      const addressBounds = await address.boundingBox();
+      expect(addressBounds?.height ?? 0).toBeGreaterThanOrEqual(44);
       expect(pageErrors).toEqual([]);
     });
   }
@@ -547,7 +728,7 @@ test.describe('edición de cantidad y precio en línea de ticket', () => {
       await page.goto(`/receipts/${reviewId}`);
       const quantity = page.getByLabel(scenario.quantityLabel, { exact: true });
       const price = page.getByLabel(scenario.priceLabel, { exact: true });
-      await expect(quantity).toHaveValue('1');
+      await expect(quantity).toHaveValue('2');
       await expect(price).toHaveValue('3.50');
       for (const field of [quantity, price]) {
         await expect(field).toHaveAttribute('type', 'number');

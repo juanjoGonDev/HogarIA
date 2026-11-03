@@ -13,6 +13,7 @@ import { aiLocalizedFieldsInstruction, type AiOutputLanguage } from './ai-output
 
 export const TICKET_SHAPE = `{
   "store": "Mercadona",
+  "storeAddress": "Avenida de Ejemplo 10, 04007 Almería",
   "purchaseDate": "2024-05-10",
   "lines": [
     {
@@ -22,7 +23,8 @@ export const TICKET_SHAPE = `{
       "category": "dairy",
       "createCategory": false,
       "priceMinor": 195,
-      "offer": { "buy": 3, "take": 2 },
+      "offer": null,
+      "discount": { "kind": "percent", "percentBps": 1000, "units": 1 },
       "confidence": 0.95,
       "note": ""
     }
@@ -54,14 +56,15 @@ export function buildTicketPrompt(input: { esPdf: boolean; language?: AiOutputLa
     '1. El dinero va en CENTIMOS ENTEROS en `priceMinor` y `totalMinor` (1,95 EUR son 195). Nunca escribas un precio con coma ni con simbolo.',
     '2. El importe de cada linea del ticket es lo PAGADO por esa cantidad, no el precio por unidad: si la linea dice «2 x 1,10», son 2 unidades y priceMinor 220.',
     '3. NO inventes precios. Si el numero no se lee, `priceMinor` es null y lo dices en `warnings`. Una estimacion tuya acabaria en el historial de precios de la casa como si fuera un dato real.',
-    '4. `store` es la tienda de la cabecera del ticket (el nombre del establecimiento, no su CIF ni su direccion). Si no se distingue, null.',
+    '4. `store` es la tienda de la cabecera del ticket (el nombre del establecimiento, no su CIF ni su direccion). `storeAddress` es solo la direccion literal visible en el ticket; si no se distingue, ambos son null. No inventes coordenadas ni devuelvas latitud/longitud.',
     '5. `purchaseDate` es la fecha impresa de compra en formato `YYYY-MM-DD`. Si falta, no se lee o es ambigua, `purchaseDate` es null. Nunca uses la fecha de subida ni `created_at` como fecha de compra.',
     '6. Cada linea legible debe tener una `category` no vacia y `createCategory` booleano; nunca los devuelvas como null. Busca primero el producto registrado y usa su categoria vigente, con `createCategory: false`. Si no hay coincidencia, usa la categoria existente mas adecuada; usa `other` para lo que no encaje si esta registrada. Solo si no hay categoria util, propone una clave nueva (minusculas, sin espacios ni acentos) con `createCategory: true`.',
-    '7. `quantity` es cuantas unidades se llevan; `unit` la unidad corta (ud, kg, g, l, ml, pack, lata, botella, caja). Las ofertas tipo «3x2» van en `offer`, no en el precio.',
-    '8. `confidence` entre 0 y 1: lo que se lee claro vale 0.95, lo deducido de una letra borrosa vale 0.3.',
-    '9. `totalMinor` es el total final del ticket. Si no cuadra con la suma de tus lineas, dilo en `warnings` en vez de cuadrarlo tu.',
-    '10. Si una linea no se lee, no la metas: es mejor una linea menos que un producto que nadie compro.',
-    '11. Si las paginas son tramos contiguos o solapados de un unico ticket, cuenta cada linea impresa una sola vez aunque vuelva a verse en otra pagina. No elimines lineas impresas distintas solo porque sean el mismo producto.',
+    '7. `quantity` es cuantas unidades se llevan; `unit` la unidad corta (ud, kg, g, l, ml, pack, lata, botella, caja). Las ofertas tipo «3x2» van en `offer`. Un descuento directo legible va en `discount`: kind `amount` usa `valueMinor` como descuento TOTAL en centimos para `units` (no por unidad); kind `percent` usa `percentBps` (1000 = 10 %). Si no esta impreso claramente, discount es null. Nunca devuelvas `offer` y `discount` a la vez.',
+    '8. `priceMinor` ya es lo pagado por toda la cantidad. Nunca vuelvas a restar una oferta o descuento a `priceMinor`; no deduzcas descuentos de la diferencia entre lineas y total.',
+    '9. `confidence` entre 0 y 1: lo que se lee claro vale 0.95, lo deducido de una letra borrosa vale 0.3.',
+    '10. `totalMinor` es el total final del ticket. Si no cuadra con la suma de tus lineas, dilo en `warnings` en vez de cuadrarlo tu.',
+    '11. Si una linea no se lee, no la metas: es mejor una linea menos que un producto que nadie compro.',
+    '12. Si las paginas son tramos contiguos o solapados de un unico ticket, cuenta cada linea impresa una sola vez aunque vuelva a verse en otra pagina. No elimines lineas impresas distintas solo porque sean el mismo producto.',
     aiLocalizedFieldsInstruction(input.language ?? 'es', ['warnings'])
   ].join('\n');
 

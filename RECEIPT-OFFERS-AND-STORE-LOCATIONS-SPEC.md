@@ -1,8 +1,8 @@
 # Ofertas de ticket y ubicaciones de tienda
 
-**Estado:** spec publicada; implementación pendiente.
+**Estado:** implementado y validado localmente; integrado en PR #72; CI pendiente.
 **Base:** `origin/master` en `a0a9f09137d8c5f20e13884cc80dce03d9844449` (incluye PR #70 y la spec inicial).
-**Rama:** `feat/receipt-offers-store-location`.
+**Rama:** `feat/calendar-recipe-cooking` (PR consolidado #72; #71 queda como duplicado).
 **Objetivo:** edición visual de promociones por línea y persistencia de la sucursal exacta asociada al ticket/precios.
 
 ## Evidencia vigente
@@ -27,26 +27,26 @@
 
 ### Ofertas en líneas
 
-- [ ] El editor sustituye el campo libre por selector visual; incluye presets one-tap `3x2`, `2x1`, `4x3`, `5x4` y alternativa personalizada.
-- [ ] Se puede configurar descuento porcentual o importe exacto, limitarlo a N unidades y aplicar presets de oferta `3x2`, `2x1`, `4x3`, `5x4` con una acción; editar, limpiar y volver a abrir conserva exactamente la configuración.
-- [ ] Para un importe, la UI deja claro que se descuenta una cantidad total de las unidades seleccionadas; el porcentaje se aplica al subtotal de esas unidades. Los controles muestran el resumen y el efecto antes de guardar.
-- [ ] IA, API, SQLite y DTO validan/persisten tipos y límites; trabajos/tickets legacy con solo `offer_buy/take` siguen leyéndose igual.
-- [ ] El precio registrado sigue siendo el importe realmente pagado en el ticket; descuentos informativos no cambian el total ni producen doble descuento.
-- [ ] Pruebas cubren presets, valores inválidos, límites, redondeo/moneda, unidades parciales, lectura legacy y seguridad de alcance usuario/hogar.
+- [x] El editor sustituye el campo libre por selector visual; incluye presets one-tap `3x2`, `2x1`, `4x3`, `5x4` y alternativa personalizada.
+- [x] Se puede configurar descuento porcentual o importe exacto, limitarlo a N unidades y aplicar presets de oferta `3x2`, `2x1`, `4x3`, `5x4` con una acción; editar, limpiar y volver a abrir conserva exactamente la configuración.
+- [x] Para un importe, la UI deja claro que se descuenta una cantidad total de las unidades seleccionadas; el porcentaje se aplica al subtotal de esas unidades. Los controles muestran el resumen y el efecto antes de guardar.
+- [x] IA, API, SQLite y DTO validan/persisten tipos y límites; trabajos/tickets legacy con solo `offer_buy/take` siguen leyéndose igual.
+- [x] El precio registrado sigue siendo el importe realmente pagado en el ticket; descuentos informativos no cambian el total ni producen doble descuento.
+- [x] Pruebas cubren presets, valores inválidos, límites, redondeo/moneda, unidades parciales, lectura legacy y seguridad de alcance usuario/hogar.
 
 ### Dirección y sucursal
 
-- [ ] El esquema IA acepta dirección opcional sin lat/lon; campo ausente/ilegible se representa null y no se inventa.
-- [ ] Una resolución de ubicación común se usa desde el worker IA y desde edición manual; dirección unchanged reutiliza cache, dirección cambiada vuelve a resolver.
-- [ ] Persistir dirección y coordenadas opcionales por ticket/sucursal; sucursales con nombre igual y dirección distinta se conservan separadas. Las price observations nuevas quedan asociadas a la sucursal, sin atribuir historiales legacy ambiguos.
-- [ ] Fallos, timeout, `429`, `404`/sin resultado y respuesta malformada del geocoder mantienen ticket y dirección; coordenadas permanecen null, sin almacenar errores o mensajes remotos crudos.
-- [ ] Nominatim público (si se usa) respeta 1 req/s, `User-Agent`, atribución, caché, endpoint configurable y nunca recibe fotos, prompts, tokens, nombres de usuario ni datos del hogar.
-- [ ] Pruebas cubren autorización/aislamiento, migración de DB existente, carrera de dirección manual vs respuesta IA tardía, geocoding cacheado y proveedor externo simulado.
+- [x] El esquema IA acepta dirección opcional sin lat/lon; campo ausente/ilegible se representa null y no se inventa.
+- [x] Una resolución de ubicación común se usa desde el worker IA y desde edición manual; dirección unchanged reutiliza cache, dirección cambiada vuelve a resolver.
+- [x] Persistir dirección y coordenadas opcionales por ticket/sucursal; sucursales con nombre igual y dirección distinta se conservan separadas. Las price observations nuevas quedan asociadas a la sucursal, sin atribuir historiales legacy ambiguos.
+- [x] Fallos, timeout, `429`, `404`/sin resultado y respuesta malformada del geocoder mantienen ticket y dirección; coordenadas permanecen null, sin almacenar errores o mensajes remotos crudos.
+- [x] Nominatim público (si se usa) respeta 1 req/s, `User-Agent`, atribución, caché, endpoint configurable y nunca recibe fotos, prompts, tokens, nombres de usuario ni datos del hogar.
+- [x] Pruebas cubren autorización/aislamiento, migración de DB existente, carrera de dirección manual vs respuesta IA tardía, geocoding cacheado y proveedor externo simulado.
 
 ### Navegador y calidad
 
-- [ ] Playwright real con server y SQLite temporal recorre edición/guardado/recarga de promoción y dirección en escritorio/móvil; ningún dato personal o secreto en artefactos.
-- [ ] Capturas comparables de PC/móvil, geometría de controles equivalente (±1 CSS px), foco/teclado y targets táctiles revisados.
+- [x] Playwright real con server y SQLite temporal recorre edición/guardado/recarga de promoción y dirección en escritorio/móvil; ningún dato personal o secreto en artefactos.
+- [x] Capturas comparables de PC/móvil, geometría de controles equivalente (±1 CSS px), foco/teclado y targets táctiles revisados.
 - [ ] Tests/build/gates de CI pasan; umbral existente de coverage se conserva.
 
 ## Plan por unidades
@@ -55,3 +55,11 @@
 2. Resolver geográfico reutilizable, configuración, caché/rate-limit y tolerancia a fallos.
 3. Contrato de extracción IA para dirección; worker resuelve sucursal con el mismo servicio que PATCH manual.
 4. UI de ofertas y domicilio; integración, accesibilidad y E2E real aislado.
+
+## Evidencia de implementación
+
+- Suites server focales: `receipts.routes.spec.ts`, `receipts.schema.spec.ts`, `database.spec.ts`, `store-geocoder.spec.ts`, `ticket-prompt.spec.ts` y `ticket-geocoding.integration.spec.ts`; 98 tests pasaron.
+- Playwright real `tests/e2e/receipt-line-note.spec.ts`: ofertas y dirección en Chromium escritorio/móvil, español/inglés; guardado, recarga, preview, teclado, accesibilidad, overflow, targets táctiles y geometría. Capturas en `.e2e-screenshots/receipt-offers/` y `.e2e-screenshots/receipt-store-address/`.
+- Coverage con DB en memoria: server 89,51 % sentencias, 81,77 % ramas, 95,69 % funciones y 92,39 % líneas; frontend 90,53 %, 80,97 %, 91,99 % y 93,14 %.
+- `pnpm run build`, `pnpm run typecheck:e2e` y `pnpm run check:ui`: verdes. CI pendiente del push consolidado a PR #72.
+- Limitación local ajena al alcance: `pnpm run lint` no completa Angular lint porque falta `@angular-eslint/builder:lint`; CI no ejecuta ese comando.

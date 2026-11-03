@@ -31,6 +31,17 @@ const configSchema = z.object({
     timeout: z.number().default(30000),
     maxRetries: z.number().default(3)
   }),
+  geocoding: z.object({
+    storeEndpoint: z.string().url().default('https://nominatim.openstreetmap.org/search'),
+    storeUserAgent: z
+      .string()
+      .trim()
+      .min(1)
+      .max(256)
+      .default('HogarIA/1.0 (https://github.com/juanjoGonDev/HogarIA)'),
+    storeAttribution: z.string().trim().min(1).max(256).default('© OpenStreetMap contributors'),
+    storeAttributionUrl: z.string().url().default('https://www.openstreetmap.org/copyright')
+  }),
   memory: z.object({
     maxHeapSize: z.number().default(256), // MB
     warningThreshold: z.number().default(0.85),
@@ -70,6 +81,15 @@ function loadConfig(): Config {
       defaultProvider: process.env.AI_DEFAULT_PROVIDER || 'custom',
       timeout: parseInt(process.env.AI_TIMEOUT || '30000', 10),
       maxRetries: parseInt(process.env.AI_MAX_RETRIES || '3', 10)
+    },
+    geocoding: {
+      storeEndpoint: process.env.STORE_GEOCODER_URL || 'https://nominatim.openstreetmap.org/search',
+      storeUserAgent:
+        process.env.STORE_GEOCODER_USER_AGENT ||
+        'HogarIA/1.0 (https://github.com/juanjoGonDev/HogarIA)',
+      storeAttribution: process.env.STORE_GEOCODER_ATTRIBUTION || '© OpenStreetMap contributors',
+      storeAttributionUrl:
+        process.env.STORE_GEOCODER_ATTRIBUTION_URL || 'https://www.openstreetmap.org/copyright'
     },
     memory: {
       maxHeapSize: parseInt(process.env.MAX_HEAP_SIZE || '256', 10),

@@ -163,6 +163,7 @@ export type InputSize = 'sm' | 'md' | 'lg';
       }
 
       .input--md {
+        min-height: 44px;
         padding: var(--space-2) var(--space-3);
       }
 

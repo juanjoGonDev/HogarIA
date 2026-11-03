@@ -963,6 +963,83 @@ describe('la revision y el confirm', () => {
     return id;
   }
 
+  it('geocodifica la dirección manual en servidor y persiste coordenadas y atribución', async () => {
+    const address = `Calle sintética ${Math.random().toString(36).slice(2)}, Almería`;
+    const requestUrls: URL[] = [];
+    const requestHeaders: Headers[] = [];
+    vi.stubGlobal('fetch', async (input: string | URL | Request, init?: RequestInit) => {
+      requestUrls.push(new URL(String(input)));
+      requestHeaders.push(new Headers(init?.headers));
+      return Response.json([{ lat: '36.8400', lon: '-2.4590' }]);
+    });
+
+    const id = await ticketEnRevision();
+    const saved = await call('PATCH', `/${id}`, { storeAddress: address });
+
+    expect(saved.status).toBe(200);
+    expect(saved.payload.data).toMatchObject({
+      storeAddress: address,
+      storeLatitude: 36.84,
+      storeLongitude: -2.459,
+      storeAttribution: '© OpenStreetMap contributors',
+      storeAttributionUrl: 'https://www.openstreetmap.org/copyright'
+    });
+    expect(requestUrls).toHaveLength(1);
+    expect(requestUrls[0]!.searchParams.get('q')).toBe(address);
+    expect(requestUrls[0]!.searchParams.get('format')).toBe('jsonv2');
+    expect(requestUrls[0]!.searchParams.get('limit')).toBe('1');
+    expect(requestHeaders[0]!.get('user-agent')).toMatch(/HogarIA/iu);
+    expect(JSON.stringify(saved.payload)).not.toContain(alice.token);
+
+    const persisted = db
+      .prepare(
+        `SELECT store_address, store_address_manual, store_latitude, store_longitude,
+                store_attribution, store_attribution_url
+         FROM receipts WHERE id = ?`
+      )
+      .get(id);
+    expect(persisted).toEqual({
+      store_address: address,
+      store_address_manual: 1,
+      store_latitude: 36.84,
+      store_longitude: -2.459,
+      store_attribution: '© OpenStreetMap contributors',
+      store_attribution_url: 'https://www.openstreetmap.org/copyright'
+    });
+  });
+
+  it('mantiene la dirección ante un fallo temporal y reintenta coordenadas pendientes', async () => {
+    const address = `Calle sin coordenadas ${Math.random().toString(36).slice(2)}`;
+    let geocodeResponse: Response = new Response('remote details must not be stored', {
+      status: 503
+    });
+    let requestCount = 0;
+    vi.stubGlobal('fetch', async () => {
+      requestCount++;
+      return geocodeResponse;
+    });
+    const id = await ticketEnRevision();
+
+    const savedWithoutMatch = await call('PATCH', `/${id}`, { storeAddress: address });
+    expect(savedWithoutMatch.status).toBe(200);
+    expect(savedWithoutMatch.payload.data).toMatchObject({
+      storeAddress: address,
+      storeLatitude: null,
+      storeLongitude: null
+    });
+
+    // Re-enviar la misma dirección reintenta cuando aún faltan coordenadas.
+    geocodeResponse = Response.json([{ lat: '36.84', lon: '-2.459' }]);
+    const retried = await call('PATCH', `/${id}`, { storeAddress: address });
+    expect(retried.status).toBe(200);
+    expect(retried.payload.data).toMatchObject({
+      storeAddress: address,
+      storeLatitude: 36.84,
+      storeLongitude: -2.459
+    });
+    expect(requestCount).toBe(2);
+  });
+
   it('permite guardar tienda y fecha en cola o análisis sin cambiar el estado', async () => {
     for (const status of ['queued', 'analyzing'] as const) {
       const id = `editable-${status}`;
@@ -1096,6 +1173,66 @@ describe('la revision y el confirm', () => {
     // Confirmado no se puede confirmar otra vez; sus metadatos pueden corregirse sin repetir efectos.
     expect((await call('POST', `/${id}/confirm`)).status).toBe(409);
     expect((await call('PATCH', `/${id}`, { store: 'Lidl' })).status).toBe(200);
+  });
+
+  it('separa sucursales con el mismo nombre y vincula cada precio a su dirección', async () => {
+    const locations = new Map([
+      ['Mercadona Almería Centro', { lat: '36.8400', lon: '-2.4590' }],
+      ['Mercadona Huelva Centro', { lat: '37.2580', lon: '-6.9500' }]
+    ]);
+    vi.stubGlobal('fetch', async (input: string | URL | Request) => {
+      const address = new URL(String(input)).searchParams.get('q');
+      const location = address ? locations.get(address) : undefined;
+      return Response.json(location ? [location] : []);
+    });
+
+    const almeriaReceiptId = await ticketEnRevision();
+    const huelvaReceiptId = await ticketEnRevision();
+    expect(
+      (await call('PATCH', `/${almeriaReceiptId}`, { storeAddress: 'Mercadona Almería Centro' }))
+        .status
+    ).toBe(200);
+    expect(
+      (await call('PATCH', `/${huelvaReceiptId}`, { storeAddress: 'Mercadona Huelva Centro' }))
+        .status
+    ).toBe(200);
+    expect((await call('POST', `/${almeriaReceiptId}/confirm`)).status).toBe(200);
+    expect((await call('POST', `/${huelvaReceiptId}/confirm`)).status).toBe(200);
+
+    const branches = db
+      .prepare(
+        `SELECT id, address, normalized_address FROM stores
+         WHERE name = 'Mercadona' AND normalized_address IS NOT NULL
+         ORDER BY normalized_address`
+      )
+      .all() as { id: string; address: string; normalized_address: string }[];
+    expect(branches).toHaveLength(2);
+    expect(branches.map((branch) => branch.address)).toEqual([
+      'Mercadona Almería Centro',
+      'Mercadona Huelva Centro'
+    ]);
+
+    const observations = db
+      .prepare(
+        `SELECT receipt_id, store_id, store_name FROM price_observations
+         WHERE receipt_id IN (?, ?) AND source = 'receipt'`
+      )
+      .all(almeriaReceiptId, huelvaReceiptId) as {
+      receipt_id: string;
+      store_id: string | null;
+      store_name: string | null;
+    }[];
+    expect(observations).toHaveLength(4);
+    for (const observation of observations) {
+      expect(observation.store_name).toBe('Mercadona');
+      const expectedAddress =
+        observation.receipt_id === almeriaReceiptId
+          ? 'Mercadona Almería Centro'
+          : 'Mercadona Huelva Centro';
+      expect(branches.find((branch) => branch.address === expectedAddress)?.id).toBe(
+        observation.store_id
+      );
+    }
   });
 
   it('reanuda la búsqueda asíncrona para una ficha ya conocida sin imagen', async () => {

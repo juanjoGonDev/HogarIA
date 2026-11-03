@@ -22,6 +22,49 @@ const offerTicket = formField(
     })
 );
 
+const unitsDiscounted = formField(z.coerce.number().positive().max(10000));
+const receiptDiscount = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('amount'),
+      /** Descuento total en céntimos para las unidades afectadas, no importe por unidad. */
+      valueMinor: z.coerce.number().int().min(1).max(100_000_000),
+      percentBps: z.never().optional(),
+      units: unitsDiscounted
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('percent'),
+      valueMinor: z.never().optional(),
+      /** 1250 = 12,5 %; evitar floats en el contrato. */
+      percentBps: z.coerce.number().int().min(1).max(10000),
+      units: unitsDiscounted
+    })
+    .strict()
+]);
+
+function validateLinePromotion(
+  line: { offer?: { buy: number; take: number } | null; discount?: unknown; quantity?: number },
+  context: z.RefinementCtx
+): void {
+  if (line.offer && line.discount) {
+    context.addIssue({
+      code: 'custom',
+      path: ['discount'],
+      message: 'Elige una oferta por cantidad o un descuento directo, no ambos'
+    });
+  }
+  const discount = line.discount as { units?: number | null } | null | undefined;
+  if (discount?.units != null && line.quantity !== undefined && discount.units > line.quantity) {
+    context.addIssue({
+      code: 'custom',
+      path: ['discount', 'units'],
+      message: 'La cantidad con descuento no puede superar la cantidad de la línea'
+    });
+  }
+}
+
 const purchaseDateValueSchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha de compra: usa AAAA-MM-DD')
@@ -54,13 +97,16 @@ export const ticketAnswerSchema = z.object({
           createCategory: z.boolean(),
           priceMinor: formField(z.coerce.number().int().min(0).max(100_000_000)),
           offer: offerTicket,
+          discount: formField(receiptDiscount),
           confidence: formDefault(z.coerce.number().min(0).max(1), 0.5),
           note: formField(z.string().trim())
         })
         .refine((line) => line.name.trim().length > 1, { message: 'NombreVacio' })
+        .superRefine(validateLinePromotion)
     )
     .max(300),
   store: formField(z.string().trim()),
+  storeAddress: formField(z.string().trim().max(500)),
   // Required key with an explicit null when the ticket has no readable purchase date.
   purchaseDate: purchaseDateSchema,
   currency: formField(z.enum(['EUR', 'eur'])),
@@ -69,24 +115,29 @@ export const ticketAnswerSchema = z.object({
 });
 
 /** Una linea escrita o corregida por la persona durante la revision. */
-export const receiptItemInput = z.object({
+const receiptItemInputObject = z.object({
   name: z.string().trim().min(2, 'Nombre demasiado corto'),
   quantity: formDefault(z.coerce.number().positive().max(10000), 1),
   unit: formField(z.string().trim()),
   category: formField(z.string().trim().max(64)),
   priceMinor: formField(z.coerce.number().int().min(0).max(100_000_000)),
   offer: offerTicket,
+  discount: formField(receiptDiscount),
   note: formField(z.string().trim())
 });
 
+export const receiptItemInput = receiptItemInputObject.superRefine(validateLinePromotion);
+
 export const createReceiptItemSchema = receiptItemInput;
 
-export const updateReceiptItemSchema = formPartial(receiptItemInput);
+export const updateReceiptItemSchema =
+  formPartial(receiptItemInputObject).superRefine(validateLinePromotion);
 
 /** El encabezado del ticket, corregible durante la revision. */
 export const updateReceiptSchema = formPartial(
   z.object({
     store: formField(z.string().trim()),
+    storeAddress: formField(z.string().trim().max(500)),
     purchaseDate: purchaseDateSchema,
     notes: formField(z.string().trim())
   })

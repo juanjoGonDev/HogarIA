@@ -60,6 +60,8 @@ import { ticketAnswerSchema } from '../schemas/receipts.schema.js';
 import { RECEIPT_RESPONSE_FORMAT } from '../schemas/ai-generated-output.schema.js';
 import { leerTicket } from './ticket-files.js';
 import { aiJobLeaseSeconds } from './ai-timeout.js';
+import { normalizeStoreAddress, type StoreGeocodeResult } from './store-geocoder.js';
+import { storeGeocoder } from './store-geocoder-runtime.js';
 
 // The queue is local to this process/database. Jobs wake it directly; the slow
 // interval is only a recovery sweep for durable rows changed outside the API.
@@ -1446,6 +1448,15 @@ async function correr(
       );
     }
 
+    const direccionIA = normalizeStoreAddress(validado.data.storeAddress ?? '') || null;
+    const ubicacionManual = db
+      .prepare('SELECT store_address_manual FROM receipts WHERE id = ?')
+      .get(recibo.id) as { store_address_manual?: number } | undefined;
+    const ubicacionGeocodificada =
+      direccionIA && ubicacionManual?.store_address_manual !== 1
+        ? await storeGeocoder.geocode(direccionIA)
+        : null;
+
     // Solo se persiste el objeto completo después de validar el esquema y el job vigente.
     db.transaction(() => {
       const sigueActivo = db
@@ -1465,12 +1476,26 @@ async function correr(
       db.prepare(
         `UPDATE receipts SET status = 'review',
            store = CASE WHEN store_manual = 1 THEN store ELSE ? END,
+           store_address = CASE WHEN store_address_manual = 1 THEN store_address ELSE ? END,
+           store_latitude = CASE WHEN store_address_manual = 1 THEN store_latitude ELSE ? END,
+           store_longitude = CASE WHEN store_address_manual = 1 THEN store_longitude ELSE ? END,
+           store_attribution = CASE WHEN store_address_manual = 1 THEN store_attribution ELSE ? END,
+           store_attribution_url = CASE WHEN store_address_manual = 1 THEN store_attribution_url ELSE ? END,
            purchase_date = CASE WHEN purchase_date_manual = 1 THEN purchase_date ELSE ? END,
            currency = ?, total_minor = ?,
            warnings = ?, error_code = NULL, error_detail = NULL, updated_at = CURRENT_TIMESTAMP
          WHERE id = ? AND status = 'analyzing'`
       ).run(
         tienda,
+        direccionIA,
+        ubicacionGeocodificada?.status === 'resolved' ? ubicacionGeocodificada.latitude : null,
+        ubicacionGeocodificada?.status === 'resolved' ? ubicacionGeocodificada.longitude : null,
+        ubicacionGeocodificada?.status === 'resolved'
+          ? ubicacionGeocodificada.attribution.text
+          : null,
+        ubicacionGeocodificada?.status === 'resolved'
+          ? ubicacionGeocodificada.attribution.url
+          : null,
         validado.data.purchaseDate,
         validado.data.currency ?? 'EUR',
         validado.data.totalMinor ?? null,
@@ -1480,9 +1505,34 @@ async function correr(
       appendAiJobTraceEventBestEffortInTransaction(db, jobId, claimGeneration, {
         stage: 'runtime_finished'
       });
-      const tiendaFinal = db.prepare('SELECT store FROM receipts WHERE id = ?').get(recibo.id) as
-        { store: string | null } | undefined;
-      if (tiendaFinal?.store) registrarTienda(db, userId, tiendaFinal.store, recibo.household_id);
+      const tiendaFinal = db
+        .prepare(
+          `SELECT store, store_address, store_latitude, store_longitude,
+                  store_attribution, store_attribution_url
+           FROM receipts WHERE id = ?`
+        )
+        .get(recibo.id) as
+        | {
+            store: string | null;
+            store_address: string | null;
+            store_latitude: number | null;
+            store_longitude: number | null;
+            store_attribution: string | null;
+            store_attribution_url: string | null;
+          }
+        | undefined;
+      const storeId = tiendaFinal?.store
+        ? registrarTienda(db, userId, tiendaFinal.store, recibo.household_id, {
+            address: tiendaFinal.store_address,
+            latitude: tiendaFinal.store_latitude,
+            longitude: tiendaFinal.store_longitude,
+            attribution: {
+              text: tiendaFinal.store_attribution ?? '',
+              url: tiendaFinal.store_attribution_url ?? ''
+            }
+          })
+        : null;
+      db.prepare('UPDATE receipts SET store_id = ? WHERE id = ?').run(storeId, recibo.id);
       db.prepare(
         `UPDATE ai_jobs SET status = 'done', finished_at = CURRENT_TIMESTAMP, lease_until = NULL
          WHERE id = ? AND status = 'running' AND claim_generation = ?`
@@ -1719,9 +1769,18 @@ function insertarLinea(
   const precio =
     linea.priceMinor === null || linea.priceMinor === undefined ? null : Number(linea.priceMinor);
   const oferta = (linea.offer ?? null) as { buy?: number; take?: number } | null;
+  const descuento = (linea.discount ?? null) as {
+    kind?: 'amount' | 'percent';
+    valueMinor?: number | null;
+    percentBps?: number | null;
+    units?: number | null;
+  } | null;
   db.prepare(
-    `INSERT INTO receipt_items (id, receipt_id, name, quantity, unit, category, price_minor, offer_buy, offer_take, note, confidence, position)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO receipt_items
+       (id, receipt_id, name, quantity, unit, category, price_minor, offer_buy, offer_take,
+        discount_kind, discount_value_minor, discount_percent_bps, discount_units,
+        note, confidence, position)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     nanoid(),
     receiptId,
@@ -1734,6 +1793,10 @@ function insertarLinea(
       : null,
     oferta?.buy ?? null,
     oferta?.take ?? null,
+    descuento?.kind ?? null,
+    descuento?.kind === 'amount' ? (descuento.valueMinor ?? null) : null,
+    descuento?.kind === 'percent' ? (descuento.percentBps ?? null) : null,
+    descuento?.units ?? null,
     linea.note ? String(linea.note) : null,
     Number.isFinite(Number(linea.confidence)) ? Number(linea.confidence) : null,
     posicion
@@ -1789,23 +1852,79 @@ export function registrarTienda(
   db: SqlDb,
   userId: string,
   nombre: string,
-  householdId = activeHouseholdId(db, userId)
-): void {
-  const limpia = nombre.trim();
-  if (!limpia) return;
+  householdId = activeHouseholdId(db, userId),
+  location?: {
+    address?: string | null;
+    latitude?: number | null;
+    longitude?: number | null;
+    attribution?: StoreGeocodeResult['attribution'] | null;
+  }
+): string | null {
+  const limpia = nombre.trim().replace(/\s+/gu, ' ');
+  if (!limpia) return null;
+  const address = normalizeStoreAddress(location?.address ?? '') || null;
+  const normalizedAddress = address?.toLocaleLowerCase('es-ES') ?? null;
+  const validCoordinates =
+    address !== null &&
+    Number.isFinite(location?.latitude) &&
+    Number.isFinite(location?.longitude) &&
+    Number(location?.latitude) >= -90 &&
+    Number(location?.latitude) <= 90 &&
+    Number(location?.longitude) >= -180 &&
+    Number(location?.longitude) <= 180;
+  const latitude = validCoordinates ? Number(location!.latitude) : null;
+  const longitude = validCoordinates ? Number(location!.longitude) : null;
+  const attribution = validCoordinates ? (location?.attribution?.text ?? null) : null;
+  const attributionUrl = validCoordinates ? (location?.attribution?.url ?? null) : null;
   const ya = db
     .prepare(
-      `SELECT id FROM stores WHERE name = ?
-       AND (household_id = ? OR (household_id IS NULL AND user_id = ?))`
+      `SELECT id FROM stores WHERE lower(trim(name)) = lower(trim(?))
+       AND (household_id = ? OR (household_id IS NULL AND user_id = ?))
+       AND normalized_address IS ?
+       ORDER BY created_at, id LIMIT 1`
     )
-    .get(limpia, householdId, userId);
-  if (ya) return;
-  db.prepare('INSERT INTO stores (id, user_id, household_id, name) VALUES (?, ?, ?, ?)').run(
-    randomUUID(),
+    .get(limpia, householdId, userId, normalizedAddress) as { id: string } | undefined;
+  if (ya) {
+    db.prepare(
+      `UPDATE stores SET
+         address = COALESCE(?, address),
+         latitude = COALESCE(?, latitude),
+         longitude = COALESCE(?, longitude),
+         attribution = COALESCE(?, attribution),
+         attribution_url = COALESCE(?, attribution_url)
+       WHERE id = ? AND user_id = ?
+         AND (household_id = ? OR (household_id IS NULL AND user_id = ?))`
+    ).run(
+      address,
+      latitude,
+      longitude,
+      attribution,
+      attributionUrl,
+      ya.id,
+      userId,
+      householdId,
+      userId
+    );
+    return ya.id;
+  }
+  const id = randomUUID();
+  db.prepare(
+    `INSERT INTO stores
+       (id, user_id, household_id, name, address, normalized_address, latitude, longitude, attribution, attribution_url)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    id,
     userId,
     householdId,
-    limpia
+    limpia,
+    address,
+    normalizedAddress,
+    latitude,
+    longitude,
+    attribution,
+    attributionUrl
   );
+  return id;
 }
 
 export type AiQueueJobDto = {

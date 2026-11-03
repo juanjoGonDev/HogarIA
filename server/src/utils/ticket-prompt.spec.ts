@@ -43,11 +43,13 @@ describe('buildTicketPrompt (## 12aj)', () => {
 
   it('la forma prometida tiene todo lo que el esquema va a validar', () => {
     expect(TICKET_SHAPE).toContain('"store"');
+    expect(TICKET_SHAPE).toContain('"storeAddress"');
     expect(TICKET_SHAPE).toContain('"purchaseDate"');
     expect(TICKET_SHAPE).toContain('"priceMinor"');
     expect(TICKET_SHAPE).toContain('"totalMinor"');
     expect(TICKET_SHAPE).toContain('"warnings"');
     expect(TICKET_SHAPE).toContain('"offer"');
+    expect(TICKET_SHAPE).toContain('"discount"');
   });
 
   it('pide tienda/local y fecha impresa sin sustituirla por el momento de subida', () => {
@@ -60,6 +62,16 @@ describe('buildTicketPrompt (## 12aj)', () => {
     );
     expect(system).toContain('Si falta, no se lee o es ambigua, `purchaseDate` es null');
     expect(system).toContain('Nunca uses la fecha de subida ni `created_at` como fecha de compra');
+  });
+
+  it('pide dirección literal de la tienda y descuentos explícitos sin inventar datos', () => {
+    const { system } = buildTicketPrompt({ esPdf: false });
+
+    expect(system).toContain('`storeAddress`');
+    expect(system).toContain('direccion literal visible en el ticket');
+    expect(system).toContain('No inventes coordenadas');
+    expect(system).toContain('descuento TOTAL en centimos');
+    expect(system).toContain('Nunca vuelvas a restar una oferta o descuento a `priceMinor`');
   });
 
   it('localiza los avisos del análisis, sin traducir lo transcrito ni el catálogo', () => {
