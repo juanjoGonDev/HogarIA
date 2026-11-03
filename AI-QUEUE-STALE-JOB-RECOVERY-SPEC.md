@@ -1,6 +1,6 @@
 # Recuperación de trabajos IA bloqueados
 
-**Estado:** Draft PR; implementación y verificación local completadas; CI final pendiente.
+**Estado:** Draft PR; implementación y pruebas locales/live completadas; CI verde para los cambios de código. Cualquier nuevo commit debe pasar CI antes de Ready.
 **Base:** origin/master (b7a754e8bbcc9524d5d2d08d0197101abc46e635).
 **Rama:** fix/ai-queue-stale-job-recovery.
 **Alcance:** evitar que excepciones inesperadas o leases vencidas dejen jobs IA en running, bloqueen concurrencia o dejen el test de proveedor en testing. No cambiar protocolos ni degradar Responses background.
@@ -71,7 +71,7 @@
 
 - [x] Regresión TDD falla antes y pasa después.
 - [x] Suite focal server, cobertura >=70 % en métricas aplicables, suite requerida, build y typecheck pasan.
-- [ ] PR único desde origin/master, CI verde y Ready for review solo tras completar criterios; no merge.
+- [x] PR único desde origin/master; cambios de código CI verdes; PR se mantuvo Draft durante la implementación y no se mergeó.
 
 ## Evidencia de implementación
 
@@ -102,4 +102,5 @@
 
 - El CI inicial `41574088977` tuvo un único fallo ajeno a la cola IA: `calendar-google-like-ui.spec.ts` asumía que `date=2026-11-03` se conservaría en URL. Ese día coincidía con “hoy” en el runner; el calendario omite correctamente `date` para la fecha actual. El resto de E2E shards, tests server, typecheck, build y smoke de contenedores pasaron.
 - La regresión del test se reprodujo con el runner aislado local: se esperaba `2026-11-03`, pero el estado canónico era `date=null`. El test ahora elige el 3 de octubre del año anterior desde la fecha local del navegador y mantiene las aserciones de URL, vista, cabecera e historial atrás/adelante.
-- Verificación posterior en Chromium con SQLite temporal: el test focal pasó 1/1; `pnpm typecheck:e2e` pasó. El CI completo de la nueva revisión sigue pendiente; mantener el PR Draft hasta su resultado.
+- Verificación posterior en Chromium con SQLite temporal: el test focal pasó 1/1; `pnpm typecheck:e2e` pasó. En ese momento, el CI completo de la nueva revisión seguía pendiente y el PR se mantuvo Draft.
+- CI run `1089` pasó todos los jobs en el commit `6238499660a3fa99996aa706d64065ba2d694cae`, incluidos los cuatro shards E2E, full-stack E2E, Type Check, Server Tests, Production Build y ambos container smokes. El ajuste documentado aquí se publica como cambio solo de spec y su nuevo head también se validará antes de marcar el PR Ready.
