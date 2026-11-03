@@ -126,6 +126,18 @@ type AiJobDiagnosticTraceInput = Readonly<{
   elapsedMs?: number | null;
 }>;
 
+/** SQLite legacy schemas may return INTEGER generations as decimal TEXT (for example, `1.0`). */
+function normalizeClaimGeneration(value: unknown): number | null {
+  if (typeof value === 'number') {
+    return Number.isSafeInteger(value) && value >= 0 ? value : null;
+  }
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim();
+  if (!/^\d+(?:\.0+)?$/.test(normalized)) return null;
+  const generation = Number(normalized);
+  return Number.isSafeInteger(generation) && generation >= 0 ? generation : null;
+}
+
 function safeAiJobTraceCode(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   if (AI_JOB_TRACE_WORKER_CODES.has(value)) return value;
@@ -1059,16 +1071,24 @@ function recuperarLeasesVencidas(db: SqlDb): number {
     config_id: string | null;
     receipt_id: string | null;
     kind: string;
-    claim_generation: number;
+    claim_generation: number | string;
   }[];
 
   let recuperados = 0;
   for (const job of vencidos) {
+    const claimGeneration = normalizeClaimGeneration(job.claim_generation);
+    if (claimGeneration === null) {
+      console.error('[AI queue] Cannot recover job with invalid claim generation', {
+        jobId: job.id,
+        reason: 'INVALID_CLAIM_GENERATION'
+      });
+      continue;
+    }
     let recuperado = false;
     try {
       recuperado = db
         .transaction(() => {
-          appendAiJobTraceEventBestEffortInTransaction(db, job.id, job.claim_generation, {
+          appendAiJobTraceEventBestEffortInTransaction(db, job.id, claimGeneration, {
             stage: 'worker_stalled',
             code: 'WORKER_STALLED'
           });
@@ -1080,7 +1100,7 @@ function recuperarLeasesVencidas(db: SqlDb): number {
                WHERE id = ? AND status = 'running' AND claim_generation = ?
                  AND (lease_until IS NULL OR lease_until <= CURRENT_TIMESTAMP)`
             )
-            .run(job.id, job.claim_generation);
+            .run(job.id, claimGeneration);
           if (!updated.changes) return false;
 
           if (job.receipt_id) {
@@ -1104,7 +1124,7 @@ function recuperarLeasesVencidas(db: SqlDb): number {
     } catch {
       console.error('[AI queue] Could not recover expired job', {
         jobId: job.id,
-        claimGeneration: job.claim_generation
+        claimGeneration
       });
       continue;
     }
@@ -1118,14 +1138,14 @@ function recuperarLeasesVencidas(db: SqlDb): number {
     estado?.corriendo.delete(job.id);
 
     const runtime = trabajosEnMemoria.get(job.id);
-    if (runtime?.claimGeneration === job.claim_generation) {
+    if (runtime?.claimGeneration === claimGeneration) {
       rechazar(runtime, new AiCallError('PROVIDER', 'AI worker lease expired', 'WORKER_STALLED'));
       liberarRuntime(job.id, true);
     }
     console.error('[AI queue] Recovered stalled job', {
       jobId: job.id,
       kind: job.kind,
-      claimGeneration: job.claim_generation,
+      claimGeneration,
       reason: 'WORKER_STALLED'
     });
   }
@@ -1182,7 +1202,7 @@ function reclamarTrabajo(db: SqlDb, jobId: string, leaseSeconds: number): number
             user_id: string;
             household_id: string | null;
             kind: string;
-            claim_generation: number;
+            claim_generation: number | string;
           }
         | undefined;
       if (!fila) return null;
@@ -1213,7 +1233,22 @@ function reclamarTrabajo(db: SqlDb, jobId: string, leaseSeconds: number): number
         ).n;
         if (cap !== Number.POSITIVE_INFINITY && activos >= cap) return null;
       }
-      const claimGeneration = Number(fila.claim_generation ?? 0) + 1;
+      const previousClaimGeneration = normalizeClaimGeneration(fila.claim_generation);
+      if (previousClaimGeneration === null) {
+        console.error('[AI queue] Cannot claim job with invalid claim generation', {
+          jobId,
+          reason: 'INVALID_CLAIM_GENERATION'
+        });
+        return null;
+      }
+      const claimGeneration = previousClaimGeneration + 1;
+      if (!Number.isSafeInteger(claimGeneration)) {
+        console.error('[AI queue] Cannot claim job with exhausted claim generation', {
+          jobId,
+          reason: 'CLAIM_GENERATION_EXHAUSTED'
+        });
+        return null;
+      }
       const changed = db
         .prepare(
           `UPDATE ai_jobs SET status = 'running', attempts = attempts + 1, claim_generation = ?,
@@ -1270,15 +1305,16 @@ async function correr(
         household_id: string | null;
         receipt_id: string | null;
         status: string;
-        claim_generation: number;
+        claim_generation: number | string;
       }
     | undefined;
-  if (metadata?.status !== 'running' || metadata.claim_generation !== claimGeneration) {
+  const storedClaimGeneration = normalizeClaimGeneration(metadata?.claim_generation);
+  if (metadata?.status !== 'running' || storedClaimGeneration !== claimGeneration) {
     console.warn('[AI queue] Worker claim is no longer active', {
       jobId,
       claimGeneration,
       status: metadata?.status ?? 'missing',
-      currentGeneration: metadata?.claim_generation ?? null
+      currentGeneration: storedClaimGeneration
     });
     return;
   }
@@ -1554,14 +1590,20 @@ async function correrTrabajoGenerico(
   const row = db
     .prepare('SELECT attempts, max_attempts, status, claim_generation FROM ai_jobs WHERE id = ?')
     .get(jobId) as
-    | { attempts: number; max_attempts: number; status: string; claim_generation: number }
+    | {
+        attempts: number;
+        max_attempts: number;
+        status: string;
+        claim_generation: number | string;
+      }
     | undefined;
-  if (!row || row.status !== 'running' || row.claim_generation !== claimGeneration) {
+  const storedClaimGeneration = normalizeClaimGeneration(row?.claim_generation);
+  if (!row || row.status !== 'running' || storedClaimGeneration !== claimGeneration) {
     console.warn('[AI queue] Runtime did not start for an inactive job claim', {
       jobId,
       claimGeneration,
       status: row?.status ?? 'missing',
-      currentGeneration: row?.claim_generation ?? null,
+      currentGeneration: storedClaimGeneration,
       reason: 'CLAIM_NOT_ACTIVE'
     });
     return;
@@ -1572,8 +1614,8 @@ async function correrTrabajoGenerico(
     const result = await runtime.run(runtime.config, signal, jobId, claimGeneration);
     const vigente = db
       .prepare('SELECT status, claim_generation FROM ai_jobs WHERE id = ?')
-      .get(jobId) as { status: string; claim_generation: number } | undefined;
-    if (vigente?.claim_generation !== claimGeneration) return;
+      .get(jobId) as { status: string; claim_generation: number | string } | undefined;
+    if (normalizeClaimGeneration(vigente?.claim_generation) !== claimGeneration) return;
     if (signal.aborted || vigente?.status !== 'running') {
       rechazar(runtime, new AiCallError('PROVIDER', 'AI job cancelled', 'CANCELLED'));
       liberarRuntime(jobId, true);
@@ -1616,8 +1658,8 @@ async function correrTrabajoGenerico(
   } catch (error) {
     const vigente = db
       .prepare('SELECT status, claim_generation FROM ai_jobs WHERE id = ?')
-      .get(jobId) as { status: string; claim_generation: number } | undefined;
-    if (vigente?.claim_generation !== claimGeneration) return;
+      .get(jobId) as { status: string; claim_generation: number | string } | undefined;
+    if (normalizeClaimGeneration(vigente?.claim_generation) !== claimGeneration) return;
     if (signal.aborted || vigente?.status !== 'running') {
       rechazar(runtime, error);
       liberarRuntime(jobId, true);

@@ -153,6 +153,14 @@
 
 ### Criterios añadidos — generaciones legacy
 
-- [ ] TDD reproduce en DB temporal legacy `claim_generation TEXT` (`"1.0"`) que el worker llega a `runtime_started`, ejecuta el runtime una vez y alcanza estado terminal; antes del fix debe quedarse sin runtime.
-- [ ] Normalizar de forma segura todos los valores `claim_generation` leídos de SQLite antes de compararlos en worker, fencing, callbacks y recuperación; valores inválidos no deben coincidir.
+- [x] TDD reproduce un resultado SQLite legacy `claim_generation TEXT` (`"1.0"`): el worker llega a `runtime_started`, ejecuta el runtime una vez y alcanza estado terminal; antes del fix abandonaba el job antes del runtime.
+- [x] Normalizar de forma segura los valores `claim_generation` leídos de SQLite antes de compararlos en worker, callbacks genéricos y recuperación de leases; valores fraccionarios/inválidos no inician runtime.
 - [ ] Navegador real contra el servicio local ya actualizado y WebApi real: test de conexión background terminal exitoso, trace completo, concurrencia liberada y sin nuevo `WORKER_STALLED`.
+
+### Evidencia de corrección de generaciones legacy
+
+- TDD rojo antes del fix (desde `server/`): `.\node_modules\.bin\vitest.CMD run --configLoader runner src/utils/ai-queue.spec.ts -t "legacy decimal-text claim generation"`; el worker registraba `worker_started`, leía `"1.0"`, no llamaba `run` y la prueba expiraba.
+- Verde tras el fix: pruebas legacy decimal-text y valor no entero, 2/2; recuperación de lease con generación decimal-text, 1/1; `src/utils/ai-queue.spec.ts`, 47/47.
+- El parser acepta solo enteros seguros (`number`, dígitos y sufijo decimal de ceros); rechaza strings vacíos, fracciones, negativos, desbordes y valores no numéricos. Cubre toma de trabajo, entrada al worker, pre/post ejecución y recuperación; no cambia el esquema ni reescribe datos.
+- Se verificó con `better-sqlite3` que el parámetro numérico usado por los predicados SQL conserva el fencing frente a `TEXT "1.0"`; por eso no se cambia SQL ni se añade migración de datos.
+- Suite completa del servidor con coverage: 2.190 pasaron, 1 omitida; 89,46 % statements / 81,89 % branches / 95,67 % functions / 92,34 % lines (todos los gates aplicables >70 %). `tsc --noEmit` pasa. Build y gates completos se repiten en el hook de push.

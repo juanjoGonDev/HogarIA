@@ -1938,6 +1938,106 @@ describe('AI provider queue dispatcher', () => {
     }
   });
 
+  it('starts the runtime when SQLite returns a legacy decimal-text claim generation', async () => {
+    const { submitAiTask, pararTrabajo } = await import('./ticket-queue.js');
+    const run = vi.fn(async () => 'runtime reached');
+    const job = submitAiTask({
+      db,
+      userId,
+      config,
+      kind: 'connection_test',
+      run
+    });
+    // This in-memory DB isolates the queue test. Simulate SQLite TEXT affinity from a legacy
+    // schema: the metadata SELECT returns "1.0", although the worker claim is generation 1.
+    const legacyGenerationSelects = new Set([
+      'SELECT kind, config_id, household_id, receipt_id, status, claim_generation FROM ai_jobs WHERE id = ?',
+      'SELECT attempts, max_attempts, status, claim_generation FROM ai_jobs WHERE id = ?',
+      'SELECT status, claim_generation FROM ai_jobs WHERE id = ?'
+    ]);
+    const originalPrepare = db.prepare.bind(db);
+    let injected = false;
+    const prepare = vi.spyOn(db, 'prepare').mockImplementation((sql: string) => {
+      if (legacyGenerationSelects.has(sql)) {
+        injected = true;
+        return {
+          get: (...parameters: unknown[]) => {
+            const row = originalPrepare(sql).get(...parameters) as
+              Record<string, unknown> | undefined;
+            return row ? { ...row, claim_generation: '1.0' } : undefined;
+          }
+        } as ReturnType<Sql['prepare']>;
+      }
+      return originalPrepare(sql);
+    });
+    // Ensure a failed assertion can still settle the background job; no provider is called.
+    const result = job.result.catch((error) => error);
+
+    try {
+      await waitFor(() => injected, 500);
+      await waitFor(() => run.mock.calls.length === 1, 500);
+      await expect(result).resolves.toBe('runtime reached');
+      expect(jobRow(job.id).status).toBe('done');
+    } finally {
+      prepare.mockRestore();
+      if (jobRow(job.id)?.status === 'running') {
+        pararTrabajo(job.id);
+        await result;
+      }
+    }
+  });
+
+  it('does not start or retain a runtime for a non-integer claim generation', async () => {
+    const { submitAiTask, pararTrabajo } = await import('./ticket-queue.js');
+    const run = vi.fn(async () => 'must not run');
+    const job = submitAiTask({
+      db,
+      userId,
+      config,
+      kind: 'connection_test',
+      run
+    });
+    const metadataSelect =
+      'SELECT kind, config_id, household_id, receipt_id, status, claim_generation FROM ai_jobs WHERE id = ?';
+    const originalPrepare = db.prepare.bind(db);
+    let injected = false;
+    const prepare = vi.spyOn(db, 'prepare').mockImplementation((sql: string) => {
+      if (!injected && sql === metadataSelect) {
+        injected = true;
+        return {
+          get: (...parameters: unknown[]) => {
+            const row = originalPrepare(sql).get(...parameters) as
+              Record<string, unknown> | undefined;
+            return row ? { ...row, claim_generation: '1.5' } : undefined;
+          }
+        } as ReturnType<Sql['prepare']>;
+      }
+      return originalPrepare(sql);
+    });
+    const result = job.result.catch((error) => error);
+
+    try {
+      await waitFor(() => injected, 500);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(run).not.toHaveBeenCalled();
+      const trace = JSON.parse(String(jobRow(job.id).worker_trace_json)) as Array<{
+        stage: string;
+      }>;
+      expect(trace.map((event) => event.stage)).not.toContain('runtime_started');
+      expect(jobRow(job.id).status).toBe('running');
+      expect(pararTrabajo(job.id)).toBe(true);
+      await result;
+      expect(jobRow(job.id).status).toBe('stopped');
+    } finally {
+      prepare.mockRestore();
+      if (jobRow(job.id)?.status === 'running') {
+        pararTrabajo(job.id);
+        await result;
+      }
+    }
+  });
+
   it('does not let a stale worker failure overwrite a newer connection test', async () => {
     const { submitAiTask, ensureWorker } = await import('./ticket-queue.js');
     ensureWorker();
@@ -2323,9 +2423,34 @@ describe('AI provider queue dispatcher', () => {
            'running', NULL, 7)`
       ).run(userId, config.id);
 
-      (reconcile as () => void)();
+      const expiredJobsSelect = `SELECT id, user_id, config_id, receipt_id, kind, claim_generation FROM ai_jobs
+       WHERE status = 'running' AND (lease_until IS NULL OR lease_until <= CURRENT_TIMESTAMP)`;
+      const originalPrepare = db.prepare.bind(db);
+      let legacyLeaseValueObserved = false;
+      const prepare = vi.spyOn(db, 'prepare').mockImplementation((sql: string) => {
+        if (sql === expiredJobsSelect) {
+          const statement = originalPrepare(sql);
+          return {
+            all: (...parameters: unknown[]) => {
+              const rows = statement.all(...parameters) as Array<Record<string, unknown>>;
+              legacyLeaseValueObserved = rows.length > 0;
+              return rows.map((row) => ({
+                ...row,
+                claim_generation: `${row.claim_generation}.0`
+              }));
+            }
+          } as ReturnType<Sql['prepare']>;
+        }
+        return originalPrepare(sql);
+      });
+      try {
+        (reconcile as () => void)();
+      } finally {
+        prepare.mockRestore();
+      }
 
       await waitFor(() => jobRow(staleJob.id).status === 'failed');
+      expect(legacyLeaseValueObserved).toBe(true);
       expect(staleSignal.aborted).toBe(true);
       expect(activeSignal.aborted).toBe(false);
       expect(jobRow(staleJob.id)).toMatchObject({
