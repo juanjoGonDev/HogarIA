@@ -143,3 +143,16 @@
 - [x] Suite frontend: 1.805/1.805; coverage frontend: 90,58 % statements / 81,08 % branches / 91,89 % functions / 93,19 % lines; build Angular pasa.
 - [x] UI sintética aislada en Chromium verificada a 1440×900 y 390×844: copiar diagnóstico anuncia éxito; no se leyó el clipboard. Capturas en `.playwright-mcp/page-2026-11-03T10-32-59-531Z.png` y `.playwright-mcp/page-2026-11-03T10-33-24-549Z.png`.
 - [ ] Smoke nuevo con proveedor/WebApi real usando esta revisión: pendiente; la prueba sintética no demuestra conectividad real y no cuenta como éxito del proveedor.
+
+### Causa raíz confirmada en servidor local (2026-11-03)
+
+- El checkout limpio de `D:/projects/MiCocinAI` estaba en `bb55828f`, padre inmediato del head publicado del PR. El proceso API era `tsx watch` iniciado antes de ese commit; el fast-forward local a `783c3613` hizo que cargara el código con traza. PR #70 sigue Ready; no se mergeó.
+- Con el código actualizado, un test real de navegador fue aceptado (`202`) y persistió `worker_claimed` + `worker_started`, pero no `runtime_started`; terminó en `WORKER_STALLED` al vencer el lease.
+- Consulta SQLite estrictamente readonly de ese job: `ai_jobs.claim_generation` tiene tipo declarado `TEXT`, valor almacenado `"1.0"` (`typeof='text'`). La migración actual usa `addColumnIfMissing(..., 'INTEGER ...')`, que no cambia el tipo de una columna ya existente.
+- El worker compara algunos valores SQLite sin normalizar: `metadata.claim_generation !== claimGeneration`. En una DB legacy, `"1.0" !== 1`; `correr()` retorna justo después de `worker_started` sin iniciar ni resolver el runtime. La misma asunción afecta a la recuperación del lease y las comprobaciones posteriores al runtime.
+
+### Criterios añadidos — generaciones legacy
+
+- [ ] TDD reproduce en DB temporal legacy `claim_generation TEXT` (`"1.0"`) que el worker llega a `runtime_started`, ejecuta el runtime una vez y alcanza estado terminal; antes del fix debe quedarse sin runtime.
+- [ ] Normalizar de forma segura todos los valores `claim_generation` leídos de SQLite antes de compararlos en worker, fencing, callbacks y recuperación; valores inválidos no deben coincidir.
+- [ ] Navegador real contra el servicio local ya actualizado y WebApi real: test de conexión background terminal exitoso, trace completo, concurrencia liberada y sin nuevo `WORKER_STALLED`.
