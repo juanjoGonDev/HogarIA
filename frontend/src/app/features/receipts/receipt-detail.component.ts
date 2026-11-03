@@ -11,6 +11,7 @@ import { ConfirmService } from '../../core/services/confirm.service';
 import { I18nService } from '../../core/services/i18n.service';
 import { ClipboardService } from '../../core/services/clipboard.service';
 import { IconComponent } from '../../shared/components/ui/icon/icon.component';
+import { safeAiJobDiagnosticTrace } from '../../shared/utils/ai-job-diagnostic';
 import { ButtonComponent } from '../../shared/components/ui/button/button.component';
 import { BadgeComponent } from '../../shared/components/ui/badge/badge.component';
 import { InputComponent } from '../../shared/components/ui/input/input.component';
@@ -64,6 +65,8 @@ const SAFE_DIAGNOSTIC_ERRORS = new Set([
   'JOB_SCOPE_MISMATCH',
   'CONFIG_DISABLED',
   'CONFIG_UNAVAILABLE',
+  'WORKER_STALLED',
+  'WORKER_EXCEPTION',
   'RECEIPT_NOT_FOUND'
 ]);
 const SAFE_DIAGNOSTIC_STAGES = new Set([
@@ -1190,7 +1193,9 @@ export class ReceiptDetailComponent implements OnInit, OnDestroy {
       NO_CONFIG: 'receipts.error.NO_CONFIG',
       BAD_JSON: 'receipts.error.BAD_JSON',
       TIMEOUT: 'receipts.error.TIMEOUT',
-      PROVIDER: 'receipts.error.PROVIDER'
+      PROVIDER: 'receipts.error.PROVIDER',
+      WORKER_STALLED: 'receipts.error.WORKER_STALLED',
+      WORKER_EXCEPTION: 'receipts.error.WORKER_EXCEPTION'
     };
     return this.i18n.t(claves[codigo ?? ''] ?? 'receipts.error.PROVIDER');
   }
@@ -1257,6 +1262,9 @@ export class ReceiptDetailComponent implements OnInit, OnDestroy {
     if (Number.isSafeInteger(job.elapsed_ms) && Number(job.elapsed_ms) >= 0) {
       diagnostic['elapsedMs'] = job.elapsed_ms;
     }
+
+    const trace = safeAiJobDiagnosticTrace(job.diagnosticTrace);
+    if (trace) diagnostic['trace'] = trace;
 
     return diagnostic;
   }

@@ -120,8 +120,26 @@
 
 ### Criterios añadidos — diagnóstico de conexión
 
-- [ ] Un job guarda eventos `claimed`, `runtime_started`, `provider_submitting`, respuesta/progreso y estado terminal con fencing por job/claim; la consulta por usuario/config nunca mezcla jobs.
-- [ ] `WORKER_STALLED` conserva la última etapa alcanzada; el copy diagnostic explica si el worker no llegó a ejecutar el runtime o se detuvo antes/después del envío, sin inferir etapas ausentes.
-- [ ] Fallo o `UPDATE.changes=0` al escribir diagnóstico queda observable con código seguro; no se filtra texto/cuerpo del error ni se oculta silenciosamente.
-- [ ] Tests verifican orden, redacción, límite de eventos, aislamiento entre jobs y fencing de callbacks tardíos; prueban fallos pre-provider sin llamada duplicada.
+- [x] Un job guarda eventos `claimed`, `runtime_started`, `provider_submitting`, respuesta/progreso y estado terminal con fencing por job/claim; la consulta por usuario/config nunca mezcla jobs.
+- [x] `WORKER_STALLED` conserva la última etapa alcanzada; el copy diagnostic explica si el worker no llegó a ejecutar el runtime o se detuvo antes/después del envío, sin inferir etapas ausentes.
+- [x] Fallo o `UPDATE.changes=0` al escribir diagnóstico queda observable con código seguro; no se filtra texto/cuerpo del proveedor ni se oculta silenciosamente.
+- [x] Tests verifican orden, redacción, límite de eventos, aislamiento entre jobs y fencing de callbacks tardíos; prueban fallos pre-provider sin llamada duplicada.
 - [ ] Chromium contra stack aislado, SQLite temporal y WebApi/modelo real repite una conexión guardada: `202`, job único, trace visible tras cerrar/reabrir, respuesta terminal real y concurrencia liberada.
+
+## Reintento adicional del usuario (2026-11-03)
+
+- La consulta readonly de `server/data/hogaria.sqlite` confirma que los tres últimos `connection_test` conocidos (07:37, 08:58 y 09:34 UTC) acabaron `failed / WORKER_STALLED`; el más reciente sigue siendo `h2CZbMkrbSu1MQpdjva32`, no hay job posterior en esa DB.
+- `mCanvB_wONiILOEQdMz19` tuvo `attempts=1/1`, timeout de config 300.000 ms, y pasó de `created_at=08:58:33` a `finished_at=09:04:36` (363 s); el lease efectivo es timeout + 60 s. `diagnostic_log=[]` y transporte/status/response ID nulos. Esto prueba expiración del lease, pero **no** que WebApi recibiera (ni que no recibiera) la petición; la causa del hang sigue sin determinar.
+- El JS compilado local contiene el callback previo al `fetch`; en el código fuente, su `catch {}` vacío podía ocultar errores de persistencia. No es evidencia suficiente para atribuir el fallo a WebApi o a la clave.
+- Se añadieron hitos trazados también al worker de tickets, códigos seguros de preflight, coalescencia de polls repetidos y anclas `worker_claimed`/`worker_started`/`runtime_started`/`provider_submitting` dentro del límite de 32 eventos. El detalle de ticket restringe jobs por tipo, dueño y hogar del recibo.
+- Una revisión independiente detectó y se corrigió el reordenamiento de eventos al conservar anclas de una generación nueva; una regresión comprueba el orden entre dos `claim_generation`. El frontend también conserva `responses_tool_choice_unsupported` al copiar.
+- La instrumentación aún no está en el servicio que produjo esos tres registros: para obtener la causa del próximo intento hay que ejecutar esta revisión del servidor y repetir una vez; no se hizo una petición real en esta sesión porque no hay configuración de smoke real declarada.
+
+### Evidencia de esta revisión
+
+- [x] La traza de connection test y ticket persiste fases con fencing por `claim_generation`; el caso de lease vencido retiene `runtime_started` y `worker_stalled`.
+- [x] Error de escritura de diagnóstico y callback fallido dejan señales allowlist; SQL `changes=0` queda como `STALE_CLAIM`, sin mensaje privado.
+- [x] Tests focales: 78/78; suite server: 2.188 passed, 1 skipped; coverage server: 89,48 % statements / 81,85 % branches / 95,67 % functions / 92,36 % lines; `tsc --noEmit` pasa.
+- [x] Suite frontend: 1.805/1.805; coverage frontend: 90,58 % statements / 81,08 % branches / 91,89 % functions / 93,19 % lines; build Angular pasa.
+- [x] UI sintética aislada en Chromium verificada a 1440×900 y 390×844: copiar diagnóstico anuncia éxito; no se leyó el clipboard. Capturas en `.playwright-mcp/page-2026-11-03T10-32-59-531Z.png` y `.playwright-mcp/page-2026-11-03T10-33-24-549Z.png`.
+- [ ] Smoke nuevo con proveedor/WebApi real usando esta revisión: pendiente; la prueba sintética no demuestra conectividad real y no cuenta como éxito del proveedor.

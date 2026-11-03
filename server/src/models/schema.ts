@@ -462,6 +462,7 @@ export const aiJobs = sqliteTable('ai_jobs', {
   providerErrorParam: text('provider_error_param'),
   elapsedMs: integer('elapsed_ms'),
   diagnosticStage: text('diagnostic_stage'),
+  workerTraceJson: text('worker_trace_json').notNull().default('[]'),
   dismissedAt: text('dismissed_at'),
   createdAt: text('created_at').default('CURRENT_TIMESTAMP'),
   updatedAt: text('updated_at').default('CURRENT_TIMESTAMP'),

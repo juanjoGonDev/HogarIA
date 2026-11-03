@@ -18,7 +18,13 @@ import {
   isSafeProviderErrorParam,
   isSafeProviderErrorType
 } from '../utils/ai-provider-diagnostic.js';
-import { encolarTicket, pararTrabajo, reencolar, registrarTienda } from '../utils/ticket-queue.js';
+import {
+  encolarTicket,
+  pararTrabajo,
+  reencolar,
+  registrarTienda,
+  sanitizeAiJobDiagnosticTrace
+} from '../utils/ticket-queue.js';
 
 /**
  * La lectura de tickets por IA (HOGARIA-SPEC ## 12aj).
@@ -46,7 +52,9 @@ const RECEIPT_JOB_ERROR_CODES = new Set([
   'RECEIPT_NOT_FOUND',
   'CONFIG_UNAVAILABLE',
   'CONFIG_DISABLED',
-  'JOB_SCOPE_MISMATCH'
+  'JOB_SCOPE_MISMATCH',
+  'WORKER_STALLED',
+  'WORKER_EXCEPTION'
 ]);
 const PROVIDER_TRANSPORTS = new Set(['responses_background', 'chat_completions']);
 const PROVIDER_DIAGNOSTIC_STAGES = new Set([
@@ -77,6 +85,7 @@ interface ReceiptJobRow {
   provider_error_param: unknown;
   elapsed_ms: unknown;
   diagnostic_stage: unknown;
+  worker_trace_json: unknown;
 }
 
 function receiptJobForResponse(row: ReceiptJobRow | undefined) {
@@ -162,7 +171,8 @@ function receiptJobForResponse(row: ReceiptJobRow | undefined) {
       typeof row.diagnostic_stage === 'string' &&
       PROVIDER_DIAGNOSTIC_STAGES.has(row.diagnostic_stage)
         ? row.diagnostic_stage
-        : null
+        : null,
+    diagnosticTrace: sanitizeAiJobDiagnosticTrace(row.worker_trace_json)
   };
 }
 
@@ -429,10 +439,14 @@ receiptsRoutes.get('/:id', async (c) => {
     .all(String(recibo.id)) as any[];
   const trabajo = db
     .prepare(
-      `SELECT id, status, attempts, max_attempts, error_code, created_at, provider_response_id,
-              provider_transport, provider_http_status, provider_error_type, provider_error_code,
-              provider_error_param, elapsed_ms, diagnostic_stage
-       FROM ai_jobs WHERE receipt_id = ? ORDER BY created_at DESC LIMIT 1`
+      `SELECT j.id, j.status, j.attempts, j.max_attempts, j.error_code, j.created_at,
+              j.provider_response_id, j.provider_transport, j.provider_http_status,
+              j.provider_error_type, j.provider_error_code, j.provider_error_param, j.elapsed_ms,
+              j.diagnostic_stage, j.worker_trace_json
+       FROM ai_jobs j JOIN receipts r ON r.id = j.receipt_id
+       WHERE j.receipt_id = ? AND j.kind = 'receipt' AND j.user_id = r.user_id
+         AND j.household_id IS r.household_id
+       ORDER BY j.created_at DESC, j.id DESC LIMIT 1`
     )
     .get(String(recibo.id)) as ReceiptJobRow | undefined;
   return c.json({

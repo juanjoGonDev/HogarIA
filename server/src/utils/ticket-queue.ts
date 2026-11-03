@@ -64,6 +64,279 @@ import { aiJobLeaseSeconds } from './ai-timeout.js';
 // The queue is local to this process/database. Jobs wake it directly; the slow
 // interval is only a recovery sweep for durable rows changed outside the API.
 const QUEUE_RECONCILIATION_INTERVAL_MS = 30_000;
+const AI_JOB_TRACE_LIMIT = 32;
+const AI_JOB_TRACE_ANCHOR_STAGES = new Set([
+  'worker_claimed',
+  'worker_started',
+  'runtime_started',
+  'provider_submitting'
+]);
+const AI_JOB_TRACE_COALESCED_STAGES = new Set(['provider_queued', 'provider_polling']);
+const AI_JOB_TRACE_STAGES = new Set([
+  'worker_claimed',
+  'worker_started',
+  'runtime_started',
+  'runtime_finished',
+  'runtime_failed',
+  'worker_exception',
+  'worker_stalled',
+  'worker_runtime_missing',
+  'worker_scope_mismatch',
+  'provider_submitting',
+  'provider_queued',
+  'provider_polling',
+  'provider_completed',
+  'provider_failed',
+  'provider_timed_out',
+  'provider_cancelled'
+]);
+const AI_JOB_TRACE_WORKER_CODES = new Set([
+  'WORKER_EXCEPTION',
+  'WORKER_STALLED',
+  'INPUT_EXPIRED',
+  'JOB_SCOPE_MISMATCH',
+  'CONFIG_UNAVAILABLE',
+  'CONFIG_DISABLED',
+  'CONNECTION_FAILED',
+  'CANCELLED',
+  'TIMEOUT',
+  'BAD_JSON',
+  'NO_CONFIG',
+  'PROVIDER',
+  'FILE_MISSING',
+  'RECEIPT_NOT_FOUND'
+]);
+
+export type AiJobDiagnosticTraceEvent = Readonly<{
+  at: string;
+  attempt: number;
+  claimGeneration: number;
+  stage: string;
+  code?: string;
+  httpStatus?: number;
+  responseId?: string;
+  elapsedMs?: number;
+}>;
+
+type AiJobDiagnosticTraceInput = Readonly<{
+  stage: string;
+  code?: string;
+  httpStatus?: number | null;
+  responseId?: string | null;
+  elapsedMs?: number | null;
+}>;
+
+function safeAiJobTraceCode(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  if (AI_JOB_TRACE_WORKER_CODES.has(value)) return value;
+  return sanitizeProviderErrorFields({ code: value }).code;
+}
+
+/** Parse only the bounded, allowlisted lifecycle trace; never return arbitrary stored JSON. */
+export function sanitizeAiJobDiagnosticTrace(value: unknown): AiJobDiagnosticTraceEvent[] {
+  let parsed = value;
+  if (typeof parsed === 'string') {
+    if (parsed.length > 32_768) return [];
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(parsed)) return [];
+
+  return parsed.slice(-AI_JOB_TRACE_LIMIT).flatMap((candidate): AiJobDiagnosticTraceEvent[] => {
+    if (!candidate || typeof candidate !== 'object') return [];
+    const event = candidate as Record<string, unknown>;
+    const timestamp = typeof event.at === 'string' ? Date.parse(event.at) : Number.NaN;
+    const attempt = Number(event.attempt);
+    const claimGeneration = Number(event.claimGeneration);
+    const stage = typeof event.stage === 'string' ? event.stage : '';
+    if (
+      !Number.isFinite(timestamp) ||
+      !Number.isSafeInteger(attempt) ||
+      attempt < 0 ||
+      attempt > 1000 ||
+      !Number.isSafeInteger(claimGeneration) ||
+      claimGeneration < 1 ||
+      claimGeneration > 1_000_000_000 ||
+      !AI_JOB_TRACE_STAGES.has(stage)
+    ) {
+      return [];
+    }
+
+    const safe: AiJobDiagnosticTraceEvent = {
+      at: new Date(timestamp).toISOString(),
+      attempt,
+      claimGeneration,
+      stage
+    };
+    const code = safeAiJobTraceCode(event.code);
+    if (code) Object.assign(safe, { code });
+    if (
+      Number.isInteger(event.httpStatus) &&
+      Number(event.httpStatus) >= 100 &&
+      Number(event.httpStatus) <= 599
+    ) {
+      Object.assign(safe, { httpStatus: Number(event.httpStatus) });
+    }
+    if (
+      typeof event.responseId === 'string' &&
+      /^resp_[A-Za-z0-9_-]{1,128}$/.test(event.responseId)
+    ) {
+      Object.assign(safe, { responseId: event.responseId });
+    }
+    if (
+      Number.isSafeInteger(event.elapsedMs) &&
+      Number(event.elapsedMs) >= 0 &&
+      Number(event.elapsedMs) <= 1_209_600_000
+    ) {
+      Object.assign(safe, { elapsedMs: Number(event.elapsedMs) });
+    }
+    return [safe];
+  });
+}
+
+function boundAiJobDiagnosticTrace(
+  events: readonly AiJobDiagnosticTraceEvent[]
+): AiJobDiagnosticTraceEvent[] {
+  const currentClaimGeneration = events.at(-1)?.claimGeneration;
+  const anchoredStages = new Set<string>();
+  const anchors = events.filter((event) => {
+    if (
+      event.claimGeneration !== currentClaimGeneration ||
+      !AI_JOB_TRACE_ANCHOR_STAGES.has(event.stage) ||
+      anchoredStages.has(event.stage)
+    ) {
+      return false;
+    }
+    anchoredStages.add(event.stage);
+    return true;
+  });
+  const recent = events.slice(-Math.max(0, AI_JOB_TRACE_LIMIT - anchors.length));
+  const retained = new Set([...anchors, ...recent]);
+  return events.filter((event) => retained.has(event)).slice(-AI_JOB_TRACE_LIMIT);
+}
+
+function elapsedSinceJobStart(startedAt: string | null): number | undefined {
+  if (!startedAt) return undefined;
+  const timestamp = Date.parse(
+    startedAt.includes('T') ? startedAt : `${startedAt.replace(' ', 'T')}Z`
+  );
+  return Number.isFinite(timestamp) ? Math.max(0, Date.now() - timestamp) : undefined;
+}
+
+/** Caller already owns the SQLite write transaction. */
+function appendAiJobTraceEventInTransaction(
+  db: SqlDb,
+  jobId: string,
+  claimGeneration: number,
+  input: AiJobDiagnosticTraceInput
+): boolean {
+  if (!AI_JOB_TRACE_STAGES.has(input.stage)) return false;
+  const row = db
+    .prepare(
+      `SELECT attempts, started_at, worker_trace_json FROM ai_jobs
+       WHERE id = ? AND status = 'running' AND claim_generation = ?`
+    )
+    .get(jobId, claimGeneration) as
+    { attempts: number; started_at: string | null; worker_trace_json: string | null } | undefined;
+  if (!row) return false;
+
+  const event: AiJobDiagnosticTraceEvent = {
+    at: new Date().toISOString(),
+    attempt: Math.max(0, Math.trunc(row.attempts)),
+    claimGeneration,
+    stage: input.stage,
+    ...(safeAiJobTraceCode(input.code) ? { code: safeAiJobTraceCode(input.code) } : {}),
+    ...(Number.isInteger(input.httpStatus) &&
+    Number(input.httpStatus) >= 100 &&
+    Number(input.httpStatus) <= 599
+      ? { httpStatus: Number(input.httpStatus) }
+      : {}),
+    ...(typeof input.responseId === 'string' && /^resp_[A-Za-z0-9_-]{1,128}$/.test(input.responseId)
+      ? { responseId: input.responseId }
+      : {}),
+    ...(Number.isSafeInteger(input.elapsedMs) && Number(input.elapsedMs) >= 0
+      ? { elapsedMs: Math.min(Number(input.elapsedMs), 1_209_600_000) }
+      : elapsedSinceJobStart(row.started_at) !== undefined
+        ? { elapsedMs: elapsedSinceJobStart(row.started_at) }
+        : {})
+  };
+  const existing = sanitizeAiJobDiagnosticTrace(row.worker_trace_json);
+  const last = existing.at(-1);
+  const coalesce =
+    last?.claimGeneration === event.claimGeneration &&
+    last.stage === event.stage &&
+    AI_JOB_TRACE_COALESCED_STAGES.has(event.stage);
+  const trace = boundAiJobDiagnosticTrace(
+    coalesce ? [...existing.slice(0, -1), event] : [...existing, event]
+  );
+  return (
+    db
+      .prepare(
+        `UPDATE ai_jobs SET worker_trace_json = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ? AND status = 'running' AND claim_generation = ?`
+      )
+      .run(JSON.stringify(trace), jobId, claimGeneration).changes === 1
+  );
+}
+
+function appendAiJobTraceEventBestEffortInTransaction(
+  db: SqlDb,
+  jobId: string,
+  claimGeneration: number,
+  input: AiJobDiagnosticTraceInput
+): void {
+  try {
+    if (!appendAiJobTraceEventInTransaction(db, jobId, claimGeneration, input)) {
+      console.warn('[AI queue] Job trace update was skipped', {
+        jobId,
+        claimGeneration,
+        stage: AI_JOB_TRACE_STAGES.has(input.stage) ? input.stage : 'unknown',
+        reason: 'TRACE_UPDATE_SKIPPED'
+      });
+    }
+  } catch {
+    console.error('[AI queue] Could not persist job trace', {
+      jobId,
+      claimGeneration,
+      stage: AI_JOB_TRACE_STAGES.has(input.stage) ? input.stage : 'unknown',
+      reason: 'TRACE_WRITE_FAILED'
+    });
+  }
+}
+
+function appendAiJobTraceEvent(
+  db: SqlDb,
+  jobId: string,
+  claimGeneration: number,
+  input: AiJobDiagnosticTraceInput
+): boolean {
+  try {
+    const written = db
+      .transaction(() => appendAiJobTraceEventInTransaction(db, jobId, claimGeneration, input))
+      .immediate();
+    if (!written) {
+      console.warn('[AI queue] Job trace update was skipped', {
+        jobId,
+        claimGeneration,
+        stage: AI_JOB_TRACE_STAGES.has(input.stage) ? input.stage : 'unknown',
+        reason: 'TRACE_UPDATE_SKIPPED'
+      });
+    }
+    return written;
+  } catch {
+    console.error('[AI queue] Could not persist job trace', {
+      jobId,
+      claimGeneration,
+      stage: AI_JOB_TRACE_STAGES.has(input.stage) ? input.stage : 'unknown',
+      reason: 'TRACE_WRITE_FAILED'
+    });
+    return false;
+  }
+}
+
 type Trabajador = {
   temporizador: NodeJS.Timeout;
   despertador: NodeJS.Timeout | null;
@@ -373,8 +646,7 @@ export function persistAiProviderDiagnostic(
     'completed',
     'failed',
     'timed_out',
-    'cancelled',
-    'fallback'
+    'cancelled'
   ]).has(diagnostic.diagnosticStage)
     ? diagnostic.diagnosticStage
     : 'failed';
@@ -383,23 +655,63 @@ export function persistAiProviderDiagnostic(
     code: diagnostic.providerErrorCode,
     param: diagnostic.providerErrorParam
   });
-  db.prepare(
-    `UPDATE ai_jobs SET provider_response_id = ?, provider_transport = ?, provider_http_status = ?,
-       provider_error_type = ?, provider_error_code = ?, provider_error_param = ?,
-       elapsed_ms = ?, diagnostic_stage = ?, updated_at = CURRENT_TIMESTAMP
-     WHERE id = ? AND status = 'running' AND claim_generation = ?`
-  ).run(
+  let updated = 0;
+  try {
+    updated = db
+      .prepare(
+        `UPDATE ai_jobs SET provider_response_id = ?, provider_transport = ?, provider_http_status = ?,
+           provider_error_type = ?, provider_error_code = ?, provider_error_param = ?,
+           elapsed_ms = ?, diagnostic_stage = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ? AND status = 'running' AND claim_generation = ?`
+      )
+      .run(
+        responseId,
+        transport,
+        status,
+        providerError.type ?? null,
+        providerError.code ?? null,
+        providerError.param ?? null,
+        elapsedMs,
+        stage,
+        jobId,
+        claimGeneration
+      ).changes;
+  } catch {
+    console.error('[AI queue] Could not persist provider diagnostic', {
+      jobId,
+      claimGeneration,
+      stage,
+      reason: 'DIAGNOSTIC_WRITE_FAILED'
+    });
+    return;
+  }
+
+  if (updated !== 1) {
+    console.warn('[AI queue] Provider diagnostic ignored for stale job claim', {
+      jobId,
+      claimGeneration,
+      stage,
+      reason: 'STALE_CLAIM'
+    });
+    return;
+  }
+
+  const traceStage: Record<AiConnectionTestDiagnostic['diagnosticStage'], string> = {
+    submitting: 'provider_submitting',
+    queued: 'provider_queued',
+    polling: 'provider_polling',
+    completed: 'provider_completed',
+    failed: 'provider_failed',
+    timed_out: 'provider_timed_out',
+    cancelled: 'provider_cancelled'
+  };
+  appendAiJobTraceEvent(db, jobId, claimGeneration, {
+    stage: traceStage[diagnostic.diagnosticStage],
+    code: providerError.code,
+    httpStatus: status,
     responseId,
-    transport,
-    status,
-    providerError.type ?? null,
-    providerError.code ?? null,
-    providerError.param ?? null,
-    elapsedMs,
-    stage,
-    jobId,
-    claimGeneration
-  );
+    elapsedMs
+  });
 }
 
 /** Tickets keep their durable file/receipt reference while sharing the same provider scheduler. */
@@ -617,12 +929,13 @@ function paso(): void {
         }
         continue;
       }
-      lanzar(trabajo.id, trabajo.user_id, claimGeneration);
+      lanzar(db, trabajo.id, trabajo.user_id, claimGeneration);
     }
   }
 }
 
 function recuperarFalloWorker(
+  db: SqlDb,
   jobId: string,
   userId: string,
   señal: AbortController,
@@ -634,7 +947,6 @@ function recuperarFalloWorker(
   let persistenciaFallida = false;
 
   try {
-    const db = getDatabase();
     trabajo = db
       .transaction(() => {
         const fila = db
@@ -645,6 +957,11 @@ function recuperarFalloWorker(
           .get(jobId, userId, claimGeneration) as
           { kind: string; receipt_id: string | null; config_id: string | null } | undefined;
         if (!fila) return null;
+
+        appendAiJobTraceEventBestEffortInTransaction(db, jobId, claimGeneration, {
+          stage: 'worker_exception',
+          code: 'WORKER_EXCEPTION'
+        });
 
         const updated = db
           .prepare(
@@ -751,6 +1068,10 @@ function recuperarLeasesVencidas(db: SqlDb): number {
     try {
       recuperado = db
         .transaction(() => {
+          appendAiJobTraceEventBestEffortInTransaction(db, job.id, job.claim_generation, {
+            stage: 'worker_stalled',
+            code: 'WORKER_STALLED'
+          });
           const updated = db
             .prepare(
               `UPDATE ai_jobs SET status = 'failed', error_code = 'WORKER_STALLED',
@@ -903,20 +1224,25 @@ function reclamarTrabajo(db: SqlDb, jobId: string, leaseSeconds: number): number
            updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'queued'`
         )
         .run(claimGeneration, `+${leaseSeconds} seconds`, jobId).changes;
-      return changed === 1 ? claimGeneration : null;
+      if (changed !== 1) return null;
+      appendAiJobTraceEventBestEffortInTransaction(db, jobId, claimGeneration, {
+        stage: 'worker_claimed'
+      });
+      return claimGeneration;
     })
     .immediate();
 }
 
-function lanzar(jobId: string, userId: string, claimGeneration: number): void {
+function lanzar(db: SqlDb, jobId: string, userId: string, claimGeneration: number): void {
   const estado = ensureWorker();
   estado.corriendo.add(jobId);
   const señal = new AbortController();
   estado.señales.set(jobId, señal);
   const runtime = trabajosEnMemoria.get(jobId);
   if (runtime) runtime.claimGeneration = claimGeneration;
-  void correr(jobId, userId, señal, claimGeneration)
-    .catch((error) => recuperarFalloWorker(jobId, userId, señal, claimGeneration, error))
+  appendAiJobTraceEvent(db, jobId, claimGeneration, { stage: 'worker_started' });
+  void correr(db, jobId, userId, señal, claimGeneration)
+    .catch((error) => recuperarFalloWorker(db, jobId, userId, señal, claimGeneration, error))
     .finally(() => {
       if (estado.señales.get(jobId) === señal) {
         estado.corriendo.delete(jobId);
@@ -927,12 +1253,12 @@ function lanzar(jobId: string, userId: string, claimGeneration: number): void {
 }
 
 async function correr(
+  db: SqlDb,
   jobId: string,
   userId: string,
   señal: AbortController,
   claimGeneration: number
 ): Promise<void> {
-  const db = getDatabase();
   const metadata = db
     .prepare(
       'SELECT kind, config_id, household_id, receipt_id, status, claim_generation FROM ai_jobs WHERE id = ?'
@@ -947,7 +1273,15 @@ async function correr(
         claim_generation: number;
       }
     | undefined;
-  if (metadata?.status !== 'running' || metadata.claim_generation !== claimGeneration) return;
+  if (metadata?.status !== 'running' || metadata.claim_generation !== claimGeneration) {
+    console.warn('[AI queue] Worker claim is no longer active', {
+      jobId,
+      claimGeneration,
+      status: metadata?.status ?? 'missing',
+      currentGeneration: metadata?.claim_generation ?? null
+    });
+    return;
+  }
   if (metadata.kind !== 'receipt' || !metadata.receipt_id) {
     await correrTrabajoGenerico(
       db,
@@ -961,6 +1295,7 @@ async function correr(
     return;
   }
 
+  appendAiJobTraceEvent(db, jobId, claimGeneration, { stage: 'runtime_started' });
   const recibo = db
     .prepare(
       `SELECT r.* FROM receipts r JOIN ai_jobs j ON j.receipt_id = r.id
@@ -977,6 +1312,10 @@ async function correr(
       }
     | undefined;
   if (!recibo) {
+    appendAiJobTraceEvent(db, jobId, claimGeneration, {
+      stage: 'runtime_failed',
+      code: 'RECEIPT_NOT_FOUND'
+    });
     db.prepare(
       `UPDATE ai_jobs SET status = 'failed', error_code = 'RECEIPT_NOT_FOUND',
          finished_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'running' AND claim_generation = ?`
@@ -1099,6 +1438,9 @@ async function correr(
         JSON.stringify(validado.data.warnings ?? []),
         recibo.id
       );
+      appendAiJobTraceEventBestEffortInTransaction(db, jobId, claimGeneration, {
+        stage: 'runtime_finished'
+      });
       const tiendaFinal = db.prepare('SELECT store FROM receipts WHERE id = ?').get(recibo.id) as
         { store: string | null } | undefined;
       if (tiendaFinal?.store) registrarTienda(db, userId, tiendaFinal.store, recibo.household_id);
@@ -1117,6 +1459,10 @@ async function correr(
         : error instanceof AiCallError
           ? error.code
           : 'PROVIDER';
+    appendAiJobTraceEvent(db, jobId, claimGeneration, {
+      stage: 'runtime_failed',
+      code: ficheroAusente ? 'FILE_MISSING' : codigo
+    });
     const detalle = cancelado
       ? 'Parado por la persona'
       : String((error as Error)?.message ?? error).slice(0, 300);
@@ -1180,6 +1526,10 @@ async function correrTrabajoGenerico(
 ): Promise<void> {
   const runtime = trabajosEnMemoria.get(jobId);
   if (!runtime) {
+    appendAiJobTraceEvent(db, jobId, claimGeneration, {
+      stage: 'worker_runtime_missing',
+      code: 'INPUT_EXPIRED'
+    });
     db.prepare(
       `UPDATE ai_jobs SET status = 'failed', error_code = 'INPUT_EXPIRED', error_detail = NULL,
          finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
@@ -1188,6 +1538,10 @@ async function correrTrabajoGenerico(
     return;
   }
   if (runtime.configId !== configId || runtime.householdId !== householdId) {
+    appendAiJobTraceEvent(db, jobId, claimGeneration, {
+      stage: 'worker_scope_mismatch',
+      code: 'JOB_SCOPE_MISMATCH'
+    });
     db.prepare(
       `UPDATE ai_jobs SET status = 'failed', error_code = 'JOB_SCOPE_MISMATCH', error_detail = NULL,
          finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
@@ -1202,9 +1556,19 @@ async function correrTrabajoGenerico(
     .get(jobId) as
     | { attempts: number; max_attempts: number; status: string; claim_generation: number }
     | undefined;
-  if (!row || row.status !== 'running' || row.claim_generation !== claimGeneration) return;
+  if (!row || row.status !== 'running' || row.claim_generation !== claimGeneration) {
+    console.warn('[AI queue] Runtime did not start for an inactive job claim', {
+      jobId,
+      claimGeneration,
+      status: row?.status ?? 'missing',
+      currentGeneration: row?.claim_generation ?? null,
+      reason: 'CLAIM_NOT_ACTIVE'
+    });
+    return;
+  }
 
   try {
+    appendAiJobTraceEvent(db, jobId, claimGeneration, { stage: 'runtime_started' });
     const result = await runtime.run(runtime.config, signal, jobId, claimGeneration);
     const vigente = db
       .prepare('SELECT status, claim_generation FROM ai_jobs WHERE id = ?')
@@ -1217,6 +1581,10 @@ async function correrTrabajoGenerico(
     }
 
     const errorCode = runtime.failureCode?.(result) ?? null;
+    appendAiJobTraceEvent(db, jobId, claimGeneration, {
+      stage: 'runtime_finished',
+      code: errorCode ?? undefined
+    });
     if (errorCode && row.attempts < row.max_attempts) {
       db.prepare(
         `UPDATE ai_jobs SET status = 'queued', error_code = NULL, error_detail = NULL,
@@ -1257,6 +1625,10 @@ async function correrTrabajoGenerico(
     }
 
     const errorCode = error instanceof AiCallError ? error.code : 'PROVIDER';
+    appendAiJobTraceEvent(db, jobId, claimGeneration, {
+      stage: 'runtime_failed',
+      code: errorCode
+    });
     const reintentable =
       errorCode !== 'NO_CONFIG' &&
       errorCode !== 'BAD_JSON' &&
@@ -1410,6 +1782,7 @@ export type AiQueueJobDto = {
   providerErrorParam: ReturnType<typeof sanitizeProviderErrorFields>['param'] | null;
   elapsedMs: number | null;
   diagnosticStage: AiConnectionTestDiagnostic['diagnosticStage'] | null;
+  diagnosticTrace: AiJobDiagnosticTraceEvent[];
 };
 
 export type AiActiveJobDto = {
@@ -1487,7 +1860,7 @@ export function queueForConfig(db: SqlDb, userId: string, configId: string): AiQ
       .prepare(
         `SELECT id, config_id, kind, status, attempts, max_attempts, error_code, created_at, queue_order,
            provider_response_id, provider_transport, provider_http_status, provider_error_type,
-           provider_error_code, provider_error_param, elapsed_ms, diagnostic_stage
+           provider_error_code, provider_error_param, elapsed_ms, diagnostic_stage, worker_trace_json
          FROM ai_jobs WHERE user_id = ? AND household_id IS ? AND config_id = ?
            AND dismissed_at IS NULL
            AND status IN ('queued', 'running', 'failed')
@@ -1564,7 +1937,8 @@ export function queueForConfig(db: SqlDb, userId: string, configId: string): AiQ
           'fallback'
         ].includes(String(row.diagnostic_stage))
           ? (row.diagnostic_stage as AiConnectionTestDiagnostic['diagnosticStage'])
-          : null
+          : null,
+      diagnosticTrace: sanitizeAiJobDiagnosticTrace(row.worker_trace_json)
     };
   });
 }

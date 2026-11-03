@@ -12,6 +12,7 @@ import { TranslatePipe } from '../../core/pipes/translate.pipe';
 import { I18nService } from '../../core/services/i18n.service';
 import { AiQueueService } from '../../core/services/ai-queue.service';
 import { IconComponent } from '../../shared/components/ui/icon/icon.component';
+import { safeAiJobDiagnosticTrace } from '../../shared/utils/ai-job-diagnostic';
 import type { AIProviderConfig } from '../../shared/models/ai-config.model';
 import type {
   AiQueueJob,
@@ -44,7 +45,9 @@ const ERROR_KEYS: Record<string, TranslationKey> = {
   BAD_JSON: 'ai_config.queue_error_bad_json',
   TIMEOUT: 'ai_config.queue_error_timeout',
   INPUT_EXPIRED: 'ai_config.queue_error_input_expired',
-  CONFIG_UNAVAILABLE: 'ai_config.queue_error_config_unavailable'
+  CONFIG_UNAVAILABLE: 'ai_config.queue_error_config_unavailable',
+  WORKER_STALLED: 'ai_config.queue_error_worker_stalled',
+  WORKER_EXCEPTION: 'ai_config.queue_error_worker_exception'
 };
 
 const SAFE_DIAGNOSTIC_KINDS = new Set(Object.keys(KIND_KEYS));
@@ -129,6 +132,7 @@ type QueueJobDiagnosticMetadata = {
   providerErrorParam?: unknown;
   elapsedMs?: unknown;
   diagnosticStage?: unknown;
+  diagnosticTrace?: unknown;
 };
 
 @Component({
@@ -852,6 +856,9 @@ export class AiProviderQueueComponent implements OnChanges, OnDestroy {
     ) {
       diagnostic['diagnosticStage'] = metadata.diagnosticStage;
     }
+
+    const trace = safeAiJobDiagnosticTrace(metadata.diagnosticTrace);
+    if (trace) diagnostic['trace'] = trace;
 
     const providerResponseId = this.safeIdentifier(metadata.providerResponseId);
     if (providerResponseId) diagnostic['providerResponseId'] = providerResponseId;

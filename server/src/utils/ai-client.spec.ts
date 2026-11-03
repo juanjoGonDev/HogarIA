@@ -1295,6 +1295,49 @@ describe('pingDeConexion', () => {
     });
   });
 
+  it('deja una señal segura si falla el callback de diagnóstico y continúa la petición', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      respuestaResponses({
+        id: 'resp_callback_diagnostic',
+        status: 'completed',
+        output: [
+          {
+            type: 'message',
+            content: [
+              { type: 'output_text', text: '{"status":"ok","message":"conexión establecida"}' }
+            ]
+          }
+        ]
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const callbackError = 'private callback details';
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      const verdict = await pingDeConexionTransport({
+        base_url: 'http://x:8000',
+        api_key: 'synthetic-key',
+        model: 'gpt-5',
+        jobId: 'job-callback-diagnostic',
+        onDiagnostic: () => {
+          throw new Error(callbackError);
+        }
+      });
+
+      expect(verdict).toMatchObject({ ok: true });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(errorLog).toHaveBeenCalledWith('[AI provider] Progress diagnostic callback failed', {
+        providerTransport: 'responses_background',
+        diagnosticStage: 'submitting',
+        reason: 'DIAGNOSTIC_CALLBACK_FAILED'
+      });
+      expect(JSON.stringify(errorLog.mock.calls)).not.toContain(callbackError);
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
+
   it('no cae a Chat Completions ante un Responses no disponible', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response('not found', { status: 404 }));
     vi.stubGlobal('fetch', fetchMock);

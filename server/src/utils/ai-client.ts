@@ -424,7 +424,11 @@ function notifyConnectionTestDiagnostic(
   try {
     callback?.(diagnostic);
   } catch {
-    // Sanitized progress is best-effort and must not affect provider execution.
+    console.error('[AI provider] Progress diagnostic callback failed', {
+      providerTransport: diagnostic.providerTransport,
+      diagnosticStage: diagnostic.diagnosticStage,
+      reason: 'DIAGNOSTIC_CALLBACK_FAILED'
+    });
   }
 }
 

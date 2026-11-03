@@ -1136,6 +1136,26 @@ describe('AI provider queue dispatcher', () => {
       provider_response_id: 'resp_1234567',
       provider_transport: 'responses_background'
     });
+    const connectionJob = db
+      .prepare('SELECT id, worker_trace_json FROM ai_jobs WHERE kind = ?')
+      .get('connection_test') as { id: string; worker_trace_json: string };
+    const trace = JSON.parse(connectionJob.worker_trace_json);
+    expect(trace.map((event: { stage: string }) => event.stage)).toEqual([
+      'worker_claimed',
+      'worker_started',
+      'runtime_started',
+      'provider_submitting',
+      'provider_completed',
+      'runtime_finished'
+    ]);
+    expect(
+      trace.every(
+        (event: { claimGeneration: number; attempt: number }) =>
+          event.claimGeneration === 1 && event.attempt === 1
+      )
+    ).toBe(true);
+    expect(connectionJob.worker_trace_json).not.toContain(config.api_key);
+    expect(connectionJob.worker_trace_json).not.toContain('Prueba de conexión');
   });
 
   it('rejects normal and streaming AI calls when the user has no active provider', async () => {
@@ -1901,6 +1921,15 @@ describe('AI provider queue dispatcher', () => {
         lease_until: null,
         diagnostic_stage: 'failed'
       });
+      const trace = JSON.parse(String(jobRow(job.id).worker_trace_json)) as Array<{
+        stage: string;
+      }>;
+      expect(trace.map((event) => event.stage)).toEqual([
+        'worker_claimed',
+        'worker_started',
+        'worker_exception'
+      ]);
+      expect(trace.some((event) => event.stage.startsWith('provider_'))).toBe(false);
       expect(db.prepare('SELECT test_status FROM ai_configs WHERE id = ?').get(config.id)).toEqual({
         test_status: 'failed'
       });
@@ -1964,6 +1993,7 @@ describe('AI provider queue dispatcher', () => {
 
   it('ignores provider diagnostics from an older claim generation', async () => {
     const { persistAiProviderDiagnostic } = await import('./ticket-queue.js');
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
     db.prepare(
       `INSERT INTO ai_jobs (id, user_id, config_id, kind, status, max_attempts, claim_generation)
        VALUES ('generation-diagnostic-job', ?, ?, 'connection_test', 'running', 1, 4)`
@@ -1980,6 +2010,15 @@ describe('AI provider queue dispatcher', () => {
       diagnosticStage: 'failed' as const
     };
     persistAiProviderDiagnostic(db, 'generation-diagnostic-job', staleDiagnostic, 3);
+    expect(warning).toHaveBeenCalledWith(
+      '[AI queue] Provider diagnostic ignored for stale job claim',
+      expect.objectContaining({
+        jobId: 'generation-diagnostic-job',
+        claimGeneration: 3,
+        stage: 'failed',
+        reason: 'STALE_CLAIM'
+      })
+    );
     expect(jobRow('generation-diagnostic-job')).toMatchObject({
       claim_generation: 4,
       provider_response_id: null,
@@ -1992,6 +2031,175 @@ describe('AI provider queue dispatcher', () => {
       provider_response_id: 'resp_stale',
       provider_http_status: 400,
       diagnostic_stage: 'failed'
+    });
+    warning.mockRestore();
+  });
+
+  it('logs a safe signal when provider diagnostics cannot be persisted', async () => {
+    const { persistAiProviderDiagnostic } = await import('./ticket-queue.js');
+    const privateDbError = 'synthetic private sqlite error';
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const prepare = vi.spyOn(db, 'prepare').mockImplementationOnce(() => {
+      throw new Error(privateDbError);
+    });
+
+    try {
+      expect(() =>
+        persistAiProviderDiagnostic(
+          db,
+          'diagnostic-write-failure-job',
+          {
+            providerResponseId: 'resp_write_failure',
+            providerTransport: 'responses_background',
+            providerHttpStatus: 400,
+            elapsedMs: 10,
+            providerErrorType: 'invalid_request_error',
+            providerErrorCode: 'unsupported_parameter',
+            providerErrorParam: 'input',
+            diagnosticStage: 'failed'
+          },
+          3
+        )
+      ).not.toThrow();
+      expect(error).toHaveBeenCalledWith('[AI queue] Could not persist provider diagnostic', {
+        jobId: 'diagnostic-write-failure-job',
+        claimGeneration: 3,
+        stage: 'failed',
+        reason: 'DIAGNOSTIC_WRITE_FAILED'
+      });
+      expect(JSON.stringify(error.mock.calls)).not.toContain(privateDbError);
+    } finally {
+      prepare.mockRestore();
+      error.mockRestore();
+    }
+  });
+
+  it('bounds the per-job trace and stores only sanitized provider fields', async () => {
+    const { persistAiProviderDiagnostic, queueForConfig } = await import('./ticket-queue.js');
+    db.prepare(
+      `INSERT INTO ai_jobs
+        (id, user_id, config_id, kind, status, attempts, max_attempts, claim_generation, worker_trace_json)
+       VALUES ('bounded-trace-job', ?, ?, 'connection_test', 'running', 1, 1, 2, ?)`
+    ).run(
+      userId,
+      config.id,
+      JSON.stringify(
+        ['worker_claimed', 'worker_started', 'runtime_started', 'provider_submitting'].map(
+          (stage) => ({
+            at: '2026-11-03T08:00:00.000Z',
+            attempt: 1,
+            claimGeneration: 2,
+            stage
+          })
+        )
+      )
+    );
+    const diagnostic = {
+      providerResponseId: 'resp_trace_safe',
+      providerTransport: 'responses_background' as const,
+      providerHttpStatus: 200,
+      elapsedMs: 10,
+      providerErrorType: 'invalid_request_error' as const,
+      providerErrorCode: 'unsupported_parameter' as const,
+      providerErrorParam: 'background' as const,
+      diagnosticStage: 'polling' as const
+    };
+
+    for (let index = 0; index < 40; index += 1) {
+      persistAiProviderDiagnostic(
+        db,
+        'bounded-trace-job',
+        {
+          ...diagnostic,
+          diagnosticStage: index % 2 === 0 ? 'polling' : 'queued',
+          elapsedMs: index
+        },
+        2
+      );
+    }
+
+    const trace = JSON.parse(String(jobRow('bounded-trace-job').worker_trace_json)) as Array<
+      Record<string, unknown>
+    >;
+    expect(trace).toHaveLength(32);
+    expect(trace.slice(0, 4).map((event) => event.stage)).toEqual([
+      'worker_claimed',
+      'worker_started',
+      'runtime_started',
+      'provider_submitting'
+    ]);
+    expect(trace[4]).toMatchObject({
+      claimGeneration: 2,
+      attempt: 1,
+      stage: 'provider_polling',
+      code: 'unsupported_parameter',
+      httpStatus: 200,
+      responseId: 'resp_trace_safe',
+      elapsedMs: 12
+    });
+    expect(trace.at(-1)).toMatchObject({ elapsedMs: 39 });
+    expect(JSON.stringify(trace)).not.toContain('synthetic-key');
+    const queueJob = queueForConfig(db, userId, config.id).find(
+      (job) => job.id === 'bounded-trace-job'
+    );
+    expect(queueJob?.diagnosticTrace).toHaveLength(32);
+
+    db.prepare('UPDATE ai_jobs SET worker_trace_json = ? WHERE id = ?').run(
+      JSON.stringify(
+        ['worker_claimed', 'worker_started', 'runtime_started', 'provider_submitting'].map(
+          (stage) => ({
+            at: '2026-11-03T08:00:00.000Z',
+            attempt: 1,
+            claimGeneration: 2,
+            stage
+          })
+        )
+      ),
+      'bounded-trace-job'
+    );
+    for (let index = 0; index < 40; index += 1) {
+      persistAiProviderDiagnostic(db, 'bounded-trace-job', diagnostic, 2);
+    }
+    const coalescedTrace = JSON.parse(
+      String(jobRow('bounded-trace-job').worker_trace_json)
+    ) as Array<Record<string, unknown>>;
+    expect(coalescedTrace.map((event) => event.stage)).toEqual([
+      'worker_claimed',
+      'worker_started',
+      'runtime_started',
+      'provider_submitting',
+      'provider_polling'
+    ]);
+
+    db.prepare('UPDATE ai_jobs SET claim_generation = 3, attempts = 2 WHERE id = ?').run(
+      'bounded-trace-job'
+    );
+    persistAiProviderDiagnostic(
+      db,
+      'bounded-trace-job',
+      {
+        ...diagnostic,
+        providerResponseId: null,
+        providerHttpStatus: null,
+        diagnosticStage: 'submitting',
+        elapsedMs: 0
+      },
+      3
+    );
+    const retriedTrace = JSON.parse(
+      String(jobRow('bounded-trace-job').worker_trace_json)
+    ) as Array<{
+      claimGeneration: number;
+      attempt: number;
+      stage: string;
+    }>;
+    const retryIndex = retriedTrace.findIndex((event) => event.claimGeneration === 3);
+    expect(retryIndex).toBeGreaterThan(0);
+    expect(retriedTrace.slice(retryIndex).every((event) => event.claimGeneration === 3)).toBe(true);
+    expect(retriedTrace.at(-1)).toMatchObject({
+      claimGeneration: 3,
+      attempt: 2,
+      stage: 'provider_submitting'
     });
   });
 
@@ -2124,6 +2332,15 @@ describe('AI provider queue dispatcher', () => {
         error_code: 'WORKER_STALLED',
         lease_until: null
       });
+      const stalledTrace = JSON.parse(String(jobRow(staleJob.id).worker_trace_json)) as Array<{
+        stage: string;
+      }>;
+      expect(stalledTrace.map((event) => event.stage)).toEqual([
+        'worker_claimed',
+        'worker_started',
+        'runtime_started',
+        'worker_stalled'
+      ]);
       expect(jobRow(activeJob.id).status).toBe('running');
       expect(jobRow('expired-lease-receipt-job')).toMatchObject({
         status: 'failed',

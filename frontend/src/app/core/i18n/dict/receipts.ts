@@ -45,6 +45,10 @@ export const receiptsEs = {
   'receipts.error.BAD_JSON': 'El modelo no contestó con una estructura válida',
   'receipts.error.TIMEOUT': 'El proveedor tardó demasiado en contestar',
   'receipts.error.PROVIDER': 'El proveedor de IA falló',
+  'receipts.error.WORKER_STALLED':
+    'El worker del servidor dejó de responder. Copia el diagnóstico para ver la última etapa alcanzada.',
+  'receipts.error.WORKER_EXCEPTION':
+    'El worker del servidor falló inesperadamente. Copia el diagnóstico para consultar el detalle seguro.',
   'receipts.error.FILE_MISSING':
     'No encontramos el archivo original en el servidor. Vuelve a subir el ticket para leerlo.',
   'receipts.error.PROVIDER_AUTH':
@@ -159,6 +163,10 @@ export const receiptsEn: Record<keyof typeof receiptsEs, string> = {
   'receipts.error.BAD_JSON': "The model didn't answer with a valid structure",
   'receipts.error.TIMEOUT': 'The provider took too long to answer',
   'receipts.error.PROVIDER': 'The AI provider failed',
+  'receipts.error.WORKER_STALLED':
+    'The server worker stopped responding. Copy diagnostics to see the last reached stage.',
+  'receipts.error.WORKER_EXCEPTION':
+    'The server worker failed unexpectedly. Copy diagnostics for the safe details.',
   'receipts.error.FILE_MISSING':
     'The original file is no longer available on the server. Upload the receipt again to read it.',
   'receipts.error.PROVIDER_AUTH':

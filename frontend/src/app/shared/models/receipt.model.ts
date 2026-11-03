@@ -1,3 +1,5 @@
+import type { AiJobDiagnosticTraceEvent } from './ai-queue.model';
+
 /**
  * Los tickets leidos por IA (HOGARIA-SPEC ## 12aj), la hermana de `shopping.model.ts`.
  *
@@ -88,6 +90,7 @@ export interface ReceiptJob {
     | 'cancelled'
     | 'fallback'
     | null;
+  diagnosticTrace?: AiJobDiagnosticTraceEvent[];
 }
 
 /** Campos adicionales que devuelve la cola global; no forman parte del GET de detalle. */

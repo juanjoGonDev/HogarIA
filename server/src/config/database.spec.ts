@@ -727,7 +727,7 @@ describe('AI connection-test restart recovery', () => {
         'ALTER TABLE ai_configs DROP COLUMN test_started_at; ALTER TABLE ai_configs DROP COLUMN test_latency_ms'
       );
       db.exec(
-        'ALTER TABLE ai_jobs DROP COLUMN provider_response_id; ALTER TABLE ai_jobs DROP COLUMN provider_transport; ALTER TABLE ai_jobs DROP COLUMN provider_http_status; ALTER TABLE ai_jobs DROP COLUMN elapsed_ms; ALTER TABLE ai_jobs DROP COLUMN diagnostic_stage; ALTER TABLE ai_jobs DROP COLUMN dismissed_at; ALTER TABLE ai_jobs DROP COLUMN provider_error_type; ALTER TABLE ai_jobs DROP COLUMN provider_error_code; ALTER TABLE ai_jobs DROP COLUMN provider_error_param'
+        'ALTER TABLE ai_jobs DROP COLUMN provider_response_id; ALTER TABLE ai_jobs DROP COLUMN provider_transport; ALTER TABLE ai_jobs DROP COLUMN provider_http_status; ALTER TABLE ai_jobs DROP COLUMN elapsed_ms; ALTER TABLE ai_jobs DROP COLUMN diagnostic_stage; ALTER TABLE ai_jobs DROP COLUMN dismissed_at; ALTER TABLE ai_jobs DROP COLUMN provider_error_type; ALTER TABLE ai_jobs DROP COLUMN provider_error_code; ALTER TABLE ai_jobs DROP COLUMN provider_error_param; ALTER TABLE ai_jobs DROP COLUMN worker_trace_json'
       );
       db.prepare('INSERT INTO users (id, email, name, password_hash) VALUES (?, ?, ?, ?)').run(
         'connection-test-user',
@@ -753,6 +753,7 @@ describe('AI connection-test restart recovery', () => {
       expect(legacyColumns.map((column) => column.name)).not.toContain('test_started_at');
       expect(legacyColumns.map((column) => column.name)).not.toContain('test_latency_ms');
       expect(legacyJobColumns.map((column) => column.name)).not.toContain('provider_response_id');
+      expect(legacyJobColumns.map((column) => column.name)).not.toContain('worker_trace_json');
 
       mod.closeDatabase();
       restarted = await dbModuleWith(databaseFile);
@@ -777,7 +778,8 @@ describe('AI connection-test restart recovery', () => {
           'dismissed_at',
           'provider_error_type',
           'provider_error_code',
-          'provider_error_param'
+          'provider_error_param',
+          'worker_trace_json'
         ])
       );
       const recovered = restarted

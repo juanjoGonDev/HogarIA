@@ -534,17 +534,54 @@ describe('la cola', () => {
         (id, user_id, kind, receipt_id, status, attempts, max_attempts, error_code, error_detail,
          provider_response_id, provider_transport, provider_http_status, provider_error_type,
          provider_error_code, provider_error_param, elapsed_ms,
-         diagnostic_stage)
+         diagnostic_stage, worker_trace_json)
        VALUES (?, ?, 'receipt', ?, 'failed', 4, 4, 'PROVIDER', ?, 'resp_diagnostic_123',
          'responses_background', 400, 'invalid_request_error', 'unsupported_parameter',
-         'temperature', 1234, 'failed')`
-    ).run(jobId, alice.id, receiptId, secret);
+         'temperature', 1234, 'failed', ?)`
+    ).run(
+      jobId,
+      alice.id,
+      receiptId,
+      secret,
+      JSON.stringify([
+        {
+          at: '2026-11-03T09:34:13.000Z',
+          attempt: 1,
+          claimGeneration: 1,
+          stage: 'worker_claimed'
+        },
+        {
+          at: '2026-11-03T09:34:14.000Z',
+          attempt: 1,
+          claimGeneration: 1,
+          stage: 'provider_failed',
+          code: 'unsupported_parameter',
+          httpStatus: 400,
+          responseId: 'resp_diagnostic_123',
+          elapsedMs: 1000,
+          secret
+        },
+        {
+          at: '2026-11-03T09:34:15.000Z',
+          attempt: 1,
+          claimGeneration: 1,
+          stage: 'raw-provider-body',
+          message: secret
+        }
+      ])
+    );
 
     const ownDetail = await call('GET', `/${receiptId}`);
     const other = await makeUser(
       `diagnostic-other-${Math.random().toString(36).slice(2)}@test.local`
     );
+    db.prepare(
+      `INSERT INTO ai_jobs
+        (id, user_id, kind, receipt_id, status, max_attempts, provider_response_id, created_at)
+       VALUES ('foreign-receipt-job', ?, 'receipt', ?, 'failed', 1, 'resp_foreign_secret', '2099-01-01 00:00:00')`
+    ).run(other.id, receiptId);
     const otherDetail = await call('GET', `/${receiptId}`, undefined, other.token);
+    const ownDetailAfterForeignJob = await call('GET', `/${receiptId}`);
 
     expect(ownDetail.status).toBe(200);
     expect(ownDetail.payload.data.job).toMatchObject({
@@ -563,6 +600,24 @@ describe('la cola', () => {
       diagnostic_stage: 'failed'
     });
     expect(ownDetail.payload.data.job.created_at).toBeTruthy();
+    expect(ownDetail.payload.data.job.diagnosticTrace).toEqual([
+      {
+        at: '2026-11-03T09:34:13.000Z',
+        attempt: 1,
+        claimGeneration: 1,
+        stage: 'worker_claimed'
+      },
+      {
+        at: '2026-11-03T09:34:14.000Z',
+        attempt: 1,
+        claimGeneration: 1,
+        stage: 'provider_failed',
+        code: 'unsupported_parameter',
+        httpStatus: 400,
+        responseId: 'resp_diagnostic_123',
+        elapsedMs: 1000
+      }
+    ]);
     expect(Object.keys(ownDetail.payload.data.job).sort()).toEqual(
       [
         'attempts',
@@ -578,7 +633,8 @@ describe('la cola', () => {
         'provider_error_param',
         'provider_response_id',
         'provider_transport',
-        'status'
+        'status',
+        'diagnosticTrace'
       ].sort()
     );
     expect(JSON.stringify(ownDetail.payload.data.job)).not.toContain(secret);
@@ -598,6 +654,17 @@ describe('la cola', () => {
     expect(JSON.stringify(unsafeDetail.payload.data.job)).not.toContain(unsafeMarker);
     expect(otherDetail.status).toBe(404);
     expect(JSON.stringify(otherDetail.payload)).not.toContain(secret);
+    expect(ownDetailAfterForeignJob.payload.data.job.id).toBe(jobId);
+    expect(JSON.stringify(ownDetailAfterForeignJob.payload.data.job)).not.toContain(
+      'resp_foreign_secret'
+    );
+
+    db.prepare('UPDATE ai_jobs SET error_code = ? WHERE id = ?').run('WORKER_STALLED', jobId);
+    const stalledDetail = await call('GET', `/${receiptId}`);
+    expect(stalledDetail.payload.data.job.error_code).toBe('WORKER_STALLED');
+    db.prepare('UPDATE ai_jobs SET error_code = ? WHERE id = ?').run('WORKER_EXCEPTION', jobId);
+    const exceptionDetail = await call('GET', `/${receiptId}`);
+    expect(exceptionDetail.payload.data.job.error_code).toBe('WORKER_EXCEPTION');
   });
 
   it('classifies a missing ticket file separately and does not spend provider retries', async () => {
@@ -660,6 +727,17 @@ describe('la cola', () => {
         diagnostic_stage: null
       });
       expect(fakeFetch).not.toHaveBeenCalled();
+      const trace = db
+        .prepare('SELECT worker_trace_json FROM ai_jobs WHERE receipt_id = ?')
+        .get(receiptId) as { worker_trace_json: string };
+      expect(JSON.parse(trace.worker_trace_json)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ stage: 'worker_claimed' }),
+          expect.objectContaining({ stage: 'worker_started' }),
+          expect.objectContaining({ stage: 'runtime_started' }),
+          expect.objectContaining({ stage: 'runtime_failed', code: 'FILE_MISSING' })
+        ])
+      );
     } finally {
       stopWorker();
     }

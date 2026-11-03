@@ -126,6 +126,10 @@ export const aiConfigEs = {
   'ai_config.queue_error_input_expired':
     'Los datos necesarios para repetir este trabajo ya no están disponibles.',
   'ai_config.queue_error_config_unavailable': 'La configuración del proveedor no está disponible.',
+  'ai_config.queue_error_worker_stalled':
+    'El worker del servidor dejó de responder antes de terminar. Copia el diagnóstico para ver la última etapa alcanzada.',
+  'ai_config.queue_error_worker_exception':
+    'El worker del servidor falló inesperadamente. Copia el diagnóstico para consultar el detalle seguro.',
   'ai_config.queue_error_unknown': 'La solicitud falló.',
   'ai_config.function_providers_title': 'Proveedor por función',
   'ai_config.function_providers_hint': 'Elige qué proveedor atiende cada parte de la app.',
@@ -274,6 +278,10 @@ export const aiConfigEn: Record<keyof typeof aiConfigEs, string> = {
   'ai_config.queue_error_input_expired':
     'The data needed to retry this job is no longer available.',
   'ai_config.queue_error_config_unavailable': 'The provider configuration is unavailable.',
+  'ai_config.queue_error_worker_stalled':
+    'The server worker stopped responding before finishing. Copy diagnostics to see the last reached stage.',
+  'ai_config.queue_error_worker_exception':
+    'The server worker failed unexpectedly. Copy diagnostics for the safe details.',
   'ai_config.queue_error_unknown': 'The request failed.',
   'ai_config.function_providers_title': 'Provider by function',
   'ai_config.function_providers_hint': 'Choose which provider handles each part of the app.',
