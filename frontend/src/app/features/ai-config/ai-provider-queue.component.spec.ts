@@ -157,7 +157,8 @@ describe('AiProviderQueueComponent', () => {
       error: 'PROVIDER',
       providerResponseId: 'resp_synthetic123',
       providerTransport: 'responses_background',
-      providerHttpStatus: 499,
+      providerHttpStatus: 400,
+      providerErrorCode: 'responses_input_unsupported',
       elapsedMs: 30_000,
       diagnosticStage: 'polling',
       apiKey: 'synthetic-secret-sentinel',
@@ -194,7 +195,8 @@ describe('AiProviderQueueComponent', () => {
         error: 'PROVIDER',
         providerResponseId: 'resp_synthetic123',
         providerTransport: 'responses_background',
-        providerHttpStatus: 499,
+        providerHttpStatus: 400,
+        providerErrorCode: 'responses_input_unsupported',
         elapsedMs: 30_000,
         diagnosticStage: 'polling'
       });
@@ -217,6 +219,9 @@ describe('AiProviderQueueComponent', () => {
       providerResponseId: 'https://credential.invalid/secret',
       providerTransport: 'untrusted-private-value',
       providerHttpStatus: 700,
+      providerErrorType: 'private-error-type-sentinel',
+      providerErrorCode: 'private-error-code-sentinel',
+      providerErrorParam: 'private.parameter.sentinel',
       elapsedMs: -1,
       diagnosticStage: 'untrusted-private-value'
     } as unknown as AiQueueJob;
@@ -239,11 +244,17 @@ describe('AiProviderQueueComponent', () => {
       expect(diagnostic['providerResponseId']).toBeUndefined();
       expect(diagnostic['providerTransport']).toBeUndefined();
       expect(diagnostic['providerHttpStatus']).toBeUndefined();
+      expect(diagnostic['providerErrorType']).toBeUndefined();
+      expect(diagnostic['providerErrorCode']).toBeUndefined();
+      expect(diagnostic['providerErrorParam']).toBeUndefined();
       expect(diagnostic['elapsedMs']).toBeUndefined();
       expect(diagnostic['diagnosticStage']).toBeUndefined();
       expect(copied).not.toContain('credential.invalid');
       expect(copied).not.toContain('untrusted-private-value');
       expect(copied).not.toContain('unsafe provider error detail');
+      expect(copied).not.toContain('private-error-type-sentinel');
+      expect(copied).not.toContain('private-error-code-sentinel');
+      expect(copied).not.toContain('private.parameter.sentinel');
       expect(component.diagnosticCopyStatus()).toBe('failed');
       expect(component.announcement()).toBe('ai_config.queue_copy_diagnostic_failed');
       expect(fixture.nativeElement.textContent).toContain('ai_config.queue_copy_diagnostic_failed');

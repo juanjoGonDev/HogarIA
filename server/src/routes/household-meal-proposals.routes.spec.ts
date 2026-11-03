@@ -420,7 +420,7 @@ describe('household meal proposal preview route', () => {
   }
 
   function readProviderFile(providerBody: any, filename: string): Record<string, any> {
-    const content = providerBody.input[1].content;
+    const content = providerBody.input[0].content;
     expect(Array.isArray(content)).toBe(true);
     const fileParts = content.filter((part: any) => part.type === 'input_file');
     expect(fileParts).toHaveLength(2);
@@ -446,7 +446,7 @@ describe('household meal proposal preview route', () => {
   }
 
   function readProviderPrompt(providerBody: any): string {
-    return providerBody.input[1].content
+    return providerBody.input[0].content
       .filter((part: any) => part.type === 'input_text')
       .map((part: any) => part.text)
       .join('\n');
@@ -1428,7 +1428,7 @@ describe('household meal proposal preview route', () => {
     const catalog = readProviderRecipeCatalog(providerBody);
     const serializedContext = JSON.stringify(context);
     const serializedCatalog = JSON.stringify(catalog);
-    const textParts = providerBody.input[1].content.filter(
+    const textParts = providerBody.input[0].content.filter(
       (part: any) => part.type === 'input_text'
     );
 

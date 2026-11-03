@@ -97,6 +97,12 @@ function providerBodyView(rawBody: string): any {
 }
 
 function inputText(body: any, index: number): string {
+  // Responses requests keep trusted system context in `instructions`; user input
+  // therefore starts at input[0], unlike the legacy chat-completions payload.
+  if (typeof body.instructions === 'string') {
+    if (index === 0) return body.instructions;
+    index -= 1;
+  }
   const content = body.input[index]?.content;
   if (typeof content === 'string') return content;
   return Array.isArray(content)

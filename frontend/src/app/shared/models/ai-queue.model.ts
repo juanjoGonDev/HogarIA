@@ -26,6 +26,9 @@ export interface AiQueueJob {
   providerResponseId?: string | null;
   providerTransport?: 'responses_background' | 'chat_completions' | null;
   providerHttpStatus?: number | null;
+  providerErrorType?: string | null;
+  providerErrorCode?: string | null;
+  providerErrorParam?: string | null;
   elapsedMs?: number | null;
   diagnosticStage?:
     | 'submitting'

@@ -60,11 +60,73 @@ const SAFE_DIAGNOSTIC_STAGES = new Set([
   'cancelled',
   'fallback'
 ]);
+const SAFE_PROVIDER_ERROR_TYPES = new Set([
+  'api_error',
+  'invalid_request_error',
+  'authentication_error',
+  'permission_error',
+  'rate_limit_error',
+  'server_error',
+  'insufficient_quota'
+]);
+const SAFE_PROVIDER_ERROR_CODES = new Set([
+  'unsupported_parameter',
+  'unsupported_value',
+  'invalid_value',
+  'invalid_type',
+  'model_not_found',
+  'context_length_exceeded',
+  'insufficient_quota',
+  'rate_limit_exceeded',
+  'invalid_api_key',
+  'invalid_prompt',
+  'responses_not_supported',
+  'responses_endpoint_not_supported',
+  'background_not_supported',
+  'responses_input_unsupported',
+  'bad_request',
+  'idempotency_conflict',
+  'idempotency_key_invalid',
+  'internal_error',
+  'payload_too_large',
+  'response_cancelled',
+  'response_not_cancellable',
+  'response_not_found',
+  'response_store_unavailable',
+  'responses_attachment_reference_unsupported',
+  'responses_text_format_required',
+  'responses_background_required',
+  'responses_field_unsupported',
+  'responses_runtime_unavailable',
+  'responses_storage_unavailable',
+  'responses_tool_choice_unsupported',
+  'responses_tools_unsupported',
+  'responses_store_required',
+  'responses_streaming_unsupported',
+  'responses_unexpected_tool_output'
+]);
+const SAFE_PROVIDER_ERROR_PARAMS = new Set([
+  'model',
+  'temperature',
+  'top_p',
+  'max_output_tokens',
+  'input',
+  'input_image',
+  'input_file',
+  'text.format',
+  'text.format.type',
+  'background',
+  'store',
+  'reasoning.effort'
+]);
 
 type QueueJobDiagnosticMetadata = {
   providerResponseId?: unknown;
   providerTransport?: unknown;
   providerHttpStatus?: unknown;
+  providerErrorType?: unknown;
+  providerErrorCode?: unknown;
+  providerErrorParam?: unknown;
   elapsedMs?: unknown;
   diagnosticStage?: unknown;
 };
@@ -808,6 +870,30 @@ export class AiProviderQueueComponent implements OnChanges, OnDestroy {
       metadata.providerHttpStatus <= 599
     ) {
       diagnostic['providerHttpStatus'] = metadata.providerHttpStatus;
+    }
+
+    if (
+      job.kind === 'connection_test' &&
+      typeof metadata.providerErrorType === 'string' &&
+      SAFE_PROVIDER_ERROR_TYPES.has(metadata.providerErrorType)
+    ) {
+      diagnostic['providerErrorType'] = metadata.providerErrorType;
+    }
+
+    if (
+      job.kind === 'connection_test' &&
+      typeof metadata.providerErrorCode === 'string' &&
+      SAFE_PROVIDER_ERROR_CODES.has(metadata.providerErrorCode)
+    ) {
+      diagnostic['providerErrorCode'] = metadata.providerErrorCode;
+    }
+
+    if (
+      job.kind === 'connection_test' &&
+      typeof metadata.providerErrorParam === 'string' &&
+      SAFE_PROVIDER_ERROR_PARAMS.has(metadata.providerErrorParam)
+    ) {
+      diagnostic['providerErrorParam'] = metadata.providerErrorParam;
     }
 
     if (

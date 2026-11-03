@@ -348,10 +348,8 @@ describe('ReceiptDetailComponent', () => {
       ...makeJob(),
       provider_response_id: 'resp_synthetic123',
       provider_transport: 'responses_background',
-      provider_http_status: 401,
-      provider_error_type: 'invalid_request_error',
-      provider_error_code: 'unsupported_parameter',
-      provider_error_param: 'temperature',
+      provider_http_status: 400,
+      provider_error_code: 'responses_input_unsupported',
       elapsed_ms: 451,
       diagnostic_stage: 'failed',
       error_detail: 'raw provider body and synthetic-secret-sentinel',
@@ -391,10 +389,8 @@ describe('ReceiptDetailComponent', () => {
       diagnosticStage: 'failed',
       providerResponseId: 'resp_synthetic123',
       providerTransport: 'responses_background',
-      providerHttpStatus: 401,
-      providerErrorType: 'invalid_request_error',
-      providerErrorCode: 'unsupported_parameter',
-      providerErrorParam: 'temperature',
+      providerHttpStatus: 400,
+      providerErrorCode: 'responses_input_unsupported',
       elapsedMs: 451
     });
     expect(copied).not.toContain(RECEIPT_ID);

@@ -38,7 +38,10 @@ import {
   pingDeConexionTransport
 } from './ai-client.js';
 import { aiFunctionForJobKind } from './ai-function-providers.js';
-import { sanitizeProviderErrorFields } from './ai-provider-diagnostic.js';
+import {
+  isPermanentProviderClientError,
+  sanitizeProviderErrorFields
+} from './ai-provider-diagnostic.js';
 import type {
   AiConfigRow,
   AiConnectionTestDiagnostic,
@@ -73,12 +76,18 @@ type AiRuntime<T = unknown> = {
   householdId: string | null;
   configId: string | null;
   config: AiConfigRow | null;
-  run: (config: AiConfigRow | null, signal: AbortSignal, jobId: string) => Promise<T>;
+  run: (
+    config: AiConfigRow | null,
+    signal: AbortSignal,
+    jobId: string,
+    claimGeneration: number
+  ) => Promise<T>;
   failureCode?: (result: T) => string | null;
   payloadBytes: number;
   resolve: (value: T) => void;
   reject: (reason: unknown) => void;
   settled: boolean;
+  claimGeneration: number | null;
   removeExternalAbort?: () => void;
   retryWindowTimer?: NodeJS.Timeout;
   retryError?: unknown;
@@ -99,7 +108,12 @@ type SubmitAiTask<T> = {
   /** Null for an unsaved connection check: metadata is queued, credentials remain volatile. */
   configId?: string | null;
   kind: string;
-  run: (config: AiConfigRow | null, signal: AbortSignal, jobId: string) => Promise<T>;
+  run: (
+    config: AiConfigRow | null,
+    signal: AbortSignal,
+    jobId: string,
+    claimGeneration: number
+  ) => Promise<T>;
   failureCode?: (result: T) => string | null;
   payloadBytes?: number;
   externalSignal?: AbortSignal;
@@ -199,6 +213,7 @@ export function submitAiTask<T>(input: SubmitAiTask<T>): AiJobHandle<T> {
     configId,
     config: input.config ? { ...input.config } : null,
     run: input.run,
+    claimGeneration: null,
     failureCode: input.failureCode,
     payloadBytes,
     resolve: resolveRef.current,
@@ -262,10 +277,11 @@ export function dispatchAI(
     config,
     kind,
     payloadBytes,
-    run: (_fixedConfig, signal, jobId) =>
+    run: (_fixedConfig, signal, jobId, claimGeneration) =>
       callAIWithConfig(config, messages, responseFormat, signal, {
         jobId,
-        onDiagnostic: (diagnostic) => persistAiProviderDiagnostic(db, jobId, diagnostic)
+        onDiagnostic: (diagnostic) =>
+          persistAiProviderDiagnostic(db, jobId, diagnostic, claimGeneration)
       })
   }).result;
 }
@@ -290,10 +306,11 @@ export function dispatchAIStreaming(
       JSON.stringify({ messages, response_format: responseFormat }),
       'utf8'
     ),
-    run: (_fixedConfig, signal, jobId) =>
+    run: (_fixedConfig, signal, jobId, claimGeneration) =>
       callAIStreamingWithConfig(config, messages, onDelta, responseFormat, signal, {
         jobId,
-        onDiagnostic: (diagnostic) => persistAiProviderDiagnostic(db, jobId, diagnostic)
+        onDiagnostic: (diagnostic) =>
+          persistAiProviderDiagnostic(db, jobId, diagnostic, claimGeneration)
       })
   }).result;
 }
@@ -312,12 +329,13 @@ export function dispatchPingDeConexion(
     config: context.config,
     configId: context.configId,
     kind: 'connection_test',
-    run: (_fixedConfig, signal) =>
+    run: (_fixedConfig, signal, _jobId, claimGeneration) =>
       pingDeConexionTransport({
         ...probe,
         jobId,
         signal,
-        onDiagnostic: (diagnostic) => persistAiProviderDiagnostic(context.db, jobId, diagnostic)
+        onDiagnostic: (diagnostic) =>
+          persistAiProviderDiagnostic(context.db, jobId, diagnostic, claimGeneration)
       }),
     failureCode: (result) => (result.ok ? null : 'PROVIDER')
   }).result;
@@ -326,7 +344,8 @@ export function dispatchPingDeConexion(
 export function persistAiProviderDiagnostic(
   db: SqlDb,
   jobId: string,
-  diagnostic: AiConnectionTestDiagnostic
+  diagnostic: AiConnectionTestDiagnostic,
+  claimGeneration: number
 ): void {
   const responseId =
     diagnostic.providerResponseId &&
@@ -368,7 +387,7 @@ export function persistAiProviderDiagnostic(
     `UPDATE ai_jobs SET provider_response_id = ?, provider_transport = ?, provider_http_status = ?,
        provider_error_type = ?, provider_error_code = ?, provider_error_param = ?,
        elapsed_ms = ?, diagnostic_stage = ?, updated_at = CURRENT_TIMESTAMP
-     WHERE id = ? AND status = 'running'`
+     WHERE id = ? AND status = 'running' AND claim_generation = ?`
   ).run(
     responseId,
     transport,
@@ -378,7 +397,8 @@ export function persistAiProviderDiagnostic(
     providerError.param ?? null,
     elapsedMs,
     stage,
-    jobId
+    jobId,
+    claimGeneration
   );
 }
 
@@ -505,6 +525,11 @@ function paso(): void {
   } catch {
     return;
   }
+  try {
+    recuperarLeasesVencidas(db);
+  } catch {
+    console.error('[AI queue] Could not scan expired jobs');
+  }
   const grupos = db
     .prepare(`SELECT DISTINCT config_id FROM ai_jobs WHERE status = 'queued' ORDER BY config_id`)
     .all() as { config_id: string | null }[];
@@ -595,6 +620,195 @@ function paso(): void {
       lanzar(trabajo.id, trabajo.user_id, claimGeneration);
     }
   }
+}
+
+function recuperarFalloWorker(
+  jobId: string,
+  userId: string,
+  señal: AbortController,
+  claimGeneration: number,
+  error: unknown
+): void {
+  const nombreError = nombreErrorSeguro(error);
+  let trabajo: { kind: string; receipt_id: string | null; config_id: string | null } | null = null;
+  let persistenciaFallida = false;
+
+  try {
+    const db = getDatabase();
+    trabajo = db
+      .transaction(() => {
+        const fila = db
+          .prepare(
+            `SELECT kind, receipt_id, config_id FROM ai_jobs
+             WHERE id = ? AND user_id = ? AND status = 'running' AND claim_generation = ?`
+          )
+          .get(jobId, userId, claimGeneration) as
+          { kind: string; receipt_id: string | null; config_id: string | null } | undefined;
+        if (!fila) return null;
+
+        const updated = db
+          .prepare(
+            `UPDATE ai_jobs SET status = 'failed', error_code = 'WORKER_EXCEPTION',
+               error_detail = NULL, diagnostic_stage = 'failed', finished_at = CURRENT_TIMESTAMP,
+               lease_until = NULL, updated_at = CURRENT_TIMESTAMP
+             WHERE id = ? AND user_id = ? AND status = 'running' AND claim_generation = ?`
+          )
+          .run(jobId, userId, claimGeneration);
+        if (!updated.changes) return null;
+
+        if (fila.receipt_id) {
+          db.prepare(
+            `UPDATE receipts SET status = 'failed', error_code = 'WORKER_EXCEPTION',
+               error_detail = NULL, updated_at = CURRENT_TIMESTAMP
+             WHERE id = ? AND status IN ('queued', 'analyzing')`
+          ).run(fila.receipt_id);
+        }
+        if (fila.kind === 'connection_test' && fila.config_id) {
+          marcarTestConexionFallido(
+            db,
+            fila.config_id,
+            jobId,
+            'La ejecución interna del test falló antes de terminar.'
+          );
+        }
+        return fila;
+      })
+      .immediate();
+  } catch {
+    persistenciaFallida = true;
+    console.error('[AI queue] Could not persist worker failure', {
+      jobId,
+      claimGeneration,
+      errorName: nombreError
+    });
+  }
+
+  if (trabajo) {
+    console.error('[AI queue] Worker failed before terminal state', {
+      jobId,
+      kind: trabajo.kind,
+      claimGeneration,
+      errorName: nombreError
+    });
+  }
+
+  señal.abort();
+  if (!trabajo && !persistenciaFallida) return;
+  const runtime = trabajosEnMemoria.get(jobId);
+  if (runtime?.claimGeneration === claimGeneration) {
+    rechazar(
+      runtime,
+      new AiCallError('PROVIDER', 'AI worker failed unexpectedly', 'WORKER_EXCEPTION')
+    );
+    liberarRuntime(jobId, true);
+  }
+}
+
+function nombreErrorSeguro(error: unknown): string {
+  const name = error instanceof Error ? error.name : 'UnknownError';
+  return /^[A-Za-z][A-Za-z0-9]{0,63}$/.test(name) ? name : 'UnknownError';
+}
+
+function marcarTestConexionFallido(
+  db: SqlDb,
+  configId: string,
+  jobId: string,
+  testError: string
+): void {
+  const otraPruebaActiva = db
+    .prepare(
+      `SELECT 1 FROM ai_jobs WHERE config_id = ? AND id != ?
+         AND kind = 'connection_test' AND status IN ('queued', 'running') LIMIT 1`
+    )
+    .get(configId, jobId);
+  if (otraPruebaActiva) return;
+
+  db.prepare(
+    `UPDATE ai_configs SET test_status = 'failed', test_error = ?,
+       test_started_at = NULL, last_tested = CURRENT_TIMESTAMP
+     WHERE id = ? AND test_status = 'testing'`
+  ).run(testError, configId);
+}
+
+function recuperarLeasesVencidas(db: SqlDb): number {
+  const vencidos = db
+    .prepare(
+      `SELECT id, user_id, config_id, receipt_id, kind, claim_generation FROM ai_jobs
+       WHERE status = 'running' AND (lease_until IS NULL OR lease_until <= CURRENT_TIMESTAMP)`
+    )
+    .all() as {
+    id: string;
+    user_id: string;
+    config_id: string | null;
+    receipt_id: string | null;
+    kind: string;
+    claim_generation: number;
+  }[];
+
+  let recuperados = 0;
+  for (const job of vencidos) {
+    let recuperado = false;
+    try {
+      recuperado = db
+        .transaction(() => {
+          const updated = db
+            .prepare(
+              `UPDATE ai_jobs SET status = 'failed', error_code = 'WORKER_STALLED',
+                 error_detail = NULL, diagnostic_stage = 'failed', finished_at = CURRENT_TIMESTAMP,
+                 lease_until = NULL, updated_at = CURRENT_TIMESTAMP
+               WHERE id = ? AND status = 'running' AND claim_generation = ?
+                 AND (lease_until IS NULL OR lease_until <= CURRENT_TIMESTAMP)`
+            )
+            .run(job.id, job.claim_generation);
+          if (!updated.changes) return false;
+
+          if (job.receipt_id) {
+            db.prepare(
+              `UPDATE receipts SET status = 'failed', error_code = 'WORKER_STALLED',
+                 error_detail = NULL, updated_at = CURRENT_TIMESTAMP
+               WHERE id = ? AND status IN ('queued', 'analyzing')`
+            ).run(job.receipt_id);
+          }
+          if (job.kind === 'connection_test' && job.config_id) {
+            marcarTestConexionFallido(
+              db,
+              job.config_id,
+              job.id,
+              'La ejecución superó el plazo interno del worker.'
+            );
+          }
+          return true;
+        })
+        .immediate();
+    } catch {
+      console.error('[AI queue] Could not recover expired job', {
+        jobId: job.id,
+        claimGeneration: job.claim_generation
+      });
+      continue;
+    }
+    if (!recuperado) continue;
+
+    recuperados += 1;
+    const estado = trabajador;
+    const señal = estado?.señales.get(job.id);
+    señal?.abort();
+    estado?.señales.delete(job.id);
+    estado?.corriendo.delete(job.id);
+
+    const runtime = trabajosEnMemoria.get(job.id);
+    if (runtime?.claimGeneration === job.claim_generation) {
+      rechazar(runtime, new AiCallError('PROVIDER', 'AI worker lease expired', 'WORKER_STALLED'));
+      liberarRuntime(job.id, true);
+    }
+    console.error('[AI queue] Recovered stalled job', {
+      jobId: job.id,
+      kind: job.kind,
+      claimGeneration: job.claim_generation,
+      reason: 'WORKER_STALLED'
+    });
+  }
+  return recuperados;
 }
 
 function limiteDe(value: unknown): number {
@@ -699,11 +913,17 @@ function lanzar(jobId: string, userId: string, claimGeneration: number): void {
   estado.corriendo.add(jobId);
   const señal = new AbortController();
   estado.señales.set(jobId, señal);
-  void correr(jobId, userId, señal, claimGeneration).finally(() => {
-    estado.corriendo.delete(jobId);
-    estado.señales.delete(jobId);
-    if (trabajador === estado) despertarWorker();
-  });
+  const runtime = trabajosEnMemoria.get(jobId);
+  if (runtime) runtime.claimGeneration = claimGeneration;
+  void correr(jobId, userId, señal, claimGeneration)
+    .catch((error) => recuperarFalloWorker(jobId, userId, señal, claimGeneration, error))
+    .finally(() => {
+      if (estado.señales.get(jobId) === señal) {
+        estado.corriendo.delete(jobId);
+        estado.señales.delete(jobId);
+      }
+      if (trabajador === estado) despertarWorker();
+    });
 }
 
 async function correr(
@@ -834,7 +1054,8 @@ async function correr(
       señal.signal,
       {
         jobId,
-        onDiagnostic: (diagnostic) => persistAiProviderDiagnostic(db, jobId, diagnostic)
+        onDiagnostic: (diagnostic) =>
+          persistAiProviderDiagnostic(db, jobId, diagnostic, claimGeneration)
       }
     );
 
@@ -984,7 +1205,7 @@ async function correrTrabajoGenerico(
   if (!row || row.status !== 'running' || row.claim_generation !== claimGeneration) return;
 
   try {
-    const result = await runtime.run(runtime.config, signal, jobId);
+    const result = await runtime.run(runtime.config, signal, jobId, claimGeneration);
     const vigente = db
       .prepare('SELECT status, claim_generation FROM ai_jobs WHERE id = ?')
       .get(jobId) as { status: string; claim_generation: number } | undefined;
@@ -1054,7 +1275,15 @@ async function correrTrabajoGenerico(
          finished_at = CURRENT_TIMESTAMP, lease_until = NULL, updated_at = CURRENT_TIMESTAMP
        WHERE id = ? AND status = 'running' AND claim_generation = ?`
     ).run(errorCode, jobId, claimGeneration);
-    if (kind === 'connection_test' || !esperarReintentoManual(db, jobId, runtime, error)) {
+    const permanentProviderClientError =
+      error instanceof AiCallError &&
+      error.code === 'PROVIDER' &&
+      isPermanentProviderClientError(error.providerHttpStatus);
+    if (
+      kind === 'connection_test' ||
+      permanentProviderClientError ||
+      !esperarReintentoManual(db, jobId, runtime, error)
+    ) {
       rechazar(runtime, error);
       liberarRuntime(jobId, true);
     }
@@ -1176,6 +1405,9 @@ export type AiQueueJobDto = {
   providerResponseId: string | null;
   providerTransport: 'responses_background' | 'chat_completions' | null;
   providerHttpStatus: number | null;
+  providerErrorType: ReturnType<typeof sanitizeProviderErrorFields>['type'] | null;
+  providerErrorCode: ReturnType<typeof sanitizeProviderErrorFields>['code'] | null;
+  providerErrorParam: ReturnType<typeof sanitizeProviderErrorFields>['param'] | null;
   elapsedMs: number | null;
   diagnosticStage: AiConnectionTestDiagnostic['diagnosticStage'] | null;
 };
@@ -1254,7 +1486,8 @@ export function queueForConfig(db: SqlDb, userId: string, configId: string): AiQ
     db
       .prepare(
         `SELECT id, config_id, kind, status, attempts, max_attempts, error_code, created_at, queue_order,
-           provider_response_id, provider_transport, provider_http_status, elapsed_ms, diagnostic_stage
+           provider_response_id, provider_transport, provider_http_status, provider_error_type,
+           provider_error_code, provider_error_param, elapsed_ms, diagnostic_stage
          FROM ai_jobs WHERE user_id = ? AND household_id IS ? AND config_id = ?
            AND dismissed_at IS NULL
            AND status IN ('queued', 'running', 'failed')
@@ -1267,6 +1500,14 @@ export function queueForConfig(db: SqlDb, userId: string, configId: string): AiQ
     const kind = String(row.kind);
     const status = row.status as AiQueueJobDto['status'];
     const runtime = trabajosEnMemoria.get(jobId);
+    const providerError =
+      kind === 'connection_test'
+        ? sanitizeProviderErrorFields({
+            type: row.provider_error_type,
+            code: row.provider_error_code,
+            param: row.provider_error_param
+          })
+        : {};
     return {
       id: jobId,
       configId: String(row.config_id),
@@ -1301,6 +1542,9 @@ export function queueForConfig(db: SqlDb, userId: string, configId: string): AiQ
         Number(row.provider_http_status) <= 599
           ? Number(row.provider_http_status)
           : null,
+      providerErrorType: providerError.type ?? null,
+      providerErrorCode: providerError.code ?? null,
+      providerErrorParam: providerError.param ?? null,
       elapsedMs:
         kind === 'connection_test' &&
         Number.isSafeInteger(row.elapsed_ms) &&

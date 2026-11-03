@@ -1713,7 +1713,7 @@ describe('entrada por foto (§8f)', () => {
     expect(sent).toContain('priceMinor');
     const providerRequest = JSON.parse(sent);
     expect(providerRequest.background).toBe(true);
-    expect(providerRequest.input[1].content).toEqual(
+    expect(providerRequest.input[0].content).toEqual(
       expect.arrayContaining([expect.objectContaining({ type: 'input_image' })])
     );
     expect(providerRequest.text.format.type).toBe('json_schema');

@@ -83,6 +83,12 @@ function stubResponsesFetch(
 }
 
 function inputText(body: any, index: number): string {
+  // Responses requests keep trusted system context in `instructions`; user input
+  // therefore starts at input[0], unlike the legacy chat-completions payload.
+  if (typeof body.instructions === 'string') {
+    if (index === 0) return body.instructions;
+    index -= 1;
+  }
   const content = body.input[index]?.content;
   if (typeof content === 'string') return content;
   return Array.isArray(content)
@@ -641,15 +647,14 @@ describe('household plan persistence routes', () => {
       success: true,
       data: { draft: { summary: 'Borrador local' } }
     });
-    expect(providerBody.input[1].content).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          type: 'input_image',
-          image_url: 'data:image/png;base64,iVBORw0KGgo=',
-          detail: 'high'
-        })
-      ])
+    const imagePart = providerBody.input[0].content.find(
+      (part: { type?: string }) => part.type === 'input_image'
     );
+    expect(imagePart).toMatchObject({
+      type: 'input_image',
+      image_url: 'data:image/png;base64,iVBORw0KGgo='
+    });
+    expect(imagePart).not.toHaveProperty('detail');
     expect(JSON.stringify(providerBody)).not.toContain('private-sketch-name');
     expect(inputText(providerBody, 1)).toContain(JSON.stringify(draft));
     expect(providerBody.text.format).toEqual({

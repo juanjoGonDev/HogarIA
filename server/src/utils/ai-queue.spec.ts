@@ -920,6 +920,46 @@ describe('AI provider queue dispatcher', () => {
     );
   });
 
+  it('rejects permanent provider 400 waiters promptly without a manual retry window', async () => {
+    const { AiCallError } = await import('./ai-client.js');
+    const { queueForConfig, submitAiTask, stopWorker } = await import('./ticket-queue.js');
+    const job = submitAiTask({
+      db,
+      userId,
+      id: 'permanent-provider-400',
+      config: { ...config, retry_attempts: 0, concurrency: 1 },
+      kind: 'test.permanent_provider_error',
+      run: async () => {
+        throw new AiCallError('PROVIDER', 'Provider rejected request', 'HTTP 400', 400);
+      }
+    });
+    let timeout: NodeJS.Timeout | undefined;
+    const outcome = job.result.then(
+      () => ({ status: 'resolved' as const }),
+      (error) => ({ status: 'rejected' as const, error })
+    );
+
+    try {
+      const settled = await Promise.race([
+        outcome,
+        new Promise<{ status: 'timed-out' }>((resolve) => {
+          timeout = setTimeout(() => resolve({ status: 'timed-out' }), 500);
+        })
+      ]);
+      expect(settled).toMatchObject({
+        status: 'rejected',
+        error: { code: 'PROVIDER', providerHttpStatus: 400 }
+      });
+      expect(jobRow(job.id)).toMatchObject({ status: 'failed', attempts: 1, max_attempts: 1 });
+      expect(queueForConfig(db, userId, config.id).find(({ id }) => id === job.id)).toMatchObject({
+        retryable: false
+      });
+    } finally {
+      if (timeout) clearTimeout(timeout);
+      stopWorker();
+    }
+  });
+
   it('fails permanent provider 400s after one attempt but keeps transient 503 retries', async () => {
     const { dispatchAI } = await import('./ticket-queue.js');
     const fakeFetch = vi.mocked(fetch);
@@ -1258,8 +1298,8 @@ describe('AI provider queue dispatcher', () => {
         strict: true,
         schema: RECEIPT_RESPONSE_FORMAT.json_schema.schema
       });
-      expect(providerMessages[0]?.content).toContain('English (United Kingdom)');
-      expect(providerMessages[0]?.content).toContain('warnings');
+      expect(providerRequest.instructions).toContain('English (United Kingdom)');
+      expect(providerRequest.instructions).toContain('warnings');
       const ticketContent = providerMessages.find(({ role }) => role === 'user')?.content;
       expect(Array.isArray(ticketContent)).toBe(true);
       const ticketTextParts = Array.isArray(ticketContent)
@@ -1819,6 +1859,316 @@ describe('AI provider queue dispatcher', () => {
     expect(jobRow(job.id).attempts).toBe(1);
   });
 
+  it('settles a connection test when worker preflight throws before the provider call', async () => {
+    const { submitAiTask } = await import('./ticket-queue.js');
+    const run = vi.fn(async () => 'unexpected provider result');
+    db.prepare("UPDATE ai_configs SET test_status = 'testing' WHERE id = ?").run(config.id);
+    const job = submitAiTask({
+      db,
+      userId,
+      config,
+      kind: 'connection_test',
+      run
+    });
+    const resultPromise = job.result.then(
+      () => ({ kind: 'resolved' as const }),
+      (error) => ({ kind: 'rejected' as const, error })
+    );
+    const originalPrepare = db.prepare.bind(db);
+    let injected = false;
+    const prepare = vi.spyOn(db, 'prepare').mockImplementation((sql: string) => {
+      if (!injected && sql.includes('SELECT kind, config_id, household_id, receipt_id')) {
+        injected = true;
+        throw new Error('synthetic preflight failure');
+      }
+      return originalPrepare(sql);
+    });
+
+    try {
+      await waitFor(() => jobRow(job.id).status === 'failed', 500);
+      const result = await resultPromise;
+      expect(result).toMatchObject({
+        kind: 'rejected',
+        error: { code: 'PROVIDER', detail: 'WORKER_EXCEPTION' }
+      });
+
+      expect(injected).toBe(true);
+      expect(run).not.toHaveBeenCalled();
+      expect(jobRow(job.id)).toMatchObject({
+        status: 'failed',
+        error_code: 'WORKER_EXCEPTION',
+        error_detail: null,
+        lease_until: null,
+        diagnostic_stage: 'failed'
+      });
+      expect(db.prepare('SELECT test_status FROM ai_configs WHERE id = ?').get(config.id)).toEqual({
+        test_status: 'failed'
+      });
+    } finally {
+      prepare.mockRestore();
+    }
+  });
+
+  it('does not let a stale worker failure overwrite a newer connection test', async () => {
+    const { submitAiTask, ensureWorker } = await import('./ticket-queue.js');
+    ensureWorker();
+    db.prepare('UPDATE ai_configs SET concurrency = 2, test_status = ? WHERE id = ?').run(
+      'testing',
+      config.id
+    );
+    const newerStarted = deferred<void>();
+    const newerResult = deferred<string>();
+    const older = submitAiTask({
+      db,
+      userId,
+      config,
+      kind: 'connection_test',
+      run: async () => 'unused'
+    });
+    const newer = submitAiTask({
+      db,
+      userId,
+      config,
+      kind: 'connection_test',
+      run: async () => {
+        newerStarted.resolve();
+        return newerResult.promise;
+      }
+    });
+    const olderResult = older.result.catch(() => undefined);
+    const originalPrepare = db.prepare.bind(db);
+    let injected = false;
+    const prepare = vi.spyOn(db, 'prepare').mockImplementation((sql: string) => {
+      if (!injected && sql.includes('SELECT kind, config_id, household_id, receipt_id')) {
+        injected = true;
+        throw new Error('synthetic stale connection worker failure');
+      }
+      return originalPrepare(sql);
+    });
+
+    try {
+      await newerStarted.promise;
+      await olderResult;
+      expect(injected).toBe(true);
+      expect(jobRow(older.id).status).toBe('failed');
+      expect(jobRow(newer.id).status).toBe('running');
+      expect(db.prepare('SELECT test_status FROM ai_configs WHERE id = ?').get(config.id)).toEqual({
+        test_status: 'testing'
+      });
+    } finally {
+      prepare.mockRestore();
+      newerResult.resolve('done');
+      await newer.result;
+    }
+  });
+
+  it('ignores provider diagnostics from an older claim generation', async () => {
+    const { persistAiProviderDiagnostic } = await import('./ticket-queue.js');
+    db.prepare(
+      `INSERT INTO ai_jobs (id, user_id, config_id, kind, status, max_attempts, claim_generation)
+       VALUES ('generation-diagnostic-job', ?, ?, 'connection_test', 'running', 1, 4)`
+    ).run(userId, config.id);
+
+    const staleDiagnostic = {
+      providerResponseId: 'resp_stale',
+      providerTransport: 'responses_background' as const,
+      providerHttpStatus: 400,
+      elapsedMs: 12,
+      providerErrorType: 'invalid_request_error' as const,
+      providerErrorCode: 'invalid_value' as const,
+      providerErrorParam: 'input' as const,
+      diagnosticStage: 'failed' as const
+    };
+    persistAiProviderDiagnostic(db, 'generation-diagnostic-job', staleDiagnostic, 3);
+    expect(jobRow('generation-diagnostic-job')).toMatchObject({
+      claim_generation: 4,
+      provider_response_id: null,
+      provider_http_status: null,
+      diagnostic_stage: null
+    });
+
+    persistAiProviderDiagnostic(db, 'generation-diagnostic-job', staleDiagnostic, 4);
+    expect(jobRow('generation-diagnostic-job')).toMatchObject({
+      provider_response_id: 'resp_stale',
+      provider_http_status: 400,
+      diagnostic_stage: 'failed'
+    });
+  });
+
+  it('marks a receipt failed when worker preflight throws before loading its file', async () => {
+    const { encolarTicket } = await import('./ticket-queue.js');
+    const receiptId = 'worker-preflight-receipt';
+    db.prepare(
+      `INSERT INTO receipts (id, user_id, status, file_url, file_kind)
+       VALUES (?, ?, 'queued', '/synthetic/missing.png', 'png')`
+    ).run(receiptId, userId);
+    const jobId = encolarTicket(db, userId, receiptId);
+    const originalPrepare = db.prepare.bind(db);
+    let injected = false;
+    const prepare = vi.spyOn(db, 'prepare').mockImplementation((sql: string) => {
+      if (!injected && sql.includes('SELECT r.* FROM receipts r JOIN ai_jobs')) {
+        injected = true;
+        throw new Error('synthetic receipt preflight failure');
+      }
+      return originalPrepare(sql);
+    });
+
+    try {
+      await waitFor(() => jobRow(jobId).status === 'failed');
+
+      expect(injected).toBe(true);
+      expect(jobRow(jobId)).toMatchObject({
+        status: 'failed',
+        error_code: 'WORKER_EXCEPTION',
+        error_detail: null,
+        lease_until: null
+      });
+      expect(
+        db
+          .prepare('SELECT status, error_code, error_detail FROM receipts WHERE id = ?')
+          .get(receiptId)
+      ).toEqual({
+        status: 'failed',
+        error_code: 'WORKER_EXCEPTION',
+        error_detail: null
+      });
+      expect(fetch).not.toHaveBeenCalled();
+    } finally {
+      prepare.mockRestore();
+    }
+  });
+
+  it('fails expired leases without touching a live lease or retrying the provider', async () => {
+    const { submitAiTask, cancelarTrabajo } = await import('./ticket-queue.js');
+    db.prepare('UPDATE ai_configs SET concurrency = 2, test_status = ? WHERE id = ?').run(
+      'testing',
+      config.id
+    );
+    const interval = vi.spyOn(globalThis, 'setInterval');
+    const staleStarted = deferred<AbortSignal>();
+    const activeStarted = deferred<AbortSignal>();
+    const runUntilAbort = (started: ReturnType<typeof deferred<AbortSignal>>) =>
+      vi.fn(async (_fixedConfig: AiConfig | null, signal: AbortSignal) => {
+        started.resolve(signal);
+        await new Promise<void>((_resolve, reject) => {
+          signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+        });
+      });
+    const staleRun = runUntilAbort(staleStarted);
+    const activeRun = runUntilAbort(activeStarted);
+    const staleJob = submitAiTask({
+      db,
+      userId,
+      config,
+      kind: 'connection_test',
+      run: staleRun
+    });
+    const activeJob = submitAiTask({
+      db,
+      userId,
+      config,
+      kind: 'test.live-lease',
+      run: activeRun
+    });
+    const staleOutcome = staleJob.result.then(
+      () => 'resolved',
+      () => 'rejected'
+    );
+    const activeOutcome = activeJob.result.then(
+      () => 'resolved',
+      () => 'rejected'
+    );
+
+    try {
+      await waitFor(
+        () => jobRow(staleJob.id).status === 'running' && jobRow(activeJob.id).status === 'running'
+      );
+      const staleSignal = await staleStarted.promise;
+      const activeSignal = await activeStarted.promise;
+      const reconcile = interval.mock.calls.find(([, delay]) => delay === 30_000)?.[0];
+      expect(reconcile).toBeTypeOf('function');
+
+      db.prepare("UPDATE ai_jobs SET lease_until = datetime('now', '-1 second') WHERE id = ?").run(
+        staleJob.id
+      );
+      db.prepare("UPDATE ai_jobs SET lease_until = datetime('now', '+1 hour') WHERE id = ?").run(
+        activeJob.id
+      );
+      db.prepare(
+        `INSERT INTO receipts (id, user_id, status, file_url, file_kind)
+         VALUES ('expired-lease-receipt', ?, 'analyzing', '/synthetic/expired.png', 'png')`
+      ).run(userId);
+      db.prepare(
+        `INSERT INTO ai_jobs
+          (id, user_id, config_id, kind, receipt_id, status, lease_until, claim_generation)
+         VALUES ('expired-lease-receipt-job', ?, ?, 'receipt', 'expired-lease-receipt',
+           'running', datetime('now', '-1 second'), 4)`
+      ).run(userId, config.id);
+      db.prepare(
+        `INSERT INTO receipts (id, user_id, status, file_url, file_kind)
+         VALUES ('missing-lease-receipt', ?, 'analyzing', '/synthetic/missing-lease.png', 'png')`
+      ).run(userId);
+      db.prepare(
+        `INSERT INTO ai_jobs
+          (id, user_id, config_id, kind, receipt_id, status, lease_until, claim_generation)
+         VALUES ('missing-lease-receipt-job', ?, ?, 'receipt', 'missing-lease-receipt',
+           'running', NULL, 7)`
+      ).run(userId, config.id);
+
+      (reconcile as () => void)();
+
+      await waitFor(() => jobRow(staleJob.id).status === 'failed');
+      expect(staleSignal.aborted).toBe(true);
+      expect(activeSignal.aborted).toBe(false);
+      expect(jobRow(staleJob.id)).toMatchObject({
+        error_code: 'WORKER_STALLED',
+        lease_until: null
+      });
+      expect(jobRow(activeJob.id).status).toBe('running');
+      expect(jobRow('expired-lease-receipt-job')).toMatchObject({
+        status: 'failed',
+        error_code: 'WORKER_STALLED',
+        lease_until: null
+      });
+      expect(jobRow('missing-lease-receipt-job')).toMatchObject({
+        status: 'failed',
+        error_code: 'WORKER_STALLED',
+        lease_until: null
+      });
+      expect(
+        db
+          .prepare(
+            'SELECT id, status, error_code, error_detail FROM receipts WHERE id IN (?, ?) ORDER BY id'
+          )
+          .all('expired-lease-receipt', 'missing-lease-receipt')
+      ).toEqual([
+        {
+          id: 'expired-lease-receipt',
+          status: 'failed',
+          error_code: 'WORKER_STALLED',
+          error_detail: null
+        },
+        {
+          id: 'missing-lease-receipt',
+          status: 'failed',
+          error_code: 'WORKER_STALLED',
+          error_detail: null
+        }
+      ]);
+      expect(db.prepare('SELECT test_status FROM ai_configs WHERE id = ?').get(config.id)).toEqual({
+        test_status: 'failed'
+      });
+      expect(staleRun).toHaveBeenCalledTimes(1);
+      expect(await staleOutcome).toBe('rejected');
+
+      await cancelarTrabajo(db, userId, config.id, activeJob.id);
+      expect(await activeOutcome).toBe('rejected');
+      expect(activeRun).toHaveBeenCalledTimes(1);
+    } finally {
+      interval.mockRestore();
+    }
+  });
+
   it('cancels a running provider fetch using the job AbortSignal', async () => {
     const { submitAiTask, cancelarTrabajo } = await import('./ticket-queue.js');
     const started = deferred<AbortSignal>();
@@ -1898,7 +2248,8 @@ describe('AI provider queue dispatcher', () => {
 
     // Simulate a ticket requeue/new claim before a provider that ignored abort resolves.
     db.prepare(
-      `UPDATE ai_jobs SET status = 'running', claim_generation = ?, attempts = attempts + 1
+      `UPDATE ai_jobs SET status = 'running', claim_generation = ?, attempts = attempts + 1,
+         lease_until = datetime('now', '+1 hour')
        WHERE id = ? AND status = 'stopped'`
     ).run(jobRow(job.id).claim_generation + 1, job.id);
     finishOldProviderCall.resolve('stale result');
