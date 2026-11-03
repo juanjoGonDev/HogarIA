@@ -50,6 +50,93 @@ test('household meal smoke launches only its dedicated isolated Playwright spec'
   });
 });
 
+test('connection-only smoke launches only its real-browser connection scenario', async () => {
+  const child = createRunnerChild();
+  const running = runAiLiveSmokeRunner({
+    env: { HOGARIA_AI_REAL_SMOKE_CONNECTION_ONLY: '1' },
+    watchdogMs: 60_000,
+    spawnImpl: (_command, args) => {
+      assert.deepEqual(args.slice(1), [
+        '--config=playwright.ai-real-smoke.config.ts',
+        'tests/e2e/ai-real-smoke.spec.ts',
+        '--grep=HogarIA connection-only real test'
+      ]);
+      return child;
+    }
+  });
+
+  child.emit('spawn');
+  child.emit('message', { type: AI_LIVE_SMOKE_RUNNER_COMPLETE_MESSAGE, cleaned: true });
+  child.exitCode = 0;
+  child.connected = false;
+  child.emit('exit', 0, null);
+
+  assert.deepEqual(await running, {
+    code: 0,
+    cancelled: false,
+    timedOut: false,
+    runnerCleaned: true
+  });
+});
+
+test('household-plan-only smoke launches only its real-browser proposal scenario', async () => {
+  const child = createRunnerChild();
+  const running = runAiLiveSmokeRunner({
+    env: { HOGARIA_AI_REAL_SMOKE_HOUSEHOLD_PLAN_ONLY: '1' },
+    watchdogMs: 60_000,
+    spawnImpl: (_command, args) => {
+      assert.deepEqual(args.slice(1), [
+        '--config=playwright.ai-real-smoke.config.ts',
+        'tests/e2e/ai-real-smoke.spec.ts',
+        '--grep=HogarIA household plan proposal real workflow'
+      ]);
+      return child;
+    }
+  });
+
+  child.emit('spawn');
+  child.emit('message', { type: AI_LIVE_SMOKE_RUNNER_COMPLETE_MESSAGE, cleaned: true });
+  child.exitCode = 0;
+  child.connected = false;
+  child.emit('exit', 0, null);
+
+  assert.deepEqual(await running, {
+    code: 0,
+    cancelled: false,
+    timedOut: false,
+    runnerCleaned: true
+  });
+});
+
+test('workflow-only smoke launches only its real-browser workflow scenario', async () => {
+  const child = createRunnerChild();
+  const running = runAiLiveSmokeRunner({
+    env: { HOGARIA_AI_REAL_SMOKE_WORKFLOWS_ONLY: '1' },
+    watchdogMs: 60_000,
+    spawnImpl: (_command, args) => {
+      assert.deepEqual(args.slice(1), [
+        '--config=playwright.ai-real-smoke.config.ts',
+        'tests/e2e/ai-real-smoke.spec.ts',
+        '--grep=HogarIA real recipe improvement replacement and Commons image search'
+      ]);
+      return child;
+    }
+  });
+
+  child.emit('spawn');
+  child.emit('message', { type: AI_LIVE_SMOKE_RUNNER_COMPLETE_MESSAGE, cleaned: true });
+  child.exitCode = 0;
+  child.connected = false;
+  child.emit('exit', 0, null);
+
+  assert.deepEqual(await running, {
+    code: 0,
+    cancelled: false,
+    timedOut: false,
+    runnerCleaned: true
+  });
+});
+
 test('cancellation asks the owned E2E runner to shut down and waits for cleanup confirmation', async () => {
   const controller = new AbortController();
   const child = createRunnerChild();
@@ -175,6 +262,21 @@ test('runner exposes only allowlisted progress labels from its child', async () 
   });
   child.emit('message', {
     type: AI_LIVE_SMOKE_RUNNER_PROGRESS_MESSAGE,
+    phase: 'test-phase:proposal-request-start',
+    secret: 'must-not-be-forwarded'
+  });
+  child.emit('message', {
+    type: AI_LIVE_SMOKE_RUNNER_PROGRESS_MESSAGE,
+    phase: 'test-phase:proposal-response-error',
+    secret: 'must-not-be-forwarded'
+  });
+  child.emit('message', {
+    type: AI_LIVE_SMOKE_RUNNER_PROGRESS_MESSAGE,
+    phase: 'test-phase:assistant-proposal-snapshot-changed:ai_configs|recipes',
+    secret: 'must-not-be-forwarded'
+  });
+  child.emit('message', {
+    type: AI_LIVE_SMOKE_RUNNER_PROGRESS_MESSAGE,
     phase: 'test-phase:assistant-proposal-error-AI_PROVIDER_ERROR',
     secret: 'must-not-be-forwarded'
   });
@@ -203,6 +305,11 @@ test('runner exposes only allowlisted progress labels from its child', async () 
   child.emit('message', {
     type: AI_LIVE_SMOKE_RUNNER_PROGRESS_MESSAGE,
     phase: 'test-phase:assistant-proposal-action-kinds-mismatch-none-with-questions',
+    secret: 'must-not-be-forwarded'
+  });
+  child.emit('message', {
+    type: AI_LIVE_SMOKE_RUNNER_PROGRESS_MESSAGE,
+    phase: 'test-phase:assistant-proposal-action-kinds-mismatch-scenario-9-none-with-questions',
     secret: 'must-not-be-forwarded'
   });
   child.emit('message', {
@@ -298,6 +405,25 @@ test('runner exposes only allowlisted progress labels from its child', async () 
   });
   child.emit('message', {
     type: AI_LIVE_SMOKE_RUNNER_PROGRESS_MESSAGE,
+    phase: `test-phase:connection-only-diagnostic:${encodeURIComponent(
+      JSON.stringify({
+        testStatus: 'failed',
+        testError: 'PROVIDER',
+        status: 400,
+        error: 'PROVIDER',
+        transport: 'responses_background',
+        code: 'responses_input_unsupported',
+        stage: 'failed',
+        elapsedMs: 167,
+        responseId: 'resp_live_123',
+        attempts: 1,
+        message: 'private provider body sentinel',
+        token: 'private bearer sentinel'
+      })
+    )}`
+  });
+  child.emit('message', {
+    type: AI_LIVE_SMOKE_RUNNER_PROGRESS_MESSAGE,
     phase: 'unrecognized-phase',
     secret: 'must-not-be-forwarded'
   });
@@ -318,11 +444,15 @@ test('runner exposes only allowlisted progress labels from its child', async () 
     'Último hito E2E: contenido de la receta validado.',
     'Último hito E2E: iniciando la receta sintética real.',
     'Último hito E2E: propuesta estructurada y revisable validada.',
+    'Último hito E2E: enviando propuesta semanal al servidor.',
+    'Último hito E2E: el servidor rechazó la propuesta semanal antes de validarla.',
+    'Último hito E2E: propuesta cambió tablas SQLite temporales: ai_configs, recipes.',
     'Último hito E2E: propuesta falló con código API AI_PROVIDER_ERROR.',
     'Último hito E2E: el campo category del payload no pasó la validación (invalid_type).',
     'Último hito E2E: la comprobación segura action-count de la propuesta no pasó.',
     'Último hito E2E: tipos allowlist devueltos por WebAPI no coinciden: pantry.add_ingredient, shopping.add_item.',
     'Último hito E2E: WebAPI pidió aclaración y no propuso acciones para el escenario.',
+    'Último hito E2E: WebAPI pidió aclaración en el escenario 9 y no propuso acciones.',
     'Último hito E2E: estado de shopping.add_item no válido: dependencies, payload.',
     'Último hito E2E: falló la comprobación semántica sintética shopping-dependency.',
     'Último hito E2E: la matriz de propuestas no escribió datos.',
@@ -338,8 +468,11 @@ test('runner exposes only allowlisted progress labels from its child', async () 
     'Último hito E2E: el ticket sintético no coincide en tienda ni fecha.',
     'Último hito E2E: fuentes validadas y selección de tickets preparada en memoria.',
     'Último hito E2E: ticket procesado, revisado y guardado en historial.',
-    'Último hito E2E: los tickets seleccionados y su revisión quedaron verificados.'
+    'Último hito E2E: los tickets seleccionados y su revisión quedaron verificados.',
+    'Diagnóstico seguro de conexión: estado=failed; error=PROVIDER; HTTP 400; responses_background; responses_input_unsupported; fase=failed; 167 ms; intentos=1; id=resp_live_123.'
   ]);
+  assert.equal(progress.join(' ').includes('private provider body sentinel'), false);
+  assert.equal(progress.join(' ').includes('private bearer sentinel'), false);
   assert.deepEqual(await running, {
     code: 0,
     cancelled: false,

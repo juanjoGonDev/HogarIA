@@ -274,29 +274,70 @@ export async function callAI(
   return dispatchAI(userId, messages, db, responseFormat, kind, externalSignal, householdId);
 }
 
-/** Convert Chat Completions-shaped internal messages to Responses input items. */
+/** Convert chat messages to Responses input items; system context belongs in `instructions`. */
 function responsesInput(messages: AiMessage[]): Record<string, unknown>[] {
-  return messages.map(({ role, content }) => ({
-    role,
-    content:
-      typeof content === 'string'
-        ? content
-        : content.map((part) => {
-            if (part.type === 'text') return { type: 'input_text', text: part.text };
-            if (part.type === 'file') {
+  if (messages.some(({ role }) => role !== 'system' && role !== 'user')) {
+    throw new AiCallError(
+      'BAD_JSON',
+      'AI input contains an unsupported message role',
+      'UNSUPPORTED_INPUT_ROLE'
+    );
+  }
+  return messages
+    .filter(({ role }) => role !== 'system')
+    .map(({ content }) => ({
+      // The configured WebApi-compatible Responses endpoint accepts user-only input roles.
+      role: 'user',
+      content:
+        typeof content === 'string'
+          ? [{ type: 'input_text', text: content }]
+          : content.map((part) => {
+              if (part.type === 'text') return { type: 'input_text', text: part.text };
+              if (part.type === 'file') {
+                return {
+                  type: 'input_file',
+                  filename: part.file.filename,
+                  file_data: part.file.file_data
+                };
+              }
               return {
-                type: 'input_file',
-                filename: part.file.filename,
-                file_data: part.file.file_data
+                type: 'input_image',
+                image_url: part.image_url.url
               };
-            }
-            return {
-              type: 'input_image',
-              image_url: part.image_url.url,
-              ...(part.image_url.detail ? { detail: part.image_url.detail } : {})
-            };
-          })
-  }));
+            })
+    }));
+}
+
+/** Responses carries trusted system context in `instructions`, not as an input role. */
+function responsesInstructions(messages: AiMessage[]): string | undefined {
+  const systemMessages = messages.filter(({ role }) => role === 'system');
+  if (systemMessages.length === 0) return undefined;
+  const instructions = systemMessages
+    .map(({ content }) => {
+      if (typeof content === 'string') return content;
+      return content
+        .map((part) => {
+          if (part.type !== 'text') {
+            throw new AiCallError(
+              'BAD_JSON',
+              'System instructions may contain text only',
+              'INVALID_SYSTEM_INSTRUCTIONS'
+            );
+          }
+          return part.text;
+        })
+        .join('\n');
+    })
+    .join('\n\n');
+  // WebApi validates this field with JavaScript string length semantics.
+  if (instructions.length > 4000) {
+    throw new AiCallError(
+      'BAD_JSON',
+      'System instructions exceed the 4000 character limit',
+      'INSTRUCTIONS_TOO_LONG'
+    );
+  }
+  return instructions;
 }
 
 function responsesFormat(responseFormat: AiCallResponseFormat): Record<string, unknown> {
@@ -322,6 +363,8 @@ function responsesBody(
     input: responsesInput(messages),
     text: { format: responsesFormat(responseFormat) }
   };
+  const instructions = responsesInstructions(messages);
+  if (instructions !== undefined) body.instructions = instructions;
   if (active.max_tokens !== null && active.max_tokens !== undefined) {
     body.max_output_tokens = active.max_tokens;
   }
@@ -381,7 +424,11 @@ function notifyConnectionTestDiagnostic(
   try {
     callback?.(diagnostic);
   } catch {
-    // Sanitized progress is best-effort and must not affect provider execution.
+    console.error('[AI provider] Progress diagnostic callback failed', {
+      providerTransport: diagnostic.providerTransport,
+      diagnosticStage: diagnostic.diagnosticStage,
+      reason: 'DIAGNOSTIC_CALLBACK_FAILED'
+    });
   }
 }
 
@@ -429,8 +476,7 @@ function responsesBackgroundUnsupported(status: number, payload: any): boolean {
       'responses_endpoint_not_supported',
       'background_not_supported'
     ].includes(code) ||
-    (code === 'unsupported_parameter' &&
-      ['background', 'store', 'text.format', 'text.format.type'].includes(parameter))
+    (code === 'unsupported_parameter' && ['background', 'store'].includes(parameter))
   );
 }
 
@@ -913,6 +959,13 @@ export async function pingDeConexionTransport(config: {
   { ok: true; latency: number; message: string } | { ok: false; latency: number; error: string }
 > {
   const startTime = Date.now();
+  const latestBackgroundDiagnostic: { current: AiConnectionTestDiagnostic | null } = {
+    current: null
+  };
+  const onBackgroundDiagnostic = (diagnostic: AiConnectionTestDiagnostic) => {
+    latestBackgroundDiagnostic.current = diagnostic;
+    notifyConnectionTestDiagnostic(config.onDiagnostic, diagnostic);
+  };
   let apiKey: string;
   try {
     apiKey = resolveProviderApiKey(config.base_url, config.api_key);
@@ -958,7 +1011,7 @@ export async function pingDeConexionTransport(config: {
       signal: config.signal,
       timeoutMs: aiOperationTimeoutMs(config.timeout),
       requestTimeoutMs: effectiveAiTimeoutMs(config.timeout),
-      onDiagnostic: config.onDiagnostic
+      onDiagnostic: onBackgroundDiagnostic
     });
     const result = connectionTestVerdictFromContent(
       extractResponsesText(response.payload),
@@ -987,14 +1040,24 @@ export async function pingDeConexionTransport(config: {
         : aiError.detail === 'CANCELLED'
           ? 'cancelled'
           : 'failed';
-    const httpStatus = /^HTTP \d+$/.test(aiError.detail ?? '')
-      ? Number(aiError.detail?.slice(5))
-      : null;
+    const httpStatus =
+      aiError.providerHttpStatus ??
+      (/^HTTP \d+$/.test(aiError.detail ?? '') ? Number(aiError.detail?.slice(5)) : null);
+    const previous = latestBackgroundDiagnostic.current;
     notifyConnectionTestDiagnostic(config.onDiagnostic, {
-      providerResponseId: null,
+      providerResponseId: previous?.providerResponseId ?? null,
       providerTransport: 'responses_background',
-      providerHttpStatus: httpStatus,
-      elapsedMs: Date.now() - startTime,
+      providerHttpStatus: httpStatus ?? previous?.providerHttpStatus ?? null,
+      elapsedMs: Math.max(previous?.elapsedMs ?? 0, Date.now() - startTime),
+      ...((aiError.providerErrorType ?? previous?.providerErrorType)
+        ? { providerErrorType: aiError.providerErrorType ?? previous?.providerErrorType }
+        : {}),
+      ...((aiError.providerErrorCode ?? previous?.providerErrorCode)
+        ? { providerErrorCode: aiError.providerErrorCode ?? previous?.providerErrorCode }
+        : {}),
+      ...((aiError.providerErrorParam ?? previous?.providerErrorParam)
+        ? { providerErrorParam: aiError.providerErrorParam ?? previous?.providerErrorParam }
+        : {}),
       diagnosticStage
     });
     return {

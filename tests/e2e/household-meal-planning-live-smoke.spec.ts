@@ -399,13 +399,14 @@ test('envía una propuesta semanal compartida al proveedor y no la persiste ante
     expect(await readCalendarMeals(page, householdHeaders, start, end)).toHaveLength(0);
     phase('calendar-empty');
 
+    phase('proposal-request-start');
     const proposalResponse = await page.request.post('/api/household/meal-planning/proposal', {
       headers: { ...householdHeaders, 'content-type': 'application/json' },
       data: { weekStart: start, householdMemberIds: activeMembers.map((member) => member.id) },
       timeout: LIVE_REQUEST_TIMEOUT_MS
     });
-    phase('proposal-returned');
-    expect(proposalResponse.status(), await proposalResponse.text()).toBe(200);
+    phase(proposalResponse.status() === 200 ? 'proposal-returned' : 'proposal-response-error');
+    expect(proposalResponse.status()).toBe(200);
     const result = (await proposalResponse.json()) as {
       success: boolean;
       data: {

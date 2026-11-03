@@ -167,7 +167,8 @@ describe('callAI', () => {
             image_url: { url: 'data:image/png;base64,aW1n', detail: 'high' as const }
           }
         ]
-      }
+      },
+      { role: 'user' as const, content: 'Texto simple adicional' }
     ];
 
     const content = await callAITransportRaw(
@@ -194,8 +195,8 @@ describe('callAI', () => {
       model: 'gpt-vision',
       background: true,
       store: true,
+      instructions: 'Sigue instrucciones.',
       input: [
-        { role: 'system', content: 'Sigue instrucciones.' },
         {
           role: 'user',
           content: [
@@ -205,8 +206,12 @@ describe('callAI', () => {
               filename: 'inventario.json',
               file_data: 'data:application/json;base64,e30='
             },
-            { type: 'input_image', image_url: 'data:image/png;base64,aW1n', detail: 'high' }
+            { type: 'input_image', image_url: 'data:image/png;base64,aW1n' }
           ]
+        },
+        {
+          role: 'user',
+          content: [{ type: 'input_text', text: 'Texto simple adicional' }]
         }
       ],
       text: {
@@ -231,6 +236,67 @@ describe('callAI', () => {
       providerTransport: 'responses_background',
       diagnosticStage: 'completed'
     });
+  });
+
+  it('rechaza instrucciones de sistema de más de 4000 caracteres antes de llamar al proveedor', async () => {
+    const secretInstruction = 'x'.repeat(4001);
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const error = await callAITransportRaw(
+      CONFIG,
+      [
+        { role: 'system', content: secretInstruction },
+        { role: 'user', content: 'hola' }
+      ],
+      TEST_RESPONSE_FORMAT
+    ).catch((reason) => reason);
+
+    expect(error).toBeInstanceOf(AiCallError);
+    expect(error).toMatchObject({ code: 'BAD_JSON', detail: 'INSTRUCTIONS_TOO_LONG' });
+    expect(error.message).not.toContain(secretInstruction);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('acepta instrucciones de sistema de exactamente 4000 caracteres', async () => {
+    let body: Record<string, unknown> | undefined;
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      body = JSON.parse(String(init.body));
+      return responsesResult('resp_exact_instructions', 'completed', 'ok');
+    });
+    const instructions = 'x'.repeat(4000);
+
+    await callAITransportRaw(
+      CONFIG,
+      [
+        { role: 'system', content: instructions },
+        { role: 'user', content: 'hola' }
+      ],
+      TEST_RESPONSE_FORMAT
+    );
+
+    expect(body?.instructions).toBe(instructions);
+  });
+
+  it('rechaza turnos assistant localmente antes de llamar al proveedor', async () => {
+    const privateAssistantContent = 'respuesta privada anterior';
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const error = await callAITransportRaw(
+      CONFIG,
+      [
+        { role: 'system', content: 'Instrucciones confiables.' },
+        { role: 'assistant', content: privateAssistantContent },
+        { role: 'user', content: 'Continúa' }
+      ],
+      TEST_RESPONSE_FORMAT
+    ).catch((reason) => reason);
+
+    expect(error).toBeInstanceOf(AiCallError);
+    expect(error).toMatchObject({ code: 'BAD_JSON', detail: 'UNSUPPORTED_INPUT_ROLE' });
+    expect(error.message).not.toContain(privateAssistantContent);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('admite JSON object y no vuelve a Chat Completions si Responses no está disponible', async () => {
@@ -438,7 +504,7 @@ describe('callAI', () => {
       background: true,
       store: true,
       max_output_tokens: 900,
-      input: [{ role: 'user', content: 'hola' }],
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'hola' }] }],
       text: {
         format: {
           type: 'json_schema',
@@ -958,7 +1024,7 @@ describe('callAI: el cuerpo lleva solo lo configurado', () => {
       model: CONFIG.model,
       background: true,
       store: true,
-      input: [{ role: 'user', content: 'hola' }],
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'hola' }] }],
       text: {
         format: {
           type: 'json_schema',
@@ -1229,6 +1295,49 @@ describe('pingDeConexion', () => {
     });
   });
 
+  it('deja una señal segura si falla el callback de diagnóstico y continúa la petición', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      respuestaResponses({
+        id: 'resp_callback_diagnostic',
+        status: 'completed',
+        output: [
+          {
+            type: 'message',
+            content: [
+              { type: 'output_text', text: '{"status":"ok","message":"conexión establecida"}' }
+            ]
+          }
+        ]
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const callbackError = 'private callback details';
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      const verdict = await pingDeConexionTransport({
+        base_url: 'http://x:8000',
+        api_key: 'synthetic-key',
+        model: 'gpt-5',
+        jobId: 'job-callback-diagnostic',
+        onDiagnostic: () => {
+          throw new Error(callbackError);
+        }
+      });
+
+      expect(verdict).toMatchObject({ ok: true });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(errorLog).toHaveBeenCalledWith('[AI provider] Progress diagnostic callback failed', {
+        providerTransport: 'responses_background',
+        diagnosticStage: 'submitting',
+        reason: 'DIAGNOSTIC_CALLBACK_FAILED'
+      });
+      expect(JSON.stringify(errorLog.mock.calls)).not.toContain(callbackError);
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
+
   it('no cae a Chat Completions ante un Responses no disponible', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response('not found', { status: 404 }));
     vi.stubGlobal('fetch', fetchMock);
@@ -1247,6 +1356,65 @@ describe('pingDeConexion', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(new URL(String(fetchMock.mock.calls[0][0])).pathname).toBe('/v1/responses');
   });
+
+  it.each(['create', 'poll'] as const)(
+    'preserva el diagnóstico seguro del HTTP 400 de %s en una prueba de conexión',
+    async (failureStage) => {
+      const secret = 'provider-private-validation-message';
+      const createFailure = respuestaResponses(
+        {
+          error: {
+            type: 'invalid_request_error',
+            code: 'unsupported_parameter',
+            param: 'text.format',
+            message: secret
+          }
+        },
+        400
+      );
+      const pollFailure = respuestaResponses(
+        {
+          error: {
+            type: 'invalid_request_error',
+            code: 'invalid_value',
+            param: 'text.format.type',
+            message: secret
+          }
+        },
+        400
+      );
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          failureStage === 'create'
+            ? createFailure
+            : respuestaResponses({ id: 'resp_connection_diagnostic', status: 'queued' }, 202)
+        );
+      if (failureStage === 'poll') fetchMock.mockResolvedValueOnce(pollFailure);
+      vi.stubGlobal('fetch', fetchMock);
+      const diagnostics: Array<Record<string, unknown>> = [];
+
+      const verdict = await pingDeConexionTransport({
+        base_url: 'http://x/v1',
+        api_key: 'synthetic-key',
+        model: 'gpt-5',
+        jobId: `connection-${failureStage}-400`,
+        onDiagnostic: (diagnostic) => diagnostics.push({ ...diagnostic })
+      });
+
+      expect(verdict).toMatchObject({ ok: false, error: 'HTTP 400' });
+      expect(diagnostics.at(-1)).toMatchObject({
+        providerResponseId: failureStage === 'poll' ? 'resp_connection_diagnostic' : null,
+        providerTransport: 'responses_background',
+        providerHttpStatus: 400,
+        providerErrorType: 'invalid_request_error',
+        providerErrorCode: failureStage === 'poll' ? 'invalid_value' : 'unsupported_parameter',
+        providerErrorParam: failureStage === 'poll' ? 'text.format.type' : 'text.format',
+        diagnosticStage: 'failed'
+      });
+      expect(JSON.stringify(diagnostics)).not.toContain(secret);
+    }
+  );
 
   it('devuelve un error explícito si el proveedor declara incompatible background', async () => {
     const fetchMock = vi

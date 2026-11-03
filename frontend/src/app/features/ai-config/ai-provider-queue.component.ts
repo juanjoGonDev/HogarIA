@@ -12,6 +12,7 @@ import { TranslatePipe } from '../../core/pipes/translate.pipe';
 import { I18nService } from '../../core/services/i18n.service';
 import { AiQueueService } from '../../core/services/ai-queue.service';
 import { IconComponent } from '../../shared/components/ui/icon/icon.component';
+import { safeAiJobDiagnosticTrace } from '../../shared/utils/ai-job-diagnostic';
 import type { AIProviderConfig } from '../../shared/models/ai-config.model';
 import type {
   AiQueueJob,
@@ -44,7 +45,9 @@ const ERROR_KEYS: Record<string, TranslationKey> = {
   BAD_JSON: 'ai_config.queue_error_bad_json',
   TIMEOUT: 'ai_config.queue_error_timeout',
   INPUT_EXPIRED: 'ai_config.queue_error_input_expired',
-  CONFIG_UNAVAILABLE: 'ai_config.queue_error_config_unavailable'
+  CONFIG_UNAVAILABLE: 'ai_config.queue_error_config_unavailable',
+  WORKER_STALLED: 'ai_config.queue_error_worker_stalled',
+  WORKER_EXCEPTION: 'ai_config.queue_error_worker_exception'
 };
 
 const SAFE_DIAGNOSTIC_KINDS = new Set(Object.keys(KIND_KEYS));
@@ -60,13 +63,76 @@ const SAFE_DIAGNOSTIC_STAGES = new Set([
   'cancelled',
   'fallback'
 ]);
+const SAFE_PROVIDER_ERROR_TYPES = new Set([
+  'api_error',
+  'invalid_request_error',
+  'authentication_error',
+  'permission_error',
+  'rate_limit_error',
+  'server_error',
+  'insufficient_quota'
+]);
+const SAFE_PROVIDER_ERROR_CODES = new Set([
+  'unsupported_parameter',
+  'unsupported_value',
+  'invalid_value',
+  'invalid_type',
+  'model_not_found',
+  'context_length_exceeded',
+  'insufficient_quota',
+  'rate_limit_exceeded',
+  'invalid_api_key',
+  'invalid_prompt',
+  'responses_not_supported',
+  'responses_endpoint_not_supported',
+  'background_not_supported',
+  'responses_input_unsupported',
+  'bad_request',
+  'idempotency_conflict',
+  'idempotency_key_invalid',
+  'internal_error',
+  'payload_too_large',
+  'response_cancelled',
+  'response_not_cancellable',
+  'response_not_found',
+  'response_store_unavailable',
+  'responses_attachment_reference_unsupported',
+  'responses_text_format_required',
+  'responses_background_required',
+  'responses_field_unsupported',
+  'responses_runtime_unavailable',
+  'responses_storage_unavailable',
+  'responses_tool_choice_unsupported',
+  'responses_tools_unsupported',
+  'responses_store_required',
+  'responses_streaming_unsupported',
+  'responses_unexpected_tool_output'
+]);
+const SAFE_PROVIDER_ERROR_PARAMS = new Set([
+  'model',
+  'temperature',
+  'top_p',
+  'max_output_tokens',
+  'input',
+  'input_image',
+  'input_file',
+  'text.format',
+  'text.format.type',
+  'background',
+  'store',
+  'reasoning.effort'
+]);
 
 type QueueJobDiagnosticMetadata = {
   providerResponseId?: unknown;
   providerTransport?: unknown;
   providerHttpStatus?: unknown;
+  providerErrorType?: unknown;
+  providerErrorCode?: unknown;
+  providerErrorParam?: unknown;
   elapsedMs?: unknown;
   diagnosticStage?: unknown;
+  diagnosticTrace?: unknown;
 };
 
 @Component({
@@ -791,6 +857,9 @@ export class AiProviderQueueComponent implements OnChanges, OnDestroy {
       diagnostic['diagnosticStage'] = metadata.diagnosticStage;
     }
 
+    const trace = safeAiJobDiagnosticTrace(metadata.diagnosticTrace);
+    if (trace) diagnostic['trace'] = trace;
+
     const providerResponseId = this.safeIdentifier(metadata.providerResponseId);
     if (providerResponseId) diagnostic['providerResponseId'] = providerResponseId;
 
@@ -808,6 +877,30 @@ export class AiProviderQueueComponent implements OnChanges, OnDestroy {
       metadata.providerHttpStatus <= 599
     ) {
       diagnostic['providerHttpStatus'] = metadata.providerHttpStatus;
+    }
+
+    if (
+      job.kind === 'connection_test' &&
+      typeof metadata.providerErrorType === 'string' &&
+      SAFE_PROVIDER_ERROR_TYPES.has(metadata.providerErrorType)
+    ) {
+      diagnostic['providerErrorType'] = metadata.providerErrorType;
+    }
+
+    if (
+      job.kind === 'connection_test' &&
+      typeof metadata.providerErrorCode === 'string' &&
+      SAFE_PROVIDER_ERROR_CODES.has(metadata.providerErrorCode)
+    ) {
+      diagnostic['providerErrorCode'] = metadata.providerErrorCode;
+    }
+
+    if (
+      job.kind === 'connection_test' &&
+      typeof metadata.providerErrorParam === 'string' &&
+      SAFE_PROVIDER_ERROR_PARAMS.has(metadata.providerErrorParam)
+    ) {
+      diagnostic['providerErrorParam'] = metadata.providerErrorParam;
     }
 
     if (

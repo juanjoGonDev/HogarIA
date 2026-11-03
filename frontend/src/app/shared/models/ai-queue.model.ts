@@ -10,6 +10,36 @@ export type AiQueueJobKind =
   | 'expiry_estimate'
   | 'connection_test';
 
+export type AiJobDiagnosticTraceStage =
+  | 'worker_claimed'
+  | 'worker_started'
+  | 'runtime_started'
+  | 'runtime_finished'
+  | 'runtime_failed'
+  | 'worker_exception'
+  | 'worker_stalled'
+  | 'worker_runtime_missing'
+  | 'worker_scope_mismatch'
+  | 'provider_submitting'
+  | 'provider_queued'
+  | 'provider_polling'
+  | 'provider_completed'
+  | 'provider_failed'
+  | 'provider_timed_out'
+  | 'provider_cancelled';
+
+/** Safe per-job lifecycle metadata; never contains a request body or provider message. */
+export interface AiJobDiagnosticTraceEvent {
+  at: string;
+  attempt: number;
+  claimGeneration: number;
+  stage: AiJobDiagnosticTraceStage;
+  code?: string;
+  httpStatus?: number;
+  responseId?: string;
+  elapsedMs?: number;
+}
+
 /** Safe metadata only: request bodies, prompts, files, results and credentials never belong here. */
 export interface AiQueueJob {
   id: string;
@@ -26,6 +56,9 @@ export interface AiQueueJob {
   providerResponseId?: string | null;
   providerTransport?: 'responses_background' | 'chat_completions' | null;
   providerHttpStatus?: number | null;
+  providerErrorType?: string | null;
+  providerErrorCode?: string | null;
+  providerErrorParam?: string | null;
   elapsedMs?: number | null;
   diagnosticStage?:
     | 'submitting'
@@ -37,6 +70,7 @@ export interface AiQueueJob {
     | 'cancelled'
     | 'fallback'
     | null;
+  diagnosticTrace?: AiJobDiagnosticTraceEvent[];
 }
 
 export interface AiQueueSnapshot {

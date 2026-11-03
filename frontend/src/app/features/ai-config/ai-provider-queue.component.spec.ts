@@ -157,9 +157,58 @@ describe('AiProviderQueueComponent', () => {
       error: 'PROVIDER',
       providerResponseId: 'resp_synthetic123',
       providerTransport: 'responses_background',
-      providerHttpStatus: 499,
+      providerHttpStatus: 400,
+      providerErrorCode: 'responses_input_unsupported',
       elapsedMs: 30_000,
       diagnosticStage: 'polling',
+      diagnosticTrace: [
+        {
+          at: '2026-11-03T09:34:13.000Z',
+          attempt: 1,
+          claimGeneration: 1,
+          stage: 'worker_claimed',
+          message: 'private prompt sentinel'
+        },
+        {
+          at: '2026-11-03T09:34:13.100Z',
+          attempt: 1,
+          claimGeneration: 1,
+          stage: 'runtime_started',
+          apiKey: 'synthetic-secret-sentinel'
+        },
+        {
+          at: '2026-11-03T09:34:13.200Z',
+          attempt: 1,
+          claimGeneration: 1,
+          stage: 'provider_submitting',
+          providerUrl: 'https://private.invalid/v1'
+        },
+        {
+          at: '2026-11-03T09:34:14.000Z',
+          attempt: 1,
+          claimGeneration: 1,
+          stage: 'provider_polling',
+          httpStatus: 202,
+          responseId: 'resp_synthetic123',
+          elapsedMs: 1000
+        },
+        {
+          at: '2026-11-03T09:40:13.000Z',
+          attempt: 1,
+          claimGeneration: 1,
+          stage: 'worker_stalled',
+          code: 'WORKER_STALLED',
+          elapsedMs: 360_000,
+          errorDetail: 'raw worker exception sentinel'
+        },
+        {
+          at: '2026-11-03T09:40:14.000Z',
+          attempt: 1,
+          claimGeneration: 1,
+          stage: 'private_stage_sentinel',
+          code: 'private-error-sentinel'
+        }
+      ],
       apiKey: 'synthetic-secret-sentinel',
       baseUrl: 'https://private.invalid/v1',
       prompt: 'private prompt sentinel',
@@ -194,9 +243,47 @@ describe('AiProviderQueueComponent', () => {
         error: 'PROVIDER',
         providerResponseId: 'resp_synthetic123',
         providerTransport: 'responses_background',
-        providerHttpStatus: 499,
+        providerHttpStatus: 400,
+        providerErrorCode: 'responses_input_unsupported',
         elapsedMs: 30_000,
-        diagnosticStage: 'polling'
+        diagnosticStage: 'polling',
+        trace: [
+          {
+            at: '2026-11-03T09:34:13.000Z',
+            attempt: 1,
+            claimGeneration: 1,
+            stage: 'worker_claimed'
+          },
+          {
+            at: '2026-11-03T09:34:13.100Z',
+            attempt: 1,
+            claimGeneration: 1,
+            stage: 'runtime_started'
+          },
+          {
+            at: '2026-11-03T09:34:13.200Z',
+            attempt: 1,
+            claimGeneration: 1,
+            stage: 'provider_submitting'
+          },
+          {
+            at: '2026-11-03T09:34:14.000Z',
+            attempt: 1,
+            claimGeneration: 1,
+            stage: 'provider_polling',
+            httpStatus: 202,
+            responseId: 'resp_synthetic123',
+            elapsedMs: 1000
+          },
+          {
+            at: '2026-11-03T09:40:13.000Z',
+            attempt: 1,
+            claimGeneration: 1,
+            stage: 'worker_stalled',
+            code: 'WORKER_STALLED',
+            elapsedMs: 360_000
+          }
+        ]
       });
       expect(copied).not.toContain('other-job');
       expect(copied).not.toContain('synthetic-secret-sentinel');
@@ -217,8 +304,20 @@ describe('AiProviderQueueComponent', () => {
       providerResponseId: 'https://credential.invalid/secret',
       providerTransport: 'untrusted-private-value',
       providerHttpStatus: 700,
+      providerErrorType: 'private-error-type-sentinel',
+      providerErrorCode: 'private-error-code-sentinel',
+      providerErrorParam: 'private.parameter.sentinel',
       elapsedMs: -1,
-      diagnosticStage: 'untrusted-private-value'
+      diagnosticStage: 'untrusted-private-value',
+      diagnosticTrace: [
+        {
+          at: '2026-11-03T09:34:13.000Z',
+          attempt: 1,
+          claimGeneration: 1,
+          stage: 'private_stage_sentinel',
+          message: 'private trace detail sentinel'
+        }
+      ]
     } as unknown as AiQueueJob;
     queueState.set(state({ configId: CONFIG.id, jobs: [selected] }));
     fixture.componentRef.setInput('config', CONFIG);
@@ -239,11 +338,18 @@ describe('AiProviderQueueComponent', () => {
       expect(diagnostic['providerResponseId']).toBeUndefined();
       expect(diagnostic['providerTransport']).toBeUndefined();
       expect(diagnostic['providerHttpStatus']).toBeUndefined();
+      expect(diagnostic['providerErrorType']).toBeUndefined();
+      expect(diagnostic['providerErrorCode']).toBeUndefined();
+      expect(diagnostic['providerErrorParam']).toBeUndefined();
       expect(diagnostic['elapsedMs']).toBeUndefined();
       expect(diagnostic['diagnosticStage']).toBeUndefined();
+      expect(diagnostic['trace']).toBeUndefined();
       expect(copied).not.toContain('credential.invalid');
       expect(copied).not.toContain('untrusted-private-value');
       expect(copied).not.toContain('unsafe provider error detail');
+      expect(copied).not.toContain('private-error-type-sentinel');
+      expect(copied).not.toContain('private-error-code-sentinel');
+      expect(copied).not.toContain('private.parameter.sentinel');
       expect(component.diagnosticCopyStatus()).toBe('failed');
       expect(component.announcement()).toBe('ai_config.queue_copy_diagnostic_failed');
       expect(fixture.nativeElement.textContent).toContain('ai_config.queue_copy_diagnostic_failed');
@@ -266,6 +372,8 @@ describe('AiProviderQueueComponent', () => {
     expect(component.errorLabel('CONFIG_UNAVAILABLE')).toBe(
       'ai_config.queue_error_config_unavailable'
     );
+    expect(component.errorLabel('WORKER_STALLED')).toBe('ai_config.queue_error_worker_stalled');
+    expect(component.errorLabel('WORKER_EXCEPTION')).toBe('ai_config.queue_error_worker_exception');
     expect(component.errorLabel('UNSAFE_BACKEND_DETAIL')).toBe('ai_config.queue_error_unknown');
     expect(fixture.nativeElement.textContent).not.toContain('UNSAFE_BACKEND_DETAIL');
     expect(

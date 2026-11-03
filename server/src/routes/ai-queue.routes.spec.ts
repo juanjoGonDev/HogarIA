@@ -58,14 +58,18 @@ function createJob(input: {
   providerResponseId?: string | null;
   providerTransport?: string | null;
   providerHttpStatus?: number | null;
+  providerErrorType?: string | null;
+  providerErrorCode?: string | null;
+  providerErrorParam?: string | null;
   elapsedMs?: number | null;
   diagnosticStage?: string | null;
 }): void {
   db.prepare(
     `INSERT INTO ai_jobs
        (id, user_id, household_id, config_id, kind, status, queue_order, error_code, error_detail,
-        provider_response_id, provider_transport, provider_http_status, elapsed_ms, diagnostic_stage)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        provider_response_id, provider_transport, provider_http_status, provider_error_type,
+        provider_error_code, provider_error_param, elapsed_ms, diagnostic_stage)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     input.id,
     input.userId,
@@ -79,6 +83,9 @@ function createJob(input: {
     input.providerResponseId ?? null,
     input.providerTransport ?? null,
     input.providerHttpStatus ?? null,
+    input.providerErrorType ?? null,
+    input.providerErrorCode ?? null,
+    input.providerErrorParam ?? null,
     input.elapsedMs ?? null,
     input.diagnosticStage ?? null
   );
@@ -319,6 +326,9 @@ describe('AI queue API', () => {
       providerResponseId: 'resp_1234567',
       providerTransport: 'responses_background',
       providerHttpStatus: 200,
+      providerErrorType: 'invalid_request_error',
+      providerErrorCode: 'unsupported_parameter',
+      providerErrorParam: 'text.format',
       elapsedMs: 45000,
       diagnosticStage: 'failed'
     });
@@ -336,6 +346,9 @@ describe('AI queue API', () => {
           providerResponseId: 'resp_1234567',
           providerTransport: 'responses_background',
           providerHttpStatus: 200,
+          providerErrorType: 'invalid_request_error',
+          providerErrorCode: 'unsupported_parameter',
+          providerErrorParam: 'text.format',
           elapsedMs: 45000,
           diagnosticStage: 'failed'
         }

@@ -107,9 +107,9 @@ describe('callAssistantAITransient', () => {
       strict: true,
       schema: { type: 'object' }
     });
+    expect(requestBody?.instructions).toBe('System contract.');
     expect(requestBody?.input).toEqual([
-      { role: 'system', content: 'System contract.' },
-      { role: 'user', content: 'Synthetic prompt.' }
+      { role: 'user', content: [{ type: 'input_text', text: 'Synthetic prompt.' }] }
     ]);
   });
 
@@ -201,9 +201,9 @@ describe('callAssistantAITransient', () => {
     expect(actionUnion[0].properties.payload.properties.expirationDate.anyOf[0]).not.toHaveProperty(
       'pattern'
     );
+    expect(requestBody?.instructions).toBe('System contract.');
     expect(requestBody?.input).toEqual([
-      { role: 'system', content: 'System contract.' },
-      { role: 'user', content: 'Synthetic prompt.' }
+      { role: 'user', content: [{ type: 'input_text', text: 'Synthetic prompt.' }] }
     ]);
   });
 
@@ -220,7 +220,10 @@ describe('callAssistantAITransient', () => {
     await callAssistantAITransient({
       userId: 'u-custom',
       config: insertConfig('u-custom'),
-      messages: [{ role: 'system', content: 'System contract.' }],
+      messages: [
+        { role: 'system', content: 'System contract.' },
+        { role: 'user', content: 'Synthetic prompt.' }
+      ],
       responseFormat
     });
 
@@ -230,7 +233,10 @@ describe('callAssistantAITransient', () => {
       strict: true,
       schema: { type: 'object' }
     });
-    expect(requestBody?.input).toEqual([{ role: 'system', content: 'System contract.' }]);
+    expect(requestBody?.instructions).toBe('System contract.');
+    expect(requestBody?.input).toEqual([
+      { role: 'user', content: [{ type: 'input_text', text: 'Synthetic prompt.' }] }
+    ]);
     expect(requestBody?.reasoning).toBeUndefined();
   });
 

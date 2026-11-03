@@ -89,11 +89,12 @@ export async function callAssistantAITransient(input: {
         JSON.stringify({ messages: input.messages, responseFormat }),
         'utf8'
       ),
-      run: (_fixedConfig, signal, jobId) =>
+      run: (_fixedConfig, signal, jobId, claimGeneration) =>
         callAIWithConfig(input.config, input.messages, responseFormat, signal, {
           ...requestOptions,
           jobId,
-          onDiagnostic: (diagnostic) => persistAiProviderDiagnostic(db, jobId, diagnostic)
+          onDiagnostic: (diagnostic) =>
+            persistAiProviderDiagnostic(db, jobId, diagnostic, claimGeneration)
         })
     }).result;
   } finally {

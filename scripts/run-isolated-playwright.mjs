@@ -457,6 +457,10 @@ async function main() {
     E2E_NGINX_INGRESS: nginxIngress ? '1' : '0',
     ...(nginxIngress ? { JWT_SECRET: randomBytes(32).toString('base64url') } : {})
   };
+  if (liveSmoke && process.env.HOGARIA_AI_REAL_SMOKE_WORKFLOWS_ONLY === '1') {
+    // The opt-in image workflow must use Wikimedia Commons, not the repeatable fixture.
+    delete env.PANTRY_IMAGE_SEARCH_FIXTURE;
+  }
   const processEnvs = liveSmoke
     ? isolatedProcessEnvironments(env)
     : { server: env, browser: env, playwright: env };

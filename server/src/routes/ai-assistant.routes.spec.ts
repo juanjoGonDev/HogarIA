@@ -20,6 +20,10 @@ function responsesText(content: string, id = 'resp_assistant_fixture'): Response
 }
 
 function inputText(body: any, index: number): string {
+  if (typeof body.instructions === 'string') {
+    if (index === 0) return body.instructions;
+    index -= 1;
+  }
   const content = body.input[index]?.content;
   if (typeof content === 'string') return content;
   return Array.isArray(content)
@@ -547,8 +551,9 @@ describe('POST /api/ai/assistant/proposals', () => {
     expect(providerRequest.text.format.name).toBe('ai_action_plan');
     const providerResponseSchema = JSON.stringify(providerRequest.text.format.schema);
     expect(Buffer.byteLength(providerResponseSchema, 'utf8')).toBeLessThanOrEqual(12_000);
-    expect(inputText(providerRequest, 0)).toContain('payloadJson');
-    expect(inputText(providerRequest, 0)).toContain('no devuelvas `payload` como otro campo');
+    expect(providerRequest.instructions).toContain('payloadJson');
+    expect(providerRequest.instructions).toContain('sin campos extra ni propiedad payload');
+    expect(providerRequest.instructions.length).toBeLessThanOrEqual(3900);
     expect(providerResponseSchema).toContain(
       'pantry.add_ingredient: { name: string; quantity: number;'
     );
@@ -567,6 +572,23 @@ describe('POST /api/ai/assistant/proposals', () => {
     expect(body.data.actions[0].payload).toEqual(payload);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(persistedSnapshot()).toEqual(before);
+  });
+
+  it('keeps assistant instructions under WebApi limit in English too', async () => {
+    addConfig(alice);
+    const fetchMock = stubProvider(JSON.stringify(assistantCandidate()));
+
+    const response = await call(
+      'POST',
+      '/proposals',
+      { prompt: 'Add lentils to the pantry' },
+      alice.token,
+      { 'x-app-language': 'en' }
+    );
+
+    expect(response.status).toBe(200);
+    const providerRequest = JSON.parse(fetchMock.mock.calls[0][1]?.body as string);
+    expect(providerRequest.instructions.length).toBeLessThanOrEqual(3900);
   });
 
   it('uses the provider assigned to the assistant function', async () => {

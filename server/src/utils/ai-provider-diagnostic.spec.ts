@@ -55,6 +55,10 @@ describe('provider diagnostics allowlist', () => {
     expect(isSafeProviderErrorType('private_message')).toBe(false);
     expect(isSafeProviderErrorType(undefined)).toBe(false);
     expect(isSafeProviderErrorCode('unsupported_parameter')).toBe(true);
+    expect(isSafeProviderErrorCode('responses_input_unsupported')).toBe(true);
+    expect(isSafeProviderErrorCode('responses_attachment_reference_unsupported')).toBe(true);
+    expect(isSafeProviderErrorCode('private_message')).toBe(false);
+    expect(isSafeProviderErrorCode('responses_text_format_required')).toBe(true);
     expect(isSafeProviderErrorCode('private_message')).toBe(false);
     expect(isSafeProviderErrorCode(null)).toBe(false);
     expect(isSafeProviderErrorParam('input_file')).toBe(true);

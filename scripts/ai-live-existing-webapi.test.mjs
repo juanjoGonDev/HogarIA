@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { AI_LIVE_SMOKE_ENV } from './ai-live-smoke-safety.mjs';
+import {
+  AI_LIVE_SMOKE_ENV,
+  createAiLiveSmokeRunnerEnvironment,
+  isolatedProcessEnvironments
+} from './ai-live-smoke-safety.mjs';
 import { prepareExistingAiLiveSmokeSession } from './ai-live-existing-webapi.mjs';
 
 const WEB_API_ORIGIN = 'http://127.0.0.1:3001';
@@ -16,6 +20,7 @@ function jsonResponse(body, status = 200) {
 }
 
 function createWebApi({
+  origin = WEB_API_ORIGIN,
   requestLogging = {
     captureDetails: false,
     enabled: false,
@@ -42,7 +47,7 @@ function createWebApi({
     const method = options.method ?? 'GET';
     const headers = new Headers(options.headers);
     calls.push({ url: url.toString(), method, headers, body: options.body });
-    assert.equal(url.origin, WEB_API_ORIGIN);
+    assert.equal(url.origin, origin);
     assert.equal(options.redirect, 'error');
 
     if (method === 'GET' && url.pathname === '/health/ready') {
@@ -113,6 +118,74 @@ function createWebApi({
 
   return { calls, fetchImpl };
 }
+
+test('uses an explicitly configured alternate loopback WebAPI origin for every preflight request', async () => {
+  const origin = 'http://127.0.0.1:3002';
+  const { calls, fetchImpl } = createWebApi({ origin });
+
+  const session = await prepareExistingAiLiveSmokeSession({
+    env: { [AI_LIVE_SMOKE_ENV.webApiOrigin]: origin },
+    fetchImpl
+  });
+
+  assert.equal(session.origin, origin);
+  await session.cleanup();
+  assert.ok(calls.length > 0);
+  assert.ok(calls.every((call) => new URL(call.url).origin === origin));
+});
+
+test('rejects non-loopback WebAPI origins before any request or token access', async (t) => {
+  const invalidOrigins = [
+    'https://127.0.0.1:3002',
+    'http://localhost:3002',
+    'http://192.168.1.10:3002',
+    'http://user:secret@127.0.0.1:3002',
+    'http://127.0.0.1:3002/api',
+    'http://127.0.0.1:3002/?debug=1',
+    'http://127.0.0.1',
+    'http://127.0.0.1:0',
+    'http://127.0.0.1:03002',
+    'http://127.0.0.1:65536',
+    'not a URL',
+    ''
+  ];
+
+  for (const origin of invalidOrigins) {
+    await t.test(origin.replace(/user:secret/, 'user:[redacted]'), async () => {
+      let calls = 0;
+      await assert.rejects(
+        prepareExistingAiLiveSmokeSession({
+          env: { [AI_LIVE_SMOKE_ENV.webApiOrigin]: origin },
+          fetchImpl: async () => {
+            calls += 1;
+            throw new Error('must not connect');
+          }
+        })
+      );
+      assert.equal(calls, 0);
+    });
+  }
+});
+
+test('does not pass the alternate WebAPI origin to isolated app or browser processes', () => {
+  const runnerEnv = createAiLiveSmokeRunnerEnvironment(
+    {
+      [AI_LIVE_SMOKE_ENV.webApiOrigin]: 'http://127.0.0.1:3002',
+      PATH: 'synthetic-path'
+    },
+    {
+      proxyToken: 'synthetic-proxy-token-long-enough',
+      proxyUrl: 'http://127.0.0.1:43821/v1',
+      model: 'gpt-5'
+    }
+  );
+  const childEnvironments = isolatedProcessEnvironments(runnerEnv);
+
+  assert.equal(AI_LIVE_SMOKE_ENV.webApiOrigin in runnerEnv, false);
+  for (const childEnv of Object.values(childEnvironments)) {
+    assert.equal(AI_LIVE_SMOKE_ENV.webApiOrigin in childEnv, false);
+  }
+});
 
 test('fails before token creation or model calls when capture settings are unsafe', async () => {
   const { calls, fetchImpl } = createWebApi({

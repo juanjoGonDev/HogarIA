@@ -348,12 +348,51 @@ describe('ReceiptDetailComponent', () => {
       ...makeJob(),
       provider_response_id: 'resp_synthetic123',
       provider_transport: 'responses_background',
-      provider_http_status: 401,
-      provider_error_type: 'invalid_request_error',
-      provider_error_code: 'unsupported_parameter',
-      provider_error_param: 'temperature',
+      provider_http_status: 400,
+      provider_error_code: 'responses_input_unsupported',
       elapsed_ms: 451,
       diagnostic_stage: 'failed',
+      diagnosticTrace: [
+        {
+          at: '2026-11-03T09:34:13.000Z',
+          attempt: 1,
+          claimGeneration: 1,
+          stage: 'worker_claimed',
+          message: 'private prompt sentinel'
+        },
+        {
+          at: '2026-11-03T09:34:13.100Z',
+          attempt: 1,
+          claimGeneration: 1,
+          stage: 'runtime_started',
+          apiKey: 'synthetic-secret-sentinel'
+        },
+        {
+          at: '2026-11-03T09:34:14.000Z',
+          attempt: 1,
+          claimGeneration: 1,
+          stage: 'provider_polling',
+          httpStatus: 202,
+          responseId: 'resp_synthetic123',
+          elapsedMs: 1000
+        },
+        {
+          at: '2026-11-03T09:40:13.000Z',
+          attempt: 1,
+          claimGeneration: 1,
+          stage: 'worker_stalled',
+          code: 'WORKER_STALLED',
+          elapsedMs: 360_000,
+          errorDetail: 'private error body sentinel'
+        },
+        {
+          at: '2026-11-03T09:40:14.000Z',
+          attempt: 1,
+          claimGeneration: 1,
+          stage: 'not_allowlisted',
+          providerUrl: 'https://private.invalid/v1'
+        }
+      ],
       error_detail: 'raw provider body and synthetic-secret-sentinel',
       provider_url: 'https://private.invalid/v1',
       api_key: 'synthetic-secret-sentinel',
@@ -391,18 +430,53 @@ describe('ReceiptDetailComponent', () => {
       diagnosticStage: 'failed',
       providerResponseId: 'resp_synthetic123',
       providerTransport: 'responses_background',
-      providerHttpStatus: 401,
-      providerErrorType: 'invalid_request_error',
-      providerErrorCode: 'unsupported_parameter',
-      providerErrorParam: 'temperature',
-      elapsedMs: 451
+      providerHttpStatus: 400,
+      providerErrorCode: 'responses_input_unsupported',
+      elapsedMs: 451,
+      trace: [
+        {
+          at: '2026-11-03T09:34:13.000Z',
+          attempt: 1,
+          claimGeneration: 1,
+          stage: 'worker_claimed'
+        },
+        {
+          at: '2026-11-03T09:34:13.100Z',
+          attempt: 1,
+          claimGeneration: 1,
+          stage: 'runtime_started'
+        },
+        {
+          at: '2026-11-03T09:34:14.000Z',
+          attempt: 1,
+          claimGeneration: 1,
+          stage: 'provider_polling',
+          httpStatus: 202,
+          responseId: 'resp_synthetic123',
+          elapsedMs: 1000
+        },
+        {
+          at: '2026-11-03T09:40:13.000Z',
+          attempt: 1,
+          claimGeneration: 1,
+          stage: 'worker_stalled',
+          code: 'WORKER_STALLED',
+          elapsedMs: 360_000
+        }
+      ]
     });
     expect(copied).not.toContain(RECEIPT_ID);
     expect(copied).not.toContain('synthetic-secret-sentinel');
     expect(copied).not.toContain('private.invalid');
     expect(copied).not.toContain('private prompt sentinel');
     expect(copied).not.toContain('private output sentinel');
+    expect(copied).not.toContain('private error body sentinel');
     expect(feedback?.textContent).toContain('receipts.copy_diagnostic_success');
+  });
+
+  it('explains worker stalls and unexpected worker exceptions without raw details', () => {
+    expect(component.textoDeError('WORKER_STALLED')).toBe('receipts.error.WORKER_STALLED');
+    expect(component.textoDeError('WORKER_EXCEPTION')).toBe('receipts.error.WORKER_EXCEPTION');
   });
 
   it('announces clipboard rejection without exposing the browser error', async () => {

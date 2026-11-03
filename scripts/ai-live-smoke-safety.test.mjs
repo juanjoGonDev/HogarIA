@@ -9,23 +9,241 @@ import {
   prepareAiLiveSmokeSession,
   createAiLiveProxy,
   isSuccessfulAiLiveSmokeResult,
+  isSuccessfulAiLiveConnectionSmokeResult,
   isSuccessfulAiLiveAssistantSmokeResult,
   isSuccessfulAiLiveRecipeSmokeResult,
   isSuccessfulAiLiveHouseholdMealSmokeResult,
+  isSuccessfulAiLiveWorkflowSmokeResult,
   isolatedProcessEnvironments,
   selectAiLiveModel,
   validateAiLiveSmokeOptIn,
   validateAiLiveRecipeSmokeRequest,
   validateAiLiveAssistantSmokeRequest,
+  validateAiLiveConnectionSmokeRequest,
+  validateAiLiveWorkflowSmokeRequest,
   validateAiLiveHouseholdMealSmokeRequest,
+  validateAiLiveHouseholdPlanSmokeRequest,
+  isSuccessfulAiLiveHouseholdPlanSmokeResult,
   validateAiLiveSmokeRunner
 } from './ai-live-smoke-safety.mjs';
-import { AI_LIVE_SMOKE_DEADLINES } from './ai-live-smoke-contract.mjs';
+import {
+  AI_LIVE_SMOKE_DEADLINES,
+  AI_LIVE_WORKFLOWS_SMOKE_GREP
+} from './ai-live-smoke-contract.mjs';
 
 test('requires explicit opt-in and rejects CI before any live setup', () => {
   assert.throws(() => validateAiLiveSmokeOptIn({}), /explicit opt-in/i);
   assert.throws(() => validateAiLiveSmokeOptIn({ HOGARIA_AI_REAL_SMOKE: '1', CI: 'true' }), /CI/i);
   assert.doesNotThrow(() => validateAiLiveSmokeOptIn({ HOGARIA_AI_REAL_SMOKE: '1', CI: '' }));
+});
+
+test('connection-only mode is explicit, exclusive, and requires one real background completion', () => {
+  const args = [
+    '--config=playwright.ai-real-smoke.config.ts',
+    'tests/e2e/ai-real-smoke.spec.ts',
+    '--grep=HogarIA connection-only real test'
+  ];
+  const env = {
+    HOGARIA_AI_REAL_SMOKE: '1',
+    HOGARIA_AI_REAL_SMOKE_RUNNER: '1',
+    HOGARIA_AI_REAL_SMOKE_CONNECTION_ONLY: '1',
+    HOGARIA_AI_REAL_SMOKE_PROXY_TOKEN: 'synthetic-local-proxy-token',
+    HOGARIA_AI_REAL_SMOKE_PROXY_URL: 'http://127.0.0.1:41000/v1',
+    HOGARIA_AI_REAL_SMOKE_MODEL: 'gpt-5',
+    CI: ''
+  };
+
+  assert.equal(validateAiLiveConnectionSmokeRequest(env), true);
+  assert.equal(validateAiLiveSmokeRunner(env, args), true);
+  assert.equal(validateAiLiveConnectionSmokeRequest({}), false);
+  for (const conflictingInput of [
+    { HOGARIA_AI_REAL_SMOKE_CONNECTION_ONLY: 'true' },
+    { HOGARIA_AI_REAL_SMOKE_RECIPE_ONLY: '1' },
+    { HOGARIA_AI_REAL_SMOKE_ASSISTANT_ONLY: '1' },
+    { HOGARIA_AI_REAL_SMOKE_RECEIPTS_ONLY: '1' },
+    { HOGARIA_AI_REAL_SMOKE_HOUSEHOLD_MEAL_ONLY: '1' },
+    { HOGARIA_AI_REAL_SMOKE_RECEIPT_PATH: 'C:/private/ticket.pdf' }
+  ]) {
+    assert.throws(
+      () => validateAiLiveConnectionSmokeRequest({ ...env, ...conflictingInput }),
+      /exact opt-in|cannot combine/i
+    );
+  }
+  assert.throws(
+    () => validateAiLiveSmokeRunner(env, args.slice(0, 2)),
+    /only accepts/i
+  );
+
+  const runnerExit = { code: 0, timedOut: false, cancelled: false, runnerCleaned: true };
+  const backgroundCall = { providerTransport: 'responses_background', stream: false, status: 200 };
+  const proxyMetrics = { requestAttempts: 1, rejectedRequests: 0, failed: false };
+  const input = { runnerExit, cleanupFailed: false, calls: [backgroundCall], proxyMetrics };
+  assert.equal(isSuccessfulAiLiveConnectionSmokeResult(input), true);
+  assert.equal(isSuccessfulAiLiveConnectionSmokeResult({ ...input, calls: [] }), false);
+  assert.equal(isSuccessfulAiLiveConnectionSmokeResult({ ...input, calls: [backgroundCall, backgroundCall] }), false);
+  assert.equal(isSuccessfulAiLiveConnectionSmokeResult({ ...input, proxyMetrics: { ...proxyMetrics, requestAttempts: 2 } }), false);
+  assert.equal(isSuccessfulAiLiveConnectionSmokeResult({ ...input, runnerExit: { ...runnerExit, runnerCleaned: false } }), false);
+});
+
+test('household-plan-only mode is explicit, exclusive and requires one strict real completion', () => {
+  const args = [
+    '--config=playwright.ai-real-smoke.config.ts',
+    'tests/e2e/ai-real-smoke.spec.ts',
+    '--grep=HogarIA household plan proposal real workflow'
+  ];
+  const env = {
+    HOGARIA_AI_REAL_SMOKE: '1',
+    HOGARIA_AI_REAL_SMOKE_RUNNER: '1',
+    HOGARIA_AI_REAL_SMOKE_HOUSEHOLD_PLAN_ONLY: '1',
+    HOGARIA_AI_REAL_SMOKE_PROXY_TOKEN: 'synthetic-local-proxy-token',
+    HOGARIA_AI_REAL_SMOKE_PROXY_URL: 'http://127.0.0.1:41000/v1',
+    HOGARIA_AI_REAL_SMOKE_MODEL: 'gpt-5',
+    CI: ''
+  };
+
+  assert.equal(validateAiLiveHouseholdPlanSmokeRequest(env), true);
+  assert.equal(validateAiLiveSmokeRunner(env, args), true);
+  assert.equal(validateAiLiveHouseholdPlanSmokeRequest({}), false);
+  assert.throws(
+    () => validateAiLiveHouseholdPlanSmokeRequest({ ...env, HOGARIA_AI_REAL_SMOKE_HOUSEHOLD_PLAN_ONLY: 'true' }),
+    /exact opt-in/i
+  );
+  for (const conflictingInput of [
+    { HOGARIA_AI_REAL_SMOKE_CONNECTION_ONLY: '1' },
+    { HOGARIA_AI_REAL_SMOKE_WORKFLOWS_ONLY: '1' },
+    { HOGARIA_AI_REAL_SMOKE_ASSISTANT_ONLY: '1' },
+    { HOGARIA_AI_REAL_SMOKE_HOUSEHOLD_MEAL_ONLY: '1' },
+    { HOGARIA_AI_REAL_SMOKE_RECIPE_ONLY: '1' },
+    { HOGARIA_AI_REAL_SMOKE_RECEIPTS_ONLY: '1' },
+    { HOGARIA_AI_REAL_SMOKE_RECEIPT_PATH: 'C:/private/ticket.pdf' }
+  ]) {
+    assert.throws(
+      () => validateAiLiveHouseholdPlanSmokeRequest({ ...env, ...conflictingInput }),
+      /cannot combine|cannot include receipt/i
+    );
+  }
+
+  const runnerExit = { code: 0, cancelled: false, timedOut: false, runnerCleaned: true };
+  const call = {
+    status: 200,
+    stream: false,
+    providerTransport: 'responses_background',
+    schemaName: 'household_plan',
+    requestContract: { strictJsonSchema: true }
+  };
+  const proxyMetrics = { requestAttempts: 1, rejectedRequests: 0, failed: false };
+  const input = { runnerExit, cleanupFailed: false, calls: [call], proxyMetrics };
+  assert.equal(isSuccessfulAiLiveHouseholdPlanSmokeResult(input), true);
+  assert.equal(isSuccessfulAiLiveHouseholdPlanSmokeResult({ ...input, calls: [] }), false);
+  assert.equal(isSuccessfulAiLiveHouseholdPlanSmokeResult({ ...input, calls: [call, call] }), false);
+  assert.equal(
+    isSuccessfulAiLiveHouseholdPlanSmokeResult({ ...input, calls: [{ ...call, schemaName: 'recipe' }] }),
+    false
+  );
+  assert.equal(
+    isSuccessfulAiLiveHouseholdPlanSmokeResult({
+      ...input,
+      calls: [{ ...call, requestContract: { strictJsonSchema: false } }]
+    }),
+    false
+  );
+  assert.equal(
+    isSuccessfulAiLiveHouseholdPlanSmokeResult({
+      ...input,
+      proxyMetrics: { ...proxyMetrics, rejectedRequests: 1, failed: true }
+    }),
+    false
+  );
+});
+
+test('workflow-only mode is explicit, exclusive, and requires both real schemas', () => {
+  const args = [
+    '--config=playwright.ai-real-smoke.config.ts',
+    'tests/e2e/ai-real-smoke.spec.ts',
+    `--grep=${AI_LIVE_WORKFLOWS_SMOKE_GREP}`
+  ];
+  const env = {
+    HOGARIA_AI_REAL_SMOKE: '1',
+    HOGARIA_AI_REAL_SMOKE_RUNNER: '1',
+    HOGARIA_AI_REAL_SMOKE_WORKFLOWS_ONLY: '1',
+    HOGARIA_AI_REAL_SMOKE_PROXY_TOKEN: 'synthetic-local-proxy-token',
+    HOGARIA_AI_REAL_SMOKE_PROXY_URL: 'http://127.0.0.1:41000/v1',
+    HOGARIA_AI_REAL_SMOKE_MODEL: 'gpt-5',
+    CI: ''
+  };
+
+  assert.equal(validateAiLiveWorkflowSmokeRequest(env), true);
+  assert.equal(validateAiLiveSmokeRunner(env, args), true);
+  assert.equal(new RegExp(AI_LIVE_WORKFLOWS_SMOKE_GREP).test(AI_LIVE_WORKFLOWS_SMOKE_GREP), true);
+  assert.equal(validateAiLiveWorkflowSmokeRequest({}), false);
+  for (const conflictingInput of [
+    { HOGARIA_AI_REAL_SMOKE_WORKFLOWS_ONLY: 'true' },
+    { HOGARIA_AI_REAL_SMOKE_WORKFLOWS_ONLY: '1', HOGARIA_AI_REAL_SMOKE_CONNECTION_ONLY: '1' },
+    { HOGARIA_AI_REAL_SMOKE_WORKFLOWS_ONLY: '1', HOGARIA_AI_REAL_SMOKE_RECIPE_ONLY: '1' },
+    { HOGARIA_AI_REAL_SMOKE_WORKFLOWS_ONLY: '1', HOGARIA_AI_REAL_SMOKE_ASSISTANT_ONLY: '1' },
+    { HOGARIA_AI_REAL_SMOKE_WORKFLOWS_ONLY: '1', HOGARIA_AI_REAL_SMOKE_RECEIPTS_ONLY: '1' },
+    { HOGARIA_AI_REAL_SMOKE_WORKFLOWS_ONLY: '1', HOGARIA_AI_REAL_SMOKE_HOUSEHOLD_MEAL_ONLY: '1' },
+    { HOGARIA_AI_REAL_SMOKE_WORKFLOWS_ONLY: '1', HOGARIA_AI_REAL_SMOKE_RECEIPT_PATH: 'C:/private/ticket.pdf' }
+  ]) {
+    assert.throws(
+      () =>
+        validateAiLiveWorkflowSmokeRequest({
+          ...env,
+          ...conflictingInput
+        }),
+      /cannot combine|exact opt-in/i
+    );
+  }
+
+  const calls = [
+    {
+      status: 200,
+      stream: false,
+      providerTransport: 'responses_background',
+      schemaName: 'generated_recipe',
+      requestContract: { strictJsonSchema: true }
+    },
+    {
+      status: 200,
+      stream: false,
+      providerTransport: 'responses_background',
+      schemaName: 'meal_replacement',
+      requestContract: { strictJsonSchema: true }
+    }
+  ];
+  const runnerExit = { code: 0, cancelled: false, timedOut: false, runnerCleaned: true };
+  const proxyMetrics = { requestAttempts: 2, rejectedRequests: 0, failed: false };
+  assert.equal(
+    isSuccessfulAiLiveWorkflowSmokeResult({ runnerExit, cleanupFailed: false, calls, proxyMetrics }),
+    true
+  );
+  assert.equal(
+    isSuccessfulAiLiveWorkflowSmokeResult({
+      runnerExit,
+      cleanupFailed: false,
+      calls: calls.slice(0, 1),
+      proxyMetrics
+    }),
+    false
+  );
+  assert.equal(
+    isSuccessfulAiLiveWorkflowSmokeResult({
+      runnerExit,
+      cleanupFailed: false,
+      calls: [{ ...calls[0], schemaName: 'chat_completions' }, calls[1]],
+      proxyMetrics
+    }),
+    false
+  );
+  assert.equal(
+    isSuccessfulAiLiveWorkflowSmokeResult({
+      runnerExit,
+      cleanupFailed: false,
+      calls: [calls[0], { ...calls[1], schemaName: 'generated_recipe' }],
+      proxyMetrics
+    }),
+    false
+  );
 });
 
 test('recipe-only mode permits one isolated generation and rejects other smoke inputs', () => {
@@ -1099,6 +1317,26 @@ test('assistant-only runner environment keeps its mode in Playwright and strips 
   assert.equal(processEnvs.playwright.HOGARIA_AI_REAL_SMOKE_PROXY_TOKEN, undefined);
 });
 
+test('workflow-only environment keeps real-search opt-in solely in Playwright', () => {
+  const env = createAiLiveSmokeRunnerEnvironment(
+    { PATH: 'C:/Windows/System32', PANTRY_IMAGE_SEARCH_FIXTURE: '1' },
+    {
+      proxyToken: 'synthetic-local-proxy-token',
+      proxyUrl: 'http://127.0.0.1:41000/v1',
+      model: 'gpt-5',
+      workflowsOnly: true
+    }
+  );
+  const processEnvs = isolatedProcessEnvironments(env);
+
+  assert.equal(env.HOGARIA_AI_REAL_SMOKE_WORKFLOWS_ONLY, '1');
+  assert.equal(processEnvs.server.HOGARIA_AI_REAL_SMOKE_WORKFLOWS_ONLY, undefined);
+  assert.equal(processEnvs.browser.HOGARIA_AI_REAL_SMOKE_WORKFLOWS_ONLY, undefined);
+  assert.equal(processEnvs.playwright.HOGARIA_AI_REAL_SMOKE_WORKFLOWS_ONLY, '1');
+  assert.equal(processEnvs.server.PANTRY_IMAGE_SEARCH_FIXTURE, undefined);
+  assert.equal(processEnvs.browser.PANTRY_IMAGE_SEARCH_FIXTURE, undefined);
+});
+
 test('accepts only a fully successful run with nine or ten background Responses completions', () => {
   const calls = (count) =>
     Array.from({ length: count }, () => ({
@@ -1765,7 +2003,7 @@ test('recipe proxy admits one generated_recipe schema only when recipe text has 
   }
 });
 
-test('meal proxy forwards one strict-schema completion with its verified JSON context and rejects duplicates', async () => {
+test('meal proxy accepts unordered aliases for valid member preferences and rejects duplicates', async () => {
   const upstreamRequests = [];
   const completionEvents = [];
   const providerResponse = {
@@ -1798,6 +2036,7 @@ test('meal proxy forwards one strict-schema completion with its verified JSON co
     onCompletion: (event) => completionEvents.push(event)
   });
   const context = syntheticMealContext();
+  context.participants.reverse();
   const catalog = syntheticMealRecipeCatalog();
   const contextData = JSON.stringify(context);
   const catalogData = JSON.stringify(catalog);
@@ -1876,6 +2115,71 @@ test('meal proxy forwards one strict-schema completion with its verified JSON co
       },
       { requestAttempts: 2, rejectedRequests: 1, failed: true }
     );
+  } finally {
+    await proxy.close();
+    await new Promise((resolve, reject) =>
+      upstream.close((error) => (error ? reject(error) : resolve()))
+    );
+  }
+});
+
+test('meal proxy classifies invalid context with a safe rejection code', async () => {
+  const proxy = await createAiLiveProxy({
+    token: 'synthetic-provider-token',
+    model: 'gpt-5',
+    targetOrigin: 'http://127.0.0.1:1',
+    maxCalls: 1,
+    expectedSchemaName: 'weekly_meal_proposal'
+  });
+  try {
+    const privateFixture = 'private synthetic context marker';
+    const response = await postJson(
+      `${proxy.baseUrl}/chat/completions`,
+      proxy.clientToken,
+      mealPayload({ context: { ...syntheticMealContext(), unexpected: privateFixture } })
+    );
+
+    assert.equal(response.status, 400);
+    assert.deepEqual(proxy.metrics.rejectionCodes, ['meal_context_shape']);
+    assert.equal(JSON.stringify(proxy.metrics).includes(privateFixture), false);
+    assert.equal(proxy.metrics.requestAttempts, 1);
+    assert.equal(proxy.metrics.rejectedRequests, 1);
+  } finally {
+    await proxy.close();
+  }
+});
+
+test('meal proxy names mismatched preference field without retaining preference value', async () => {
+  let upstreamCalls = 0;
+  const upstream = createServer((_request, response) => {
+    upstreamCalls += 1;
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end('{"choices":[]}');
+  });
+  const upstreamPort = await listen(upstream);
+  const proxy = await createAiLiveProxy({
+    token: 'synthetic-provider-token',
+    model: 'gpt-5',
+    targetOrigin: `http://127.0.0.1:${upstreamPort}`,
+    maxCalls: 1,
+    expectedSchemaName: 'weekly_meal_proposal'
+  });
+  try {
+    const privatePreference = 'synthetic-private-like-value';
+    const context = syntheticMealContext();
+    context.participants[0].preferences.likes = [privatePreference];
+    const response = await postJson(
+      `${proxy.baseUrl}/chat/completions`,
+      proxy.clientToken,
+      mealPayload({ context })
+    );
+
+    assert.equal(response.status, 400);
+    assert.deepEqual(proxy.metrics.rejectionCodes, ['meal_context_member_likes']);
+    assert.equal(proxy.metrics.requestAttempts, 1);
+    assert.equal(proxy.metrics.rejectedRequests, 1);
+    assert.equal(upstreamCalls, 0);
+    assert.equal(JSON.stringify(proxy.metrics).includes(privatePreference), false);
   } finally {
     await proxy.close();
     await new Promise((resolve, reject) =>
@@ -2276,7 +2580,8 @@ test('background Responses proxy validates its fixed route, polls only accepted 
       model: 'gpt-5',
       background: true,
       store: true,
-      input: [{ role: 'user', content: 'synthetic background prompt' }],
+      instructions: 'Synthetic system instruction.',
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'synthetic background prompt' }] }],
       text: {
         format: {
           type: 'json_schema',
@@ -2316,6 +2621,7 @@ test('background Responses proxy validates its fixed route, polls only accepted 
     );
     assert.equal(completed.status, 200);
     assert.equal(JSON.parse(completed.text).status, 'completed');
+    assert.equal(upstreamRequests[0].body.instructions, 'Synthetic system instruction.');
     assert.equal(completed.text.includes(bearer), false);
     assert.equal(completed.text.includes(proxyToken), false);
     assert.deepEqual(
@@ -2342,8 +2648,13 @@ test('background Responses proxy validates its fixed route, polls only accepted 
     assert.equal(JSON.stringify(proxy.metrics).includes(bearer), false);
     assert.equal(JSON.stringify(proxy.metrics).includes(proxyToken), false);
 
-    const secondCreate = await postJson(`${proxy.baseUrl}/responses`, proxyToken, request);
+    const stringInputPrompt = 'Synthetic connection test prompt.';
+    const secondCreate = await postJson(`${proxy.baseUrl}/responses`, proxyToken, {
+      ...request,
+      input: stringInputPrompt
+    });
     assert.equal(secondCreate.status, 202);
+    assert.equal(upstreamRequests[2].body.input, stringInputPrompt);
     const cancel = await requestJson(
       `${proxy.baseUrl}/responses/resp_fixture_2/cancel`,
       proxyToken,
@@ -2385,6 +2696,26 @@ test('background Responses proxy validates its fixed route, polls only accepted 
       ]
     });
     assert.equal(invalidInputPart.status, 400);
+    const unsupportedSystemInput = await postJson(`${proxy.baseUrl}/responses`, proxyToken, {
+      ...request,
+      input: [{ role: 'system', content: 'Must be sent as instructions.' }]
+    });
+    assert.equal(unsupportedSystemInput.status, 400);
+    const unsupportedStringMessageContent = await postJson(`${proxy.baseUrl}/responses`, proxyToken, {
+      ...request,
+      input: [{ role: 'user', content: 'WebAPI requires input_text parts here.' }]
+    });
+    assert.equal(unsupportedStringMessageContent.status, 400);
+    const invalidInstructions = await postJson(`${proxy.baseUrl}/responses`, proxyToken, {
+      ...request,
+      instructions: { private: 'object' }
+    });
+    assert.equal(invalidInstructions.status, 400);
+    const overlongInstructions = await postJson(`${proxy.baseUrl}/responses`, proxyToken, {
+      ...request,
+      instructions: 'x'.repeat(4001)
+    });
+    assert.equal(overlongInstructions.status, 400);
     const unsupportedField = await postJson(`${proxy.baseUrl}/responses`, proxyToken, {
       ...request,
       tools: [{ type: 'web_search' }]
@@ -2398,6 +2729,73 @@ test('background Responses proxy validates its fixed route, polls only accepted 
     );
     assert.equal(arbitraryRoute.status, 404);
     assert.equal(upstreamRequests.length, 4);
+  } finally {
+    await proxy.close();
+    await new Promise((resolve, reject) =>
+      upstream.close((error) => (error ? reject(error) : resolve()))
+    );
+  }
+});
+
+test('background Responses proxy preserves only safe provider error fields for diagnostics', async () => {
+  const bearer = 'synthetic-responses-provider-bearer-secret';
+  let proxyToken = '';
+  const upstream = createServer((_request, response) => {
+    response.writeHead(400, { 'content-type': 'application/json' });
+    response.end(
+      JSON.stringify({
+        error: {
+          code: 'responses_input_unsupported',
+          message: `Sensitive provider message with bearer ${bearer}`
+        }
+      })
+    );
+  });
+  const upstreamPort = await listen(upstream);
+  const proxy = await createAiLiveProxy({
+    token: bearer,
+    model: 'gpt-5',
+    targetOrigin: `http://127.0.0.1:${upstreamPort}`,
+    maxCalls: 1
+  });
+  proxyToken = proxy.clientToken;
+
+  try {
+    const request = {
+      model: 'gpt-5',
+      background: true,
+      store: true,
+      input: [{ role: 'user', content: [{ type: 'input_text', text: 'synthetic prompt' }] }],
+      text: {
+        format: {
+          type: 'json_schema',
+          name: 'synthetic_answer',
+          strict: true,
+          schema: SYNTHETIC_STRICT_RESPONSE_FORMAT.json_schema.schema
+        }
+      }
+    };
+    const response = await postJson(`${proxy.baseUrl}/responses`, proxyToken, request);
+    const payload = JSON.parse(response.text);
+    const safeProviderError = {
+      code: 'responses_input_unsupported'
+    };
+
+    assert.equal(response.status, 400);
+    assert.deepEqual(payload, { error: safeProviderError });
+    assert.equal(response.text.includes(bearer), false);
+    assert.equal(response.text.includes(proxyToken), false);
+    assert.equal(response.text.includes('Sensitive provider message'), false);
+    assert.deepEqual(proxy.metrics.calls[0].providerError, safeProviderError);
+    assert.deepEqual(proxy.metrics.calls[0].providerErrorEnvelope, {
+      contentType: 'json',
+      bodyFormat: 'json',
+      errorShape: 'object',
+      knownFields: ['code', 'message']
+    });
+    assert.equal(JSON.stringify(proxy.metrics).includes(bearer), false);
+    assert.equal(JSON.stringify(proxy.metrics).includes(proxyToken), false);
+    assert.equal(JSON.stringify(proxy.metrics).includes('Sensitive provider message'), false);
   } finally {
     await proxy.close();
     await new Promise((resolve, reject) =>
@@ -3066,4 +3464,33 @@ test('closing the proxy aborts in-flight upstream work', async () => {
       upstream.close((error) => (error ? reject(error) : resolve()))
     );
   }
+});
+
+test('connection-only mode is removed from server and browser env but retained for Playwright', () => {
+  const env = createAiLiveSmokeRunnerEnvironment(
+    {
+      PATH: 'C:/Windows/System32',
+      HOGARIA_AI_REAL_SMOKE_RECEIPT_PATH: 'C:/private/ticket.pdf',
+      HOGARIA_AI_REAL_SMOKE_RECEIPTS_ONLY: '1',
+      HOGARIA_AI_REAL_SMOKE_RECEIPT_SELECTION: 'unsubmitted-only',
+      HOGARIA_AI_REAL_SMOKE_RECEIPT_DIRECTORY: 'C:/private/tickets',
+      HOGARIA_AI_REAL_SMOKE_PREFERRED_JPEG_ORDINAL: '2'
+    },
+    {
+      proxyToken: 'synthetic-local-proxy-token',
+      proxyUrl: 'http://127.0.0.1:41000/v1',
+      model: 'gpt-5',
+      connectionOnly: true
+    }
+  );
+  const isolated = isolatedProcessEnvironments(env);
+
+  assert.equal(env.HOGARIA_AI_REAL_SMOKE_CONNECTION_ONLY, '1');
+  assert.equal(Object.hasOwn(env, 'HOGARIA_AI_REAL_SMOKE_RECEIPT_PATH'), false);
+  assert.equal(Object.hasOwn(isolated.server, 'HOGARIA_AI_REAL_SMOKE_CONNECTION_ONLY'), false);
+  assert.equal(Object.hasOwn(isolated.browser, 'HOGARIA_AI_REAL_SMOKE_CONNECTION_ONLY'), false);
+  assert.equal(isolated.playwright.HOGARIA_AI_REAL_SMOKE_CONNECTION_ONLY, '1');
+  assert.equal(isolated.server.HOGARIA_AI_REAL_SMOKE_PROXY_TOKEN, 'synthetic-local-proxy-token');
+  assert.equal(Object.hasOwn(isolated.browser, 'HOGARIA_AI_REAL_SMOKE_PROXY_TOKEN'), false);
+  assert.equal(Object.hasOwn(isolated.playwright, 'HOGARIA_AI_REAL_SMOKE_PROXY_TOKEN'), false);
 });
