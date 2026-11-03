@@ -95,7 +95,7 @@ test('sustituye una sola comida con restricciones efímeras de invitados tras re
       .locator('[data-test="timeline-block-meal"]')
       .filter({ hasText: 'Pasta original QA' });
     await expect(meal).toHaveCount(1);
-    await meal.click();
+    await page.getByRole('button', { name: 'Editar Pasta original QA', exact: true }).click();
 
     const editor = page.locator('app-modal:has(#meal-custom)');
     await editor.locator('.modal').evaluate(async (element) => {

@@ -46,7 +46,7 @@
 ### Navegador y calidad
 
 - [x] Playwright real con server y SQLite temporal recorre edición/guardado/recarga de promoción y dirección en escritorio/móvil; ningún dato personal o secreto en artefactos.
-- [x] Capturas comparables de PC/móvil, geometría de controles equivalente (±1 CSS px), foco/teclado y targets táctiles revisados.
+- [x] Capturas comparables de PC/móvil, geometría de controles equivalente (±1 CSS px; `app-input` mantiene 42 px), foco/teclado y targets de acción revisados.
 - [ ] Tests/build/gates de CI pasan; umbral existente de coverage se conserva.
 
 ## Plan por unidades

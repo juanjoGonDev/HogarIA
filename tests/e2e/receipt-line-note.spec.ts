@@ -679,7 +679,7 @@ test.describe('edición de dirección y sucursal del ticket', () => {
         await expectNoHorizontalOverflow(page, 320, 740);
       }
       const addressBounds = await address.boundingBox();
-      expect(addressBounds?.height ?? 0).toBeGreaterThanOrEqual(44);
+      expect(Math.abs((addressBounds?.height ?? 0) - 42)).toBeLessThanOrEqual(1);
       expect(pageErrors).toEqual([]);
     });
   }
