@@ -1987,9 +1987,63 @@ describe('AI provider queue dispatcher', () => {
     }
   });
 
-  it('does not start or retain a runtime for a non-integer claim generation', async () => {
+  it.each([null, '1.5'])(
+    'does not start or retain a runtime for an invalid active claim generation (%s)',
+    async (invalidGeneration) => {
+      const { submitAiTask, pararTrabajo } = await import('./ticket-queue.js');
+      const run = vi.fn(async () => 'must not run');
+      const job = submitAiTask({
+        db,
+        userId,
+        config,
+        kind: 'connection_test',
+        run
+      });
+      const metadataSelect =
+        'SELECT kind, config_id, household_id, receipt_id, status, claim_generation FROM ai_jobs WHERE id = ?';
+      const originalPrepare = db.prepare.bind(db);
+      let injected = false;
+      const prepare = vi.spyOn(db, 'prepare').mockImplementation((sql: string) => {
+        if (!injected && sql === metadataSelect) {
+          injected = true;
+          return {
+            get: (...parameters: unknown[]) => {
+              const row = originalPrepare(sql).get(...parameters) as
+                Record<string, unknown> | undefined;
+              return row ? { ...row, claim_generation: invalidGeneration } : undefined;
+            }
+          } as ReturnType<Sql['prepare']>;
+        }
+        return originalPrepare(sql);
+      });
+      const result = job.result.catch((error) => error);
+
+      try {
+        await waitFor(() => injected, 500);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(run).not.toHaveBeenCalled();
+        const trace = JSON.parse(String(jobRow(job.id).worker_trace_json)) as Array<{
+          stage: string;
+        }>;
+        expect(trace.map((event) => event.stage)).not.toContain('runtime_started');
+        expect(jobRow(job.id).status).toBe('running');
+        expect(pararTrabajo(job.id)).toBe(true);
+        await result;
+        expect(jobRow(job.id).status).toBe('stopped');
+      } finally {
+        prepare.mockRestore();
+        if (jobRow(job.id)?.status === 'running') {
+          pararTrabajo(job.id);
+          await result;
+        }
+      }
+    }
+  );
+
+  it('treats a null legacy queued claim generation as the initial generation', async () => {
     const { submitAiTask, pararTrabajo } = await import('./ticket-queue.js');
-    const run = vi.fn(async () => 'must not run');
+    const run = vi.fn(async () => 'runtime reached');
     const job = submitAiTask({
       db,
       userId,
@@ -1997,18 +2051,18 @@ describe('AI provider queue dispatcher', () => {
       kind: 'connection_test',
       run
     });
-    const metadataSelect =
-      'SELECT kind, config_id, household_id, receipt_id, status, claim_generation FROM ai_jobs WHERE id = ?';
+    const claimSelect =
+      "SELECT id, config_id, user_id, household_id, kind, claim_generation FROM ai_jobs WHERE id = ? AND status = 'queued'";
     const originalPrepare = db.prepare.bind(db);
     let injected = false;
     const prepare = vi.spyOn(db, 'prepare').mockImplementation((sql: string) => {
-      if (!injected && sql === metadataSelect) {
+      if (sql === claimSelect) {
         injected = true;
         return {
           get: (...parameters: unknown[]) => {
             const row = originalPrepare(sql).get(...parameters) as
               Record<string, unknown> | undefined;
-            return row ? { ...row, claim_generation: '1.5' } : undefined;
+            return row ? { ...row, claim_generation: null } : undefined;
           }
         } as ReturnType<Sql['prepare']>;
       }
@@ -2018,20 +2072,12 @@ describe('AI provider queue dispatcher', () => {
 
     try {
       await waitFor(() => injected, 500);
-      await new Promise((resolve) => setTimeout(resolve, 0));
-
-      expect(run).not.toHaveBeenCalled();
-      const trace = JSON.parse(String(jobRow(job.id).worker_trace_json)) as Array<{
-        stage: string;
-      }>;
-      expect(trace.map((event) => event.stage)).not.toContain('runtime_started');
-      expect(jobRow(job.id).status).toBe('running');
-      expect(pararTrabajo(job.id)).toBe(true);
-      await result;
-      expect(jobRow(job.id).status).toBe('stopped');
+      await waitFor(() => run.mock.calls.length === 1, 500);
+      await expect(result).resolves.toBe('runtime reached');
+      expect(jobRow(job.id).status).toBe('done');
     } finally {
       prepare.mockRestore();
-      if (jobRow(job.id)?.status === 'running') {
+      if (['queued', 'running'].includes(String(jobRow(job.id)?.status))) {
         pararTrabajo(job.id);
         await result;
       }

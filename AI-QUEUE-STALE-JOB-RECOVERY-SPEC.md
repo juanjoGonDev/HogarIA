@@ -155,7 +155,7 @@
 
 - [x] TDD reproduce un resultado SQLite legacy `claim_generation TEXT` (`"1.0"`): el worker llega a `runtime_started`, ejecuta el runtime una vez y alcanza estado terminal; antes del fix abandonaba el job antes del runtime.
 - [x] Normalizar de forma segura los valores `claim_generation` leídos de SQLite antes de compararlos en worker, callbacks genéricos y recuperación de leases; valores fraccionarios/inválidos no inician runtime.
-- [ ] En filas `queued` legacy con `claim_generation = NULL`, interpretar null solo como generación inicial 0 para reclamar; active claims null/inválidos no deben coincidir con una generación vigente.
+- [x] En filas `queued` legacy con `claim_generation = NULL`, interpretar null solo como generación inicial 0 para reclamar; active claims null/inválidos no deben coincidir con una generación vigente.
 - [ ] Navegador real contra el servicio local ya actualizado y WebApi real: test de conexión background terminal exitoso, trace completo, concurrencia liberada y sin nuevo `WORKER_STALLED`.
 
 ### Evidencia de corrección de generaciones legacy
@@ -171,3 +171,4 @@
 - Desde el navegador real se aceptó otro test (`202`), pero quedó en cola: la UI mostró `1 esperando · 0 en curso`. La consulta readonly de la DB encontró el job `FLAHOhsn9LYvl4i8IGKsy` en `queued`, `attempts=0`, `claim_generation=NULL`, sin lease ni eventos de worker; no llegó al proveedor.
 - El esquema antiguo permite `NULL` en esa columna. La primera normalización lo rechazaba también al leer la generación inicial de una fila queued, así que el worker no reclamaba el job. La corrección debe tratar `NULL` como 0 solo durante la reclamación queued; los valores nulos/fraccionarios en claims activos deben seguir fallando cerrados.
 - Reproducir primero en test aislado; después del fix, ejecutar una prueba nueva desde navegador/WebApi reales. La revisión local del servidor invalida jobs genéricos/connection-test en memoria al reiniciar (`INPUT_EXPIRED`), por eso no se reutilizará esta closure perdida ni se editará manualmente la DB.
+- TDD: el nuevo test de `queued + NULL` falló antes del fix (`INVALID_CLAIM_GENERATION`, runtime nunca arrancó) y pasa ahora; el test parametrizado confirma que claims activos `NULL` y fraccionarios no inician runtime. `ai-queue.spec.ts`: 49/49; suite servidor: 2.192 pasaron, 1 omitida; coverage 89,47 % statements / 81,90 % branches / 95,67 % functions / 92,34 % lines; `tsc --noEmit` pasa.

@@ -1202,7 +1202,7 @@ function reclamarTrabajo(db: SqlDb, jobId: string, leaseSeconds: number): number
             user_id: string;
             household_id: string | null;
             kind: string;
-            claim_generation: number | string;
+            claim_generation: number | string | null;
           }
         | undefined;
       if (!fila) return null;
@@ -1233,7 +1233,10 @@ function reclamarTrabajo(db: SqlDb, jobId: string, leaseSeconds: number): number
         ).n;
         if (cap !== Number.POSITIVE_INFINITY && activos >= cap) return null;
       }
-      const previousClaimGeneration = normalizeClaimGeneration(fila.claim_generation);
+      // Legacy queued rows may have NULL because the column was added to an older schema.
+      // Treat that one state as the initial generation; active claims remain fail-closed.
+      const previousClaimGeneration =
+        fila.claim_generation === null ? 0 : normalizeClaimGeneration(fila.claim_generation);
       if (previousClaimGeneration === null) {
         console.error('[AI queue] Cannot claim job with invalid claim generation', {
           jobId,
