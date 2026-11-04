@@ -104,3 +104,10 @@ El run [#1141](https://github.com/juanjoGonDev/HogarIA/actions/runs/41877339875)
 - [ ] Ejecutar CI nuevo del PR #72 y comprobar que instalación, smokes `amd64`/`arm64` y el resto de gates dejan de fallar por `ERR_PNPM_OUTDATED_LOCKFILE`.
 
 **Evidencia local:** `pnpm install --lockfile-only --frozen-lockfile --ignore-scripts` pasó; el diff queda limitado a Hono `4.13.14` → `4.13.16` en manifiesto, importers, resolución y snapshots. No se modificó `node_modules`.
+
+### Hallazgo del run #1146 — 2026-11-04
+
+Run #1146 (`41894912465`, commit `1589a83d`) pasó instalación congelada, smokes de contenedor `amd64`/`arm64` y resto de gates salvo shard E2E 2. Fallaron cinco pruebas por `getByRole('tab', { name: 'Ajustes' })`, que coincidía tanto con «Ajustes» como con «Ajustes IA»; no era una regresión funcional. Se cambió el locator a `exact: true` en `confirm-dialog.spec.ts`, `household-action-ack.spec.ts`, `household-icon-consistency.spec.ts` y `household.spec.ts`.
+
+- [x] Reproducir los cinco strict-locator failures y validar corrección en las cuatro suites afectadas: `node scripts/run-isolated-playwright.mjs --project=chromium --forbid-only tests/e2e/confirm-dialog.spec.ts tests/e2e/household-action-ack.spec.ts tests/e2e/household-icon-consistency.spec.ts tests/e2e/household.spec.ts` — 20/20 pasan.
+- [ ] Confirmar run remoto completo verde tras publicar el fix; PR #72 se mantiene Draft mientras tanto.

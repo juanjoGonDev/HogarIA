@@ -27,7 +27,7 @@ test.describe('Household sharing & invite flow', () => {
     await expect(page.locator('.invite-card__code')).toContainText('/invite/');
     // Copy link button present
     await expect(page.getByRole('button', { name: /Copiar enlace/ })).toBeVisible();
-    await page.getByRole('tab', { name: 'Ajustes' }).click();
+    await page.getByRole('tab', { name: 'Ajustes', exact: true }).click();
     // Share toggles present (admin sees them)
     const shareSection = page
       .locator('.settings-section')
@@ -49,7 +49,7 @@ test.describe('Household sharing & invite flow', () => {
         : { width: 1440, height: 900 };
     await page.setViewportSize(viewport);
     await registerWithHousehold(page, '/household', 'button-state-geometry');
-    await page.getByRole('tab', { name: 'Ajustes' }).click();
+    await page.getByRole('tab', { name: 'Ajustes', exact: true }).click();
 
     const name = page.locator('[data-test="household-name-input"]');
     const save = page.locator('[data-test="household-name-save"] button');
@@ -210,7 +210,7 @@ test.describe('Household sharing & invite flow', () => {
     expectSameGeometry(normal, await readGeometry(), 'tras éxito');
 
     await page.reload();
-    await page.getByRole('tab', { name: 'Ajustes' }).click();
+    await page.getByRole('tab', { name: 'Ajustes', exact: true }).click();
     await expect(name).toHaveValue('Hogar de geometría sintética');
   });
 
