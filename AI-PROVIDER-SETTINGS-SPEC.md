@@ -1,11 +1,11 @@
 # Hogar: proveedores de IA y registro
 
-**Estado:** Implementación, gates locales y comparación geométrica verificados; CI del código en `eca1c81` verde (run [41242323842](https://github.com/juanjoGonDev/HogarIA/actions/runs/41242323842)). El estado del PR lo controla el usuario.
+**Estado:** Implementación base verificada; cambio de navegación solicitado el 04/11/2026, pendiente en PR #72. Conservar estado Ready elegido por el usuario; no mergear.
 **Base revalidada:** `origin/master` en `b4bc0c8277ff7090cf709946433932a25e2b49c4` (incluye la reversión solicitada en PR #62; integrada sin reescribir la rama).
 
 ## Objetivo y decisiones
 
-- La configuración de proveedores vive en **Hogar → Ajustes** y conserva el aislamiento por hogar y el permiso `settings`.
+- La configuración de proveedores vive en una pestaña propia **Hogar → IA** y conserva el aislamiento por hogar y el permiso `settings`. Esta decisión reemplaza la ubicación anterior en **Hogar → Ajustes** por feedback del usuario (04/11/2026).
 - Se permiten varios proveedores activos. La configuración asigna cada función de IA a un proveedor activo; con un proveedor se muestra su nombre sin selector y con varios se ofrece un selector por función.
 - Las asignaciones se guardan por scope en `ai_function_providers` (una fila por función; no guarda credenciales) y se inicializan con el proveedor activo más antiguo del mismo scope. Los cambios son atómicos; `ai_jobs.config_id` conserva la selección al admitir el trabajo.
 - Las funciones visibles son: **Asistente**, **Recetas y recomendaciones**, **Planificación**, **Compra y despensa** y **Automatización del hogar**. Todos los `AiJobKind` y caminos directos del servidor se asignan exactamente a una función; `connection_test` siempre usa la configuración probada. `product_image_search` consulta Commons y no llama al modelo, pero conserva su afinidad de scheduler en Compra y despensa.
@@ -18,6 +18,20 @@
 - Una API key con solo espacios se trata como vacía al editar (no sustituye la clave existente) y se rechaza al crear; las claves válidas se guardan sin recortarlas.
 - Los errores de validación Joi/Zod que se muestren en un toast identifican campo y regla incumplida, incluidos límites numéricos. Guardar/probar una configuración no puede convertir un error de validación en un toast genérico; los flujos con error inline propio conservan su comportamiento silencioso.
 - La entrega será **un único PR**, por decisión explícita del usuario aunque el diff supere 400 líneas; documentar esa excepción con la etiqueta `size:exception`. Respetar el estado del PR elegido por el usuario y no mergear sin permiso.
+
+## Enmienda vigente: pestaña IA y márgenes (04/11/2026)
+
+La configuración IA debe separarse de los ajustes generales del hogar y quedar en una pestaña propia de primer nivel. Ajustes conserva nombre/compartición y acciones propias del hogar. La nueva pestaña conserva el permiso `settings`, el aislamiento del hogar y los guardas de servidor; el usuario puede navegar a ella con `?tab=ai`. Rutas o diálogos que abren la configuración deben llevar a esa pestaña. Miembros sin permiso conservan la explicación de acceso restringido y no reciben datos del gestor.
+
+La pestaña IA reutiliza el contenedor, ancho y gutters existentes de Hogar. No añadir márgenes negativos, padding duplicado ni una segunda tarjeta exterior alrededor del gestor. Navegación y panel deben conservar margen lateral y alineación del contenido de Ajustes con tolerancia de 1 CSS px, sin overflow horizontal en escritorio, móvil mínimo y apaisado.
+
+### Criterios de aceptación de la enmienda
+
+- [ ] La IA aparece en pestaña superior independiente, con tab/panel accesibles, i18n ES/EN, navegación por teclado y query `tab=ai`; Ajustes ya no monta el gestor.
+- [ ] La pestaña IA conserva el permiso `settings`; el usuario autorizado puede entrar por enlace directo y los miembros no autorizados ven el estado restringido sin datos de proveedores.
+- [ ] La ruta directa `/ai-config` y los diálogos de proveedor requerido llevan a `/household?tab=ai`; los query params ajenos se preservan.
+- [ ] El contenido IA alinea sus gutters con los paneles equivalentes del hogar (±1 CSS px); verificado con Playwright real en escritorio, móvil, 320 px y orientación apaisada, con foco/teclado y sin overflow.
+- [ ] Capturas sintéticas comparables de escritorio/móvil guardadas e inspeccionadas; spec/checklist y evidencia actualizadas tras pasar pruebas.
 
 ## Fuente de verdad y discrepancias
 
@@ -38,9 +52,9 @@
 - [x] Routear `recipe`/`multiple_recipes` y `recommendations` a **Recetas y recomendaciones**; `weekly_plan`/`household_plan` a **Planificación**; `receipt`, `shopping_photo`, `expiry_estimate` y búsqueda de imagen de producto a **Compra y despensa**; automation worker a **Automatización del hogar**; runtime global a **Asistente**. Revisados dispatcher, streaming, llamadas directas y afinidad de jobs. `connection_test` usa explícitamente el proveedor probado.
 - [x] Al desactivar o eliminar un proveedor asignado, mostrar una advertencia accesible que identifica los usos afectados y confirma la sustitución por el proveedor activo más antiguo; si no queda proveedor, quedan sin asignación y se muestra la vía de configuración.
 - [x] Probar selección, fallback y aislamiento entre dos hogares, permisos `settings` y jobs admitidos antes del cambio. Las rutas de configuración requieren permiso de escritura; la IA puede usar la config de hogar sin conceder ese permiso. No hay fallback personal ni entre hogares.
-- [x] Reutilizar el gestor en Hogar → Ajustes y redirigir enlaces guardados a la ubicación nueva sin cambiar la ACL del servidor.
+- [ ] Reutilizar el gestor en Hogar → IA y redirigir enlaces guardados a la pestaña propia sin cambiar la ACL del servidor.
 - [x] Con un proveedor activo, mostrarlo fijo; con varios, mostrar selectores por función solo con opciones activas. Con cero activos, no mostrar selector falso.
-- [x] Ocultar el acceso global a IA cuando no haya proveedor activo. Los puntos de generación cubiertos muestran un modal accesible con enlace directo a Hogar → Ajustes; las pruebas verifican que no se dispara la petición. El backend conserva sus guards.
+- [ ] Ocultar el acceso global a IA cuando no haya proveedor activo. Los puntos de generación cubiertos muestran un modal accesible con enlace directo a Hogar → IA; las pruebas verifican que no se dispara la petición. El backend conserva sus guards.
 - [x] El estado de disponibilidad, sin credenciales, se puede leer antes de crear un hogar tras autenticar y responde 200 con estado no configurado; no debe provocar 409 de setup ni solicitudes de generación. Probado por el middleware de setup sobre `createApp`.
 
 ### Edición segura y errores de validación
@@ -70,7 +84,7 @@
 - [x] TDD con pruebas focales para contratos, límites, carreras, cancelación, recarga, persistencia, permisos y ausencia de proveedor. La suite usa SQLite temporal y HTTP sintético local; no escribe en la BD habitual ni llama proveedores externos.
 - [x] Playwright app/API real con datos sintéticos: escritorio y móvil, selector/fallback, recarga de test sin duplicado, estado sin proveedor, registro, teclado y breakpoints 320–1440 px. Capturas comparables guardadas e inspeccionadas bajo `.e2e-screenshots/` (ignorado por Git).
 - [x] i18n ES/EN, nombres accesibles y navegación/teclado cubiertos por pruebas y build. Coverage completa: frontend >70 % en statements, ramas, funciones y líneas; servidor >70 % en las cuatro métricas.
-- [x] Comparar geometría calculada entre `/ai-config` y Hogar → Ajustes con tolerancia máxima de 1 CSS px en Chromium de escritorio y móvil: el botón de alta iguala ancho/alto y los 5 selectores igualan altura. La captura específica del panel quedó guardada e inspeccionada.
+- [ ] Verificar gutters/alineación de la pestaña Hogar → IA frente a otros paneles del hogar (±1 CSS px) y comparar controles equivalentes con `/ai-config` en escritorio/móvil; guardar e inspeccionar capturas sintéticas.
 - [x] CI de PR conserva los cuatro shards E2E amplios y smoke de imagen `amd64`/`arm64`; el job full-stack de 30 min se limita a flujos críticos de build servido, proveedor por función, registro, rate limit y logs/SSE. No duplica las 178 pruebas full-stack dentro de ese job. En `9ace07e`, todos los checks terminaron verdes; el smoke construye y prueba ambas imágenes sin publicar al registry.
 - [x] Mantener esta checklist ligada a evidencia reproducible. No cambiar el estado del PR elegido por el usuario; no mergear sin permiso.
 
