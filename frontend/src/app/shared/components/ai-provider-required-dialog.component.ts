@@ -45,6 +45,7 @@ const FUNCTION_LABELS: Record<AiFunctionKey, TranslationKey> = {
             class="provider-required__link"
             [routerLink]="setupCommands()"
             [queryParams]="setupQueryParams()"
+            queryParamsHandling="merge"
             (click)="close()"
           >
             {{ 'ai_config.open_settings' | t }}
@@ -122,7 +123,7 @@ export class AiProviderRequiredDialogComponent {
   );
   readonly setupQueryParams = computed(() =>
     this.household.activeHouseholdId() || this.household.memberships().length > 0
-      ? { tab: 'settings' }
+      ? { tab: 'ai' }
       : null
   );
 

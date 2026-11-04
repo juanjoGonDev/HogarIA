@@ -299,7 +299,7 @@ test.describe('tickets: la cola de lectura (## 12aj)', () => {
     const setupDialog = page.getByRole('dialog', { name: 'Configura la IA' });
     await expect(setupDialog).toBeVisible();
     await expect(setupDialog).toContainText('Compra y despensa');
-    await expect(setupDialog.getByRole('link', { name: 'Abrir ajustes' })).toBeVisible();
+    await expect(setupDialog.getByRole('link', { name: 'Abrir configuración IA' })).toBeVisible();
     expect(uploadRequests).toBe(0);
     await expect(icono).not.toHaveClass(/rq__button--error/);
   });

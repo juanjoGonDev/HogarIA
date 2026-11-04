@@ -1002,8 +1002,16 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
   await expect(page.locator('[data-test="household-panel-plan"]')).toBeVisible();
   const householdTabs = page.locator('.household-tabs');
   if (mobile) {
-    for (const tabName of ['Hogar', 'Plano', 'Planificación', 'Miembros', 'Permisos', 'Ajustes']) {
-      await expect(householdTabs.getByRole('tab', { name: tabName })).toBeVisible();
+    for (const tabName of [
+      'Hogar',
+      'Plano',
+      'Planificación',
+      'Miembros',
+      'Permisos',
+      'Ajustes',
+      'Ajustes IA'
+    ]) {
+      await expect(householdTabs.getByRole('tab', { name: tabName, exact: true })).toBeVisible();
     }
     await expect(householdTabs.getByRole('tab', { name: 'Plano' })).toBeInViewport();
     const tabDimensions = await householdTabs.evaluate((element) => ({
@@ -1040,7 +1048,7 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
           };
         })
       );
-      expect(tabLayout, `all six household tabs exist at ${width}px`).toHaveLength(6);
+      expect(tabLayout, `all seven household tabs exist at ${width}px`).toHaveLength(7);
       for (let index = 1; index < tabLayout.length; index += 1) {
         expect(tabLayout[index].left).toBeGreaterThanOrEqual(tabLayout[index - 1].right - 1);
         expect(
@@ -1052,12 +1060,12 @@ test('plano por hogar, propuesta revisable y tareas semanales zonificadas en PC 
     await page.setViewportSize({ width: 320, height: 568 });
     await expect(page.getByRole('tab', { name: 'Plano' })).toBeInViewport();
     const planTab = page.getByRole('tab', { name: 'Plano' });
-    const settingsTab = page.getByRole('tab', { name: 'Ajustes' });
+    const aiTab = page.getByRole('tab', { name: 'Ajustes IA', exact: true });
     await planTab.focus();
     await page.keyboard.press('End');
-    await expect(settingsTab).toBeFocused();
-    await expect(settingsTab).toHaveAttribute('aria-selected', 'true');
-    await expect(page).toHaveURL(/tab=settings/);
+    await expect(aiTab).toBeFocused();
+    await expect(aiTab).toHaveAttribute('aria-selected', 'true');
+    await expect(page).toHaveURL(/tab=ai/);
     await expect
       .poll(async () => {
         return householdTabs.evaluate((element) => {

@@ -84,7 +84,7 @@ test.describe('AI provider settings in household', () => {
         ? { width: 1440, height: 900 }
         : { width: 393, height: 851 };
     await page.setViewportSize(viewport);
-    await registerWithHousehold(page, '/household?tab=settings', 'Proveedor IA hogar sintético');
+    await registerWithHousehold(page, '/household?tab=ai', 'Proveedor IA hogar sintético');
 
     const embedded = page.locator('[data-test="household-ai-config"]');
     await expect(embedded).toBeVisible();
@@ -166,7 +166,7 @@ test.describe('AI provider settings in household', () => {
   test('keeps a saved connection test running after closing the tab without starting a duplicate', async ({
     page
   }) => {
-    await registerWithHousehold(page, '/household?tab=settings', 'Test persistente sintético');
+    await registerWithHousehold(page, '/household?tab=ai', 'Test persistente sintético');
 
     let resolveProviderRequest!: () => void;
     let markProviderRequestStarted!: () => void;
@@ -241,7 +241,7 @@ test.describe('AI provider settings in household', () => {
       );
       const context = page.context();
       const stalePage = await context.newPage();
-      await stalePage.goto('/household?tab=settings');
+      await stalePage.goto('/household?tab=ai');
       const staleCard = stalePage.locator('.config-card').filter({ hasText: configName });
       const staleDeleteButton = staleCard.getByRole('button', { name: 'Eliminar', exact: true });
       await expect(staleCard).toBeVisible();
@@ -334,7 +334,7 @@ test.describe('AI provider settings in household', () => {
         generationRequests += 1;
       }
     });
-    await page.goto('/recipes');
+    await page.goto('/recipes?source=calendar');
     await expect(page.locator('h1.recipes__title')).toBeVisible();
     await expect(page.locator('[data-test="ai-assistant-open"]')).toHaveCount(0);
     await page.getByRole('button', { name: /Generar IA/ }).click();
@@ -352,8 +352,8 @@ test.describe('AI provider settings in household', () => {
     await expect(setupDialog).toBeVisible();
     await expect(setupDialog).toContainText('Recetas y recomendaciones');
     await expect(setupDialog.locator('.provider-required__permission')).toHaveCount(0);
-    const setupLink = setupDialog.getByRole('link', { name: 'Abrir ajustes' });
-    await expect(setupLink).toHaveAttribute('href', '/household?tab=settings');
+    const setupLink = setupDialog.getByRole('link', { name: 'Abrir configuración IA' });
+    await expect(setupLink).toHaveAttribute('href', '/household?source=calendar&tab=ai');
     await expect(setupDialog).toHaveAttribute('aria-modal', 'true');
     const closeButton = setupDialog.getByRole('button', { name: 'Cerrar' });
     await setupLink.focus();
@@ -381,7 +381,7 @@ test.describe('AI provider settings in household', () => {
     }
 
     await setupLink.click();
-    await expect(page).toHaveURL('/household?tab=settings');
+    await expect(page).toHaveURL('/household?source=calendar&tab=ai');
     await expect(page.locator('[data-test="household-ai-config"]')).toBeVisible();
     const householdSettings = page.locator('[data-test="household-ai-config"]');
     await expect(householdSettings.locator('.empty-state__title')).toHaveText(

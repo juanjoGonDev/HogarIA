@@ -19,7 +19,7 @@ async function screenshot(page: Page, name: string): Promise<void> {
   await page.screenshot({ path, fullPage: true, animations: 'disabled' });
 }
 
-test('Hogar organiza miembros, permisos y ajustes en pestañas enlazables', async ({
+test('Hogar organiza miembros, permisos, ajustes e IA en pestañas enlazables', async ({
   page,
   browser
 }) => {
@@ -30,12 +30,13 @@ test('Hogar organiza miembros, permisos y ajustes en pestañas enlazables', asyn
   const homeTab = tabs.getByRole('tab', { name: 'Hogar' });
   const membersTab = tabs.getByRole('tab', { name: 'Miembros' });
   const permissionsTab = tabs.getByRole('tab', { name: 'Permisos' });
-  const settingsTab = tabs.getByRole('tab', { name: 'Ajustes' });
+  const settingsTab = tabs.getByRole('tab', { name: 'Ajustes', exact: true });
+  const aiTab = tabs.getByRole('tab', { name: 'Ajustes IA' });
 
   await expect(homeTab).toHaveAttribute('aria-selected', 'true');
   await expect(homeTab).toHaveAttribute('tabindex', '0');
   await expect(page).not.toHaveURL(/[?&]tab=/);
-  for (const tab of [homeTab, membersTab, permissionsTab, settingsTab]) {
+  for (const tab of [homeTab, membersTab, permissionsTab, settingsTab, aiTab]) {
     const panelId = await tab.getAttribute('aria-controls');
     const tabId = await tab.getAttribute('id');
     expect(panelId).toBeTruthy();
@@ -59,6 +60,7 @@ test('Hogar organiza miembros, permisos y ajustes en pestañas enlazables', asyn
 
   await settingsTab.click();
   await expect(page).toHaveURL(/[?&]tab=settings/);
+  await expect(page.locator('[data-test="household-ai-config"]')).toHaveCount(0);
   await expect(page.locator('[data-test="household-name-input"]')).toHaveValue(
     'Hogar sintético de pestañas'
   );
@@ -69,12 +71,23 @@ test('Hogar organiza miembros, permisos y ajustes en pestañas enlazables', asyn
   );
   await screenshot(page, 'settings');
 
+  await aiTab.click();
+  await expect(page).toHaveURL(/[?&]tab=ai/);
+  await expect(page.locator('[data-test="household-panel-ai"]')).toBeVisible();
+  await expect(page.locator('[data-test="household-ai-config"]')).toBeVisible();
+  await screenshot(page, 'ai-settings');
+
+  await page.goBack();
+  await expect(page).toHaveURL(/[?&]tab=settings/);
+  await expect(settingsTab).toHaveAttribute('aria-selected', 'true');
   await page.goBack();
   await expect(page).toHaveURL(/[?&]tab=members/);
   await expect(membersTab).toHaveAttribute('aria-selected', 'true');
   await page.goForward();
   await expect(page).toHaveURL(/[?&]tab=settings/);
-  await expect(settingsTab).toHaveAttribute('aria-selected', 'true');
+  await page.goForward();
+  await expect(page).toHaveURL(/[?&]tab=ai/);
+  await expect(aiTab).toHaveAttribute('aria-selected', 'true');
 
   await page.goto('/household?source=shared&tab=permissions');
   await expect(permissionsTab).toHaveAttribute('aria-selected', 'true');
@@ -86,10 +99,12 @@ test('Hogar organiza miembros, permisos y ajustes en pestañas enlazables', asyn
   await permissionsTab.focus();
   await page.keyboard.press('ArrowRight');
   await expect(settingsTab).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('ArrowRight');
+  await expect(aiTab).toHaveAttribute('aria-selected', 'true');
   await expect
-    .poll(() => settingsTab.evaluate((tab) => getComputedStyle(tab).outlineStyle))
+    .poll(() => aiTab.evaluate((tab) => getComputedStyle(tab).outlineStyle))
     .toBe('solid');
-  await expect(page).toHaveURL(/[?&]tab=settings/);
+  await expect(page).toHaveURL(/[?&]tab=ai/);
 
   await page.goto('/household?source=shared&tab=not-a-household-tab');
   await expect(homeTab).toHaveAttribute('aria-selected', 'true');
@@ -144,6 +159,13 @@ test('Hogar organiza miembros, permisos y ajustes en pestañas enlazables', asyn
       memberPage.getByText('Solo los administradores pueden cambiar los ajustes del hogar.')
     ).toBeVisible();
     await expect(memberPage.locator('[data-test="household-name-input"]')).toHaveCount(0);
+    await memberPage.goto('/household?tab=ai');
+    await expect(
+      memberPage.getByText(
+        'Solo administradores o miembros con permiso pueden configurar la IA del hogar.'
+      )
+    ).toBeVisible();
+    await expect(memberPage.locator('[data-test="household-ai-config"]')).toHaveCount(0);
   } finally {
     await memberContext.close();
   }
@@ -165,5 +187,6 @@ test('Hogar organiza miembros, permisos y ajustes en pestañas enlazables', asyn
     await expect(membersTab).toBeAttached();
     await expect(permissionsTab).toBeAttached();
     await expect(settingsTab).toBeAttached();
+    await expect(aiTab).toBeAttached();
   }
 });

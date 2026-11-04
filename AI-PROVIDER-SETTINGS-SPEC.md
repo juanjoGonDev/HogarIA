@@ -27,11 +27,11 @@ La pestaña IA reutiliza el contenedor, ancho y gutters existentes de Hogar. No 
 
 ### Criterios de aceptación de la enmienda
 
-- [ ] La IA aparece en pestaña superior independiente, con tab/panel accesibles, i18n ES/EN, navegación por teclado y query `tab=ai`; Ajustes ya no monta el gestor.
-- [ ] La pestaña IA conserva el permiso `settings`; el usuario autorizado puede entrar por enlace directo y los miembros no autorizados ven el estado restringido sin datos de proveedores.
-- [ ] La ruta directa `/ai-config` y los diálogos de proveedor requerido llevan a `/household?tab=ai`; los query params ajenos se preservan.
-- [ ] El contenido IA alinea sus gutters con los paneles equivalentes del hogar (±1 CSS px); verificado con Playwright real en escritorio, móvil, 320 px y orientación apaisada, con foco/teclado y sin overflow.
-- [ ] Capturas sintéticas comparables de escritorio/móvil guardadas e inspeccionadas; spec/checklist y evidencia actualizadas tras pasar pruebas.
+- [x] La IA aparece en pestaña superior independiente, con tab/panel accesibles, i18n ES/EN, navegación por teclado y query `tab=ai`; Ajustes ya no monta el gestor.
+- [x] La pestaña IA conserva el permiso `settings`; el usuario autorizado puede entrar por enlace directo y los miembros no autorizados ven el estado restringido sin datos de proveedores.
+- [x] La ruta directa `/ai-config` y los diálogos de proveedor requerido llevan a `/household?tab=ai`; los query params ajenos se preservan.
+- [x] El contenido IA alinea sus gutters con los paneles equivalentes del hogar (±1 CSS px); verificado con Playwright real en escritorio, móvil, 320 px y orientación apaisada, con foco/teclado y sin overflow.
+- [x] Capturas sintéticas comparables de escritorio/móvil guardadas e inspeccionadas; spec/checklist y evidencia actualizadas tras pasar pruebas.
 
 ## Fuente de verdad y discrepancias
 
@@ -84,11 +84,17 @@ La pestaña IA reutiliza el contenedor, ancho y gutters existentes de Hogar. No 
 - [x] TDD con pruebas focales para contratos, límites, carreras, cancelación, recarga, persistencia, permisos y ausencia de proveedor. La suite usa SQLite temporal y HTTP sintético local; no escribe en la BD habitual ni llama proveedores externos.
 - [x] Playwright app/API real con datos sintéticos: escritorio y móvil, selector/fallback, recarga de test sin duplicado, estado sin proveedor, registro, teclado y breakpoints 320–1440 px. Capturas comparables guardadas e inspeccionadas bajo `.e2e-screenshots/` (ignorado por Git).
 - [x] i18n ES/EN, nombres accesibles y navegación/teclado cubiertos por pruebas y build. Coverage completa: frontend >70 % en statements, ramas, funciones y líneas; servidor >70 % en las cuatro métricas.
-- [ ] Verificar gutters/alineación de la pestaña Hogar → IA frente a otros paneles del hogar (±1 CSS px) y comparar controles equivalentes con `/ai-config` en escritorio/móvil; guardar e inspeccionar capturas sintéticas.
+- [x] Gutters/alineación de Hogar → IA verificados frente a pestañas equivalentes (±1 CSS px) en escritorio/móvil; capturas sintéticas inspeccionadas.
 - [x] CI de PR conserva los cuatro shards E2E amplios y smoke de imagen `amd64`/`arm64`; el job full-stack de 30 min se limita a flujos críticos de build servido, proveedor por función, registro, rate limit y logs/SSE. No duplica las 178 pruebas full-stack dentro de ese job. En `9ace07e`, todos los checks terminaron verdes; el smoke construye y prueba ambas imágenes sin publicar al registry.
 - [x] Mantener esta checklist ligada a evidencia reproducible. No cambiar el estado del PR elegido por el usuario; no mergear sin permiso.
 
 ### Evidencia reproducible
+
+- Enmienda Hogar → IA: `pnpm --filter @hogaria/web exec ng test --no-watch --browsers=ChromeHeadless --include=src/app/features/household/household-tabs.util.spec.ts --include=src/app/features/household/household.component.spec.ts --include=src/app/core/guards/ai-household-settings.guard.spec.ts --include=src/app/shared/components/ai-provider-required-dialog.component.spec.ts` — 49/49. La prueba nueva primero reprodujo el descarte de `source=calendar`; guard y enlace del diálogo ahora llevan al tab IA preservando query params.
+- E2E pestaña y geometría: `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/household-tabs.spec.ts tests/e2e/ai-household-settings-permission.spec.ts` — 4/4; teclado, deep-link, permiso, vista restringida, gutters ±1 CSS px, 320 px, apaisado y ausencia de overflow.
+- E2E full-stack servido: `node scripts/run-isolated-playwright.mjs --config=playwright.full-stack.config.ts --project=chromium --project=mobile-chrome tests/e2e/full-stack/ai-provider-settings.spec.ts` — 6/6; el diálogo conserva `source=calendar` al navegar a `/household?source=calendar&tab=ai`.
+- E2E regresión de planificación: `node scripts/run-isolated-playwright.mjs --project=chromium --project=mobile-chrome tests/e2e/household-plan-tasks.spec.ts --grep 'plano por hogar, propuesta revisable y tareas semanales zonificadas'` — 2/2.
+- Build de producción: `pnpm run build` — pasa; quedan warnings Angular/SCSS preexistentes sin error. Las capturas sintéticas inspeccionadas están en `.e2e-screenshots/ai-household-ai-tab/chromium-embedded.png` y `.e2e-screenshots/ai-household-ai-tab/mobile-chrome-embedded.png` (ignoradas por Git).
 
 - Funciones/proveedores y todos los contratos servidor: `pnpm run test:server:coverage` — 122 ficheros pasaron, 2,121 tests pasaron, 1 skip; coverage 89.70 % statements, 81.82 % ramas, 95.56 % funciones, 92.66 % líneas. Incluye backfill idempotente, mapping, multi-activos, selección/fallback, permisos/scope, redacción, routing, lease y pinning.
 - Registro: `pnpm --filter @hogaria/web exec ng test --no-watch --include=src/app/features/auth/register/*.spec.ts --browsers=ChromeHeadless` — 15/15. Cubre label visible, requerido, discrepancia, corrección y llamada a `AuthService.register` solo con `{name,email,password}`.

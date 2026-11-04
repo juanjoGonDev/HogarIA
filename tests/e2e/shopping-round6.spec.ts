@@ -598,9 +598,9 @@ test.describe('Cesta: iconos, oferta y descuento', () => {
     const setupDialog = page.getByRole('dialog', { name: 'Configura la IA' });
     await expect(setupDialog).toBeVisible();
     await expect(setupDialog).toContainText('Compra y despensa');
-    await expect(setupDialog.getByRole('link', { name: 'Abrir ajustes' })).toHaveAttribute(
+    await expect(setupDialog.getByRole('link', { name: 'Abrir configuración IA' })).toHaveAttribute(
       'href',
-      '/household?tab=settings'
+      '/household?tab=ai'
     );
     await expect(page.locator('[data-test="item-row"]')).toHaveCount(0);
     expect(analyzeRequests).toBe(0);
