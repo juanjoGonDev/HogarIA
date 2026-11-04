@@ -294,6 +294,68 @@ test('analiza una foto, deja revisar la propuesta y persiste solo lo confirmado'
     .find((part) => part.type === 'input_image');
   expect(Boolean(imagePart?.image_url?.startsWith('data:image/png;base64,'))).toBe(true);
 
+  const measureLocationPrompt = async () =>
+    page.locator('[role="dialog"]').evaluate((dialog) => {
+      const selectors = {
+        dialog: '',
+        header: '.modal__header',
+        body: '.modal__body',
+        content: '[data-test="location-prompt"]',
+        actions: '.location-flow__actions'
+      };
+      const geometry: Record<
+        string,
+        {
+          x: number;
+          y: number;
+          width: number;
+          height: number;
+          padding: string;
+          margin: string;
+          gap: string;
+          borderRadius: string;
+        }
+      > = {};
+      for (const [name, selector] of Object.entries(selectors)) {
+        const element = selector ? dialog.querySelector<HTMLElement>(selector) : dialog;
+        if (!element) throw new Error(`Falta el nodo geométrico: ${name}`);
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        geometry[name] = {
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+          padding: style.padding,
+          margin: style.margin,
+          gap: style.gap,
+          borderRadius: style.borderRadius
+        };
+      }
+      return geometry;
+    });
+
+  const expectSameLocationPromptGeometry = (
+    actual: Awaited<ReturnType<typeof measureLocationPrompt>>,
+    expected: Awaited<ReturnType<typeof measureLocationPrompt>>
+  ) => {
+    for (const name of Object.keys(expected)) {
+      const a = actual[name];
+      const e = expected[name];
+      for (const dimension of ['x', 'y', 'width', 'height'] as const) {
+        expect(
+          Math.abs(a[dimension] - e[dimension]),
+          `${name}.${dimension} debe coincidir entre foto y marcado individual`
+        ).toBeLessThanOrEqual(1);
+      }
+      for (const token of ['padding', 'margin', 'gap', 'borderRadius'] as const) {
+        expect(a[token], `${name}.${token} debe coincidir entre foto y marcado individual`).toBe(
+          e[token]
+        );
+      }
+    }
+  };
+
   const listBeforeConfirm = await page.request.get(`/api/shopping/lists/${listId}`, {
     headers: { authorization: `Bearer ${token}` }
   });
@@ -398,7 +460,11 @@ test('analiza una foto, deja revisar la propuesta y persiste solo lo confirmado'
   await expect(
     page.locator('[data-test="item-row"]').filter({ hasText: 'Pan de molde QA' })
   ).toContainText('2 ud');
-  await expect(page.locator('[data-test="location-prompt"]')).toBeVisible();
+  const locationPrompt = page.locator('[data-test="location-prompt"]');
+  const locationDialog = page.locator('[role="dialog"]');
+  await expect(locationPrompt).toBeVisible();
+  await expect(locationDialog).toHaveCSS('transform', 'none');
+  const photoPromptGeometry = await measureLocationPrompt();
   await page.locator('[data-test="location-skip"] button').click();
   expect(locationRequests).toEqual([]);
 
@@ -417,5 +483,16 @@ test('analiza una foto, deja revisar la propuesta y persiste solo lo confirmado'
   expect(
     (await savedList.json()).data.items.map((item: { name: string }) => item.name).sort()
   ).toEqual(['Leche semidesnatada', 'Pan de molde QA']);
+
+  await page
+    .locator('[data-test="item-row"]')
+    .filter({ hasText: 'Leche semidesnatada' })
+    .locator('[data-test="check"]')
+    .click();
+  await expect(locationPrompt).toBeVisible();
+  await expect(locationDialog).toHaveCSS('transform', 'none');
+  expectSameLocationPromptGeometry(await measureLocationPrompt(), photoPromptGeometry);
+  await page.locator('[data-test="location-skip"] button').click();
+  expect(locationRequests).toEqual([]);
   expect(pageErrors).toEqual([]);
 });

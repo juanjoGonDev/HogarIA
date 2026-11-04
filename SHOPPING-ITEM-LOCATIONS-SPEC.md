@@ -51,8 +51,8 @@ Permitir asociar una tienda/establecimiento a productos añadidos desde una foto
 - [x] Playwright real contra app y servidor con SQLite temporal: alta por foto y marcado individual, ubicación online simulada, manual, recarga y fallback; pruebas de API para tienda registrada y cambio de hogar. Pruebas de cuenta/lista comprueban la pregunta y la descartan en el resto de flujos (`42 passed, 3 skipped`); presupuesto/dinero full-stack: `4 passed`.
 - [x] Coverage supera 70 % en sentencias, ramas, funciones y líneas; gates existentes permanecen intactos.
 - [x] Revisar escritorio y móvil en 1440×900, 390×844 y ancho mínimo 320 px, incluyendo apaisado, teclado/foco, hoja/modal, scroll, safe-area y targets táctiles.
-- [ ] Capturas sintéticas guardadas en `.e2e-screenshots/shopping-item-locations/` (ignoradas por Git); falta registrar comparación geométrica explícita ±1 CSS px entre orígenes.
-- [ ] Ejecutar suites focales, build, typecheck, UI gates y CI del PR; registrar comandos, resultados y limitaciones antes de marcar casillas. (Pruebas locales verdes; CI remoto y comparación geométrica pendientes.)
+- [x] Capturas sintéticas PC/móvil guardadas en `.e2e-screenshots/shopping-item-locations/` (ignoradas por Git). Playwright compara rectángulos calculados y padding/margin/gap/radio entre la pregunta tras foto y tras marcado individual: tolerancia ≤1 CSS px a 1440×900 y 320×568. `node scripts/run-isolated-playwright.mjs --config=playwright.full-stack.config.ts full-stack/shopping-photo-review.spec.ts`: 2/2.
+- [ ] Confirmar CI remoto del PR en el head final; suites locales focales, build, typecheck, UI gates y comparación geométrica están verdes y registrados arriba.
 
 ## Plan por unidades
 
