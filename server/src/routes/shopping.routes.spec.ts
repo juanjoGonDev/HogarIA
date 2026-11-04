@@ -199,6 +199,66 @@ describe('product locations', () => {
     });
   });
 
+  it('keeps item location snapshots when the user changes active household and returns', async () => {
+    db.prepare('INSERT INTO households (id, name, invite_code) VALUES (?, ?, ?)').run(
+      'location-home-one',
+      'Casa uno',
+      'LOC-HOME1'
+    );
+    db.prepare('INSERT INTO households (id, name, invite_code) VALUES (?, ?, ?)').run(
+      'location-home-two',
+      'Casa dos',
+      'LOC-HOME2'
+    );
+    for (const [householdId, memberId] of [
+      ['location-home-one', 'alice-home-one'],
+      ['location-home-two', 'alice-home-two']
+    ]) {
+      db.prepare(
+        `INSERT INTO household_members (id, household_id, user_id, role, permissions)
+         VALUES (?, ?, ?, 'admin', '{}')`
+      ).run(memberId, householdId, alice.id);
+    }
+    db.prepare('UPDATE users SET household_id = ? WHERE id = ?').run('location-home-one', alice.id);
+
+    const list = await createList(alice);
+    const item = await data(
+      await call(alice, 'POST', `/lists/${list.id}/items`, { name: 'Arroz' })
+    );
+    db.prepare(
+      `INSERT INTO stores (id, user_id, household_id, name, address, latitude, longitude)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      'store-home-one',
+      alice.id,
+      'location-home-one',
+      'Colmado Uno',
+      'Calle Sol 1',
+      40.4,
+      -3.7
+    );
+    expect(
+      (
+        await call(alice, 'PUT', `/lists/${list.id}/items/location`, {
+          itemIds: [item.id],
+          store: { source: 'registered', id: 'store-home-one' }
+        })
+      ).status
+    ).toBe(200);
+
+    db.prepare('UPDATE users SET household_id = ? WHERE id = ?').run('location-home-two', alice.id);
+    expect((await call(alice, 'GET', `/lists/${list.id}`)).status).toBe(404);
+
+    db.prepare('UPDATE users SET household_id = ? WHERE id = ?').run('location-home-one', alice.id);
+    const returnedList = await data(await call(alice, 'GET', `/lists/${list.id}`));
+    expect(returnedList.items[0]).toMatchObject({
+      id: item.id,
+      location_store_id: 'store-home-one',
+      location_name: 'Colmado Uno',
+      location_address: 'Calle Sol 1'
+    });
+  });
+
   it('uses OSM as a simulated fallback and saves its attribution only after selection', async () => {
     const list = await createList(alice);
     const item = await data(

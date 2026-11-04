@@ -38,7 +38,7 @@ Permitir asociar una tienda/establecimiento a productos añadidos desde una foto
 - [x] La geolocalización nativa se invoca solo tras consentimiento; denegación, timeout, API ausente y cancelación permiten continuar o escribir ubicación manual.
 - [x] Coincidencias registradas se limitan al usuario/hogar activo. Sin coincidencia, búsqueda OSM es best-effort y presenta resultados cercanos seleccionables; no guarda una sugerencia ambigua sin selección.
 - [x] La misma hoja permite corregir manualmente nombre/dirección y volver a guardar la ubicación desde la edición del producto.
-- [ ] Solo se guardan ubicaciones elegidas; no se persisten coordenadas GPS crudas. El producto mantiene snapshots legibles tras recarga, cambio de hogar y actualización de datos de tienda. (Recarga y actualización de tienda validadas; falta prueba explícita de cambio de hogar.)
+- [x] Solo se guardan ubicaciones elegidas; no se persisten coordenadas GPS crudas. El producto mantiene snapshots legibles tras recarga, cambio de hogar y actualización de datos de tienda.
 - [x] API valida límites y coordenadas, aplica autorización/aislamiento, no permite asociar tiendas ajenas y no registra ubicación precisa en logs.
 - [x] Timeout, límite/`429`, error, respuesta inválida o lista vacía de Overpass dejan disponible la ruta manual y no bloquean las operaciones de lista.
 
@@ -46,7 +46,7 @@ Permitir asociar una tienda/establecimiento a productos añadidos desde una foto
 
 - [ ] TDD: pruebas de esquema/migración, autorización, deduplicación, guardado/lectura, proveedor OSM simulado, caché, límites, errores y ubicación manual antes de implementar.
 - [x] Pruebas frontend cubren flujo compartido, consentimiento, denegación/fallo, cancelación, corrección y prevención de prompts duplicados.
-- [x] Playwright real contra app y servidor con SQLite temporal: alta por foto y marcado individual, ubicación online simulada, manual, recarga y fallback; prueba de tienda registrada en unit/API.
+- [x] Playwright real contra app y servidor con SQLite temporal: alta por foto y marcado individual, ubicación online simulada, manual, recarga y fallback; pruebas de API para tienda registrada y cambio de hogar.
 - [x] Coverage supera 70 % en sentencias, ramas, funciones y líneas; gates existentes permanecen intactos.
 - [x] Revisar escritorio y móvil en 1440×900, 390×844 y ancho mínimo 320 px, incluyendo apaisado, teclado/foco, hoja/modal, scroll, safe-area y targets táctiles.
 - [ ] Capturas sintéticas guardadas en `.e2e-screenshots/shopping-item-locations/` (ignoradas por Git); falta registrar comparación geométrica explícita ±1 CSS px entre orígenes.
@@ -61,10 +61,11 @@ Permitir asociar una tienda/establecimiento a productos añadidos desde una foto
 
 ## Evidencia local — 2026-11-04
 
-- `pnpm --filter @hogaria/server exec vitest run --maxWorkers=2 src/config/database.spec.ts src/routes/shopping.routes.spec.ts`: 126/126.
+- `pnpm --filter @hogaria/server exec vitest run --maxWorkers=2 src/config/database.spec.ts src/routes/shopping.routes.spec.ts`: 127/127.
+- `pnpm --filter @hogaria/server exec vitest run --maxWorkers=2 src/routes/shopping.routes.spec.ts`: 110/110; incluye cambio de hogar y regreso al snapshot original.
 - `node scripts/run-isolated-playwright.mjs --config=playwright.full-stack.config.ts full-stack/shopping-item-location.spec.ts full-stack/shopping-photo-review.spec.ts`: 4/4 en Chromium escritorio y mobile Chrome; backend real, SQLite temporal, producto reabierto tras reload y flujo de foto/omisión sin permiso ni llamadas de ubicación.
 - `pnpm run test:client:coverage`: 1837/1837; 90.49 % statements, 80.96 % branches, 92.02 % functions, 93.12 % lines.
-- `pnpm run test:server:coverage`: 2259 pasados, 1 omitido; 89.52 % statements, 81.76 % branches, 95.47 % functions, 92.41 % lines. `store-locator.ts`: 87.97/86.4/84.84/90.51 % (S/B/F/L).
+- `pnpm run test:server:coverage`: 2260 pasados, 1 omitido; 89.52 % statements, 81.76 % branches, 95.47 % functions, 92.41 % lines. `store-locator.ts`: 87.97/86.4/84.84/90.51 % (S/B/F/L).
 - `pnpm run check:ui` (278 ficheros/21 reglas), `pnpm run typecheck:e2e` y `pnpm run test:config` (146/146) pasan. `pnpm run build` pasó antes de estos últimos cambios, que solo añaden pruebas/criterios; CI lo revalidará.
 - Capturas sintéticas: `prompt-desktop-1440x900.png`, `prompt-mobile-390x844.png`, `prompt-mobile-320x568.png`, `candidate-desktop-1440x900.png`, `candidate-mobile-390x844.png`, `edit-desktop-1440x900.png`, `edit-mobile-390x844.png`. `git check-ignore` confirma que no entran en Git.
-- Limitaciones por cerrar: cambio de hogar explícito, comparación geométrica de ±1 CSS px y CI remoto verde tras el fix de locators del run #1146. PR #72 sigue Draft.
+- Limitaciones por cerrar: comparación geométrica explícita de ±1 CSS px y CI remoto verde tras el fix de locators del run #1146. PR #72 sigue Draft.
