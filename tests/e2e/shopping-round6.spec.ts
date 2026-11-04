@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { Locator, Page, expect } from '@playwright/test';
 import { test } from './fixtures';
 import { registerAndGoto } from './helpers/auth';
-import { shoppingNewListAction } from './helpers/shopping-ui';
+import { shoppingNewListAction, skipOptionalShoppingLocationPrompt } from './helpers/shopping-ui';
 
 /**
  * Ronda 6 (HOGARIA-SPEC §8f): la bandeja como tabla con filtros, controles de solo icono,
@@ -139,6 +139,7 @@ test.describe('Cesta: iconos, oferta y descuento', () => {
     const row = page.locator('[data-test="item-row"]').first();
     await expect(row.locator('[data-test="check"] svg')).toBeVisible();
     await row.locator('[data-test="check"]').click();
+    await skipOptionalShoppingLocationPrompt(page);
     await expect(page.locator('[data-test="tab-cart"]')).toContainText('En el carro (1)');
 
     // Marcar mueve la línea fuera de «Pendientes»; seleccionar todo opera sobre la pestaña visible.

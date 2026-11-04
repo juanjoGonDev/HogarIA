@@ -4,6 +4,8 @@
 **Rama:** `feat/calendar-recipe-cooking` (PR #72 Draft).
 **Fecha:** 2026-11-04.
 
+**Hallazgo CI:** al marcar una línea, la pregunta opcional de ubicación bloquea correctamente acciones posteriores hasta responder. El primer CI falló en el flujo de cuenta y en siete pruebas de compras que no resolvían el aviso. Se añadió un helper E2E compartido que exige el aviso y elige «Ahora no» en pruebas cuyo objetivo no es ubicación; las pruebas de ubicación conservan sus aserciones. Suites locales: 42 pasaron y 3 se omitieron en Chromium; 4 pasaron full-stack.
+
 ## Objetivo
 
 Permitir asociar una tienda/establecimiento a productos añadidos desde una foto o marcados como comprados. La ubicación es opcional, requiere confirmación explícita y usa un único flujo reutilizable para detectar, elegir y editar el establecimiento.
@@ -46,7 +48,7 @@ Permitir asociar una tienda/establecimiento a productos añadidos desde una foto
 
 - [ ] TDD: pruebas de esquema/migración, autorización, deduplicación, guardado/lectura, proveedor OSM simulado, caché, límites, errores y ubicación manual antes de implementar.
 - [x] Pruebas frontend cubren flujo compartido, consentimiento, denegación/fallo, cancelación, corrección y prevención de prompts duplicados.
-- [x] Playwright real contra app y servidor con SQLite temporal: alta por foto y marcado individual, ubicación online simulada, manual, recarga y fallback; pruebas de API para tienda registrada y cambio de hogar.
+- [x] Playwright real contra app y servidor con SQLite temporal: alta por foto y marcado individual, ubicación online simulada, manual, recarga y fallback; pruebas de API para tienda registrada y cambio de hogar. Pruebas de cuenta/lista comprueban la pregunta y la descartan en el resto de flujos (`42 passed, 3 skipped`); presupuesto/dinero full-stack: `4 passed`.
 - [x] Coverage supera 70 % en sentencias, ramas, funciones y líneas; gates existentes permanecen intactos.
 - [x] Revisar escritorio y móvil en 1440×900, 390×844 y ancho mínimo 320 px, incluyendo apaisado, teclado/foco, hoja/modal, scroll, safe-area y targets táctiles.
 - [ ] Capturas sintéticas guardadas en `.e2e-screenshots/shopping-item-locations/` (ignoradas por Git); falta registrar comparación geométrica explícita ±1 CSS px entre orígenes.
