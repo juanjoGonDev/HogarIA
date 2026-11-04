@@ -99,6 +99,8 @@ El run [#1141](https://github.com/juanjoGonDev/HogarIA/actions/runs/41877339875)
 
 ### Criterios de corrección
 
-- [ ] Alinear `server/package.json` y `pnpm-lock.yaml` con la versión de `hono` de la base actual; no desactivar `--frozen-lockfile` ni bajar la versión de la base.
-- [ ] Verificar instalación local con lockfile congelado y revisar que el diff de lockfile solo contiene cambios necesarios para esa alineación.
+- [x] Alinear `server/package.json` y `pnpm-lock.yaml` con la versión de `hono` de la base actual; no desactivar `--frozen-lockfile` ni bajar la versión de la base.
+- [x] Verificar instalación local con lockfile congelado y revisar que el diff de lockfile solo contiene cambios necesarios para esa alineación.
 - [ ] Ejecutar CI nuevo del PR #72 y comprobar que instalación, smokes `amd64`/`arm64` y el resto de gates dejan de fallar por `ERR_PNPM_OUTDATED_LOCKFILE`.
+
+**Evidencia local:** `pnpm install --lockfile-only --frozen-lockfile --ignore-scripts` pasó; el diff queda limitado a Hono `4.13.14` → `4.13.16` en manifiesto, importers, resolución y snapshots. No se modificó `node_modules`.
