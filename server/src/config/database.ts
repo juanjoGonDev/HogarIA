@@ -1192,6 +1192,21 @@ async function runMigrations(db: Database.Database): Promise<void> {
   // la misma marca para que actualizarlas no borre lo que la casa anadio a mano.
   addColumnIfMissing('shopping_lists', 'source', "TEXT NOT NULL DEFAULT 'manual'");
   addColumnIfMissing('shopping_list_items', 'source', "TEXT NOT NULL DEFAULT 'manual'");
+  // Snapshot de la tienda elegida para cada producto. Nunca se guarda aqui la coordenada del
+  // dispositivo: lat/lon solo contienen las coordenadas publicadas del establecimiento.
+  addColumnIfMissing('shopping_list_items', 'location_store_id', 'TEXT');
+  addColumnIfMissing('shopping_list_items', 'location_name', 'TEXT');
+  addColumnIfMissing('shopping_list_items', 'location_address', 'TEXT');
+  addColumnIfMissing('shopping_list_items', 'location_latitude', 'REAL');
+  addColumnIfMissing('shopping_list_items', 'location_longitude', 'REAL');
+  addColumnIfMissing('shopping_list_items', 'location_attribution', 'TEXT');
+  addColumnIfMissing('shopping_list_items', 'location_attribution_url', 'TEXT');
+  addColumnIfMissing(
+    'shopping_list_items',
+    'location_source',
+    "TEXT CHECK (location_source IS NULL OR location_source IN ('registered', 'openstreetmap', 'manual'))"
+  );
+  addColumnIfMissing('shopping_list_items', 'location_updated_at', 'DATETIME');
 
   // weekly_calendars.household_id nacio NOT NULL con FK a households, y las rutas
   // metían '' para las cuentas sin hogar: la FK lo rechaza (foreign_keys = ON),

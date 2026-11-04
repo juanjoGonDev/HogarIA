@@ -150,10 +150,17 @@ test('analiza una foto, deja revisar la propuesta y persiste solo lo confirmado'
   const viewport = desktop ? { width: 1440, height: 900 } : { width: 393, height: 851 };
   const pageErrors: string[] = [];
   const applyRequests: string[] = [];
+  const locationRequests: string[] = [];
   page.on('pageerror', (error) => pageErrors.push(String(error.message).split('\n')[0]));
   page.on('request', (request) => {
     if (request.method() === 'POST' && request.url().includes('/items/apply')) {
       applyRequests.push(request.url());
+    }
+    if (
+      request.url().includes('/location-candidates') ||
+      request.url().endsWith('/items/location')
+    ) {
+      locationRequests.push(`${request.method()} ${new URL(request.url()).pathname}`);
     }
   });
   await page.setViewportSize(viewport);
@@ -391,6 +398,9 @@ test('analiza una foto, deja revisar la propuesta y persiste solo lo confirmado'
   await expect(
     page.locator('[data-test="item-row"]').filter({ hasText: 'Pan de molde QA' })
   ).toContainText('2 ud');
+  await expect(page.locator('[data-test="location-prompt"]')).toBeVisible();
+  await page.locator('[data-test="location-skip"] button').click();
+  expect(locationRequests).toEqual([]);
 
   await page.reload();
   await expect(page.locator('[data-test="item-row"]')).toHaveCount(2);

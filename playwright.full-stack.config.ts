@@ -45,7 +45,9 @@ export default defineConfig({
     '**/served-app.spec.ts',
     '**/logs-live.spec.ts',
     '**/service-worker-update.spec.ts',
-    '**/receipt-queue-actions.spec.ts'
+    '**/receipt-queue-actions.spec.ts',
+    '**/shopping-item-location.spec.ts',
+    '**/shopping-photo-review.spec.ts'
   ],
   // La misma semilla del run: el reporter y el backend tienen que ver lo mismo.
   globalSetup: './tests/e2e/global-setup.ts',

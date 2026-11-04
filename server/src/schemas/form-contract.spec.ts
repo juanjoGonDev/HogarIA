@@ -94,6 +94,8 @@ import {
   createSuggestedListSchema,
   discountSchema,
   listFilterSchema,
+  itemLocationsSchema,
+  locationCandidatesSchema,
   orderSchema,
   photoLinesSchema,
   priceFilterSchema,
@@ -781,6 +783,18 @@ const ROWS: Row[] = [
   { name: 'completeListSchema', schema: completeListSchema },
   { name: 'photoLinesSchema', schema: photoLinesSchema, required: { lines: [] } },
   { name: 'applyLinesSchema', schema: applyLinesSchema, required: { lines: [{ name: 'Pan' }] } },
+  {
+    name: 'locationCandidatesSchema',
+    schema: locationCandidatesSchema,
+    required: { latitude: 40.4168, longitude: -3.7038 },
+    note: 'La búsqueda consentida exige coordenadas válidas; el radio es opcional y limitado.'
+  },
+  {
+    name: 'itemLocationsSchema',
+    schema: itemLocationsSchema,
+    required: { itemIds: ['item-1'], store: { source: 'manual', name: 'Tienda', address: '' } },
+    note: 'La tienda elegida es obligatoria al guardar; la ubicación manual puede quedar sin dirección resoluble.'
+  },
   query('listFilterSchema', listFilterSchema),
   query('priceFilterSchema', priceFilterSchema),
 

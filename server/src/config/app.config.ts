@@ -33,6 +33,7 @@ const configSchema = z.object({
   }),
   geocoding: z.object({
     storeEndpoint: z.string().url().default('https://nominatim.openstreetmap.org/search'),
+    storeNearbyEndpoint: z.string().url().default('https://overpass-api.de/api/interpreter'),
     storeUserAgent: z
       .string()
       .trim()
@@ -84,6 +85,8 @@ function loadConfig(): Config {
     },
     geocoding: {
       storeEndpoint: process.env.STORE_GEOCODER_URL || 'https://nominatim.openstreetmap.org/search',
+      storeNearbyEndpoint:
+        process.env.STORE_NEARBY_ENDPOINT || 'https://overpass-api.de/api/interpreter',
       storeUserAgent:
         process.env.STORE_GEOCODER_USER_AGENT ||
         'HogarIA/1.0 (https://github.com/juanjoGonDev/HogarIA)',

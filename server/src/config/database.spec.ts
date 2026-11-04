@@ -854,6 +854,94 @@ describe('receipt promotion and store location schema', () => {
     }
   });
 
+  it('migrates legacy shopping items with existing rows and stays idempotent', async () => {
+    const databaseFile = target();
+    let mod: DbModule | undefined;
+    try {
+      mod = await dbModuleWith(databaseFile);
+      await mod.initializeDatabase();
+      const db = mod.getDatabase();
+      db.prepare('INSERT INTO users (id, email, name, password_hash) VALUES (?, ?, ?, ?)').run(
+        'legacy-shopping-user',
+        'legacy-shopping@hogaria.test',
+        'Legacy shopping',
+        'hash'
+      );
+      db.prepare('INSERT INTO shopping_lists (id, user_id, name) VALUES (?, ?, ?)').run(
+        'legacy-shopping-list',
+        'legacy-shopping-user',
+        'Lista anterior'
+      );
+      db.prepare(
+        `INSERT INTO shopping_list_items (id, list_id, name, product_key, quantity, checked)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      ).run('legacy-shopping-item', 'legacy-shopping-list', 'Leche', 'leche', 2, 1);
+
+      db.exec(`
+        ALTER TABLE shopping_list_items DROP COLUMN location_store_id;
+        ALTER TABLE shopping_list_items DROP COLUMN location_name;
+        ALTER TABLE shopping_list_items DROP COLUMN location_address;
+        ALTER TABLE shopping_list_items DROP COLUMN location_latitude;
+        ALTER TABLE shopping_list_items DROP COLUMN location_longitude;
+        ALTER TABLE shopping_list_items DROP COLUMN location_attribution;
+        ALTER TABLE shopping_list_items DROP COLUMN location_attribution_url;
+        ALTER TABLE shopping_list_items DROP COLUMN location_source;
+        ALTER TABLE shopping_list_items DROP COLUMN location_updated_at;
+      `);
+      mod.closeDatabase();
+
+      mod = await dbModuleWith(databaseFile);
+      await mod.initializeDatabase();
+      const migratedDb = mod.getDatabase();
+      const columns = (
+        migratedDb.prepare('PRAGMA table_info(shopping_list_items)').all() as {
+          name: string;
+        }[]
+      ).map((column) => column.name);
+      expect(columns).toEqual(
+        expect.arrayContaining([
+          'location_store_id',
+          'location_name',
+          'location_address',
+          'location_latitude',
+          'location_longitude',
+          'location_attribution',
+          'location_attribution_url',
+          'location_source',
+          'location_updated_at'
+        ])
+      );
+      expect(
+        migratedDb
+          .prepare(
+            `SELECT id, name, product_key, quantity, checked, location_name, location_latitude
+             FROM shopping_list_items WHERE id = ?`
+          )
+          .get('legacy-shopping-item')
+      ).toEqual({
+        id: 'legacy-shopping-item',
+        name: 'Leche',
+        product_key: 'leche',
+        quantity: 2,
+        checked: 1,
+        location_name: null,
+        location_latitude: null
+      });
+
+      mod.closeDatabase();
+      mod = await dbModuleWith(databaseFile);
+      await mod.initializeDatabase();
+      expect(
+        mod
+          .getDatabase()
+          .prepare('SELECT id, name FROM shopping_list_items WHERE id = ?')
+          .get('legacy-shopping-item')
+      ).toEqual({ id: 'legacy-shopping-item', name: 'Leche' });
+    } finally {
+      mod?.closeDatabase();
+    }
+  });
+
   it('adds the new location columns to a legacy database without guessing branches or losing receipt data', async () => {
     const databaseFile = target();
     let mod: DbModule | undefined;
