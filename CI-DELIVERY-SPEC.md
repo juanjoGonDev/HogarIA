@@ -92,3 +92,13 @@ No habilitar IA real ni enviar prompts desde CI. No crear cuentas/secretos de pr
 - `docker build --platform linux/amd64 --tag hogaria-ci:pr47-final-amd64 .` y equivalente `linux/arm64` completan; ambas imágenes ejecutan el smoke anterior y llegan a `HEALTHCHECK=healthy`. DB está en tmpfs y JWT es aleatorio; ambos contenedores se eliminaron.
 - Pre-push completo en `5ba77b4`: `node scripts/check-push-format.mjs` (3 rutas), `pnpm run check:ui` (266/21), `pnpm run build` (éxito, advertencias existentes), `pnpm run typecheck:e2e`, y `pnpm run test` (config 104/104, cliente 1709/1709 con 90,62/80,96/91,73/93,18 % S/B/F/L; servidor 2082 pasados, 1 omitido). Duración del hook: 102 s.
 - Retarget y revisión del diff a `master` completados. Run #807 (`5ba77b4`) terminó verde con 11/11 jobs: instalación, amd64/arm64 build+smoke, typecheck, server coverage, producción, 4 shards E2E y full-stack. Falta publicar/pullar GHCR y validar el artefacto publicado. `ing.json` es una respuesta de datos seed genéricos (20/69 ingredientes; un ID opaco de usuario/hogar, sin notas, imágenes, email ni credenciales) y no tiene referencias en el código. No se ha llamado a WebAPI ni a un proveedor IA en CI/local smoke.
+
+## Incidencia vigente — CI del PR #72 (2026-11-04)
+
+El run [#1141](https://github.com/juanjoGonDev/HogarIA/actions/runs/41877339875) falló en `Install & warm caches` y en ambos smokes de contenedor. El merge temporal del PR combinó la actualización de `hono` a `4.13.16` en la base `master` con `4.13.14` en `server/package.json` y `pnpm-lock.yaml` de la rama. La instalación congelada rechazó el desacuerdo; los dos fallos Docker repiten la misma causa. No es un fallo de tests ni de runtime.
+
+### Criterios de corrección
+
+- [ ] Alinear `server/package.json` y `pnpm-lock.yaml` con la versión de `hono` de la base actual; no desactivar `--frozen-lockfile` ni bajar la versión de la base.
+- [ ] Verificar instalación local con lockfile congelado y revisar que el diff de lockfile solo contiene cambios necesarios para esa alineación.
+- [ ] Ejecutar CI nuevo del PR #72 y comprobar que instalación, smokes `amd64`/`arm64` y el resto de gates dejan de fallar por `ERR_PNPM_OUTDATED_LOCKFILE`.
