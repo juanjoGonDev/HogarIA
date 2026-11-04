@@ -101,7 +101,7 @@ El run [#1141](https://github.com/juanjoGonDev/HogarIA/actions/runs/41877339875)
 
 - [x] Alinear `server/package.json` y `pnpm-lock.yaml` con la versión de `hono` de la base actual; no desactivar `--frozen-lockfile` ni bajar la versión de la base.
 - [x] Verificar instalación local con lockfile congelado y revisar que el diff de lockfile solo contiene cambios necesarios para esa alineación.
-- [ ] Ejecutar CI nuevo del PR #72 y comprobar que instalación, smokes `amd64`/`arm64` y el resto de gates dejan de fallar por `ERR_PNPM_OUTDATED_LOCKFILE`.
+- [x] Ejecutar CI nuevo del PR #72 y comprobar que instalación, smokes `amd64`/`arm64` y el resto de gates dejan de fallar por `ERR_PNPM_OUTDATED_LOCKFILE` (run `41909284726`: instalador y smokes verdes; el fallo E2E posterior está descrito abajo).
 
 **Evidencia local:** `pnpm install --lockfile-only --frozen-lockfile --ignore-scripts` pasó; el diff queda limitado a Hono `4.13.14` → `4.13.16` en manifiesto, importers, resolución y snapshots. No se modificó `node_modules`.
 
@@ -110,4 +110,10 @@ El run [#1141](https://github.com/juanjoGonDev/HogarIA/actions/runs/41877339875)
 Run #1146 (`41894912465`, commit `1589a83d`) pasó instalación congelada, smokes de contenedor `amd64`/`arm64` y resto de gates salvo shard E2E 2. Fallaron cinco pruebas por `getByRole('tab', { name: 'Ajustes' })`, que coincidía tanto con «Ajustes» como con «Ajustes IA»; no era una regresión funcional. Se cambió el locator a `exact: true` en `confirm-dialog.spec.ts`, `household-action-ack.spec.ts`, `household-icon-consistency.spec.ts` y `household.spec.ts`.
 
 - [x] Reproducir los cinco strict-locator failures y validar corrección en las cuatro suites afectadas: `node scripts/run-isolated-playwright.mjs --project=chromium --forbid-only tests/e2e/confirm-dialog.spec.ts tests/e2e/household-action-ack.spec.ts tests/e2e/household-icon-consistency.spec.ts tests/e2e/household.spec.ts` — 20/20 pasan.
-- [ ] Confirmar run remoto completo verde tras publicar el fix; PR #72 se mantiene Draft mientras tanto.
+- [ ] Confirmar run remoto completo verde tras publicar los fixes; PR #72 se mantiene Draft mientras tanto.
+
+### Hallazgo del run #41909284726 — 2026-11-04
+
+El run terminó con fallo en los shards E2E 1 y 4; instalación, smokes `amd64`/`arm64`, full-stack, servidor, typecheck y build pasaron. Ocho pruebas fallaban porque, después de marcar un producto como comprado, la nueva pregunta de ubicación queda correctamente modal y bloquea interacciones posteriores. Una era `account.spec.ts`; siete eran de lista, ciclo de vida, orden o sugerencias. No es un fallo del flujo de compra: las pruebas omitían contestar la pregunta.
+
+Corrección publicada en `7990cd35`: helper E2E `skipOptionalShoppingLocationPrompt`, que exige el aviso y elige «Ahora no» en pruebas ajenas a ubicación; las pruebas de ubicación conservan sus aserciones. Verificado localmente: suites Chromium focales (42 pasaron, 3 omitidas), full-stack dinero/presupuesto (4 pasaron), Prettier, `typecheck:e2e` y hook pre-push completo (configuración 146, cliente 1837, servidor 2260; 1 omitido). El run nuevo del head `7990cd35` (`41914541391`) estaba en curso al actualizar esta spec.
