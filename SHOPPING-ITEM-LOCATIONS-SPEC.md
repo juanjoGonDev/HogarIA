@@ -1,6 +1,6 @@
 # Ubicación de productos en la lista de la compra
 
-**Estado:** implementación local verificada; CI remoto pendiente.
+**Estado:** implementación y verificación local completas; CI remoto verde en el head funcional `6015d7a2` (run `41916635303`). El PR sigue Draft mientras quede pendiente la casilla de cronología TDD.
 **Rama:** `feat/calendar-recipe-cooking` (PR #72 Draft).
 **Fecha:** 2026-11-04.
 
@@ -52,7 +52,7 @@ Permitir asociar una tienda/establecimiento a productos añadidos desde una foto
 - [x] Coverage supera 70 % en sentencias, ramas, funciones y líneas; gates existentes permanecen intactos.
 - [x] Revisar escritorio y móvil en 1440×900, 390×844 y ancho mínimo 320 px, incluyendo apaisado, teclado/foco, hoja/modal, scroll, safe-area y targets táctiles.
 - [x] Capturas sintéticas PC/móvil guardadas en `.e2e-screenshots/shopping-item-locations/` (ignoradas por Git). Playwright compara rectángulos calculados y padding/margin/gap/radio entre la pregunta tras foto y tras marcado individual: tolerancia ≤1 CSS px a 1440×900 y 320×568. `node scripts/run-isolated-playwright.mjs --config=playwright.full-stack.config.ts full-stack/shopping-photo-review.spec.ts`: 2/2.
-- [ ] Confirmar CI remoto del PR en el head final; suites locales focales, build, typecheck, UI gates y comparación geométrica están verdes y registrados arriba.
+- [x] Confirmar CI remoto del PR en el head funcional `6015d7a2` (run `41916635303`, 11/11 jobs); suites locales focales, build, typecheck, UI gates y comparación geométrica están verdes y registrados arriba.
 
 ## Plan por unidades
 
