@@ -21,7 +21,7 @@
   "dependencies": {
     "hono": "4.13.16",
     "hono-rate-limiter": "0.5.4",
-    "@hono/node-server": "2.1.5",
+    "@hono/node-server": "2.1.6",
     "better-sqlite3": "13.0.3",
     "drizzle-orm": "0.45.4",
     "zod": "4.6.7",
@@ -42,7 +42,7 @@
     "eslint": "9.17.0",
     "tsx": "4.23.15",
     "typescript": "5.7.3",
-    "vitest": "5.0.5",
-    "@vitest/coverage-v8": "5.0.5"
+    "vitest": "5.1.0",
+    "@vitest/coverage-v8": "5.1.0"
   }
 }
