@@ -7,6 +7,37 @@ export const shoppingListDetailEs = {
   'shopping_list_detail.a_que_se_aplica': 'A que se aplica',
   'shopping_list_detail.acciones_de_la_linea': 'Acciones de la linea',
   'shopping_list_detail.acciones_de_la_seleccion': 'Acciones de la seleccion',
+  'shopping_list_detail.ubicacion_de_producto': 'Establecimiento asociado',
+  'shopping_list_detail.anadir_establecimiento': 'Añadir establecimiento',
+  'shopping_list_detail.editar_establecimiento': 'Cambiar establecimiento',
+  'shopping_list_detail.ubicacion_guardada': 'Ubicación guardada.',
+  'shopping_list_detail.anadir_ubicacion_producto': '¿Añadir ubicación?',
+  'shopping_list_detail.editar_ubicacion_producto': 'Ubicación del producto',
+  'shopping_list_detail.ubicacion_consentimiento':
+    'Si aceptas, usaremos tu ubicación aproximada para buscar tiendas cercanas. Si no hay una registrada, consultaremos OpenStreetMap. No guardamos la ubicación exacta del dispositivo.',
+  'shopping_list_detail.ahora_no': 'Ahora no',
+  'shopping_list_detail.buscar_establecimientos_cerca': 'Sí, buscar cerca',
+  'shopping_list_detail.selecciona_el_establecimiento':
+    'Elige la tienda. Si ninguna coincide, puedes escribirla.',
+  'shopping_list_detail.buscando_establecimientos': 'Buscando establecimientos cercanos…',
+  'shopping_list_detail.distancia_establecimiento': 'A {distance} m',
+  'shopping_list_detail.escribir_establecimiento': 'Escribir manualmente',
+  'shopping_list_detail.ubicacion_manual_pista':
+    'Indica el nombre y, si te ayuda, la dirección. Guardaremos solo la tienda que elijas.',
+  'shopping_list_detail.nombre_establecimiento': 'Nombre del establecimiento',
+  'shopping_list_detail.direccion_establecimiento': 'Dirección (opcional)',
+  'shopping_list_detail.guardar_ubicacion': 'Guardar ubicación',
+  'shopping_list_detail.detectar_establecimiento_cerca': 'Detectar cerca de mí',
+  'shopping_list_detail.geolocalizacion_no_disponible':
+    'No se pudo acceder a la ubicación. Puedes escribir el establecimiento.',
+  'shopping_list_detail.geolocalizacion_no_autorizada':
+    'No hay permiso o no se pudo obtener la ubicación. Puedes escribir el establecimiento.',
+  'shopping_list_detail.no_se_encontraron_establecimientos':
+    'No encontramos tiendas cercanas. Puedes escribir el establecimiento.',
+  'shopping_list_detail.deteccion_no_disponible':
+    'La detección no está disponible ahora. Puedes escribir el establecimiento.',
+  'shopping_list_detail.no_se_pudo_guardar_ubicacion':
+    'No se pudo guardar. Revisa la conexión y vuelve a intentarlo.',
   'shopping_list_detail.alcance_del_descuento': 'Alcance del descuento',
   'shopping_list_detail.anadiendo': 'Anadiendo…',
   'shopping_list_detail.anadir_2_leche_1kg': 'Añadir: 2 Leche, 1kg Tomates…',
@@ -411,5 +442,36 @@ export const shoppingListDetailEn: Record<keyof typeof shoppingListDetailEs, str
   'shopping_list_detail.familia_unidades': 'Count',
   'shopping_list_detail.familia_envase': 'Packaging',
   'shopping_list_detail.familia_medida_de_cocina': 'Cooking measure',
-  'shopping_list_detail.usar_importe': 'Use {amount}'
+  'shopping_list_detail.usar_importe': 'Use {amount}',
+  'shopping_list_detail.anadir_ubicacion_producto': 'Add a location?',
+  'shopping_list_detail.editar_ubicacion_producto': 'Product location',
+  'shopping_list_detail.ubicacion_consentimiento':
+    'If you agree, we will use your approximate location to find nearby stores. If none are registered, we will query OpenStreetMap. We do not save your device’s exact location.',
+  'shopping_list_detail.ahora_no': 'Not now',
+  'shopping_list_detail.buscar_establecimientos_cerca': 'Yes, search nearby',
+  'shopping_list_detail.selecciona_el_establecimiento':
+    'Choose the store. If none match, you can enter it manually.',
+  'shopping_list_detail.buscando_establecimientos': 'Searching nearby stores…',
+  'shopping_list_detail.distancia_establecimiento': '{distance} m away',
+  'shopping_list_detail.escribir_establecimiento': 'Enter manually',
+  'shopping_list_detail.ubicacion_manual_pista':
+    'Enter the name and, if useful, the address. We will save only the store you choose.',
+  'shopping_list_detail.nombre_establecimiento': 'Store name',
+  'shopping_list_detail.direccion_establecimiento': 'Address (optional)',
+  'shopping_list_detail.guardar_ubicacion': 'Save location',
+  'shopping_list_detail.detectar_establecimiento_cerca': 'Detect nearby stores',
+  'shopping_list_detail.geolocalizacion_no_disponible':
+    'Location is unavailable. You can enter the store manually.',
+  'shopping_list_detail.geolocalizacion_no_autorizada':
+    'Location permission was denied or unavailable. You can enter the store manually.',
+  'shopping_list_detail.no_se_encontraron_establecimientos':
+    'No nearby stores found. You can enter the store manually.',
+  'shopping_list_detail.deteccion_no_disponible':
+    'Store detection is unavailable right now. You can enter the store manually.',
+  'shopping_list_detail.no_se_pudo_guardar_ubicacion':
+    'Could not save. Check your connection and try again.',
+  'shopping_list_detail.ubicacion_de_producto': 'Associated store',
+  'shopping_list_detail.anadir_establecimiento': 'Add a store',
+  'shopping_list_detail.editar_establecimiento': 'Change store',
+  'shopping_list_detail.ubicacion_guardada': 'Location saved.'
 };

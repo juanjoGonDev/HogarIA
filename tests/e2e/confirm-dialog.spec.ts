@@ -186,7 +186,7 @@ test.describe('Confirmaciones sin diálogos nativos', () => {
     await registerWithHousehold(page, '/household');
     await expect(page.locator('.invite-card__code')).toContainText('/invite/');
 
-    await page.getByRole('tab', { name: 'Ajustes' }).click();
+    await page.getByRole('tab', { name: 'Ajustes', exact: true }).click();
     await page.getByRole('button', { name: /Salir del hogar/ }).click();
     const dialog = confirmDialog(page);
     // El titulo real lleva la bandera de la puerta: 'household.salir_del_hogar' es «🚪 Salir del hogar» y el

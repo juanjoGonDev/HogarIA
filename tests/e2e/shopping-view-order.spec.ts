@@ -2,7 +2,7 @@ import { mkdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { expect, test, type Page } from './fixtures';
 import { createHousehold, registerAndGoto } from './helpers/auth';
-import { shoppingNewListAction } from './helpers/shopping-ui';
+import { shoppingNewListAction, skipOptionalShoppingLocationPrompt } from './helpers/shopping-ui';
 
 async function ensureMobileSidebarOpen(page: Page): Promise<void> {
   if (test.info().project.name !== 'mobile-chrome') return;
@@ -103,6 +103,7 @@ test('grouping and display ordering do not rewrite shopping items', async ({ pag
     has: page.locator('.detail__name', { hasText: 'Patatas' })
   });
   await patatas.locator('[data-test="check"]').click();
+  await skipOptionalShoppingLocationPrompt(page);
   await expect(page.locator('[data-test="tab-todo"]')).toContainText('Pendientes (2)');
   await page.locator('[data-test="tab-cart"]').click();
   await expect(page.locator('[data-test="tab-cart"]')).toContainText('En el carro (1)');

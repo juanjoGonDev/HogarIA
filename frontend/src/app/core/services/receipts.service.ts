@@ -192,7 +192,12 @@ export class ReceiptsService {
 
   updateReceipt(
     id: string,
-    input: { store?: string | null; purchaseDate?: string | null; notes?: string | null }
+    input: {
+      store?: string | null;
+      storeAddress?: string | null;
+      purchaseDate?: string | null;
+      notes?: string | null;
+    }
   ): Promise<Receipt | null> {
     return this.first<Receipt>(
       this.http

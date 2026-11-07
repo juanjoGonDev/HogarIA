@@ -14,7 +14,12 @@ async function tokenOf(page: Page): Promise<string> {
   return token as string;
 }
 
-function seedReceipts(databasePath: string, runDirectory: string, userId: string) {
+function seedReceipts(
+  databasePath: string,
+  runDirectory: string,
+  userId: string,
+  reviewLineCount = 1
+) {
   const relativeDatabasePath = relative(resolve(runDirectory), resolve(databasePath));
   if (isAbsolute(relativeDatabasePath) || relativeDatabasePath.startsWith('..')) {
     throw new Error('DATABASE_PATH debe permanecer dentro del directorio aislado del test');
@@ -35,7 +40,7 @@ function seedReceipts(databasePath: string, runDirectory: string, userId: string
       `INSERT INTO receipt_items (
         id, receipt_id, name, quantity, unit, category, price_minor,
         offer_buy, offer_take, note, confidence, position
-      ) VALUES (?, ?, 'Producto QA', 1, 'ud', 'other', 350, NULL, NULL, ?, 0.99, 0)`
+      ) VALUES (?, ?, ?, 2, 'ud', 'other', 350, NULL, NULL, ?, 0.99, ?)`
     );
 
     insertReceipt.run(
@@ -47,7 +52,11 @@ function seedReceipts(databasePath: string, runDirectory: string, userId: string
       createdAt,
       null
     );
-    insertLine.run(`${reviewId}-line`, reviewId, 'Nota reconocida');
+    insertLine.run(`${reviewId}-line`, reviewId, 'Producto QA', 'Nota reconocida', 0);
+    for (let position = 1; position < reviewLineCount; position += 1) {
+      const lineId = `${reviewId}-line-${position + 1}`;
+      insertLine.run(lineId, reviewId, `Producto QA ${position + 1}`, null, position);
+    }
     insertReceipt.run(
       confirmedId,
       userId,
@@ -57,12 +66,18 @@ function seedReceipts(databasePath: string, runDirectory: string, userId: string
       createdAt,
       createdAt
     );
-    insertLine.run(`${confirmedId}-line`, confirmedId, 'Nota bloqueada');
+    insertLine.run(`${confirmedId}-line`, confirmedId, 'Producto QA', 'Nota bloqueada', 0);
   } finally {
     database.close();
   }
 
-  return { reviewId, confirmedId, reviewLineId: `${reviewId}-line` };
+  return {
+    reviewId,
+    confirmedId,
+    reviewLineId: `${reviewId}-line`,
+    reviewLastLineId:
+      reviewLineCount > 1 ? `${reviewId}-line-${reviewLineCount}` : `${reviewId}-line`
+  };
 }
 
 async function expectNoHorizontalOverflow(page: Page, width: number, height: number) {
@@ -171,7 +186,10 @@ async function expectAccessibleNamesNotToAffectGeometry(page: Page, ids: string[
       const originalValue = original[key];
       const nextValue = next[key];
       if (typeof originalValue === 'number' && typeof nextValue === 'number') {
-        expect(Math.abs(originalValue - nextValue)).toBeLessThanOrEqual(1);
+        expect(
+          Math.abs(originalValue - nextValue),
+          `${ids[index]}.${key} should not move when its accessible name changes`
+        ).toBeLessThanOrEqual(1);
       } else {
         expect(nextValue).toBe(originalValue);
       }
@@ -247,11 +265,29 @@ async function guardarCapturaUnidadOferta(page: Page, testInfo: TestInfo, langua
   });
 }
 
+async function guardarCapturaEditorOferta(page: Page, testInfo: TestInfo, language: string) {
+  const directory = process.env.E2E_SCREENSHOT_DIR ?? testInfo.outputPath('screenshots');
+  mkdirSync(directory, { recursive: true });
+  await page.locator('[data-test="receipt-promotion-editor"]').screenshot({
+    path: join(directory, `receipt-offer-numeric-editor-${testInfo.project.name}-${language}.png`),
+    animations: 'disabled'
+  });
+}
+
 async function guardarCapturaCantidadPrecio(page: Page, testInfo: TestInfo, language: string) {
   const directory = process.env.E2E_SCREENSHOT_DIR ?? testInfo.outputPath('screenshots');
   mkdirSync(directory, { recursive: true });
   await page.locator('.tabla').screenshot({
     path: join(directory, `receipt-line-quantity-price-${testInfo.project.name}-${language}.png`),
+    animations: 'disabled'
+  });
+}
+
+async function guardarCapturaDireccionTienda(page: Page, testInfo: TestInfo, language: string) {
+  const directory = process.env.E2E_SCREENSHOT_DIR ?? testInfo.outputPath('screenshots');
+  mkdirSync(directory, { recursive: true });
+  await page.locator('.ficha__cabecera').screenshot({
+    path: join(directory, `receipt-store-address-${testInfo.project.name}-${language}.png`),
     animations: 'disabled'
   });
 }
@@ -384,14 +420,334 @@ test.describe('edición de nota de línea del ticket', () => {
   }
 });
 
+test.describe('selector de categoría de línea del ticket', () => {
+  test('mantiene buscador y opciones visibles al abrir desde la última fila', async ({
+    page
+  }, info) => {
+    await registerAndGoto(page, '/receipts');
+    const token = await tokenOf(page);
+    const profileResponse = await page.request.get('/api/auth/profile', {
+      headers: { authorization: `Bearer ${token}` }
+    });
+    expect(profileResponse.ok()).toBeTruthy();
+    const profile = (await profileResponse.json()) as { data: { id: string } };
+    const runDirectory = process.env.E2E_RUN_DIR;
+    const databasePath = process.env.DATABASE_PATH;
+    if (!runDirectory || !databasePath) throw new Error('E2E requiere rutas temporales aisladas');
+    const { reviewId, reviewLastLineId } = seedReceipts(
+      databasePath,
+      runDirectory,
+      profile.data.id,
+      16
+    );
+
+    await page.goto(`/receipts/${reviewId}`);
+    const viewport =
+      info.project.name === 'chromium' ? { width: 1440, height: 900 } : { width: 390, height: 844 };
+    await page.setViewportSize(viewport);
+    const lastRow = page.locator('.tabla__fila').last();
+    const categoryPicker = lastRow.locator('.tabla__celda--categoria app-picker');
+    const trigger = categoryPicker.locator('button.picker__trigger');
+    await expect(lastRow.locator(`#linea-${reviewLastLineId}-nombre`)).toBeVisible();
+    await lastRow.evaluate((row) => row.scrollIntoView({ block: 'end', behavior: 'instant' }));
+    await expect(trigger).toBeInViewport();
+    await trigger.click();
+
+    const panel = categoryPicker.locator('.picker__panel');
+    await expect(panel).toBeVisible();
+    await expect(panel).toHaveClass(/picker__panel--floating/u);
+    const search = panel.locator('.picker__search input');
+    await expect(search).toBeVisible();
+    await expect(search).toBeFocused();
+    const expectPanelInViewport = async (width: number, height: number) => {
+      await expect
+        .poll(async () => {
+          const bounds = await panel.boundingBox();
+          return Boolean(
+            bounds &&
+            bounds.x >= 0 &&
+            bounds.y >= 0 &&
+            bounds.x + bounds.width <= width &&
+            bounds.y + bounds.height <= height
+          );
+        })
+        .toBe(true);
+    };
+    await expectPanelInViewport(viewport.width, viewport.height);
+
+    await search.fill('Cereales');
+    const cereals = panel.getByRole('option', { name: 'Cereales' });
+    await expect(cereals).toBeVisible();
+    await expect(search).toHaveAttribute('aria-activedescendant', /.+/u);
+    const screenshotDirectory = process.env.E2E_SCREENSHOT_DIR ?? info.outputPath('screenshots');
+    mkdirSync(screenshotDirectory, { recursive: true });
+    await page.screenshot({
+      path: join(screenshotDirectory, `receipt-category-picker-${info.project.name}.png`),
+      animations: 'disabled'
+    });
+
+    if (info.project.name !== 'chromium') {
+      const openAtViewport = async (size: { width: number; height: number }) => {
+        await page.keyboard.press('Escape');
+        await page.setViewportSize(size);
+        await lastRow.evaluate((row) => row.scrollIntoView({ block: 'end', behavior: 'instant' }));
+        await expect(trigger).toBeInViewport();
+        await trigger.click();
+        await expect(panel).toBeVisible();
+        await expect(search).toBeFocused();
+        await expectPanelInViewport(size.width, size.height);
+      };
+
+      await openAtViewport({ width: 844, height: 390 });
+      await openAtViewport({ width: 320, height: 740 });
+      await page.keyboard.press('Escape');
+      await page.setViewportSize(viewport);
+      await lastRow.evaluate((row) => row.scrollIntoView({ block: 'end', behavior: 'instant' }));
+      await expect(trigger).toBeInViewport();
+      await trigger.click();
+      await expect(panel).toBeVisible();
+      await expect(search).toBeFocused();
+    }
+
+    await search.fill('Cereales');
+
+    const linePath = `/api/receipts/${reviewId}/items/${reviewLastLineId}`;
+    const categoryPatch = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === linePath && response.request().method() === 'PATCH'
+    );
+    await page.keyboard.press('Enter');
+    expect((await categoryPatch).status()).toBe(200);
+    await expect(trigger).toContainText('Cereales');
+  });
+});
+
 test.describe('edición de unidad y oferta en línea de ticket', () => {
   for (const scenario of [
-    { language: 'es', unitLabel: 'Unidad: Producto QA', offerLabel: 'Oferta: Producto QA' },
-    { language: 'en', unitLabel: 'Unit: Producto QA', offerLabel: 'Offer: Producto QA' }
+    {
+      language: 'es',
+      unitLabel: 'Unidad: Producto QA',
+      numericValue: '1.25',
+      preview: 'Descuento total de 1,25 € sobre 1/2 unidades.'
+    },
+    {
+      language: 'en',
+      unitLabel: 'Unit: Producto QA',
+      numericValue: '1.25',
+      preview: 'Total discount of €1.25 on 1/2 units.'
+    }
   ]) {
-    test(`persiste unidad y oferta con controles accesibles (${scenario.language})`, async ({
+    test.describe(`locale numérico ${scenario.language}`, () => {
+      test(`persiste unidad y oferta con controles accesibles (${scenario.language})`, async ({
+        page
+      }, info) => {
+        const pageErrors: string[] = [];
+        page.on('pageerror', (error) => pageErrors.push(`${error.name}: ${error.message}`));
+        await registerAndGoto(page, '/receipts');
+        await page.evaluate((language) => {
+          window.localStorage.setItem('hogar:v1:language', language);
+        }, scenario.language);
+        await page.reload();
+
+        const token = await tokenOf(page);
+        const profileResponse = await page.request.get('/api/auth/profile', {
+          headers: { authorization: `Bearer ${token}` }
+        });
+        expect(profileResponse.ok()).toBeTruthy();
+        const profile = (await profileResponse.json()) as { data: { id: string } };
+        const runDirectory = process.env.E2E_RUN_DIR;
+        const databasePath = process.env.DATABASE_PATH;
+        if (!runDirectory || !databasePath)
+          throw new Error('E2E requiere rutas temporales aisladas');
+        const { reviewId, confirmedId, reviewLineId } = seedReceipts(
+          databasePath,
+          runDirectory,
+          profile.data.id
+        );
+
+        await page.goto(`/receipts/${reviewId}`);
+        const unit = page.getByLabel(scenario.unitLabel, { exact: true });
+        const offer = page.locator('[data-test="receipt-promotion-open"]');
+        await expect(unit).toHaveValue('ud');
+        await expect(offer).toHaveAttribute('aria-label', /Producto QA/);
+
+        const linePath = `/api/receipts/${reviewId}/items/${reviewLineId}`;
+        const unitId = `linea-${reviewLineId}-unidad`;
+        const offerId = `linea-${reviewLineId}-oferta`;
+        const editableFieldIds = [unitId, offerId];
+        const saveAndRead = async (
+          field: Locator,
+          value: string,
+          expectedPatch: Record<string, unknown>,
+          expectedLine: Record<string, unknown>
+        ) => {
+          const patch = page.waitForResponse(
+            (response) =>
+              new URL(response.url()).pathname === linePath &&
+              response.request().method() === 'PATCH'
+          );
+          await field.fill(value);
+          await field.press('Tab');
+          const response = await patch;
+          expect(response.status()).toBe(200);
+          expect(response.request().postDataJSON()).toEqual(expectedPatch);
+
+          const detailResponse = await page.request.get(`/api/receipts/${reviewId}`, {
+            headers: { authorization: `Bearer ${token}` }
+          });
+          expect(detailResponse.status()).toBe(200);
+          const detail = (await detailResponse.json()) as {
+            data: { lines: (Record<string, unknown> & { id: string })[] };
+          };
+          expect(detail.data.lines.find((line) => line.id === reviewLineId)).toMatchObject(
+            expectedLine
+          );
+          await page.evaluate(() => {
+            if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+          });
+        };
+
+        await saveAndRead(unit, 'pack', { unit: 'pack' }, { unit: 'pack' });
+        const quickOfferPatch = page.waitForResponse(
+          (response) =>
+            new URL(response.url()).pathname === linePath && response.request().method() === 'PATCH'
+        );
+        await offer.click();
+        const offerEditor = page.locator('[data-test="receipt-promotion-editor"]');
+        await offerEditor.locator('[data-test="receipt-offer-preset-3x2"]').click();
+        const quickOfferResponse = await quickOfferPatch;
+        expect(quickOfferResponse.status()).toBe(200);
+        expect(quickOfferResponse.request().postDataJSON()).toEqual({
+          offer: { buy: 3, take: 2 },
+          discount: null
+        });
+        await page.reload();
+        await expect(unit).toHaveValue('pack');
+        await expect(offer).toContainText('3x2');
+
+        await offer.click();
+        const reopenedEditor = page.locator('[data-test="receipt-promotion-editor"]');
+        const amountMode = reopenedEditor.locator('[data-test="receipt-promotion-mode-amount"]');
+        await amountMode.focus();
+        await expect(amountMode).toBeFocused();
+        await page.keyboard.press('Enter');
+        const amountInput = reopenedEditor.locator('[data-test="receipt-promotion-value"]');
+        await expect(amountInput).toHaveAttribute('type', 'number');
+        await expect(amountInput).toHaveAttribute('min', '0.01');
+        await expect(amountInput).toHaveAttribute('step', '0.01');
+        await expect(amountInput).not.toHaveAttribute('max', /.+/u);
+        // HTML number inputs expose a canonical dot decimal through automation,
+        // even when the browser renders a locale-specific separator to the user.
+        await amountInput.fill(scenario.numericValue);
+        await expect(amountInput).toHaveValue(scenario.numericValue);
+        await reopenedEditor.locator('[data-test="receipt-promotion-units"]').fill('1');
+        await expect(reopenedEditor.locator('[data-test="receipt-promotion-preview"]')).toHaveText(
+          scenario.preview
+        );
+        await guardarCapturaEditorOferta(page, info, scenario.language);
+        const amountPatch = page.waitForResponse(
+          (response) =>
+            new URL(response.url()).pathname === linePath && response.request().method() === 'PATCH'
+        );
+        await page.locator('[data-test="receipt-promotion-save"]').click();
+        const amountResponse = await amountPatch;
+        expect(amountResponse.status()).toBe(200);
+        expect(amountResponse.request().postDataJSON()).toEqual({
+          offer: null,
+          discount: { kind: 'amount', valueMinor: 125, units: 1 }
+        });
+        const amountDetailResponse = await page.request.get(`/api/receipts/${reviewId}`, {
+          headers: { authorization: `Bearer ${token}` }
+        });
+        expect(amountDetailResponse.status()).toBe(200);
+        const amountDetail = (await amountDetailResponse.json()) as {
+          data: { lines: (Record<string, unknown> & { id: string })[] };
+        };
+        expect(amountDetail.data.lines.find((line) => line.id === reviewLineId)).toMatchObject({
+          priceMinor: 350,
+          offer: null,
+          discount: { kind: 'amount', valueMinor: 125, units: 1 }
+        });
+        await expect(offer).toContainText(/1[,.]25 €/);
+
+        await page.reload();
+        await offer.click();
+        const persistedEditor = page.locator('[data-test="receipt-promotion-editor"]');
+        await expect(
+          persistedEditor.locator('[data-test="receipt-promotion-mode-amount"]')
+        ).toHaveAttribute('aria-pressed', 'true');
+        await expect(persistedEditor.locator('[data-test="receipt-promotion-value"]')).toHaveValue(
+          scenario.numericValue
+        );
+        await expect(persistedEditor.locator('[data-test="receipt-promotion-units"]')).toHaveValue(
+          '1'
+        );
+        await persistedEditor.locator('[data-test="receipt-promotion-mode-percent"]').click();
+        const percentInput = persistedEditor.locator('[data-test="receipt-promotion-value"]');
+        await expect(percentInput).toHaveAttribute('type', 'number');
+        await expect(percentInput).toHaveAttribute('min', '0.01');
+        await expect(percentInput).toHaveAttribute('max', '99.99');
+        await expect(percentInput).toHaveAttribute('step', '0.01');
+        await page.locator('[data-test="receipt-promotion-cancel"]').click();
+
+        if (info.project.name === 'chromium') {
+          await expectNoHorizontalOverflow(page, 1440, 900);
+          await expect(unit).toBeVisible();
+          await expectAccessibleNamesNotToAffectGeometry(page, editableFieldIds);
+          await guardarCapturaUnidadOferta(page, info, scenario.language);
+          await expectNoHorizontalOverflow(page, 320, 740);
+          await expectAccessibleNamesNotToAffectGeometry(page, editableFieldIds);
+          await expectMobileTouchTargets(page);
+        } else {
+          await expectNoHorizontalOverflow(page, 390, 844);
+          await expect(unit).toBeVisible();
+          await expectAccessibleNamesNotToAffectGeometry(page, editableFieldIds);
+          await expectMobileTouchTargets(page);
+          await guardarCapturaUnidadOferta(page, info, scenario.language);
+          await expectNoHorizontalOverflow(page, 320, 740);
+          await expectAccessibleNamesNotToAffectGeometry(page, editableFieldIds);
+          await expectMobileTouchTargets(page);
+        }
+
+        await saveAndRead(
+          unit,
+          '',
+          { unit: null },
+          { unit: null, discount: { kind: 'amount', valueMinor: 125, units: 1 } }
+        );
+        await offer.click();
+        const clearEditor = page.locator('[data-test="receipt-promotion-editor"]');
+        await clearEditor.locator('[data-test="receipt-promotion-mode-none"]').click();
+        const clearPatch = page.waitForResponse(
+          (response) =>
+            new URL(response.url()).pathname === linePath && response.request().method() === 'PATCH'
+        );
+        await page.locator('[data-test="receipt-promotion-save"]').click();
+        const clearResponse = await clearPatch;
+        expect(clearResponse.status()).toBe(200);
+        expect(clearResponse.request().postDataJSON()).toEqual({ offer: null, discount: null });
+        await page.reload();
+        await expect(unit).toHaveValue('');
+        await expect(offer).not.toContainText(/1[,.]25|3x2/);
+
+        await page.goto(`/receipts/${confirmedId}`);
+        await expect(page.getByLabel(scenario.unitLabel, { exact: true })).toHaveCount(0);
+        await expect(page.locator('[data-test="receipt-promotion-open"]')).toHaveCount(0);
+        expect(pageErrors).toEqual([]);
+      });
+    });
+  }
+});
+
+test.describe('edición de dirección y sucursal del ticket', () => {
+  for (const scenario of [
+    { language: 'es', addressLabel: 'Dirección de la tienda' },
+    { language: 'en', addressLabel: 'Store address' }
+  ]) {
+    test(`resuelve y conserva la dirección editada (${scenario.language})`, async ({
       page
     }, info) => {
+      test.skip(process.env.E2E_STACK !== 'dev', 'El fixture local de geocoding usa el stack dev.');
       const pageErrors: string[] = [];
       page.on('pageerror', (error) => pageErrors.push(`${error.name}: ${error.message}`));
       await registerAndGoto(page, '/receipts');
@@ -409,96 +765,66 @@ test.describe('edición de unidad y oferta en línea de ticket', () => {
       const runDirectory = process.env.E2E_RUN_DIR;
       const databasePath = process.env.DATABASE_PATH;
       if (!runDirectory || !databasePath) throw new Error('E2E requiere rutas temporales aisladas');
-      const { reviewId, confirmedId, reviewLineId } = seedReceipts(
-        databasePath,
-        runDirectory,
-        profile.data.id
-      );
+      const { reviewId } = seedReceipts(databasePath, runDirectory, profile.data.id);
 
       await page.goto(`/receipts/${reviewId}`);
-      const unit = page.getByLabel(scenario.unitLabel, { exact: true });
-      const offer = page.getByLabel(scenario.offerLabel, { exact: true });
-      await expect(unit).toHaveValue('ud');
-      await expect(offer).toHaveValue('');
+      const address = page.getByLabel(scenario.addressLabel, { exact: true });
+      const addressValue = 'Avenida Sierra Alhamilla 12, 04007 Almería';
+      await expect(address).toHaveValue('');
+      await address.fill(addressValue);
 
-      const linePath = `/api/receipts/${reviewId}/items/${reviewLineId}`;
-      const unitId = `linea-${reviewLineId}-unidad`;
-      const offerId = `linea-${reviewLineId}-oferta`;
-      const editableFieldIds = [unitId, offerId];
-      const saveAndRead = async (
-        field: Locator,
-        value: string,
-        expectedPatch: Record<string, unknown>,
-        expectedLine: Record<string, unknown>
-      ) => {
-        const patch = page.waitForResponse(
-          (response) =>
-            new URL(response.url()).pathname === linePath && response.request().method() === 'PATCH'
-        );
-        await field.fill(value);
-        await field.press('Tab');
-        const response = await patch;
-        expect(response.status()).toBe(200);
-        expect(response.request().postDataJSON()).toEqual(expectedPatch);
-
-        const detailResponse = await page.request.get(`/api/receipts/${reviewId}`, {
-          headers: { authorization: `Bearer ${token}` }
-        });
-        expect(detailResponse.status()).toBe(200);
-        const detail = (await detailResponse.json()) as {
-          data: { lines: (Record<string, unknown> & { id: string })[] };
-        };
-        expect(detail.data.lines.find((line) => line.id === reviewLineId)).toMatchObject(
-          expectedLine
-        );
-        await page.evaluate(() => {
-          if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-        });
-      };
-
-      await saveAndRead(unit, 'pack', { unit: 'pack' }, { unit: 'pack' });
-      await saveAndRead(
-        offer,
-        '3x2',
-        { offer: { buy: 3, take: 2 } },
-        {
-          unit: 'pack',
-          offer: { buy: 3, take: 2 }
-        }
+      const save = page.locator('[data-test="save-receipt-metadata"]');
+      await expect(save).toBeEnabled();
+      const saveResponse = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === `/api/receipts/${reviewId}` &&
+          response.request().method() === 'PATCH'
       );
+      await save.click();
+      const saved = await saveResponse;
+      expect(saved.status()).toBe(200);
+      expect(saved.request().postDataJSON()).toEqual({ storeAddress: addressValue });
+
+      const detailResponse = await page.request.get(`/api/receipts/${reviewId}`, {
+        headers: { authorization: `Bearer ${token}` }
+      });
+      expect(detailResponse.status()).toBe(200);
+      const detail = (await detailResponse.json()) as {
+        data: {
+          storeAddress: string;
+          storeLatitude: number;
+          storeLongitude: number;
+          storeAttribution: string;
+          storeAttributionUrl: string;
+        };
+      };
+      expect(detail.data).toMatchObject({
+        storeAddress: addressValue,
+        storeLatitude: 36.834,
+        storeLongitude: -2.463,
+        storeAttribution: '© OpenStreetMap contributors',
+        storeAttributionUrl: 'https://www.openstreetmap.org/copyright'
+      });
+
       await page.reload();
-      await expect(unit).toHaveValue('pack');
-      await expect(offer).toHaveValue('3x2');
+      await expect(address).toHaveValue(addressValue);
+      await expect(
+        page.getByRole('link', { name: '© OpenStreetMap contributors', exact: true })
+      ).toHaveAttribute('href', 'https://www.openstreetmap.org/copyright');
 
       if (info.project.name === 'chromium') {
         await expectNoHorizontalOverflow(page, 1440, 900);
-        await expect(unit).toBeVisible();
-        await expectAccessibleNamesNotToAffectGeometry(page, editableFieldIds);
-        await guardarCapturaUnidadOferta(page, info, scenario.language);
+        await expect(address).toBeVisible();
+        await guardarCapturaDireccionTienda(page, info, scenario.language);
         await expectNoHorizontalOverflow(page, 320, 740);
-        await expectAccessibleNamesNotToAffectGeometry(page, editableFieldIds);
-        await expectMobileTouchTargets(page);
       } else {
         await expectNoHorizontalOverflow(page, 390, 844);
-        await expect(unit).toBeVisible();
-        await expectAccessibleNamesNotToAffectGeometry(page, editableFieldIds);
-        await expectMobileTouchTargets(page);
-        await guardarCapturaUnidadOferta(page, info, scenario.language);
+        await expect(address).toBeVisible();
+        await guardarCapturaDireccionTienda(page, info, scenario.language);
         await expectNoHorizontalOverflow(page, 320, 740);
-        await expectAccessibleNamesNotToAffectGeometry(page, editableFieldIds);
-        await expectMobileTouchTargets(page);
       }
-
-      await saveAndRead(unit, '', { unit: null }, { unit: null, offer: { buy: 3, take: 2 } });
-      await saveAndRead(offer, '', { offer: null }, { unit: null, offer: null });
-      await saveAndRead(offer, 'oferta inválida', { offer: null }, { offer: null });
-      await page.reload();
-      await expect(unit).toHaveValue('');
-      await expect(offer).toHaveValue('');
-
-      await page.goto(`/receipts/${confirmedId}`);
-      await expect(page.getByLabel(scenario.unitLabel, { exact: true })).toHaveCount(0);
-      await expect(page.getByLabel(scenario.offerLabel, { exact: true })).toHaveCount(0);
+      const addressBounds = await address.boundingBox();
+      expect(Math.abs((addressBounds?.height ?? 0) - 42)).toBeLessThanOrEqual(1);
       expect(pageErrors).toEqual([]);
     });
   }
@@ -547,7 +873,7 @@ test.describe('edición de cantidad y precio en línea de ticket', () => {
       await page.goto(`/receipts/${reviewId}`);
       const quantity = page.getByLabel(scenario.quantityLabel, { exact: true });
       const price = page.getByLabel(scenario.priceLabel, { exact: true });
-      await expect(quantity).toHaveValue('1');
+      await expect(quantity).toHaveValue('2');
       await expect(price).toHaveValue('3.50');
       for (const field of [quantity, price]) {
         await expect(field).toHaveAttribute('type', 'number');

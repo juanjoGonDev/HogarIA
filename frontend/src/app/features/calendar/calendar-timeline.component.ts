@@ -53,6 +53,7 @@ interface TimelineItem extends GridItem {
   event?: HouseholdEvent;
 }
 import { IconButtonComponent } from '../../shared/components/ui/icon-button/icon-button.component';
+import { IconComponent } from '../../shared/components/ui/icon/icon.component';
 import { AvatarComponent } from '../../shared/components/ui/avatar/avatar.component';
 import { MEAL_LABEL_KEYS } from '../../core/i18n/labels';
 import { TranslatePipe } from '../../core/pipes/translate.pipe';
@@ -84,6 +85,7 @@ const MIN_DAY_COLUMN_WIDTH_PX = 48;
     TranslatePipe,
     CommonModule,
     IconButtonComponent,
+    IconComponent,
     AvatarComponent,
     CalendarHouseholdTasksComponent
   ],
@@ -186,6 +188,9 @@ const MIN_DAY_COLUMN_WIDTH_PX = 48;
                       type="button"
                       class="tl__block"
                       [class.tl__block--meal]="block.item.kind === 'meal'"
+                      [class.tl__block--editable]="
+                        block.item.kind === 'meal' && !block.item.meal?.isShared
+                      "
                       [class.is-done]="block.item.meal?.completed"
                       [style.--event-color]="colorOf(block.item)"
                       [style.top.px]="block.topPx"
@@ -193,6 +198,7 @@ const MIN_DAY_COLUMN_WIDTH_PX = 48;
                       [style.left.%]="(block.column / block.columns) * 100"
                       [style.width.%]="100 / block.columns - 0.6"
                       [attr.title]="tipOf(block.item)"
+                      [attr.aria-label]="openActionLabel(block.item)"
                       [attr.data-test]="'timeline-block-' + block.item.kind"
                       (click)="$event.stopPropagation(); onOpen(block.item)"
                     >
@@ -200,6 +206,24 @@ const MIN_DAY_COLUMN_WIDTH_PX = 48;
                         *ngTemplateOutlet="timelineBlockContent; context: { $implicit: block.item }"
                       />
                     </button>
+                    @if (
+                      block.item.kind === 'meal' && block.item.meal && !block.item.meal.isShared
+                    ) {
+                      <button
+                        type="button"
+                        class="tl__edit"
+                        [class.tl__edit--single]="single()"
+                        [attr.aria-label]="
+                          'calendar.edit_meal_named' | t: { meal: block.item.meal.title }
+                        "
+                        [title]="'calendar.edit_meal_named' | t: { meal: block.item.meal.title }"
+                        [style.top.px]="block.topPx"
+                        [style.left.%]="((block.column + 1) / block.columns) * 100"
+                        (click)="onEditMeal(block.item, $event)"
+                      >
+                        <app-icon name="edit" [size]="18" [label]="null" />
+                      </button>
+                    }
                   } @else {
                     <div
                       class="tl__block tl__block--readonly tl__block--meal"
@@ -516,6 +540,37 @@ const MIN_DAY_COLUMN_WIDTH_PX = 48;
         background: color-mix(in srgb, var(--event-color, var(--primary)) 28%, var(--bg-secondary));
       }
 
+      .tl__block--editable {
+        padding-right: 34px;
+      }
+
+      .tl__edit {
+        position: absolute;
+        z-index: 2;
+        display: grid;
+        place-items: center;
+        width: 32px;
+        height: 32px;
+        padding: 0;
+        border: 1px solid var(--border-default);
+        border-radius: var(--radius-md);
+        background: var(--bg-secondary);
+        color: var(--text-secondary);
+        cursor: pointer;
+        transform: translate(-100%, 0);
+        margin-top: 1px;
+      }
+
+      .tl__edit:hover {
+        color: var(--text-primary);
+        border-color: var(--border-strong);
+      }
+
+      .tl__edit:focus-visible {
+        outline: 2px solid var(--primary);
+        outline-offset: 2px;
+      }
+
       .tl__block--readonly {
         cursor: default;
       }
@@ -597,6 +652,19 @@ const MIN_DAY_COLUMN_WIDTH_PX = 48;
           font-size: 9px;
         }
       }
+
+      @media (max-width: 767px) {
+        .tl__edit:not(.tl__edit--single) {
+          display: none;
+        }
+        .tl__edit--single {
+          width: 44px;
+          height: 44px;
+        }
+        .tl--single .tl__block--editable {
+          padding-right: 48px;
+        }
+      }
     `
   ]
 })
@@ -618,6 +686,7 @@ export class CalendarTimelineComponent implements AfterViewInit, OnChanges {
   @Input() mealAnchors?: Record<MealType, number>;
 
   @Output() openMeal = new EventEmitter<CalendarMeal>();
+  @Output() editMeal = new EventEmitter<CalendarMeal>();
   @Output() toggleMeal = new EventEmitter<CalendarMeal>();
   @Output() removeMeal = new EventEmitter<CalendarMeal>();
   @Output() editEvent = new EventEmitter<HouseholdEvent>();
@@ -777,6 +846,14 @@ export class CalendarTimelineComponent implements AfterViewInit, OnChanges {
     return item.kind === 'event' ? (item.event?.title ?? '') : (item.meal?.title ?? '');
   }
 
+  protected openActionLabel(item: TimelineItem): string | null {
+    if (item.kind !== 'meal' || !item.meal) return null;
+    return this.i18n.t(
+      item.meal.isShared ? 'calendar.record_consumption_for' : 'calendar.cook_meal_named',
+      { meal: item.meal.title }
+    );
+  }
+
   protected whenOf(item: TimelineItem): string {
     if (item.kind === 'event' && item.event) return eventTimeLabel(item.event);
     // Solo la hora ESCRITA se pinta: la ancla del tipo es posición, no dato del usuario, y
@@ -806,6 +883,11 @@ export class CalendarTimelineComponent implements AfterViewInit, OnChanges {
   protected onOpen(item: TimelineItem): void {
     if (item.kind === 'meal' && item.meal) this.openMeal.emit(item.meal);
     else if (item.kind === 'event' && item.event) this.editEvent.emit(item.event);
+  }
+
+  protected onEditMeal(item: TimelineItem, event?: Event): void {
+    event?.stopPropagation();
+    if (item.kind === 'meal' && item.meal && !item.meal.isShared) this.editMeal.emit(item.meal);
   }
 
   protected canOpen(item: TimelineItem): boolean {

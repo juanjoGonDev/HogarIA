@@ -65,6 +65,7 @@ const COVERED = [
   'src/utils/shopping-categories.ts',
   'src/utils/list-discount.ts',
   'src/utils/shopping-events.ts',
+  'src/utils/store-locator.ts',
   'src/middleware/timestamp.middleware.ts',
   'src/utils/photo-prompt.ts',
   'src/utils/live-hub.ts',

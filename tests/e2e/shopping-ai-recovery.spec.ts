@@ -52,8 +52,8 @@ test('el error de foto sin IA lleva a la configuración real sin escribir línea
   const setupDialog = page.getByRole('dialog', { name: 'Configura la IA' });
   await expect(setupDialog).toBeVisible();
   await expect(setupDialog).toContainText('Compra y despensa');
-  const recoveryLink = setupDialog.getByRole('link', { name: 'Abrir ajustes' });
-  await expect(recoveryLink).toHaveAttribute('href', '/household?tab=settings');
+  const recoveryLink = setupDialog.getByRole('link', { name: 'Abrir configuración IA' });
+  await expect(recoveryLink).toHaveAttribute('href', '/household?tab=ai');
   await expect(page.locator('app-toast .toast--error')).toHaveCount(0);
   await expect(page.locator('[data-test="item-row"]')).toHaveCount(0);
   expect(analyzeRequests).toBe(0);
@@ -69,7 +69,7 @@ test('el error de foto sin IA lleva a la configuración real sin escribir línea
   if (mobile) await recoveryLink.tap();
   else await recoveryLink.click();
 
-  await expect(page).toHaveURL(/\/household\?tab=settings$/);
+  await expect(page).toHaveURL(/\/household\?tab=ai$/);
   await expect(page.locator('[data-test="household-ai-config"]')).toBeVisible();
   await expect(
     page.locator('[data-test="household-ai-config"]').getByRole('heading', {

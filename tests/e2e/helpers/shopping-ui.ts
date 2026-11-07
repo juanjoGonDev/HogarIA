@@ -7,6 +7,14 @@ export function shoppingNewListAction(page: Page): Locator {
   return page.locator(NEW_LIST_ACTIONS).first();
 }
 
+/** Dismisses the shared optional location flow after a test marks one item as purchased. */
+export async function skipOptionalShoppingLocationPrompt(page: Page): Promise<void> {
+  const prompt = page.locator('[data-test="location-prompt"]');
+  await expect(prompt).toBeVisible();
+  await page.locator('[data-test="location-skip"] button').click();
+  await expect(prompt).toHaveCount(0);
+}
+
 /** Opens the mobile drawer when needed, then follows the real shopping navigation link. */
 export async function navigateToShopping(page: Page): Promise<void> {
   const width = page.viewportSize()?.width ?? 1024;

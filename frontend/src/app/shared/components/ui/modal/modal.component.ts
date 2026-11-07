@@ -85,7 +85,7 @@ const FOCUSABLE_SELECTOR =
         left: 0;
         right: 0;
         bottom: auto;
-        height: var(--modal-visual-viewport-height, 100vh);
+        height: min(var(--modal-visual-viewport-height, 100vh), 100vh);
         box-sizing: border-box;
       }
 

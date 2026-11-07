@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import type { Locator, Page, TestInfo } from '@playwright/test';
 import { expect, test } from './fixtures';
 import { registerAndGoto } from './helpers/auth';
-import { shoppingNewListAction } from './helpers/shopping-ui';
+import { shoppingNewListAction, skipOptionalShoppingLocationPrompt } from './helpers/shopping-ui';
 
 function trayRow(page: Page, name: string): Locator {
   return page.locator('[data-test="list-row"]', { hasText: name });
@@ -59,6 +59,7 @@ test.describe('Bandeja: ciclo de vida de una lista', () => {
     await page.locator('[data-test="price-input"]').blur();
     await page.locator('[data-test="edit-sheet"]').getByRole('button', { name: /Hecho/i }).click();
     await item.locator('[data-test="check"]').click();
+    await skipOptionalShoppingLocationPrompt(page);
     await page.locator('[data-test="back"]').click();
     await expect(trayRow(page, name)).toBeVisible();
     const finish = trayRow(page, name).locator(`[data-test="row-done-${listId}"] button`);

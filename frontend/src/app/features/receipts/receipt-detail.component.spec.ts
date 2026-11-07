@@ -1,4 +1,5 @@
 import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
 import { signal } from '@angular/core';
 import { ActivatedRoute, provideRouter, Router } from '@angular/router';
 import { of } from 'rxjs';
@@ -22,6 +23,7 @@ function makeLine(overrides: Partial<ReceiptItem> = {}): ReceiptItem {
     category: 'dairy',
     priceMinor: 250,
     offer: null,
+    discount: null,
     note: null,
     confidence: 0.9,
     ...overrides
@@ -60,6 +62,7 @@ function makeReceipt(overrides: Partial<ReceiptDetail> = {}): ReceiptDetail {
     items: 1,
     lines: [makeLine()],
     job: null,
+    storeAddress: 'Avenida sintética 1',
     ...overrides
   };
 }
@@ -150,10 +153,28 @@ describe('ReceiptDetailComponent', () => {
     expect(service.loadReceipt).toHaveBeenCalledOnceWith(RECEIPT_ID);
     expect(pantry.loadCategories).toHaveBeenCalledOnceWith();
     expect(component.tiendaDraft()).toBe('Tienda inicial');
+    expect(component.direccionTiendaDraft()).toBe('Avenida sintética 1');
     expect(component.fechaCompraDraft()).toBe('2026-08-21');
     expect(component.metadatosCambiados()).toBeFalse();
     expect(fixture.nativeElement.querySelector('#ticket-tienda')).not.toBeNull();
+    expect(fixture.nativeElement.querySelector('#ticket-store-address')).not.toBeNull();
   });
+
+  it('reloads categories when background ticket reading enters review', fakeAsync(() => {
+    fixture.destroy();
+    service.receipt.set(makeReceipt({ status: 'analyzing', lines: [] }));
+    pantry.loadCategories.calls.reset();
+    fixture = TestBed.createComponent(ReceiptDetailComponent);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    service.receipt.set(
+      makeReceipt({ status: 'review', lines: [makeLine({ category: 'cuidado personal' })] })
+    );
+
+    tick(1000);
+
+    expect(pantry.loadCategories).toHaveBeenCalledTimes(2);
+  }));
 
   it('initializes null metadata as empty drafts and updates drafts only for a new receipt id', () => {
     fixture.destroy();
@@ -221,6 +242,20 @@ describe('ReceiptDetailComponent', () => {
     expect(component.metadatosGuardados()).toBeTrue();
     expect(component.errorMetadatos()).toBeFalse();
     expect(component.metadatosGuardando()).toBeFalse();
+  });
+
+  it('submits a changed store address through the same metadata save flow and can clear it', async () => {
+    component.cambiarDireccionTienda('  Calle manual 8, Almería  ');
+    await component.guardarMetadatos();
+
+    expect(service.updateReceipt).toHaveBeenCalledOnceWith(RECEIPT_ID, {
+      storeAddress: 'Calle manual 8, Almería'
+    });
+
+    service.updateReceipt.calls.reset();
+    component.cambiarDireccionTienda('   ');
+    await component.guardarMetadatos();
+    expect(service.updateReceipt).toHaveBeenCalledOnceWith(RECEIPT_ID, { storeAddress: null });
   });
 
   it('omits unchanged fields from the metadata patch and does nothing for unchanged values', async () => {
@@ -582,7 +617,7 @@ describe('ReceiptDetailComponent', () => {
     expect(component.numeroDe('invalid')).toBe(1);
   });
 
-  it('updates a line then refreshes; parses valid offers and clears malformed offers', async () => {
+  it('updates a line then refreshes; quick offer summaries remain readable', async () => {
     const line = component.lineas()[0];
     await component.editarLinea(line, { name: 'Leche entera' });
     expect(service.updateLine).toHaveBeenCalledOnceWith(RECEIPT_ID, 'line-1', {
@@ -590,12 +625,229 @@ describe('ReceiptDetailComponent', () => {
     });
     expect(service.loadReceipt).toHaveBeenCalledWith(RECEIPT_ID);
 
-    await component.editarOferta(line, ' 3 X 2 ');
-    expect(service.updateLine.calls.mostRecent().args[2]).toEqual({ offer: { buy: 3, take: 2 } });
-    await component.editarOferta(line, 'oferta inválida');
-    expect(service.updateLine.calls.mostRecent().args[2]).toEqual({ offer: null });
-    expect(component.ofertaTexto(makeLine({ offer: { buy: 2, take: 1 } }))).toBe('2x1');
-    expect(component.ofertaTexto(makeLine({ offer: null }))).toBe('');
+    await component.aplicarOfertaRapida(line, { buy: 3, take: 2 });
+    expect(service.updateLine.calls.mostRecent().args[2]).toEqual({
+      offer: { buy: 3, take: 2 },
+      discount: null
+    });
+    expect(component.resumenPromocion(makeLine({ offer: { buy: 2, take: 1 } }))).toBe('2x1');
+    expect(
+      component.resumenPromocion(
+        makeLine({ discount: { kind: 'amount', valueMinor: 250, units: 1 } })
+      )
+    ).toBe('2,50 € · 1/2');
+  });
+
+  it('opens an accessible offer editor with one-tap offers and Basketra discount modes', () => {
+    fixture.detectChanges();
+    const opener = fixture.nativeElement.querySelector(
+      '[data-test="receipt-promotion-open"]'
+    ) as HTMLButtonElement;
+    expect(opener).not.toBeNull();
+    opener.click();
+    fixture.detectChanges();
+
+    const dialog = fixture.nativeElement.querySelector('[role="dialog"]') as HTMLElement;
+    expect(dialog).not.toBeNull();
+    expect(dialog.querySelector('[data-test="receipt-promotion-mode-none"]')).not.toBeNull();
+    expect(dialog.querySelector('[data-test="receipt-promotion-mode-percent"]')).not.toBeNull();
+    expect(dialog.querySelector('[data-test="receipt-promotion-mode-amount"]')).not.toBeNull();
+    expect(dialog.querySelector('[data-test="receipt-offer-preset-3x2"]')).not.toBeNull();
+    expect(dialog.querySelector('[data-test="receipt-offer-preset-2x1"]')).not.toBeNull();
+    expect(dialog.querySelector('[data-test="receipt-offer-preset-4x3"]')).not.toBeNull();
+    expect(dialog.querySelector('[data-test="receipt-offer-preset-5x4"]')).not.toBeNull();
+    (
+      dialog.querySelector('[data-test="receipt-promotion-mode-amount"]') as HTMLButtonElement
+    ).click();
+    fixture.detectChanges();
+    expect(dialog.textContent).toContain('receipts.descuento_importe_total_hint');
+  });
+
+  it('uses a floating category picker and a bounded numeric discount input', () => {
+    const picker = fixture.debugElement.query(By.css('app-picker'));
+    expect(picker.componentInstance.floatingPanel).toBeTrue();
+
+    const line = component.lineas()[0];
+    component.abrirEditorPromocion(line);
+    component.seleccionarModoPromocion('percent');
+    fixture.detectChanges();
+
+    let value = fixture.nativeElement.querySelector(
+      '[data-test="receipt-promotion-value"]'
+    ) as HTMLInputElement;
+    expect(value.type).toBe('number');
+    expect(value.min).toBe('0.01');
+    expect(value.step).toBe('0.01');
+    expect(value.max).toBe('99.99');
+
+    component.seleccionarModoPromocion('amount');
+    fixture.detectChanges();
+    value = fixture.nativeElement.querySelector(
+      '[data-test="receipt-promotion-value"]'
+    ) as HTMLInputElement;
+    expect(value.type).toBe('number');
+    expect(value.min).toBe('0.01');
+    expect(value.step).toBe('0.01');
+    expect(value.hasAttribute('max')).toBeFalse();
+  });
+
+  it('reopens persisted discounts using the canonical decimal value required by number inputs', () => {
+    service.receipt.set(
+      makeReceipt({
+        lines: [makeLine({ discount: { kind: 'amount', valueMinor: 125, units: 1 } })]
+      })
+    );
+    fixture.detectChanges();
+    component.abrirEditorPromocion(component.lineas()[0]!);
+    fixture.detectChanges();
+    expect(
+      (
+        fixture.nativeElement.querySelector(
+          '[data-test="receipt-promotion-value"]'
+        ) as HTMLInputElement
+      ).value
+    ).toBe('1.25');
+
+    service.receipt.set(
+      makeReceipt({
+        lines: [makeLine({ discount: { kind: 'percent', percentBps: 1250, units: null } })]
+      })
+    );
+    fixture.detectChanges();
+    component.abrirEditorPromocion(component.lineas()[0]!);
+    fixture.detectChanges();
+    expect(
+      (
+        fixture.nativeElement.querySelector(
+          '[data-test="receipt-promotion-value"]'
+        ) as HTMLInputElement
+      ).value
+    ).toBe('12.50');
+  });
+
+  it('previews valid offer and discount effects before saving, and hides invalid drafts', () => {
+    const line = component.lineas()[0];
+    component.abrirEditorPromocion(line);
+    expect(component.previsualizacionPromocion()).toBeNull();
+
+    component.seleccionarModoPromocion('amount');
+    component.valorPromocionDraft.set('0');
+    expect(component.previsualizacionPromocion()).toBeNull();
+    component.valorPromocionDraft.set('1,25');
+    component.unidadesPromocionDraft.set('1');
+    expect(component.previsualizacionPromocion()).toBe('receipts.preview_promotion_amount');
+    expect(i18n.t).toHaveBeenCalledWith('receipts.preview_promotion_amount', {
+      amount: '1,25',
+      units: '1/2'
+    });
+
+    component.seleccionarModoPromocion('percent');
+    component.valorPromocionDraft.set('12,5');
+    component.unidadesPromocionDraft.set('');
+    expect(component.previsualizacionPromocion()).toBe('receipts.preview_promotion_percent');
+    expect(i18n.t).toHaveBeenCalledWith('receipts.preview_promotion_percent', {
+      percent: '12,5',
+      units: '2/2'
+    });
+
+    component.valorPromocionDraft.set('99.99');
+    expect(component.previsualizacionPromocion()).toBe('receipts.preview_promotion_percent');
+    component.valorPromocionDraft.set('100');
+    expect(component.previsualizacionPromocion()).toBeNull();
+    component.valorPromocionDraft.set('12.345');
+    expect(component.previsualizacionPromocion()).toBeNull();
+
+    component.seleccionarModoPromocion('offer');
+    component.compraPromocionDraft.set('3');
+    component.pagaPromocionDraft.set('2');
+    expect(component.previsualizacionPromocion()).toBe('receipts.preview_promotion_offer');
+    expect(i18n.t).toHaveBeenCalledWith('receipts.preview_promotion_offer', {
+      buy: 3,
+      take: 2,
+      free: 1
+    });
+  });
+
+  it('saves a total fixed discount for selected units and keeps the paid line amount unchanged', async () => {
+    const line = component.lineas()[0];
+    component.abrirEditorPromocion(line);
+    component.seleccionarModoPromocion('amount');
+    component.valorPromocionDraft.set('1,25');
+    component.unidadesPromocionDraft.set('1');
+
+    await component.guardarPromocion();
+
+    expect(service.updateLine).toHaveBeenCalledOnceWith(RECEIPT_ID, 'line-1', {
+      offer: null,
+      discount: { kind: 'amount', valueMinor: 125, units: 1 }
+    });
+    expect(component.suma()).toBe(250);
+  });
+
+  it('saves percentages in basis points, treats blank units as all units, and applies quick offers in one action', async () => {
+    const line = component.lineas()[0];
+    component.abrirEditorPromocion(line);
+    component.seleccionarModoPromocion('percent');
+    component.valorPromocionDraft.set('12,5');
+    component.unidadesPromocionDraft.set('');
+    await component.guardarPromocion();
+
+    expect(service.updateLine.calls.mostRecent().args[2]).toEqual({
+      offer: null,
+      discount: { kind: 'percent', percentBps: 1250, units: null }
+    });
+
+    service.updateLine.calls.reset();
+    await component.aplicarOfertaRapida(line, { buy: 3, take: 2 });
+    expect(service.updateLine).toHaveBeenCalledOnceWith(RECEIPT_ID, 'line-1', {
+      offer: { buy: 3, take: 2 },
+      discount: null
+    });
+  });
+
+  it('accepts 99.99 percent but rejects 100 percent', async () => {
+    const line = component.lineas()[0];
+    component.abrirEditorPromocion(line);
+    component.seleccionarModoPromocion('percent');
+    component.valorPromocionDraft.set('100');
+    await component.guardarPromocion();
+    expect(service.updateLine).not.toHaveBeenCalled();
+
+    component.valorPromocionDraft.set('99.99');
+    await component.guardarPromocion();
+    expect(service.updateLine).toHaveBeenCalledOnceWith(RECEIPT_ID, 'line-1', {
+      offer: null,
+      discount: { kind: 'percent', percentBps: 9999, units: null }
+    });
+  });
+
+  it('rejects invalid discount values, unit caps and custom offers without sending a patch', async () => {
+    const line = component.lineas()[0];
+    component.abrirEditorPromocion(line);
+    component.seleccionarModoPromocion('amount');
+    component.valorPromocionDraft.set('0');
+    await component.guardarPromocion();
+    expect(service.updateLine).not.toHaveBeenCalled();
+
+    component.seleccionarModoPromocion('percent');
+    component.valorPromocionDraft.set('101');
+    await component.guardarPromocion();
+    expect(service.updateLine).not.toHaveBeenCalled();
+
+    component.valorPromocionDraft.set('12.345');
+    await component.guardarPromocion();
+    expect(service.updateLine).not.toHaveBeenCalled();
+
+    component.valorPromocionDraft.set('15');
+    component.unidadesPromocionDraft.set('3');
+    await component.guardarPromocion();
+    expect(service.updateLine).not.toHaveBeenCalled();
+
+    component.seleccionarModoPromocion('offer');
+    component.compraPromocionDraft.set('2');
+    component.pagaPromocionDraft.set('2');
+    await component.guardarPromocion();
+    expect(service.updateLine).not.toHaveBeenCalled();
   });
 
   it('does not refresh a line after a failed update so its draft is retained', async () => {

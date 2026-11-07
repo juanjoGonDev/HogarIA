@@ -25,6 +25,8 @@ import {
   registrarTienda,
   sanitizeAiJobDiagnosticTrace
 } from '../utils/ticket-queue.js';
+import { normalizeStoreAddress } from '../utils/store-geocoder.js';
+import { storeGeocoder } from '../utils/store-geocoder-runtime.js';
 
 /**
  * La lectura de tickets por IA (HOGARIA-SPEC ## 12aj).
@@ -194,6 +196,12 @@ function pintar(recibo: Record<string, any>, items: number) {
     id: recibo.id,
     status: recibo.status,
     store: recibo.store,
+    storeId: recibo.store_id ?? null,
+    storeAddress: recibo.store_address ?? null,
+    storeLatitude: recibo.store_latitude ?? null,
+    storeLongitude: recibo.store_longitude ?? null,
+    storeAttribution: recibo.store_attribution ?? null,
+    storeAttributionUrl: recibo.store_attribution_url ?? null,
     purchaseDate: recibo.purchase_date ?? null,
     currency: recibo.currency,
     totalMinor: recibo.total_minor,
@@ -464,6 +472,20 @@ receiptsRoutes.get('/:id', async (c) => {
           linea.offer_buy && linea.offer_take
             ? { buy: linea.offer_buy, take: linea.offer_take }
             : null,
+        discount:
+          linea.discount_kind === 'amount'
+            ? {
+                kind: 'amount',
+                valueMinor: linea.discount_value_minor ?? null,
+                units: linea.discount_units ?? null
+              }
+            : linea.discount_kind === 'percent'
+              ? {
+                  kind: 'percent',
+                  percentBps: linea.discount_percent_bps ?? null,
+                  units: linea.discount_units ?? null
+                }
+              : null,
         note: linea.note,
         confidence: linea.confidence
       })),
@@ -486,6 +508,7 @@ receiptsRoutes.patch('/:id', async (c) => {
   // el parse, y aqui igual —la validez la garantizo el esquema, no el tipo.
   const input = updateReceiptSchema.parse(await c.req.json().catch(() => ({}))) as {
     store?: string | null;
+    storeAddress?: string | null;
     purchaseDate?: string | null;
     notes?: string | null;
   };
@@ -495,25 +518,128 @@ receiptsRoutes.patch('/:id', async (c) => {
       409
     );
   }
-  const sets: string[] = [];
-  const valores: unknown[] = [];
-  if (input.store !== undefined) {
-    sets.push('store = ?', 'store_manual = 1');
-    valores.push(input.store?.trim() || null);
-  }
-  if (input.purchaseDate !== undefined) {
-    sets.push('purchase_date = ?', 'purchase_date_manual = 1');
-    valores.push(input.purchaseDate);
-  }
-  if (input.notes !== undefined) {
-    sets.push('notes = ?');
-    valores.push(input.notes?.trim() || null);
-  }
-  if (sets.length > 0) {
-    db.prepare(
-      `UPDATE receipts SET ${sets.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
-    ).run(...valores, recibo.id);
-  }
+  const householdId = typeof recibo.household_id === 'string' ? recibo.household_id : null;
+  const store =
+    input.store !== undefined
+      ? input.store?.trim().replace(/\s+/gu, ' ') || null
+      : typeof recibo.store === 'string'
+        ? recibo.store
+        : null;
+  const oldAddress = normalizeStoreAddress(String(recibo.store_address ?? '')) || null;
+  const address =
+    input.storeAddress !== undefined
+      ? normalizeStoreAddress(input.storeAddress ?? '') || null
+      : oldAddress;
+  const addressChanged = input.storeAddress !== undefined && address !== oldAddress;
+  const currentCoordinatesValid =
+    typeof recibo.store_latitude === 'number' &&
+    typeof recibo.store_longitude === 'number' &&
+    Number.isFinite(recibo.store_latitude) &&
+    Number.isFinite(recibo.store_longitude);
+  const geocoded =
+    address && (addressChanged || (input.storeAddress !== undefined && !currentCoordinatesValid))
+      ? await storeGeocoder.geocode(address)
+      : null;
+  const resolved = geocoded?.status === 'resolved';
+  const geocodedLocationChanged = addressChanged || geocoded !== null;
+  const latitude = geocodedLocationChanged
+    ? resolved
+      ? geocoded.latitude
+      : null
+    : typeof recibo.store_latitude === 'number' && Number.isFinite(recibo.store_latitude)
+      ? recibo.store_latitude
+      : null;
+  const longitude = geocodedLocationChanged
+    ? resolved
+      ? geocoded.longitude
+      : null
+    : typeof recibo.store_longitude === 'number' && Number.isFinite(recibo.store_longitude)
+      ? recibo.store_longitude
+      : null;
+  const attribution = geocodedLocationChanged
+    ? resolved
+      ? geocoded.attribution
+      : null
+    : recibo.store_latitude != null && recibo.store_longitude != null
+      ? {
+          text: String(recibo.store_attribution ?? ''),
+          url: String(recibo.store_attribution_url ?? '')
+        }
+      : null;
+  const storeChanged = input.store !== undefined || input.storeAddress !== undefined;
+  db.transaction(() => {
+    const storeId = storeChanged
+      ? store
+        ? registrarTienda(db, userId, store, householdId, {
+            address,
+            latitude,
+            longitude,
+            attribution: attribution ?? { text: '', url: '' }
+          })
+        : null
+      : (recibo.store_id ?? null);
+    const sets: string[] = [];
+    const valores: unknown[] = [];
+    if (input.store !== undefined) {
+      sets.push('store = ?', 'store_manual = 1');
+      valores.push(store);
+    }
+    if (input.storeAddress !== undefined) {
+      sets.push(
+        'store_address = ?',
+        'store_address_manual = 1',
+        'store_latitude = ?',
+        'store_longitude = ?',
+        'store_attribution = ?',
+        'store_attribution_url = ?'
+      );
+      valores.push(
+        address,
+        latitude,
+        longitude,
+        attribution?.text ?? null,
+        attribution?.url ?? null
+      );
+    } else if (addressChanged) {
+      sets.push(
+        'store_address = ?',
+        'store_latitude = ?',
+        'store_longitude = ?',
+        'store_attribution = ?',
+        'store_attribution_url = ?'
+      );
+      valores.push(
+        address,
+        latitude,
+        longitude,
+        attribution?.text ?? null,
+        attribution?.url ?? null
+      );
+    }
+    if (storeChanged) {
+      sets.push('store_id = ?');
+      valores.push(storeId);
+    }
+    if (input.purchaseDate !== undefined) {
+      sets.push('purchase_date = ?', 'purchase_date_manual = 1');
+      valores.push(input.purchaseDate);
+    }
+    if (input.notes !== undefined) {
+      sets.push('notes = ?');
+      valores.push(input.notes?.trim() || null);
+    }
+    if (sets.length > 0) {
+      db.prepare(
+        `UPDATE receipts SET ${sets.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+      ).run(...valores, recibo.id);
+    }
+    if (recibo.status === 'confirmed' && storeChanged) {
+      db.prepare(
+        `UPDATE price_observations SET store_id = ?, store_name = ?
+         WHERE receipt_id = ? AND user_id = ? AND household_id IS ? AND source = 'receipt'`
+      ).run(storeId, store, recibo.id, userId, householdId);
+    }
+  })();
   return c.json({
     success: true,
     data: pintar(filaDeRecibo(db, userId, String(recibo.id))!, contarItems(db, String(recibo.id)))
@@ -547,13 +673,21 @@ receiptsRoutes.post('/:id/items', async (c) => {
     category?: string | null;
     priceMinor?: number | null;
     offer?: { buy: number; take: number } | null;
+    discount?: {
+      kind: 'amount' | 'percent';
+      valueMinor?: number | null;
+      percentBps?: number | null;
+      units?: number | null;
+    } | null;
     note?: string | null;
   };
   const id = nanoid();
   const posicion = contarItems(db, String(recibo.id));
   db.prepare(
-    `INSERT INTO receipt_items (id, receipt_id, name, quantity, unit, category, price_minor, offer_buy, offer_take, note, position)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO receipt_items
+       (id, receipt_id, name, quantity, unit, category, price_minor, offer_buy, offer_take,
+        discount_kind, discount_value_minor, discount_percent_bps, discount_units, note, position)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id,
     recibo.id,
@@ -564,6 +698,10 @@ receiptsRoutes.post('/:id/items', async (c) => {
     input.priceMinor ?? null,
     input.offer?.buy ?? null,
     input.offer?.take ?? null,
+    input.discount?.kind ?? null,
+    input.discount?.kind === 'amount' ? (input.discount.valueMinor ?? null) : null,
+    input.discount?.kind === 'percent' ? (input.discount.percentBps ?? null) : null,
+    input.discount?.units ?? null,
     input.note ?? null,
     posicion
   );
@@ -587,7 +725,18 @@ receiptsRoutes.patch('/:id/items/:itemId', async (c) => {
   }
   const linea = db
     .prepare('SELECT * FROM receipt_items WHERE id = ? AND receipt_id = ?')
-    .get(c.req.param('itemId'), recibo.id) as { id: string } | undefined;
+    .get(c.req.param('itemId'), recibo.id) as
+    | {
+        id: string;
+        quantity: number;
+        offer_buy: number | null;
+        offer_take: number | null;
+        discount_kind: 'amount' | 'percent' | null;
+        discount_value_minor: number | null;
+        discount_percent_bps: number | null;
+        discount_units: number | null;
+      }
+    | undefined;
   if (!linea)
     return c.json({ success: false, error: 'ITEM_NOT_FOUND', message: 'Linea no encontrada' }, 404);
   const input = updateReceiptItemSchema.parse(await c.req.json()) as Partial<{
@@ -597,8 +746,50 @@ receiptsRoutes.patch('/:id/items/:itemId', async (c) => {
     category: string | null;
     priceMinor: number | null;
     offer: { buy: number; take: number } | null;
+    discount: {
+      kind: 'amount' | 'percent';
+      valueMinor?: number | null;
+      percentBps?: number | null;
+      units?: number | null;
+    } | null;
     note: string | null;
   }>;
+
+  const effectiveQuantity = input.quantity ?? Number(linea.quantity);
+  let effectiveOffer =
+    input.offer !== undefined
+      ? input.offer
+      : linea.offer_buy && linea.offer_take
+        ? { buy: linea.offer_buy, take: linea.offer_take }
+        : null;
+  let effectiveDiscount =
+    input.discount !== undefined
+      ? input.discount
+      : linea.discount_kind === 'amount'
+        ? {
+            kind: 'amount' as const,
+            valueMinor: linea.discount_value_minor,
+            units: linea.discount_units
+          }
+        : linea.discount_kind === 'percent'
+          ? {
+              kind: 'percent' as const,
+              percentBps: linea.discount_percent_bps,
+              units: linea.discount_units
+            }
+          : null;
+  if (input.offer != null) effectiveDiscount = null;
+  if (input.discount != null) effectiveOffer = null;
+  if (effectiveDiscount?.units != null && effectiveDiscount.units > effectiveQuantity) {
+    return c.json(
+      {
+        success: false,
+        error: 'INVALID_DISCOUNT_QUANTITY',
+        message: 'La cantidad con descuento no puede superar la cantidad de la línea'
+      },
+      400
+    );
+  }
 
   const sets: string[] = [];
   const valores: unknown[] = [];
@@ -622,10 +813,21 @@ receiptsRoutes.patch('/:id/items/:itemId', async (c) => {
     sets.push('price_minor = ?');
     valores.push(input.priceMinor);
   }
-  if (input.offer !== undefined) {
+  if (input.offer !== undefined || input.discount !== undefined) {
     sets.push('offer_buy = ?');
     sets.push('offer_take = ?');
-    valores.push(input.offer?.buy ?? null, input.offer?.take ?? null);
+    sets.push('discount_kind = ?');
+    sets.push('discount_value_minor = ?');
+    sets.push('discount_percent_bps = ?');
+    sets.push('discount_units = ?');
+    valores.push(
+      effectiveOffer?.buy ?? null,
+      effectiveOffer?.take ?? null,
+      effectiveDiscount?.kind ?? null,
+      effectiveDiscount?.kind === 'amount' ? (effectiveDiscount.valueMinor ?? null) : null,
+      effectiveDiscount?.kind === 'percent' ? (effectiveDiscount.percentBps ?? null) : null,
+      effectiveDiscount?.units ?? null
+    );
   }
   if (input.note !== undefined) {
     sets.push('note = ?');
@@ -693,7 +895,7 @@ receiptsRoutes.post('/:id/confirm', async (c) => {
 
   const tienda = String(recibo.store ?? '').trim() || null;
   const householdId = typeof recibo.household_id === 'string' ? recibo.household_id : null;
-  if (tienda) registrarTienda(db, userId, tienda, householdId);
+  let storeId: string | null = null;
   let precios = 0;
   let pantryMoved = 0;
   let pantryMerged = 0;
@@ -702,6 +904,27 @@ receiptsRoutes.post('/:id/confirm', async (c) => {
 
   db.transaction(() => {
     ensurePantryCategories(db, userId, householdId);
+    storeId = tienda
+      ? registrarTienda(db, userId, tienda, householdId, {
+          address: typeof recibo.store_address === 'string' ? recibo.store_address : null,
+          latitude:
+            typeof recibo.store_latitude === 'number' && Number.isFinite(recibo.store_latitude)
+              ? recibo.store_latitude
+              : null,
+          longitude:
+            typeof recibo.store_longitude === 'number' && Number.isFinite(recibo.store_longitude)
+              ? recibo.store_longitude
+              : null,
+          attribution:
+            recibo.store_attribution && recibo.store_attribution_url
+              ? {
+                  text: String(recibo.store_attribution),
+                  url: String(recibo.store_attribution_url)
+                }
+              : undefined
+        })
+      : null;
+    db.prepare('UPDATE receipts SET store_id = ? WHERE id = ?').run(storeId, recibo.id);
     // El catalogo de la casa, ya con las categorias por defecto creadas: la categoria de la
     // linea solo se respeta si existe de verdad (## 12aj: 'category' es clave de pantry).
     categoriasValidas = new Set(
@@ -716,8 +939,9 @@ receiptsRoutes.post('/:id/confirm', async (c) => {
     );
     const apuntaPrecio = db.prepare(
       `INSERT INTO price_observations
-         (id, user_id, household_id, product_key, product_name, store_name, price_minor, quantity, source, observed_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'receipt', CURRENT_TIMESTAMP)`
+         (id, user_id, household_id, receipt_id, product_key, product_name, store_id, store_name,
+          price_minor, quantity, source, observed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'receipt', CURRENT_TIMESTAMP)`
     );
     const buscaFicha = db.prepare(
       `SELECT id, name, quantity FROM ingredients
@@ -742,8 +966,10 @@ receiptsRoutes.post('/:id/confirm', async (c) => {
           nanoid(),
           userId,
           householdId,
+          recibo.id,
           productKeyOf(linea.name),
           linea.name,
+          storeId,
           tienda,
           Math.trunc(Number(linea.price_minor)),
           cantidad

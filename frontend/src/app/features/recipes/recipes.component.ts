@@ -1285,13 +1285,15 @@ export class RecipesComponent implements OnInit {
     combineLatest([this.route.queryParamMap, this.route.fragment])
       .pipe(
         map(([queryParams, fragment]) =>
-          resolveRecipeRouteIntent(queryParams.get('recipe'), fragment)
+          resolveRecipeRouteIntent(queryParams.get('recipe'), fragment, queryParams.get('mode'))
         ),
         distinctUntilChanged(
           (previous, current) =>
             previous.type === current.type &&
             (previous.type !== 'recipe' ||
-              (current.type === 'recipe' && previous.recipeId === current.recipeId))
+              (current.type === 'recipe' &&
+                previous.recipeId === current.recipeId &&
+                previous.mode === current.mode))
         ),
         switchMap((intent) =>
           intent.type === 'recipe'
@@ -1312,7 +1314,20 @@ export class RecipesComponent implements OnInit {
         if (intent.type === 'recipe') {
           if (this.isAiModalOpen()) this.closeAiModal();
           if (recipe) {
+            if (this.selectedRecipe()?.id === recipe.id) {
+              if (intent.mode === 'cooking') {
+                if (!this.isCookingMode() && !this.enterCookingMode(false)) {
+                  this.syncRecipeDetailsUrl(true);
+                }
+              } else if (this.isCookingMode()) {
+                this.exitCookingMode(false);
+              }
+              return;
+            }
             this.showRecipe(recipe);
+            if (intent.mode === 'cooking' && !this.enterCookingMode(false)) {
+              this.syncRecipeDetailsUrl(true);
+            }
           } else {
             this.closeRecipeDetail();
           }
@@ -1694,7 +1709,7 @@ export class RecipesComponent implements OnInit {
   viewRecipe(recipe: Recipe): void {
     void this.router.navigate([], {
       relativeTo: this.route,
-      queryParams: { recipe: recipe.id },
+      queryParams: { recipe: recipe.id, mode: null },
       queryParamsHandling: 'merge'
     });
   }
@@ -1790,7 +1805,7 @@ export class RecipesComponent implements OnInit {
     if (clearRecipeQuery) {
       void this.router.navigate([], {
         relativeTo: this.route,
-        queryParams: { recipe: null },
+        queryParams: { recipe: null, mode: null },
         queryParamsHandling: 'merge',
         preserveFragment: true,
         replaceUrl: true
@@ -1798,20 +1813,38 @@ export class RecipesComponent implements OnInit {
     }
   }
 
-  enterCookingMode(): void {
+  enterCookingMode(syncUrl = true): boolean {
     const recipe = this.selectedRecipe();
     if (!recipe || this.getRecipeSteps(recipe, this.selectedRecipeDetailLevel()).length === 0)
-      return;
+      return false;
     this.hasCookingSession.set(true);
     this.isCookingMode.set(true);
+    if (syncUrl) {
+      void this.router.navigate([], {
+        relativeTo: this.route,
+        queryParams: { mode: 'cooking' },
+        queryParamsHandling: 'merge'
+      });
+    }
     this.focusAfterRender('[data-test="recipe-cooking-title"]');
+    return true;
   }
 
-  exitCookingMode(): void {
+  exitCookingMode(syncUrl = true): void {
     this.isCookingMode.set(false);
+    if (syncUrl) this.syncRecipeDetailsUrl();
     this.focusAfterRender(
       '[data-test="recipe-cooking-open"] button, [data-test="recipe-cooking-open-sidebar"] button'
     );
+  }
+
+  private syncRecipeDetailsUrl(replaceUrl = false): void {
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { mode: null },
+      queryParamsHandling: 'merge',
+      ...(replaceUrl ? { replaceUrl: true } : {})
+    });
   }
 
   toggleIngredientSelection(ingredient: any): void {

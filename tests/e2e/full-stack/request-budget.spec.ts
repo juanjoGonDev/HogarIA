@@ -1,7 +1,7 @@
 import { expect, test } from '../fixtures';
 import { createHousehold, registerUser } from '../helpers/auth';
 import { watchRequests } from '../helpers/request-watch';
-import { shoppingNewListAction } from '../helpers/shopping-ui';
+import { shoppingNewListAction, skipOptionalShoppingLocationPrompt } from '../helpers/shopping-ui';
 
 async function expectNoRepeatAfterIdle(
   page: Parameters<typeof watchRequests>[0],
@@ -84,6 +84,7 @@ test.describe('presupuesto de peticiones en el stack de produccion', () => {
       await expectNoRepeatAfterIdle(page, watch);
     }
     await page.locator('[data-test="item-row"]').first().locator('[data-test="check"]').click();
+    await skipOptionalShoppingLocationPrompt(page);
     await expectNoRepeatAfterIdle(page, watch);
 
     // Los mutantes intencionales quedan fuera de la ventana de reposo que sigue.

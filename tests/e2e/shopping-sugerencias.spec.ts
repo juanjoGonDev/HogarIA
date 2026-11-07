@@ -1,7 +1,7 @@
 import { Locator, Page, expect } from '@playwright/test';
 import { test } from './fixtures';
 import { registerAndGoto } from './helpers/auth';
-import { shoppingNewListAction } from './helpers/shopping-ui';
+import { shoppingNewListAction, skipOptionalShoppingLocationPrompt } from './helpers/shopping-ui';
 
 /**
  * Ronda 35 (HOGARIA-SPEC ## 12ag): el autocompletado al anadir lineas y el vuelco del carro
@@ -145,6 +145,7 @@ test.describe('cerrar la compra baja el carro a la despensa', () => {
 
     await priceRow(page, 'Pan de pueblo', '2,40');
     await row_(page, 'Pan de pueblo').locator('[data-test="check"]').click();
+    await skipOptionalShoppingLocationPrompt(page);
 
     await page.locator('[data-test="complete"]').click();
     // El recibo del cierre ya no es solo dinero: una linea se fue al inventario, y se dice.

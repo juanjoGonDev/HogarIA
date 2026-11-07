@@ -589,7 +589,7 @@ describe('RecipesComponent', () => {
     component.viewRecipe(owned);
     expect(router.navigate).toHaveBeenCalledWith(
       [],
-      jasmine.objectContaining({ queryParams: { recipe: owned.id } })
+      jasmine.objectContaining({ queryParams: { recipe: owned.id, mode: null } })
     );
     component.selectedRecipe.set(owned);
     component.setSelectedRecipeDetailLevel('expert');
@@ -611,7 +611,7 @@ describe('RecipesComponent', () => {
     component.closeRecipeDetail();
     expect(router.navigate).not.toHaveBeenCalledWith(
       [],
-      jasmine.objectContaining({ queryParams: { recipe: null } })
+      jasmine.objectContaining({ queryParams: { recipe: null, mode: null } })
     );
   });
 
@@ -777,7 +777,7 @@ describe('RecipesComponent', () => {
     component.closeRecipeDetail();
     expect(router.navigate).toHaveBeenCalledWith(
       [],
-      jasmine.objectContaining({ queryParams: { recipe: null }, replaceUrl: true })
+      jasmine.objectContaining({ queryParams: { recipe: null, mode: null }, replaceUrl: true })
     );
     route.snapshot.fragment = 'ai';
     component.closeAiModal();
@@ -788,6 +788,54 @@ describe('RecipesComponent', () => {
     component.selectedRecipe.set(RECIPE);
     queryParams.next(convertToParamMap({}));
     expect(component.selectedRecipe()).toBeNull();
+  });
+
+  it('opens a linked recipe in cooking mode and falls back to details without steps', () => {
+    recipes.getRecipe.and.returnValue(of(RECIPE));
+    queryParams.next(convertToParamMap({ recipe: RECIPE.id, mode: 'cooking' }));
+
+    expect(component.selectedRecipe()).toEqual(RECIPE);
+    expect(component.isCookingMode()).toBeTrue();
+
+    const recipeWithoutSteps = { ...RECIPE, id: 'recipe-without-steps', steps: [] };
+    recipes.getRecipe.and.returnValue(of(recipeWithoutSteps));
+    router.navigate.calls.reset();
+    queryParams.next(convertToParamMap({ recipe: recipeWithoutSteps.id, mode: 'cooking' }));
+
+    expect(component.selectedRecipe()).toEqual(recipeWithoutSteps);
+    expect(component.isCookingMode()).toBeFalse();
+    expect(router.navigate).toHaveBeenCalledWith(
+      [],
+      jasmine.objectContaining({
+        queryParams: { mode: null },
+        queryParamsHandling: 'merge',
+        replaceUrl: true
+      })
+    );
+  });
+
+  it('keeps direct cooking-mode entry in the URL and clears it when exiting', () => {
+    component.selectedRecipe.set(RECIPE);
+
+    component.enterCookingMode();
+
+    expect(router.navigate).toHaveBeenCalledWith(
+      [],
+      jasmine.objectContaining({
+        queryParams: { mode: 'cooking' },
+        queryParamsHandling: 'merge'
+      })
+    );
+
+    component.exitCookingMode();
+
+    expect(router.navigate).toHaveBeenCalledWith(
+      [],
+      jasmine.objectContaining({
+        queryParams: { mode: null },
+        queryParamsHandling: 'merge'
+      })
+    );
   });
 
   it('builds pantry categories, filters ingredients and maintains the full selection', () => {

@@ -2,7 +2,11 @@ import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { expect, test, type Page } from '../fixtures';
 import { registerAndGoto } from '../helpers/auth';
-import { navigateToShopping, shoppingNewListAction } from '../helpers/shopping-ui';
+import {
+  navigateToShopping,
+  shoppingNewListAction,
+  skipOptionalShoppingLocationPrompt
+} from '../helpers/shopping-ui';
 
 /**
  * El dinero de la cesta, contra el binario que sirve todo.
@@ -39,6 +43,7 @@ async function price(page: Page, index: number, value: string) {
 
 async function tickByName(page: Page, name: string) {
   await page.getByRole('checkbox', { name: `Marcar ${name}`, exact: true }).click();
+  await skipOptionalShoppingLocationPrompt(page);
 }
 
 test.describe('lo que cuesta, y en que tienda', () => {
@@ -94,6 +99,7 @@ test.describe('lo que cuesta, y en que tienda', () => {
       await createList(page, `Compra ${store}`, store);
       await add(page, '1 Leche');
       await page.locator('[data-test="item-row"]').first().locator('[data-test="check"]').click();
+      await skipOptionalShoppingLocationPrompt(page);
       await page.locator('[data-test="complete"]').click();
       const money = page.locator('[data-test="pay-sheet"] input[inputmode="decimal"]');
       await expect(money).toBeVisible();

@@ -172,7 +172,9 @@ test('la cabecera del calendario refluye y permanece accesible en móviles y esc
     .locator('.meal-form__actions')
     .getByRole('button', { name: 'Añadir', exact: true })
     .click();
-  await expect(page.getByRole('button', { name: mealTitle, exact: true })).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: `Cocinar ${mealTitle}`, exact: true })
+  ).toBeVisible();
   await waitForCalendarPaint(page);
 
   observations.push(await setViewportAndInspect(page, viewports[1], 'after-day-view-and-meal'));

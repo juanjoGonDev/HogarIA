@@ -16,8 +16,10 @@ describe('household tabs URL contract', () => {
     expect(resolveHouseholdTab('tasks')).toBe('tasks');
     expect(resolveHouseholdTab('permissions')).toBe('permissions');
     expect(resolveHouseholdTab('settings')).toBe('settings');
+    expect(resolveHouseholdTab('ai')).toBe('ai');
     expect(householdTabQueryValue('home')).toBeNull();
     expect(householdTabQueryValue('settings')).toBe('settings');
+    expect(householdTabQueryValue('ai')).toBe('ai');
     expect(householdTabQueryValue('plan')).toBe('plan');
     expect(householdTabQueryValue('tasks')).toBe('tasks');
   });
@@ -26,6 +28,7 @@ describe('household tabs URL contract', () => {
     expect(isCanonicalHouseholdTabQuery(null)).toBeTrue();
     expect(isCanonicalHouseholdTabQuery('members')).toBeTrue();
     expect(isCanonicalHouseholdTabQuery('tasks')).toBeTrue();
+    expect(isCanonicalHouseholdTabQuery('ai')).toBeTrue();
     expect(isCanonicalHouseholdTabQuery('home')).toBeFalse();
     expect(isCanonicalHouseholdTabQuery('broken')).toBeFalse();
   });

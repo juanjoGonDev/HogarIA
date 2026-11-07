@@ -21,7 +21,12 @@ import type { Database as SqlDb } from 'better-sqlite3';
 import { nanoid } from 'nanoid';
 import { getDatabase } from '../config/database.js';
 import { activeHouseholdId } from './household-context.js';
-import { ensureDefaultCategories } from './pantry-categories.js';
+import {
+  createCategory,
+  ensureDefaultCategories,
+  findCategoryByKey,
+  pantryCategoryKey
+} from './pantry-categories.js';
 import {
   aiConfigByIdInScope,
   aiConfigForPinnedJob,
@@ -60,10 +65,13 @@ import { ticketAnswerSchema } from '../schemas/receipts.schema.js';
 import { RECEIPT_RESPONSE_FORMAT } from '../schemas/ai-generated-output.schema.js';
 import { leerTicket } from './ticket-files.js';
 import { aiJobLeaseSeconds } from './ai-timeout.js';
+import { normalizeStoreAddress, type StoreGeocodeResult } from './store-geocoder.js';
+import { storeGeocoder } from './store-geocoder-runtime.js';
 
 // The queue is local to this process/database. Jobs wake it directly; the slow
 // interval is only a recovery sweep for durable rows changed outside the API.
 const QUEUE_RECONCILIATION_INTERVAL_MS = 30_000;
+const MAX_NEW_RECEIPT_CATEGORIES = 12;
 const AI_JOB_TRACE_LIMIT = 32;
 const AI_JOB_TRACE_ANCHOR_STAGES = new Set([
   'worker_claimed',
@@ -1446,6 +1454,15 @@ async function correr(
       );
     }
 
+    const direccionIA = normalizeStoreAddress(validado.data.storeAddress ?? '') || null;
+    const ubicacionManual = db
+      .prepare('SELECT store_address_manual FROM receipts WHERE id = ?')
+      .get(recibo.id) as { store_address_manual?: number } | undefined;
+    const ubicacionGeocodificada =
+      direccionIA && ubicacionManual?.store_address_manual !== 1
+        ? await storeGeocoder.geocode(direccionIA)
+        : null;
+
     // Solo se persiste el objeto completo después de validar el esquema y el job vigente.
     db.transaction(() => {
       const sigueActivo = db
@@ -1456,8 +1473,17 @@ async function correr(
       if (!sigueActivo) return;
       db.prepare('DELETE FROM receipt_items WHERE receipt_id = ?').run(recibo.id);
       let posicion = 0;
+      const categoriasCreadas = new Set<string>();
       for (const linea of deduplicateTicketLines(validado.data.lines, validado.data.totalMinor)) {
-        insertarLinea(db, recibo.id, linea as unknown as Record<string, unknown>, posicion);
+        const lineaNormalizada = linea as unknown as Record<string, unknown>;
+        const category = resolverCategoriaTicket(
+          db,
+          userId,
+          recibo.household_id,
+          lineaNormalizada,
+          categoriasCreadas
+        );
+        insertarLinea(db, recibo.id, { ...lineaNormalizada, category }, posicion);
         posicion += 1;
       }
 
@@ -1465,12 +1491,26 @@ async function correr(
       db.prepare(
         `UPDATE receipts SET status = 'review',
            store = CASE WHEN store_manual = 1 THEN store ELSE ? END,
+           store_address = CASE WHEN store_address_manual = 1 THEN store_address ELSE ? END,
+           store_latitude = CASE WHEN store_address_manual = 1 THEN store_latitude ELSE ? END,
+           store_longitude = CASE WHEN store_address_manual = 1 THEN store_longitude ELSE ? END,
+           store_attribution = CASE WHEN store_address_manual = 1 THEN store_attribution ELSE ? END,
+           store_attribution_url = CASE WHEN store_address_manual = 1 THEN store_attribution_url ELSE ? END,
            purchase_date = CASE WHEN purchase_date_manual = 1 THEN purchase_date ELSE ? END,
            currency = ?, total_minor = ?,
            warnings = ?, error_code = NULL, error_detail = NULL, updated_at = CURRENT_TIMESTAMP
          WHERE id = ? AND status = 'analyzing'`
       ).run(
         tienda,
+        direccionIA,
+        ubicacionGeocodificada?.status === 'resolved' ? ubicacionGeocodificada.latitude : null,
+        ubicacionGeocodificada?.status === 'resolved' ? ubicacionGeocodificada.longitude : null,
+        ubicacionGeocodificada?.status === 'resolved'
+          ? ubicacionGeocodificada.attribution.text
+          : null,
+        ubicacionGeocodificada?.status === 'resolved'
+          ? ubicacionGeocodificada.attribution.url
+          : null,
         validado.data.purchaseDate,
         validado.data.currency ?? 'EUR',
         validado.data.totalMinor ?? null,
@@ -1480,9 +1520,34 @@ async function correr(
       appendAiJobTraceEventBestEffortInTransaction(db, jobId, claimGeneration, {
         stage: 'runtime_finished'
       });
-      const tiendaFinal = db.prepare('SELECT store FROM receipts WHERE id = ?').get(recibo.id) as
-        { store: string | null } | undefined;
-      if (tiendaFinal?.store) registrarTienda(db, userId, tiendaFinal.store, recibo.household_id);
+      const tiendaFinal = db
+        .prepare(
+          `SELECT store, store_address, store_latitude, store_longitude,
+                  store_attribution, store_attribution_url
+           FROM receipts WHERE id = ?`
+        )
+        .get(recibo.id) as
+        | {
+            store: string | null;
+            store_address: string | null;
+            store_latitude: number | null;
+            store_longitude: number | null;
+            store_attribution: string | null;
+            store_attribution_url: string | null;
+          }
+        | undefined;
+      const storeId = tiendaFinal?.store
+        ? registrarTienda(db, userId, tiendaFinal.store, recibo.household_id, {
+            address: tiendaFinal.store_address,
+            latitude: tiendaFinal.store_latitude,
+            longitude: tiendaFinal.store_longitude,
+            attribution: {
+              text: tiendaFinal.store_attribution ?? '',
+              url: tiendaFinal.store_attribution_url ?? ''
+            }
+          })
+        : null;
+      db.prepare('UPDATE receipts SET store_id = ? WHERE id = ?').run(storeId, recibo.id);
       db.prepare(
         `UPDATE ai_jobs SET status = 'done', finished_at = CURRENT_TIMESTAMP, lease_until = NULL
          WHERE id = ? AND status = 'running' AND claim_generation = ?`
@@ -1719,9 +1784,18 @@ function insertarLinea(
   const precio =
     linea.priceMinor === null || linea.priceMinor === undefined ? null : Number(linea.priceMinor);
   const oferta = (linea.offer ?? null) as { buy?: number; take?: number } | null;
+  const descuento = (linea.discount ?? null) as {
+    kind?: 'amount' | 'percent';
+    valueMinor?: number | null;
+    percentBps?: number | null;
+    units?: number | null;
+  } | null;
   db.prepare(
-    `INSERT INTO receipt_items (id, receipt_id, name, quantity, unit, category, price_minor, offer_buy, offer_take, note, confidence, position)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO receipt_items
+       (id, receipt_id, name, quantity, unit, category, price_minor, offer_buy, offer_take,
+        discount_kind, discount_value_minor, discount_percent_bps, discount_units,
+        note, confidence, position)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     nanoid(),
     receiptId,
@@ -1734,6 +1808,10 @@ function insertarLinea(
       : null,
     oferta?.buy ?? null,
     oferta?.take ?? null,
+    descuento?.kind ?? null,
+    descuento?.kind === 'amount' ? (descuento.valueMinor ?? null) : null,
+    descuento?.kind === 'percent' ? (descuento.percentBps ?? null) : null,
+    descuento?.units ?? null,
     linea.note ? String(linea.note) : null,
     Number.isFinite(Number(linea.confidence)) ? Number(linea.confidence) : null,
     posicion
@@ -1741,6 +1819,108 @@ function insertarLinea(
 }
 
 /** El «inventario.json» de la casa: tiendas, categorias de la despensa y sus productos. */
+/** Rescate determinista de familias no alimentarias que OCR/abreviaturas suelen dejar como «other». */
+function categoriaReconociblePorNombre(nombre: unknown): string | null {
+  if (typeof nombre !== 'string') return null;
+  const normalizado = nombre
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/gu, '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+
+  if (
+    /\b(?:aloe|hidratante|dent(?:al|ifrico|ifrica)?|colgate|champu|shampoo|desodorante|desmaquillante|limpiador facial|nivea|jabon)\b/u.test(
+      normalizado
+    ) ||
+    /\b(?:crema|gel)\s+(?:facial|hidratante|corporal|de manos|solar|de ducha|aloe)\b/u.test(
+      normalizado
+    ) ||
+    /\bpasta\s+dental\b/u.test(normalizado)
+  ) {
+    return 'Cuidado personal';
+  }
+  if (
+    /\b(?:detergente|lejia|suavizante|lavavajillas|limpiador|limpieza|desengrasante|limpiacristales|fregasuelos|estropajo|bayeta)\b/u.test(
+      normalizado
+    )
+  ) {
+    return 'Limpieza del hogar';
+  }
+  if (
+    /\b(?:papel higienico|papel de cocina|servilleta|servilletas|panuelo|panuelos|kleenex|celulosa)\b/u.test(
+      normalizado
+    ) ||
+    /\brollo\s+(?:multi|(?:de\s+)?cocina)\b/u.test(normalizado)
+  ) {
+    return 'Papel y desechables';
+  }
+  return null;
+}
+
+function crearCategoriaTicketSiCabe(
+  db: SqlDb,
+  scope: { userId: string; householdId: string | null },
+  propuesta: string,
+  categoriasCreadas: Set<string>
+): string {
+  // Algunos modelos devuelven una clave legible por máquina; conviértela en etiqueta sencilla.
+  const nombre = propuesta.replace(/[_-]+/gu, ' ').replace(/\s+/gu, ' ').trim();
+  if (nombre.length < 3 || nombre.length > 64 || !/\p{L}/u.test(nombre)) return 'other';
+
+  const clave = pantryCategoryKey(nombre);
+  if (clave === 'other' || clave === 'otros') return 'other';
+  const existente = findCategoryByKey(db, scope, clave);
+  if (existente) return existente.key;
+  if (categoriasCreadas.has(clave)) return clave;
+  if (categoriasCreadas.size >= MAX_NEW_RECEIPT_CATEGORIES) return 'other';
+
+  try {
+    const creada = createCategory(db, {
+      ...scope,
+      name: nombre,
+      idFactory: () => `pcat-${nanoid()}`
+    });
+    categoriasCreadas.add(creada.key);
+    return creada.key;
+  } catch (error) {
+    // Una propuesta mal formada no debe hacer fallar el resto del ticket.
+    if (error instanceof RangeError) return 'other';
+    throw error;
+  }
+}
+
+/**
+ * Resuelve la salida IA contra el catálogo del hogar. Una categoría explícita válida prevalece;
+ * si el modelo devuelve «other»/desconocida para una familia reconocible, el servidor la crea.
+ */
+function resolverCategoriaTicket(
+  db: SqlDb,
+  userId: string,
+  householdId: string | null,
+  linea: Record<string, unknown>,
+  categoriasCreadas: Set<string>
+): string {
+  const propuesta = typeof linea.category === 'string' ? linea.category.trim() : '';
+  const scope = { userId, householdId };
+  const claveLiteral = propuesta ? pantryCategoryKey(propuesta) : '';
+  const existente = claveLiteral ? findCategoryByKey(db, scope, claveLiteral) : undefined;
+  const propuestaReservada = claveLiteral === 'other' || claveLiteral === 'otros';
+
+  if (existente && existente.key !== 'other') return existente.key;
+  if (linea.createCategory === true && propuesta && !propuestaReservada) {
+    return crearCategoriaTicketSiCabe(db, scope, propuesta, categoriasCreadas);
+  }
+
+  const sugerida = categoriaReconociblePorNombre(linea.name);
+  if (sugerida) return crearCategoriaTicketSiCabe(db, scope, sugerida, categoriasCreadas);
+
+  if (linea.createCategory === true && propuesta) {
+    return crearCategoriaTicketSiCabe(db, scope, propuesta, categoriasCreadas);
+  }
+  return existente?.key ?? 'other';
+}
+
 export function inventarioDeLaCasa(
   db: SqlDb,
   userId: string,
@@ -1789,23 +1969,79 @@ export function registrarTienda(
   db: SqlDb,
   userId: string,
   nombre: string,
-  householdId = activeHouseholdId(db, userId)
-): void {
-  const limpia = nombre.trim();
-  if (!limpia) return;
+  householdId = activeHouseholdId(db, userId),
+  location?: {
+    address?: string | null;
+    latitude?: number | null;
+    longitude?: number | null;
+    attribution?: StoreGeocodeResult['attribution'] | null;
+  }
+): string | null {
+  const limpia = nombre.trim().replace(/\s+/gu, ' ');
+  if (!limpia) return null;
+  const address = normalizeStoreAddress(location?.address ?? '') || null;
+  const normalizedAddress = address?.toLocaleLowerCase('es-ES') ?? null;
+  const validCoordinates =
+    address !== null &&
+    Number.isFinite(location?.latitude) &&
+    Number.isFinite(location?.longitude) &&
+    Number(location?.latitude) >= -90 &&
+    Number(location?.latitude) <= 90 &&
+    Number(location?.longitude) >= -180 &&
+    Number(location?.longitude) <= 180;
+  const latitude = validCoordinates ? Number(location!.latitude) : null;
+  const longitude = validCoordinates ? Number(location!.longitude) : null;
+  const attribution = validCoordinates ? (location?.attribution?.text ?? null) : null;
+  const attributionUrl = validCoordinates ? (location?.attribution?.url ?? null) : null;
   const ya = db
     .prepare(
-      `SELECT id FROM stores WHERE name = ?
-       AND (household_id = ? OR (household_id IS NULL AND user_id = ?))`
+      `SELECT id FROM stores WHERE lower(trim(name)) = lower(trim(?))
+       AND (household_id = ? OR (household_id IS NULL AND user_id = ?))
+       AND normalized_address IS ?
+       ORDER BY created_at, id LIMIT 1`
     )
-    .get(limpia, householdId, userId);
-  if (ya) return;
-  db.prepare('INSERT INTO stores (id, user_id, household_id, name) VALUES (?, ?, ?, ?)').run(
-    randomUUID(),
+    .get(limpia, householdId, userId, normalizedAddress) as { id: string } | undefined;
+  if (ya) {
+    db.prepare(
+      `UPDATE stores SET
+         address = COALESCE(?, address),
+         latitude = COALESCE(?, latitude),
+         longitude = COALESCE(?, longitude),
+         attribution = COALESCE(?, attribution),
+         attribution_url = COALESCE(?, attribution_url)
+       WHERE id = ? AND user_id = ?
+         AND (household_id = ? OR (household_id IS NULL AND user_id = ?))`
+    ).run(
+      address,
+      latitude,
+      longitude,
+      attribution,
+      attributionUrl,
+      ya.id,
+      userId,
+      householdId,
+      userId
+    );
+    return ya.id;
+  }
+  const id = randomUUID();
+  db.prepare(
+    `INSERT INTO stores
+       (id, user_id, household_id, name, address, normalized_address, latitude, longitude, attribution, attribution_url)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    id,
     userId,
     householdId,
-    limpia
+    limpia,
+    address,
+    normalizedAddress,
+    latitude,
+    longitude,
+    attribution,
+    attributionUrl
   );
+  return id;
 }
 
 export type AiQueueJobDto = {

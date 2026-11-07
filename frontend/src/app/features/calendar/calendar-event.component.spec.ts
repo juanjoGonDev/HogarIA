@@ -43,7 +43,11 @@ describe('CalendarEventComponent shared meal access', () => {
 
     component.meal = { ...sharedMeal, canRecordConsumption: true };
     fixture.detectChanges();
-    expect(fixture.nativeElement.querySelector('button.cal-event__open')).not.toBeNull();
+    const open = fixture.nativeElement.querySelector(
+      'button.cal-event__open'
+    ) as HTMLButtonElement | null;
+    expect(open).not.toBeNull();
+    expect(open?.getAttribute('aria-label')).toBe('calendar.record_consumption_for');
   });
 
   it('keeps a missing meal safe and renders a normal meal with its actions', () => {
@@ -99,9 +103,46 @@ describe('CalendarEventComponent shared meal access', () => {
     };
     fixture.detectChanges();
 
-    expect(fixture.nativeElement.querySelector('button.cal-event__open')).not.toBeNull();
+    const open = fixture.nativeElement.querySelector(
+      'button.cal-event__open'
+    ) as HTMLButtonElement | null;
+    expect(open).not.toBeNull();
+    expect(open?.getAttribute('aria-label')).toBe('calendar.cook_meal_named');
     expect(fixture.nativeElement.querySelector('.cal-event__kcal')).toBeNull();
     expect(fixture.nativeElement.querySelector('.cal-event__actions')).toBeNull();
     expect(component.tooltip()).toContain('250 kcal');
+  });
+
+  it('keeps editing a separate, keyboard-accessible action in agenda rows', () => {
+    component.mode = 'row';
+    component.showEditAction = true;
+    component.meal = {
+      id: 'agenda-recipe',
+      date: '2026-10-05',
+      mealType: 'dinner',
+      title: 'Receta agenda',
+      recipeId: 'recipe-1',
+      servings: 2,
+      completed: false
+    };
+    fixture.detectChanges();
+
+    const edit = spyOn(component.edit, 'emit');
+    const open = spyOn(component.open, 'emit');
+    const editButton = fixture.nativeElement.querySelector(
+      'button[aria-label="calendar.edit_meal_named"]'
+    ) as HTMLButtonElement | null;
+
+    expect(editButton).not.toBeNull();
+    expect(editButton?.tabIndex).toBe(0);
+    editButton?.click();
+    expect(edit).toHaveBeenCalled();
+    expect(open).not.toHaveBeenCalled();
+
+    component.showEditAction = false;
+    fixture.detectChanges();
+    expect(
+      fixture.nativeElement.querySelector('button[aria-label="calendar.edit_meal_named"]')
+    ).toBeNull();
   });
 });

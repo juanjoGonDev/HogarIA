@@ -1,6 +1,11 @@
 import { TestBed } from '@angular/core/testing';
 import { signal } from '@angular/core';
-import { provideRouter, type ActivatedRouteSnapshot, type RouterStateSnapshot, type UrlTree } from '@angular/router';
+import {
+  provideRouter,
+  type ActivatedRouteSnapshot,
+  type RouterStateSnapshot,
+  type UrlTree
+} from '@angular/router';
 import type { Observable } from 'rxjs';
 import { firstValueFrom, of } from 'rxjs';
 import type { HouseholdMembership, MemberPermissions } from '../../shared/models/household.model';
@@ -42,9 +47,9 @@ describe('aiHouseholdSettingsGuard', () => {
     });
   });
 
-  async function evaluate(): Promise<boolean | string> {
+  async function evaluate(queryParams: Record<string, string> = {}): Promise<boolean | string> {
     const result = TestBed.runInInjectionContext(() =>
-      aiHouseholdSettingsGuard({} as ActivatedRouteSnapshot, {} as RouterStateSnapshot)
+      aiHouseholdSettingsGuard({ queryParams } as ActivatedRouteSnapshot, {} as RouterStateSnapshot)
     );
     const value = await firstValueFrom(result as Observable<boolean | UrlTree>);
     return typeof value === 'boolean' ? value : value.toString();
@@ -63,19 +68,54 @@ describe('aiHouseholdSettingsGuard', () => {
     expect(await evaluate()).toBeTrue();
   });
 
-  it('redirects a member without settings permission to household settings', async () => {
+  it('redirects a member without settings permission to the dedicated AI tab', async () => {
     memberships.set([
-      { id: 'home-a', name: 'Casa A', role: 'member', active: true, permissions: permissions(false) }
+      {
+        id: 'home-a',
+        name: 'Casa A',
+        role: 'member',
+        active: true,
+        permissions: permissions(false)
+      }
     ]);
     activeHouseholdId.set('home-a');
 
-    expect(await evaluate()).toBe('/household?tab=settings');
+    expect(await evaluate()).toBe('/household?tab=ai');
+  });
+
+  it('preserves unrelated query params while selecting the dedicated AI tab', async () => {
+    memberships.set([
+      {
+        id: 'home-a',
+        name: 'Casa A',
+        role: 'member',
+        active: true,
+        permissions: permissions(false)
+      }
+    ]);
+    activeHouseholdId.set('home-a');
+
+    expect(await evaluate({ source: 'calendar', tab: 'settings' })).toBe(
+      '/household?source=calendar&tab=ai'
+    );
   });
 
   it('requires a valid active home when there are multiple memberships', async () => {
     memberships.set([
-      { id: 'home-a', name: 'Casa A', role: 'admin', active: false, permissions: permissions(true) },
-      { id: 'home-b', name: 'Casa B', role: 'member', active: false, permissions: permissions(true) }
+      {
+        id: 'home-a',
+        name: 'Casa A',
+        role: 'admin',
+        active: false,
+        permissions: permissions(true)
+      },
+      {
+        id: 'home-b',
+        name: 'Casa B',
+        role: 'member',
+        active: false,
+        permissions: permissions(true)
+      }
     ]);
 
     expect(await evaluate()).toBe('/household');

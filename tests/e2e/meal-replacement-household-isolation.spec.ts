@@ -153,7 +153,9 @@ test('sustituir una comida usa solo miembros elegidos del hogar activo y persist
       hasText: 'Pasta original multicasa QA'
     });
     await expect(meal).toHaveCount(1);
-    await meal.click();
+    await page
+      .getByRole('button', { name: 'Editar Pasta original multicasa QA', exact: true })
+      .click();
     const editor = page.locator('app-modal:has(#meal-custom)');
     const replacementToggle = editor.locator('[data-test="open-meal-replacement"]');
     await replacementToggle.click();
