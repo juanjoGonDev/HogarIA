@@ -16,7 +16,7 @@
     "e2e": "npx playwright test"
   },
   "dependencies": {
-    "@angular/animations": "19.2.25",
+    "@angular/animations": "22.2.3",
     "@angular/common": "19.2.25",
     "@angular/compiler": "19.2.25",
     "@angular/core": "19.2.25",
