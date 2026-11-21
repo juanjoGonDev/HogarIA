@@ -805,3 +805,252 @@ describe('AI connection-test restart recovery', () => {
     }
   });
 });
+
+describe('receipt promotion and store location schema', () => {
+  it('creates nullable discount, branch and receipt-location columns', async () => {
+    const mod = await dbModuleWith(target());
+    try {
+      await mod.initializeDatabase();
+      const db = mod.getDatabase();
+      const columns = (table: string) =>
+        (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(
+          (column) => column.name
+        );
+
+      expect(columns('receipt_items')).toEqual(
+        expect.arrayContaining([
+          'discount_kind',
+          'discount_value_minor',
+          'discount_percent_bps',
+          'discount_units'
+        ])
+      );
+      expect(columns('receipts')).toEqual(
+        expect.arrayContaining([
+          'store_id',
+          'store_address',
+          'store_address_manual',
+          'store_latitude',
+          'store_longitude',
+          'store_attribution',
+          'store_attribution_url'
+        ])
+      );
+      expect(columns('stores')).toEqual(
+        expect.arrayContaining([
+          'address',
+          'normalized_address',
+          'latitude',
+          'longitude',
+          'attribution',
+          'attribution_url'
+        ])
+      );
+      expect(columns('price_observations')).toEqual(
+        expect.arrayContaining(['store_id', 'receipt_id'])
+      );
+    } finally {
+      mod.closeDatabase();
+    }
+  });
+
+  it('migrates legacy shopping items with existing rows and stays idempotent', async () => {
+    const databaseFile = target();
+    let mod: DbModule | undefined;
+    try {
+      mod = await dbModuleWith(databaseFile);
+      await mod.initializeDatabase();
+      const db = mod.getDatabase();
+      db.prepare('INSERT INTO users (id, email, name, password_hash) VALUES (?, ?, ?, ?)').run(
+        'legacy-shopping-user',
+        'legacy-shopping@hogaria.test',
+        'Legacy shopping',
+        'hash'
+      );
+      db.prepare('INSERT INTO shopping_lists (id, user_id, name) VALUES (?, ?, ?)').run(
+        'legacy-shopping-list',
+        'legacy-shopping-user',
+        'Lista anterior'
+      );
+      db.prepare(
+        `INSERT INTO shopping_list_items (id, list_id, name, product_key, quantity, checked)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      ).run('legacy-shopping-item', 'legacy-shopping-list', 'Leche', 'leche', 2, 1);
+
+      db.exec(`
+        ALTER TABLE shopping_list_items DROP COLUMN location_store_id;
+        ALTER TABLE shopping_list_items DROP COLUMN location_name;
+        ALTER TABLE shopping_list_items DROP COLUMN location_address;
+        ALTER TABLE shopping_list_items DROP COLUMN location_latitude;
+        ALTER TABLE shopping_list_items DROP COLUMN location_longitude;
+        ALTER TABLE shopping_list_items DROP COLUMN location_attribution;
+        ALTER TABLE shopping_list_items DROP COLUMN location_attribution_url;
+        ALTER TABLE shopping_list_items DROP COLUMN location_source;
+        ALTER TABLE shopping_list_items DROP COLUMN location_updated_at;
+      `);
+      mod.closeDatabase();
+
+      mod = await dbModuleWith(databaseFile);
+      await mod.initializeDatabase();
+      const migratedDb = mod.getDatabase();
+      const columns = (
+        migratedDb.prepare('PRAGMA table_info(shopping_list_items)').all() as {
+          name: string;
+        }[]
+      ).map((column) => column.name);
+      expect(columns).toEqual(
+        expect.arrayContaining([
+          'location_store_id',
+          'location_name',
+          'location_address',
+          'location_latitude',
+          'location_longitude',
+          'location_attribution',
+          'location_attribution_url',
+          'location_source',
+          'location_updated_at'
+        ])
+      );
+      expect(
+        migratedDb
+          .prepare(
+            `SELECT id, name, product_key, quantity, checked, location_name, location_latitude
+             FROM shopping_list_items WHERE id = ?`
+          )
+          .get('legacy-shopping-item')
+      ).toEqual({
+        id: 'legacy-shopping-item',
+        name: 'Leche',
+        product_key: 'leche',
+        quantity: 2,
+        checked: 1,
+        location_name: null,
+        location_latitude: null
+      });
+
+      mod.closeDatabase();
+      mod = await dbModuleWith(databaseFile);
+      await mod.initializeDatabase();
+      expect(
+        mod
+          .getDatabase()
+          .prepare('SELECT id, name FROM shopping_list_items WHERE id = ?')
+          .get('legacy-shopping-item')
+      ).toEqual({ id: 'legacy-shopping-item', name: 'Leche' });
+    } finally {
+      mod?.closeDatabase();
+    }
+  });
+
+  it('adds the new location columns to a legacy database without guessing branches or losing receipt data', async () => {
+    const databaseFile = target();
+    let mod: DbModule | undefined;
+    try {
+      mod = await dbModuleWith(databaseFile);
+      await mod.initializeDatabase();
+      let db = mod.getDatabase();
+      db.prepare('INSERT INTO users (id, email, name, password_hash) VALUES (?, ?, ?, ?)').run(
+        'legacy-receipt-user',
+        'legacy-receipt@hogaria.test',
+        'Legacy',
+        'hash'
+      );
+      db.prepare('INSERT INTO stores (id, user_id, name) VALUES (?, ?, ?)').run(
+        'legacy-store',
+        'legacy-receipt-user',
+        'Mercadona'
+      );
+      db.prepare(
+        `INSERT INTO receipts (id, user_id, status, store, file_url, file_kind)
+         VALUES (?, ?, 'confirmed', ?, ?, 'png')`
+      ).run('legacy-receipt', 'legacy-receipt-user', 'Mercadona', '/uploads/legacy.png');
+      db.prepare(
+        `INSERT INTO receipt_items (id, receipt_id, name, quantity, offer_buy, offer_take)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      ).run('legacy-receipt-line', 'legacy-receipt', 'Producto legacy', 2, 3, 2);
+      db.prepare(
+        `INSERT INTO price_observations
+           (id, user_id, product_key, product_name, store_name, price_minor, quantity, source)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'receipt')`
+      ).run(
+        'legacy-receipt-price',
+        'legacy-receipt-user',
+        'producto-legacy',
+        'Producto legacy',
+        'Mercadona',
+        399,
+        2
+      );
+
+      // Model the deployed pre-location schema; indexes that depend on new columns must go first.
+      db.exec(`
+        DROP INDEX idx_stores_branch_scope;
+        DROP INDEX idx_price_observations_store;
+        DROP INDEX idx_price_observations_receipt;
+        ALTER TABLE receipts DROP COLUMN store_id;
+        ALTER TABLE receipts DROP COLUMN store_address;
+        ALTER TABLE receipts DROP COLUMN store_address_manual;
+        ALTER TABLE receipts DROP COLUMN store_latitude;
+        ALTER TABLE receipts DROP COLUMN store_longitude;
+        ALTER TABLE receipts DROP COLUMN store_attribution;
+        ALTER TABLE receipts DROP COLUMN store_attribution_url;
+        ALTER TABLE receipt_items DROP COLUMN discount_kind;
+        ALTER TABLE receipt_items DROP COLUMN discount_value_minor;
+        ALTER TABLE receipt_items DROP COLUMN discount_percent_bps;
+        ALTER TABLE receipt_items DROP COLUMN discount_units;
+        ALTER TABLE stores DROP COLUMN address;
+        ALTER TABLE stores DROP COLUMN normalized_address;
+        ALTER TABLE stores DROP COLUMN latitude;
+        ALTER TABLE stores DROP COLUMN longitude;
+        ALTER TABLE stores DROP COLUMN attribution;
+        ALTER TABLE stores DROP COLUMN attribution_url;
+        ALTER TABLE price_observations DROP COLUMN store_id;
+        ALTER TABLE price_observations DROP COLUMN receipt_id;
+      `);
+      mod.closeDatabase();
+
+      mod = await dbModuleWith(databaseFile);
+      await mod.initializeDatabase();
+      db = mod.getDatabase();
+
+      expect(
+        db
+          .prepare(
+            `SELECT store, store_id, store_address, store_address_manual FROM receipts WHERE id = ?`
+          )
+          .get('legacy-receipt')
+      ).toEqual({
+        store: 'Mercadona',
+        store_id: null,
+        store_address: null,
+        store_address_manual: 0
+      });
+      expect(
+        db
+          .prepare(
+            'SELECT name, offer_buy, offer_take, discount_kind FROM receipt_items WHERE id = ?'
+          )
+          .get('legacy-receipt-line')
+      ).toEqual({ name: 'Producto legacy', offer_buy: 3, offer_take: 2, discount_kind: null });
+      expect(
+        db
+          .prepare(
+            `SELECT store_id, receipt_id, store_name, price_minor, quantity
+           FROM price_observations WHERE id = ?`
+          )
+          .get('legacy-receipt-price')
+      ).toEqual({
+        store_id: null,
+        receipt_id: null,
+        store_name: 'Mercadona',
+        price_minor: 399,
+        quantity: 2
+      });
+      expect(
+        db.prepare('SELECT id, name, address FROM stores WHERE id = ?').get('legacy-store')
+      ).toEqual({ id: 'legacy-store', name: 'Mercadona', address: null });
+    } finally {
+      mod?.closeDatabase();
+    }
+  });
+});

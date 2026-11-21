@@ -185,6 +185,8 @@ describe('CalendarTimelineComponent grid geometry', () => {
     expect(api.colorOf(eventItem)).toBe(externalEvent.color ?? '#8A8F98');
     expect(api.titleOf(mealItem)).toBe('Plato lunch');
     expect(api.titleOf(eventItem)).toBe('Evento shared');
+    expect(api.openActionLabel(mealItem)).toBe('calendar.cook_meal_named');
+    expect(api.openActionLabel(eventItem)).toBeNull();
     expect(api.titleOf(emptyItem)).toBe('');
     expect(api.whenOf(mealItem)).toBe('13:30');
     expect(api.whenOf(eventItem)).toBe('13:00–13:45');
@@ -204,6 +206,8 @@ describe('CalendarTimelineComponent grid geometry', () => {
     expect(api.facesOf(eventItem).map((face) => face.id)).toEqual(['author-1', 'guest-1']);
     externalEvent.editable = true;
     expect(api.facesOf(eventItem).map((face) => face.id)).toEqual(['guest-1']);
+    ownMeal.isShared = true;
+    expect(api.openActionLabel(mealItem)).toBe('calendar.record_consumption_for');
 
     component.days = [today, day('2026-10-06')];
     expect(api.kcalOf(today)).toBe('1500 kcal');
@@ -276,6 +280,18 @@ describe('CalendarTimelineComponent grid geometry', () => {
     expect(component.heightPx()).toBe(0);
     expect(component.hourLabels()).toEqual([]);
   });
+
+  it('emits a separate edit action for a meal instead of opening it', () => {
+    const component = TestBed.createComponent(CalendarTimelineComponent).componentInstance;
+    const mealToEdit = meal('editable-meal', 'lunch', '13:00');
+    const editedMeals: CalendarMeal[] = [];
+    component.editMeal.subscribe((value) => editedMeals.push(value));
+    const api = access(component);
+
+    api.onEditMeal({ kind: 'meal', meal: mealToEdit } as never);
+
+    expect(editedMeals).toEqual([mealToEdit]);
+  });
 });
 
 function access(component: CalendarTimelineComponent) {
@@ -292,9 +308,11 @@ function access(component: CalendarTimelineComponent) {
     kcalOf(day: CalendarDayView): string;
     colorOf(item: TimelineItemFixture): string;
     titleOf(item: TimelineItemFixture): string;
+    openActionLabel(item: TimelineItemFixture): string | null;
     whenOf(item: TimelineItemFixture): string;
     tipOf(item: TimelineItemFixture): string;
     onOpen(item: TimelineItemFixture): void;
+    onEditMeal(item: TimelineItemFixture, event?: Event): void;
     onAddMeal(day: CalendarDayView): void;
     onGridClick(event: MouseEvent): void;
     onBandClick(day: CalendarDayView, event?: MouseEvent): void;

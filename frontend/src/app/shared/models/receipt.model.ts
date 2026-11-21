@@ -1,4 +1,5 @@
 import type { AiJobDiagnosticTraceEvent } from './ai-queue.model';
+import type { LineDiscount } from './shopping.model';
 
 /**
  * Los tickets leidos por IA (HOGARIA-SPEC ## 12aj), la hermana de `shopping.model.ts`.
@@ -29,6 +30,8 @@ export interface ReceiptItem {
   category: string;
   priceMinor: number | null;
   offer: ReceiptOffer | null;
+  /** Descuento promocional directo; excluyente con `offer` y solo informativo en tickets. */
+  discount: LineDiscount | null;
   note: string | null;
   confidence: number;
 }
@@ -37,6 +40,11 @@ export interface Receipt {
   id: string;
   status: ReceiptStatus;
   store: string | null;
+  storeAddress?: string | null;
+  storeLatitude?: number | null;
+  storeLongitude?: number | null;
+  storeAttribution?: string | null;
+  storeAttributionUrl?: string | null;
   purchaseDate: string | null;
   currency: string | null;
   totalMinor: number | null;

@@ -91,7 +91,11 @@ describe('calendar view presentation components', () => {
     );
     Object.defineProperty(i18n, 'changeTick', { value: signal(0) });
     await TestBed.configureTestingModule({
-      imports: [CalendarHouseholdTasksComponent],
+      imports: [
+        CalendarHouseholdTasksComponent,
+        CalendarMonthComponent,
+        CalendarAgendaViewComponent
+      ],
       providers: [{ provide: I18nService, useValue: i18n }]
     }).compileComponents();
   });
@@ -228,6 +232,43 @@ describe('calendar view presentation components', () => {
 
     component.days = [day('2026-10-14')];
     expect(component.rows).not.toBe(rows);
+  });
+
+  it('exposes a separate edit action for a meal in the month view', () => {
+    const fixture = TestBed.createComponent(CalendarMonthComponent);
+    const mealToEdit = meal('month-edit');
+    const editedMeals: CalendarMeal[] = [];
+    fixture.componentRef.setInput('days', [day('2026-10-05', { meals: [mealToEdit], planned: 1 })]);
+    fixture.componentInstance.editMeal.subscribe((value) => editedMeals.push(value));
+    fixture.detectChanges();
+
+    const edit = fixture.nativeElement.querySelector(
+      'button[aria-label^="calendar.edit_meal_named"]'
+    ) as HTMLButtonElement | null;
+    expect(edit).not.toBeNull();
+    edit?.click();
+
+    expect(editedMeals).toEqual([mealToEdit]);
+  });
+
+  it('routes the agenda edit action separately from opening a meal', () => {
+    const fixture = TestBed.createComponent(CalendarAgendaViewComponent);
+    const mealToEdit = meal('agenda-edit');
+    const editedMeals: CalendarMeal[] = [];
+    const openedMeals: CalendarMeal[] = [];
+    fixture.componentRef.setInput('days', [day('2026-10-05', { meals: [mealToEdit], planned: 1 })]);
+    fixture.componentInstance.editMeal.subscribe((value) => editedMeals.push(value));
+    fixture.componentInstance.openMeal.subscribe((value) => openedMeals.push(value));
+    fixture.detectChanges();
+
+    const edit = fixture.nativeElement.querySelector(
+      'button[aria-label^="calendar.edit_meal_named"]'
+    ) as HTMLButtonElement | null;
+    expect(edit).not.toBeNull();
+    edit?.click();
+
+    expect(editedMeals).toEqual([mealToEdit]);
+    expect(openedMeals).toEqual([]);
   });
 
   it('formats event labels for missing and fully detailed meal data', () => {

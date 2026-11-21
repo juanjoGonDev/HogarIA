@@ -10,6 +10,7 @@ import { ToastService } from '../../core/services/toast.service';
 import { ConfirmService } from '../../core/services/confirm.service';
 import { I18nService } from '../../core/services/i18n.service';
 import { ClipboardService } from '../../core/services/clipboard.service';
+import { dateLocale } from '../../core/time';
 import { IconComponent } from '../../shared/components/ui/icon/icon.component';
 import { safeAiJobDiagnosticTrace } from '../../shared/utils/ai-job-diagnostic';
 import { ButtonComponent } from '../../shared/components/ui/button/button.component';
@@ -17,9 +18,11 @@ import { BadgeComponent } from '../../shared/components/ui/badge/badge.component
 import { InputComponent } from '../../shared/components/ui/input/input.component';
 import { PickerComponent } from '../../shared/components/ui/picker/picker.component';
 import { LoadingComponent } from '../../shared/components/ui/loading/loading.component';
+import { ModalComponent } from '../../shared/components/ui/modal/modal.component';
 import { TranslatePipe } from '../../core/pipes/translate.pipe';
 import type { TranslationKey } from '../../core/i18n';
 import type { ReceiptItem, ReceiptJob, ReceiptStatus } from '../../shared/models/receipt.model';
+import type { LineDiscount } from '../../shared/models/shopping.model';
 import { revisable, sumaDeLineas } from '../../shared/models/receipt.model';
 
 /**
@@ -53,6 +56,8 @@ interface LineaEnPantalla extends ReceiptItem {
   precioTexto: string;
   cantidadTexto: string;
 }
+
+type ModoEditorPromocion = 'none' | 'percent' | 'amount' | 'offer';
 
 const SAFE_DIAGNOSTIC_ERRORS = new Set([
   'NO_CONFIG',
@@ -156,6 +161,7 @@ const SAFE_PROVIDER_ERROR_PARAMS = new Set([
     InputComponent,
     PickerComponent,
     LoadingComponent,
+    ModalComponent,
     TranslatePipe
   ],
   template: `
@@ -285,6 +291,27 @@ const SAFE_PROVIDER_ERROR_PARAMS = new Set([
                 [ngModel]="tiendaDraft()"
                 (ngModelChange)="cambiarTienda($event)"
               />
+            </div>
+            <div class="ficha__campo">
+              <app-input
+                id="ticket-store-address"
+                name="storeAddress"
+                type="text"
+                [label]="'receipts.direccion_tienda' | t"
+                [placeholder]="'receipts.direccion_tienda' | t"
+                [ngModel]="direccionTiendaDraft()"
+                (ngModelChange)="cambiarDireccionTienda($event)"
+              />
+              @if (t.storeAttribution && t.storeAttributionUrl) {
+                <a
+                  class="ficha__atribucion"
+                  [href]="t.storeAttributionUrl"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {{ t.storeAttribution }}
+                </a>
+              }
             </div>
             <div class="ficha__campo">
               <app-input
@@ -439,6 +466,7 @@ const SAFE_PROVIDER_ERROR_PARAMS = new Set([
                       <app-picker
                         [options]="opcionesCategoria()"
                         [value]="linea.category"
+                        [floatingPanel]="true"
                         (valueChange)="editarLinea(linea, { category: $event ?? 'other' })"
                       />
                     } @else {
@@ -468,19 +496,18 @@ const SAFE_PROVIDER_ERROR_PARAMS = new Set([
                   </span>
                   <span class="tabla__celda tabla__celda--oferta" role="cell">
                     @if (revisable(t.status)) {
-                      <input
-                        class="linea__input linea__input--oferta"
-                        type="text"
+                      <button
+                        type="button"
+                        class="linea__promo-boton"
                         [attr.id]="'linea-' + linea.id + '-oferta'"
-                        [attr.aria-label]="('receipts.oferta' | t) + ': ' + linea.name"
-                        placeholder="3x2"
-                        [value]="ofertaTexto(linea)"
-                        (change)="editarOferta(linea, $any($event.target).value)"
-                      />
-                    } @else if (linea.offer) {
-                      {{ linea.offer.buy }}x{{ linea.offer.take }}
+                        [attr.aria-label]="etiquetaBotonPromocion(linea)"
+                        data-test="receipt-promotion-open"
+                        (click)="abrirEditorPromocion(linea)"
+                      >
+                        {{ resumenPromocion(linea) }}
+                      </button>
                     } @else {
-                      —
+                      {{ resumenPromocion(linea) }}
                     }
                   </span>
                   @if (revisable(t.status)) {
@@ -573,6 +600,253 @@ const SAFE_PROVIDER_ERROR_PARAMS = new Set([
         <app-loading />
       }
     </div>
+
+    <app-modal
+      [isOpen]="promocionEditorOpen()"
+      [title]="tituloEditorPromocion()"
+      size="sm"
+      [adaptToVisualViewport]="true"
+      [safeAreaAware]="true"
+      [showFooter]="true"
+      [closable]="!promocionGuardando()"
+      [closeOnOverlay]="!promocionGuardando()"
+      (onClose)="cerrarEditorPromocion()"
+    >
+      @if (lineaPromocionSeleccionada(); as lineaOferta) {
+        <div class="ficha__promo-editor" data-test="receipt-promotion-editor">
+          <fieldset class="ficha__promo-modos" [disabled]="promocionGuardando()">
+            <legend>{{ 'receipts.tipo_de_oferta' | t }}</legend>
+            <div
+              class="ficha__promo-opciones"
+              role="group"
+              [attr.aria-label]="'receipts.tipo_de_oferta' | t"
+            >
+              <button
+                type="button"
+                class="ficha__promo-opcion"
+                [class.ficha__promo-opcion--activa]="promocionModo() === 'none'"
+                [attr.aria-pressed]="promocionModo() === 'none'"
+                data-test="receipt-promotion-mode-none"
+                (click)="seleccionarModoPromocion('none')"
+              >
+                {{ 'receipts.sin_descuento' | t }}
+              </button>
+              <button
+                type="button"
+                class="ficha__promo-opcion"
+                [class.ficha__promo-opcion--activa]="promocionModo() === 'percent'"
+                [attr.aria-pressed]="promocionModo() === 'percent'"
+                data-test="receipt-promotion-mode-percent"
+                (click)="seleccionarModoPromocion('percent')"
+              >
+                {{ 'receipts.porcentaje' | t }}
+              </button>
+              <button
+                type="button"
+                class="ficha__promo-opcion"
+                [class.ficha__promo-opcion--activa]="promocionModo() === 'amount'"
+                [attr.aria-pressed]="promocionModo() === 'amount'"
+                data-test="receipt-promotion-mode-amount"
+                (click)="seleccionarModoPromocion('amount')"
+              >
+                {{ 'receipts.importe_euros' | t }}
+              </button>
+              <button
+                type="button"
+                class="ficha__promo-opcion"
+                [class.ficha__promo-opcion--activa]="promocionModo() === 'offer'"
+                [attr.aria-pressed]="promocionModo() === 'offer'"
+                data-test="receipt-promotion-mode-custom"
+                (click)="seleccionarModoPromocion('offer')"
+              >
+                {{ 'receipts.personalizada' | t }}
+              </button>
+            </div>
+          </fieldset>
+
+          <fieldset class="ficha__promo-rapidas" [disabled]="promocionGuardando()">
+            <legend>{{ 'receipts.ofertas_rapidas' | t }}</legend>
+            <div
+              class="ficha__promo-opciones"
+              role="group"
+              [attr.aria-label]="'receipts.ofertas_rapidas' | t"
+            >
+              <button
+                type="button"
+                class="ficha__promo-opcion"
+                data-test="receipt-offer-preset-3x2"
+                (click)="aplicarOfertaRapida(lineaOferta, { buy: 3, take: 2 })"
+              >
+                3x2
+              </button>
+              <button
+                type="button"
+                class="ficha__promo-opcion"
+                data-test="receipt-offer-preset-2x1"
+                (click)="aplicarOfertaRapida(lineaOferta, { buy: 2, take: 1 })"
+              >
+                2x1
+              </button>
+              <button
+                type="button"
+                class="ficha__promo-opcion"
+                data-test="receipt-offer-preset-4x3"
+                (click)="aplicarOfertaRapida(lineaOferta, { buy: 4, take: 3 })"
+              >
+                4x3
+              </button>
+              <button
+                type="button"
+                class="ficha__promo-opcion"
+                data-test="receipt-offer-preset-5x4"
+                (click)="aplicarOfertaRapida(lineaOferta, { buy: 5, take: 4 })"
+              >
+                5x4
+              </button>
+            </div>
+          </fieldset>
+
+          @if (promocionModo() === 'percent' || promocionModo() === 'amount') {
+            <label class="ficha__promo-campo" for="receipt-promotion-value">
+              {{
+                (promocionModo() === 'percent'
+                  ? 'receipts.descuento_porcentaje'
+                  : 'receipts.descuento_importe'
+                ) | t
+              }}
+              <input
+                id="receipt-promotion-value"
+                class="linea__input"
+                type="number"
+                min="0.01"
+                step="0.01"
+                [attr.max]="promocionModo() === 'percent' ? '99.99' : null"
+                inputmode="decimal"
+                [value]="valorPromocionDraft()"
+                (input)="valorPromocionDraft.set($any($event.target).value)"
+                [attr.aria-describedby]="
+                  promocionModo() === 'percent'
+                    ? 'receipt-promotion-percent-hint'
+                    : 'receipt-promotion-amount-hint'
+                "
+                data-test="receipt-promotion-value"
+              />
+            </label>
+            <p
+              class="ficha__promo-ayuda"
+              [id]="
+                promocionModo() === 'percent'
+                  ? 'receipt-promotion-percent-hint'
+                  : 'receipt-promotion-amount-hint'
+              "
+            >
+              {{
+                (promocionModo() === 'percent'
+                  ? 'receipts.descuento_porcentaje_hint'
+                  : 'receipts.descuento_importe_total_hint'
+                ) | t
+              }}
+            </p>
+            @if (lineaOferta.quantity > 1) {
+              <label class="ficha__promo-campo" for="receipt-promotion-units">
+                {{ 'receipts.unidades_afectadas' | t }}
+                <input
+                  id="receipt-promotion-units"
+                  class="linea__input"
+                  type="text"
+                  inputmode="decimal"
+                  maxlength="12"
+                  [value]="unidadesPromocionDraft()"
+                  (input)="unidadesPromocionDraft.set($any($event.target).value)"
+                  [attr.aria-describedby]="'receipt-promotion-units-hint'"
+                  data-test="receipt-promotion-units"
+                />
+              </label>
+              <p id="receipt-promotion-units-hint" class="ficha__promo-ayuda">
+                {{ 'receipts.unidades_afectadas_hint' | t: { quantity: lineaOferta.quantity } }}
+              </p>
+            }
+          }
+
+          @if (promocionModo() === 'offer') {
+            <div class="ficha__promo-personalizada">
+              <label class="ficha__promo-campo" for="receipt-promotion-buy">
+                {{ 'receipts.unidades_compradas' | t }}
+                <input
+                  id="receipt-promotion-buy"
+                  class="linea__input"
+                  type="number"
+                  inputmode="numeric"
+                  min="2"
+                  max="20"
+                  step="1"
+                  [value]="compraPromocionDraft()"
+                  (input)="compraPromocionDraft.set($any($event.target).value)"
+                  data-test="receipt-promotion-buy"
+                />
+              </label>
+              <label class="ficha__promo-campo" for="receipt-promotion-take">
+                {{ 'receipts.unidades_pagadas' | t }}
+                <input
+                  id="receipt-promotion-take"
+                  class="linea__input"
+                  type="number"
+                  inputmode="numeric"
+                  min="1"
+                  max="19"
+                  step="1"
+                  [value]="pagaPromocionDraft()"
+                  (input)="pagaPromocionDraft.set($any($event.target).value)"
+                  data-test="receipt-promotion-take"
+                />
+              </label>
+              <p class="ficha__promo-ayuda">{{ 'receipts.oferta_personalizada_hint' | t }}</p>
+            </div>
+          }
+
+          @if (previsualizacionPromocion(); as previsualizacion) {
+            <p
+              class="ficha__promo-ayuda ficha__promo-ayuda--total"
+              aria-live="polite"
+              data-test="receipt-promotion-preview"
+            >
+              {{ previsualizacion }}
+            </p>
+          }
+
+          <p class="ficha__promo-ayuda ficha__promo-ayuda--total">
+            {{ 'receipts.promocion_informativa_hint' | t }}
+          </p>
+
+          @if (promocionError(); as error) {
+            <p class="ficha__promo-error" role="alert">{{ error | t }}</p>
+          }
+        </div>
+      }
+      <div footer class="ficha__promo-footer">
+        <app-button
+          variant="ghost"
+          size="sm"
+          type="button"
+          [disabled]="promocionGuardando()"
+          (onClick)="cerrarEditorPromocion()"
+          data-test="receipt-promotion-cancel"
+        >
+          {{ 'common.cancel' | t }}
+        </app-button>
+        <app-button
+          variant="primary"
+          size="sm"
+          type="button"
+          [loading]="promocionGuardando()"
+          [disabled]="promocionGuardando()"
+          (onClick)="guardarPromocion()"
+          data-test="receipt-promotion-save"
+        >
+          {{ 'receipts.guardar_oferta' | t }}
+        </app-button>
+      </div>
+    </app-modal>
   `,
   styles: [
     `
@@ -655,6 +929,15 @@ const SAFE_PROVIDER_ERROR_PARAMS = new Set([
 
       .ficha__metadatos-error {
         color: var(--danger, #d64545);
+      }
+
+      .ficha__atribucion {
+        display: inline-flex;
+        margin-top: var(--space-1, 4px);
+        color: var(--text-secondary);
+        font-size: var(--text-xs, 12px);
+        text-decoration: underline;
+        text-underline-offset: 2px;
       }
 
       .ficha__fichero {
@@ -801,7 +1084,7 @@ const SAFE_PROVIDER_ERROR_PARAMS = new Set([
       .tabla__head,
       .tabla__fila {
         display: grid;
-        grid-template-columns: minmax(140px, 2fr) 64px 72px minmax(130px, 1.4fr) 84px 64px 36px;
+        grid-template-columns: minmax(140px, 2fr) 64px 72px minmax(130px, 1.4fr) 84px 104px 36px;
         gap: var(--space-2, 8px);
         align-items: center;
         padding: var(--space-2, 8px) var(--space-3, 12px);
@@ -894,6 +1177,131 @@ const SAFE_PROVIDER_ERROR_PARAMS = new Set([
 
       .linea__input--num {
         text-align: right;
+      }
+
+      .linea__promo-boton {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        min-height: 40px;
+        padding: 4px 8px;
+        border: 1px solid var(--border-default, #e2e5ea);
+        border-radius: var(--radius-sm, 6px);
+        background: var(--bg-primary, #fff);
+        color: var(--text-primary);
+        font: inherit;
+        text-align: center;
+        cursor: pointer;
+      }
+
+      .linea__promo-boton:hover {
+        border-color: var(--primary, #f97316);
+      }
+
+      .linea__promo-boton:focus-visible,
+      .ficha__promo-opcion:focus-visible {
+        outline: 2px solid var(--primary, #f97316);
+        outline-offset: 2px;
+      }
+
+      .ficha__promo-editor {
+        display: grid;
+        gap: var(--space-4, 16px);
+      }
+
+      .ficha__promo-modos,
+      .ficha__promo-rapidas {
+        display: grid;
+        gap: var(--space-2, 8px);
+        min-width: 0;
+        margin: 0;
+        padding: 0;
+        border: 0;
+      }
+
+      .ficha__promo-modos legend,
+      .ficha__promo-rapidas legend {
+        margin-bottom: var(--space-2, 8px);
+        font-size: var(--text-sm, 14px);
+        font-weight: var(--font-medium, 500);
+        color: var(--text-primary);
+      }
+
+      .ficha__promo-opciones {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-2, 8px);
+      }
+
+      .ficha__promo-opcion {
+        min-width: 44px;
+        min-height: 44px;
+        padding: 6px 10px;
+        border: 1px solid var(--border-default, #e2e5ea);
+        border-radius: var(--radius-md, 8px);
+        background: var(--bg-primary, #fff);
+        color: var(--text-primary);
+        font: inherit;
+        cursor: pointer;
+      }
+
+      .ficha__promo-opcion:hover {
+        border-color: var(--primary, #f97316);
+      }
+
+      .ficha__promo-opcion--activa {
+        border-color: var(--primary, #f97316);
+        background: color-mix(in srgb, var(--primary, #f97316) 10%, var(--bg-primary, #fff));
+        font-weight: var(--font-semibold, 600);
+      }
+
+      .ficha__promo-campo {
+        display: grid;
+        gap: var(--space-1, 4px);
+        font-size: var(--text-sm, 14px);
+        color: var(--text-primary);
+      }
+
+      .ficha__promo-campo .linea__input {
+        min-height: 44px;
+        border-color: var(--border-default, #e2e5ea);
+        background: var(--bg-primary, #fff);
+      }
+
+      .ficha__promo-personalizada {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: var(--space-3, 12px);
+      }
+
+      .ficha__promo-personalizada .ficha__promo-ayuda {
+        grid-column: 1 / -1;
+      }
+
+      .ficha__promo-ayuda {
+        margin: calc(-1 * var(--space-2, 8px)) 0 0;
+        font-size: var(--text-xs, 12px);
+        color: var(--text-secondary);
+      }
+
+      .ficha__promo-ayuda--total {
+        margin: 0;
+        padding-top: var(--space-2, 8px);
+        border-top: 1px solid var(--border-default, #e2e5ea);
+      }
+
+      .ficha__promo-error {
+        margin: 0;
+        color: var(--danger, #d64545);
+        font-size: var(--text-sm, 14px);
+      }
+
+      .ficha__promo-footer {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: var(--space-2, 8px);
       }
 
       .linea__quitar {
@@ -1048,6 +1456,10 @@ const SAFE_PROVIDER_ERROR_PARAMS = new Set([
           min-width: 44px;
         }
 
+        .linea__promo-boton {
+          min-height: 44px;
+        }
+
         .linea__quitar {
           width: 44px;
           height: 44px;
@@ -1068,6 +1480,7 @@ export class ReceiptDetailComponent implements OnInit, OnDestroy {
 
   readonly confirmando = signal(false);
   readonly tiendaDraft = signal('');
+  readonly direccionTiendaDraft = signal('');
   readonly fechaCompraDraft = signal('');
   readonly metadatosGuardando = signal(false);
   readonly metadatosGuardados = signal(false);
@@ -1079,6 +1492,15 @@ export class ReceiptDetailComponent implements OnInit, OnDestroy {
   } | null>(null);
   readonly ultimaNueva = signal<string | null>(null);
   readonly diagnosticCopyStatus = signal<'copied' | 'failed' | null>(null);
+  readonly promocionEditorOpen = signal(false);
+  readonly lineaPromocionSeleccionada = signal<LineaEnPantalla | null>(null);
+  readonly promocionModo = signal<ModoEditorPromocion>('none');
+  readonly valorPromocionDraft = signal('');
+  readonly unidadesPromocionDraft = signal('');
+  readonly compraPromocionDraft = signal('3');
+  readonly pagaPromocionDraft = signal('2');
+  readonly promocionError = signal<TranslationKey | null>(null);
+  readonly promocionGuardando = signal(false);
 
   readonly ticket = this.service.receipt;
   readonly lineas = computed<LineaEnPantalla[]>(() =>
@@ -1088,6 +1510,41 @@ export class ReceiptDetailComponent implements OnInit, OnDestroy {
       cantidadTexto: String(linea.quantity)
     }))
   );
+  readonly previsualizacionPromocion = computed(() => {
+    this.i18n.changeTick();
+    const linea = this.lineaPromocionSeleccionada();
+    if (!linea) return null;
+
+    const modo = this.promocionModo();
+    if (modo === 'none') return null;
+    if (modo === 'offer') {
+      const buy = Number(this.compraPromocionDraft());
+      const take = Number(this.pagaPromocionDraft());
+      if (!this.ofertaValida(buy, take)) return null;
+      return this.i18n.t('receipts.preview_promotion_offer', {
+        buy,
+        take,
+        free: buy - take
+      });
+    }
+
+    const value = this.numeroDecimal(this.valorPromocionDraft());
+    if (value === null || value <= 0 || (modo === 'percent' && value >= 100)) return null;
+    const units = this.unidadesAfectadas(linea);
+    if (units === undefined) return null;
+    const affected = units ?? linea.quantity;
+    const unitsSummary = `${this.formatearCantidad(affected, 2)}/${this.formatearCantidad(linea.quantity, 2)}`;
+
+    return modo === 'percent'
+      ? this.i18n.t('receipts.preview_promotion_percent', {
+          percent: this.formatearCantidad(value, 2),
+          units: unitsSummary
+        })
+      : this.i18n.t('receipts.preview_promotion_amount', {
+          amount: this.formatearCantidad(value, 2, 2),
+          units: unitsSummary
+        });
+  });
   readonly enMarcha = computed(() => {
     const estado = this.service.receipt()?.status;
     return estado === 'queued' || estado === 'analyzing';
@@ -1103,6 +1560,8 @@ export class ReceiptDetailComponent implements OnInit, OnDestroy {
     if (!receipt) return false;
     return (
       (this.tiendaDraft().trim() || null) !== receipt.store ||
+      this.normalizarDireccionTienda(this.direccionTiendaDraft()) !==
+        (receipt.storeAddress ?? null) ||
       (this.fechaCompraDraft() || null) !== receipt.purchaseDate
     );
   });
@@ -1129,6 +1588,7 @@ export class ReceiptDetailComponent implements OnInit, OnDestroy {
         return;
       this.metadatosInicializadosPara = receipt.id;
       this.tiendaDraft.set(receipt.store ?? '');
+      this.direccionTiendaDraft.set(receipt.storeAddress ?? '');
       this.fechaCompraDraft.set(receipt.purchaseDate ?? '');
     });
   }
@@ -1316,6 +1776,7 @@ export class ReceiptDetailComponent implements OnInit, OnDestroy {
     if (this.pollActivo) return;
     this.pollActivo = true;
     this.lineasPrevias = this.service.receipt()?.lines.length ?? 0;
+    let ultimoEstado = this.service.receipt()?.status ?? null;
     interval(1000)
       .pipe(
         switchMap(() => this.service.refreshReceipt(this.id)),
@@ -1327,6 +1788,8 @@ export class ReceiptDetailComponent implements OnInit, OnDestroy {
           const ahora = t?.lines.length ?? 0;
           if (ahora > this.lineasPrevias) this.ultimaNueva.set(t!.lines[ahora - 1]?.id ?? null);
           this.lineasPrevias = ahora;
+          if (t?.status === 'review' && ultimoEstado !== 'review') this.pantry.loadCategories();
+          if (t) ultimoEstado = t.status;
           // Parado el trabajo (review/failed/stopped/confirmed), el latido se apaga solo.
           if (t && t.status !== 'queued' && t.status !== 'analyzing') this.pollActivo = false;
         }
@@ -1345,6 +1808,11 @@ export class ReceiptDetailComponent implements OnInit, OnDestroy {
     this.cambiarMetadatos();
   }
 
+  cambiarDireccionTienda(valor: string): void {
+    this.direccionTiendaDraft.set(valor);
+    this.cambiarMetadatos();
+  }
+
   cambiarFechaCompra(valor: string): void {
     this.fechaCompraDraft.set(valor);
     this.cambiarMetadatos();
@@ -1353,10 +1821,16 @@ export class ReceiptDetailComponent implements OnInit, OnDestroy {
   async guardarMetadatos(): Promise<void> {
     const current = this.ticket();
     if (!current || !this.metadatosCambiados() || this.metadatosGuardando()) return;
-    const input: { store?: string | null; purchaseDate?: string | null } = {};
+    const input: {
+      store?: string | null;
+      storeAddress?: string | null;
+      purchaseDate?: string | null;
+    } = {};
     const store = this.tiendaDraft().trim() || null;
+    const storeAddress = this.normalizarDireccionTienda(this.direccionTiendaDraft());
     const purchaseDate = this.fechaCompraDraft() || null;
     if (store !== current.store) input.store = store;
+    if (storeAddress !== (current.storeAddress ?? null)) input.storeAddress = storeAddress;
     if (purchaseDate !== current.purchaseDate) input.purchaseDate = purchaseDate;
 
     this.metadatosGuardando.set(true);
@@ -1371,6 +1845,15 @@ export class ReceiptDetailComponent implements OnInit, OnDestroy {
     this.metadatosGuardados.set(true);
   }
 
+  private normalizarDireccionTienda(value: string): string | null {
+    const normalized = value
+      .normalize('NFKC')
+      .replace(/[\u0000-\u001f\u007f-\u009f]/gu, ' ')
+      .replace(/\s+/gu, ' ')
+      .trim();
+    return normalized || null;
+  }
+
   async guardarNotas(valor: string): Promise<void> {
     await this.service.updateReceipt(this.id, { notes: valor.trim() || null });
   }
@@ -1381,15 +1864,187 @@ export class ReceiptDetailComponent implements OnInit, OnDestroy {
     this.service.loadReceipt(this.id);
   }
 
-  /** La oferta se escribe como se lee: «3x2». Vacio la quita. */
-  async editarOferta(linea: LineaEnPantalla, texto: string): Promise<void> {
-    const pareja = texto.trim().match(/^(\d+)\s*[xX]\s*(\d+)$/);
-    const oferta = pareja ? { buy: Number(pareja[1]), take: Number(pareja[2]) } : null;
-    await this.editarLinea(linea, { offer: oferta });
+  abrirEditorPromocion(linea: LineaEnPantalla): void {
+    this.lineaPromocionSeleccionada.set(linea);
+    if (linea.discount) {
+      this.promocionModo.set(linea.discount.kind);
+      this.valorPromocionDraft.set(
+        linea.discount.kind === 'amount'
+          ? ((linea.discount.valueMinor ?? 0) / 100).toFixed(2)
+          : ((linea.discount.percentBps ?? 0) / 100).toFixed(2)
+      );
+      this.unidadesPromocionDraft.set(
+        linea.discount.units === null || linea.discount.units === undefined
+          ? ''
+          : this.formatearCantidad(linea.discount.units, 2)
+      );
+    } else if (linea.offer) {
+      this.promocionModo.set('offer');
+      this.compraPromocionDraft.set(String(linea.offer.buy));
+      this.pagaPromocionDraft.set(String(linea.offer.take));
+      this.valorPromocionDraft.set('');
+      this.unidadesPromocionDraft.set('');
+    } else {
+      this.promocionModo.set('none');
+      this.valorPromocionDraft.set('');
+      this.unidadesPromocionDraft.set('');
+      this.compraPromocionDraft.set('3');
+      this.pagaPromocionDraft.set('2');
+    }
+    this.promocionError.set(null);
+    this.promocionEditorOpen.set(true);
   }
 
-  ofertaTexto(linea: ReceiptItem): string {
-    return linea.offer ? `${linea.offer.buy}x${linea.offer.take}` : '';
+  cerrarEditorPromocion(): void {
+    if (this.promocionGuardando()) return;
+    this.promocionEditorOpen.set(false);
+    this.lineaPromocionSeleccionada.set(null);
+    this.promocionError.set(null);
+  }
+
+  tituloEditorPromocion(): string {
+    const linea = this.lineaPromocionSeleccionada();
+    return linea
+      ? this.i18n.t('receipts.oferta_de', { name: linea.name })
+      : this.i18n.t('receipts.editar_oferta');
+  }
+
+  etiquetaBotonPromocion(linea: ReceiptItem): string {
+    return this.i18n.t('receipts.editar_oferta_de', {
+      name: linea.name,
+      summary: this.resumenPromocion(linea)
+    });
+  }
+
+  resumenPromocion(linea: ReceiptItem): string {
+    if (linea.offer) return `${linea.offer.buy}x${linea.offer.take}`;
+    const discount = linea.discount;
+    if (!discount) {
+      return this.ticket() && revisable(this.ticket()!.status)
+        ? this.i18n.t('receipts.anadir_oferta')
+        : '—';
+    }
+
+    const base =
+      discount.kind === 'percent'
+        ? `${this.formatearCantidad((discount.percentBps ?? 0) / 100, 2)} %`
+        : `${this.formatearCantidad((discount.valueMinor ?? 0) / 100, 2, 2)} €`;
+    if (discount.units === null || discount.units === undefined) return base;
+    return `${base} · ${this.formatearCantidad(discount.units, 2)}/${this.formatearCantidad(linea.quantity, 2)}`;
+  }
+
+  seleccionarModoPromocion(mode: ModoEditorPromocion): void {
+    if (mode !== this.promocionModo()) {
+      this.valorPromocionDraft.set('');
+      this.unidadesPromocionDraft.set('');
+      if (mode === 'offer') {
+        this.compraPromocionDraft.set('3');
+        this.pagaPromocionDraft.set('2');
+      }
+    }
+    this.promocionModo.set(mode);
+    this.promocionError.set(null);
+  }
+
+  async aplicarOfertaRapida(
+    linea: LineaEnPantalla,
+    offer: { buy: number; take: number }
+  ): Promise<void> {
+    if (!this.ofertaValida(offer.buy, offer.take)) {
+      this.promocionError.set('receipts.oferta_personalizada_invalida');
+      return;
+    }
+    await this.guardarCambiosPromocion(linea, { offer, discount: null });
+  }
+
+  async guardarPromocion(): Promise<void> {
+    const linea = this.lineaPromocionSeleccionada();
+    if (!linea || this.promocionGuardando()) return;
+    const mode = this.promocionModo();
+    if (mode === 'none') {
+      await this.guardarCambiosPromocion(linea, { offer: null, discount: null });
+      return;
+    }
+
+    if (mode === 'offer') {
+      const buy = Number(this.compraPromocionDraft());
+      const take = Number(this.pagaPromocionDraft());
+      if (!this.ofertaValida(buy, take)) {
+        this.promocionError.set('receipts.oferta_personalizada_invalida');
+        return;
+      }
+      await this.guardarCambiosPromocion(linea, {
+        offer: { buy, take },
+        discount: null
+      });
+      return;
+    }
+
+    const value = this.numeroDecimal(this.valorPromocionDraft());
+    if (value === null || value <= 0 || (mode === 'percent' && value >= 100)) {
+      this.promocionError.set('receipts.descuento_valor_invalido');
+      return;
+    }
+    const units = this.unidadesAfectadas(linea);
+    if (units === undefined) {
+      this.promocionError.set('receipts.descuento_unidades_invalidas');
+      return;
+    }
+
+    const discount: LineDiscount =
+      mode === 'percent'
+        ? { kind: 'percent', percentBps: Math.round(value * 100), units }
+        : { kind: 'amount', valueMinor: Math.round(value * 100), units };
+    await this.guardarCambiosPromocion(linea, { offer: null, discount });
+  }
+
+  private async guardarCambiosPromocion(
+    linea: LineaEnPantalla,
+    cambios: Pick<ReceiptItem, 'offer' | 'discount'>
+  ): Promise<void> {
+    this.promocionGuardando.set(true);
+    this.promocionError.set(null);
+    const actualizada = await this.service.updateLine(this.id, linea.id, cambios);
+    this.promocionGuardando.set(false);
+    if (!actualizada) {
+      this.promocionError.set('receipts.promocion_guardado_error');
+      return;
+    }
+    this.service.loadReceipt(this.id);
+    this.cerrarEditorPromocion();
+  }
+
+  private ofertaValida(buy: number, take: number): boolean {
+    return (
+      Number.isInteger(buy) &&
+      buy >= 2 &&
+      buy <= 20 &&
+      Number.isInteger(take) &&
+      take >= 1 &&
+      take < buy
+    );
+  }
+
+  private numeroDecimal(text: string): number | null {
+    const normalized = text.trim().replace(',', '.');
+    if (!/^\d+(?:\.\d{1,2})?$/.test(normalized)) return null;
+    const value = Number(normalized);
+    return Number.isFinite(value) ? value : null;
+  }
+
+  private unidadesAfectadas(linea: ReceiptItem): number | null | undefined {
+    const text = this.unidadesPromocionDraft().trim().replace(',', '.');
+    if (!text) return null;
+    if (!/^\d+(?:\.\d+)?$/.test(text)) return undefined;
+    const units = Number(text);
+    return Number.isFinite(units) && units > 0 && units <= linea.quantity ? units : undefined;
+  }
+
+  private formatearCantidad(value: number, maxDecimals: number, minDecimals = 0): string {
+    return value.toLocaleString(dateLocale(), {
+      minimumFractionDigits: minDecimals,
+      maximumFractionDigits: maxDecimals
+    });
   }
 
   async quitarLinea(linea: LineItem): Promise<void> {

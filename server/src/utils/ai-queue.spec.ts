@@ -1448,6 +1448,176 @@ describe('AI provider queue dispatcher', () => {
     }
   });
 
+  it('recovers personal-care, cleaning and paper categories when AI returns other', async () => {
+    const originalDatabasePath = process.env.DATABASE_PATH;
+    const isolatedDirectory = mkdtempSync(join(tmpdir(), 'hogaria-ai-queue-ticket-category-'));
+    const { encolarTicket, stopWorker } = await import('./ticket-queue.js');
+    try {
+      process.env.DATABASE_PATH = join(isolatedDirectory, 'database.sqlite');
+      const householdId = 'receipt-category-home';
+      db.prepare('INSERT INTO households (id, name, invite_code) VALUES (?, ?, ?)').run(
+        householdId,
+        'Receipt category home',
+        'receipt-category-invite'
+      );
+      db.prepare(
+        `INSERT INTO household_members (id, household_id, user_id, role, permissions)
+         VALUES (?, ?, ?, 'admin', '{}')`
+      ).run('receipt-category-owner', householdId, userId);
+      db.prepare('UPDATE users SET household_id = ? WHERE id = ?').run(householdId, userId);
+      db.prepare('UPDATE ai_configs SET household_id = ? WHERE id = ?').run(householdId, config.id);
+
+      const { storeTicket, uploadsRoot } = await import('./uploads.js');
+      const fileUrl = storeTicket(
+        'synthetic-receipt-category-ticket',
+        Buffer.from('%PDF-1.7 synthetic receipt category ticket'),
+        'pdf',
+        uploadsRoot()
+      );
+      const receiptId = 'synthetic-receipt-category';
+      const proposedCategoryKey = 'cuidado personal';
+      const answer = {
+        lines: [
+          {
+            name: 'Gel aloe español',
+            quantity: 1,
+            unit: 'ud',
+            category: 'other',
+            createCategory: false,
+            priceMinor: 235
+          },
+          {
+            name: 'Crema hidratante',
+            quantity: 1,
+            unit: 'ud',
+            category: 'other',
+            createCategory: false,
+            priceMinor: 295
+          },
+          {
+            name: 'Dentífrico',
+            quantity: 1,
+            unit: 'ud',
+            category: 'other',
+            createCategory: false,
+            priceMinor: 195
+          },
+          {
+            name: 'Rollo multi 90m',
+            quantity: 1,
+            unit: 'ud',
+            category: 'other',
+            createCategory: false,
+            priceMinor: 315
+          },
+          {
+            name: 'Detergente lavavajillas',
+            quantity: 1,
+            unit: 'ud',
+            category: 'other',
+            createCategory: false,
+            priceMinor: 140
+          },
+          {
+            name: 'Agua mineral',
+            quantity: 1,
+            unit: 'ud',
+            category: 'beverages',
+            createCategory: true,
+            priceMinor: 80
+          },
+          {
+            name: 'Artículo sin clasificar',
+            quantity: 1,
+            unit: 'ud',
+            category: 'categoria inexistente',
+            createCategory: false,
+            priceMinor: 20
+          },
+          ...Array.from({ length: 13 }, (_, index) => ({
+            name: `Producto familia ${index}`,
+            quantity: 1,
+            unit: 'ud',
+            category: `Familia ${index}`,
+            createCategory: true,
+            priceMinor: 1
+          }))
+        ],
+        store: 'Mercado sintético',
+        purchaseDate: null,
+        currency: 'EUR',
+        totalMinor: 1293,
+        warnings: []
+      };
+      vi.mocked(fetch).mockResolvedValueOnce(
+        responsesCompleted(JSON.stringify(answer), 'resp_receipt_category')
+      );
+      db.prepare(
+        `INSERT INTO receipts (id, user_id, household_id, status, file_url, file_kind)
+         VALUES (?, ?, ?, 'queued', ?, 'pdf')`
+      ).run(receiptId, userId, householdId, fileUrl);
+
+      const jobId = encolarTicket(db, userId, receiptId);
+      await waitFor(() => jobRow(jobId).status === 'done');
+
+      const categoryRows = db
+        .prepare(
+          `SELECT key, user_id, household_id FROM pantry_categories
+           WHERE key = ?`
+        )
+        .all(proposedCategoryKey);
+      expect(categoryRows).toEqual([
+        { key: proposedCategoryKey, user_id: userId, household_id: householdId }
+      ]);
+      expect(
+        db
+          .prepare(
+            `SELECT key, user_id, household_id FROM pantry_categories
+             WHERE household_id = ? AND key = ?`
+          )
+          .get(householdId, 'papel y desechables')
+      ).toEqual({ key: 'papel y desechables', user_id: userId, household_id: householdId });
+      expect(
+        db
+          .prepare(
+            `SELECT key, user_id, household_id FROM pantry_categories
+             WHERE household_id = ? AND key = ?`
+          )
+          .get(householdId, 'limpieza del hogar')
+      ).toEqual({ key: 'limpieza del hogar', user_id: userId, household_id: householdId });
+      const receiptLines = db
+        .prepare('SELECT name, category FROM receipt_items WHERE receipt_id = ? ORDER BY position')
+        .all(receiptId);
+      expect(receiptLines).toEqual(
+        expect.arrayContaining([
+          { name: 'Gel aloe español', category: proposedCategoryKey },
+          { name: 'Crema hidratante', category: proposedCategoryKey },
+          { name: 'Dentífrico', category: proposedCategoryKey },
+          { name: 'Rollo multi 90m', category: 'papel y desechables' },
+          { name: 'Detergente lavavajillas', category: 'limpieza del hogar' },
+          { name: 'Agua mineral', category: 'beverages' },
+          { name: 'Artículo sin clasificar', category: 'other' }
+        ])
+      );
+      expect(receiptLines).toHaveLength(20);
+      expect(
+        db
+          .prepare(
+            `SELECT COUNT(*) AS count FROM pantry_categories
+             WHERE household_id = ? AND key LIKE 'familia %'`
+          )
+          .get(householdId)
+      ).toEqual({ count: 9 });
+      expect(receiptLines.find((line: any) => line.name === 'Producto familia 12')).toMatchObject({
+        category: 'other'
+      });
+    } finally {
+      stopWorker();
+      process.env.DATABASE_PATH = originalDatabasePath ?? ':memory:';
+      rmSync(isolatedDirectory, { recursive: true, force: true });
+    }
+  });
+
   it('includes the fresh household inventory as JSON beside JPEG input', async () => {
     const originalDatabasePath = process.env.DATABASE_PATH;
     const isolatedDirectory = mkdtempSync(join(tmpdir(), 'hogaria-ai-queue-jpeg-inventory-'));

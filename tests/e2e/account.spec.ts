@@ -2,7 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { Page, expect, test } from './fixtures';
 import { registerAndGoto } from './helpers/auth';
-import { shoppingNewListAction } from './helpers/shopping-ui';
+import { shoppingNewListAction, skipOptionalShoppingLocationPrompt } from './helpers/shopping-ui';
 
 /**
  * La cuenta de la persona, en su pagina (ronda 13). Hasta aqui vivia dentro de Preferencias, que
@@ -118,6 +118,7 @@ test.describe('Mi cuenta', () => {
     await page.goto('/shopping');
     await page.locator('[data-test="list-row"]').getByRole('link').click();
     await page.locator('[data-test="item-row"]').first().click();
+    await skipOptionalShoppingLocationPrompt(page);
     await page.getByRole('button', { name: 'Quien ha tocado que' }).click();
     await expect(page.locator('[data-test="audit-row"]').first()).toContainText('Ana Belen');
     await expect(page.locator('[data-test="audit-row"]').first()).not.toContainText('acct-hist');

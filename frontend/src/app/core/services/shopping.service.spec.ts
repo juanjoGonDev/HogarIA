@@ -469,16 +469,67 @@ describe('ShoppingService', () => {
       const result = service.applyPhotoLines(LIST_ID, lines);
       const apply = http.expectOne(`${API}/lists/${LIST_ID}/items/apply`);
       expect(apply.request.body).toEqual({ lines });
-      apply.flush({ data: { added: 1, merged: [], createdCategories: [] } });
+      const addedItem = makeItem({ id: 'photo-item', name: 'Pan', checked: 0 });
+      apply.flush({ data: { added: [addedItem], merged: [], createdCategories: [] } });
 
       http
         .expectOne(`${API}/lists/${LIST_ID}`)
         .flush({ data: { ...makeList(), items: [makeItem()] } });
       http.expectOne(`${API}/categories`).flush({ data: [makeCategory()] });
       http.expectOne(`${API}/lists/${LIST_ID}/estimate`).flush({ data: makeEstimate() });
-      await expectAsync(result).toBeResolvedTo({ added: 1, merged: [], createdCategories: [] });
+      await expectAsync(result).toBeResolvedTo({
+        added: [addedItem],
+        merged: [],
+        createdCategories: []
+      });
       expect(service.items()).toEqual([makeItem()]);
       expect(service.categories()).toEqual([makeCategory()]);
+    });
+
+    it('searches nearby stores only when called and saves a selected location without raw GPS', async () => {
+      const candidates = [
+        {
+          id: 'store-1',
+          name: 'Tienda cercana',
+          address: 'Calle Mayor 2',
+          latitude: 40.4,
+          longitude: -3.7,
+          distanceMeters: 12,
+          attribution: null,
+          attributionUrl: null,
+          source: 'registered' as const
+        }
+      ];
+      const search = service.searchNearbyStores(LIST_ID, 40.4, -3.7);
+      const searchRequest = http.expectOne(`${API}/lists/${LIST_ID}/location-candidates`);
+      expect(searchRequest.request.method).toBe('POST');
+      expect(searchRequest.request.body).toEqual({
+        latitude: 40.4,
+        longitude: -3.7,
+        radiusMeters: 500
+      });
+      searchRequest.flush({ data: { status: 'ok', candidates } });
+      await expectAsync(search).toBeResolvedTo({ status: 'ok', candidates });
+
+      service.items.set([makeItem()]);
+      const storedItem = makeItem({
+        location_name: 'Tienda cercana',
+        location_source: 'registered'
+      });
+      const save = service.saveItemLocations(LIST_ID, [ITEM_ID, ITEM_ID], {
+        source: 'registered',
+        id: 'store-1'
+      });
+      const saveRequest = http.expectOne(`${API}/lists/${LIST_ID}/items/location`);
+      expect(saveRequest.request.method).toBe('PUT');
+      expect(saveRequest.request.body).toEqual({
+        itemIds: [ITEM_ID],
+        store: { source: 'registered', id: 'store-1' }
+      });
+      expect(JSON.stringify(saveRequest.request.body)).not.toContain('latitude');
+      saveRequest.flush({ data: { items: [storedItem] } });
+      await expectAsync(save).toBeResolvedTo([storedItem]);
+      expect(service.items()[0].location_name).toBe('Tienda cercana');
     });
 
     it('creates, renames, and deletes lists with the expected bodies and refreshes', async () => {

@@ -5,6 +5,7 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { formatDateTime } from '../../core/time';
 import { listCategoryLabelKey } from '../../core/i18n/labels';
 import { UnitPickerComponent } from './unit-picker.component';
+import { ShoppingLocationFlowComponent } from './shopping-location-flow.component';
 import { parseQuickAddLine } from './quick-add';
 import { seccionDeLista } from './seccion-de-catalogo';
 import {
@@ -59,6 +60,13 @@ import { I18nService } from '../../core/services/i18n.service';
 
 /** Una linea de la foto con lo que la persona toco: `keep` no existe en el contrato. */
 export type KeptPhotoLine = PhotoLine & { keep: boolean };
+
+interface LocationFlowRequest {
+  itemIds: string[];
+  mode: 'prompt' | 'edit';
+  currentName?: string;
+  currentAddress?: string;
+}
 
 /** Lo que devuelve `/photo/analyze`, con la marca de que la persona todavia no ha dicho nada. */
 interface PhotoReview {
@@ -126,7 +134,8 @@ type LineDiscountKindUi = 'none' | 'percent' | 'amount';
     PickerComponent,
     UnitPickerComponent,
     AvatarComponent,
-    CatalogLabelPipe
+    CatalogLabelPipe,
+    ShoppingLocationFlowComponent
   ],
   template: `
     <div class="detail">
@@ -869,6 +878,41 @@ type LineDiscountKindUi = 'none' | 'percent' | 'amount';
                 (ngModelChange)="patch({ note: $event })"
               />
             </label>
+            <div class="detail__field" data-test="location-editor">
+              <span class="detail__field-label">{{
+                'shopping_list_detail.ubicacion_de_producto' | t
+              }}</span>
+              @if (item.location_name) {
+                <p class="detail__hint">
+                  <strong>{{ item.location_name }}</strong>
+                  @if (item.location_address) {
+                    <span> · {{ item.location_address }}</span>
+                  }
+                </p>
+                @if (item.location_attribution && item.location_attribution_url) {
+                  <a
+                    class="detail__link"
+                    [href]="item.location_attribution_url"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    >{{ item.location_attribution }}</a
+                  >
+                }
+              }
+              <button
+                type="button"
+                class="detail__link"
+                data-test="edit-item-location"
+                (click)="openLocationEditor(item)"
+              >
+                {{
+                  (item.location_name
+                    ? 'shopping_list_detail.editar_establecimiento'
+                    : 'shopping_list_detail.anadir_establecimiento'
+                  ) | t
+                }}
+              </button>
+            </div>
             <div class="detail__field" data-test="product-link">
               <span class="detail__field-label">
                 <app-icon name="link" [size]="14" [label]="null" />
@@ -1619,6 +1663,17 @@ type LineDiscountKindUi = 'none' | 'percent' | 'amount';
           </section>
         </div>
       }
+
+      <app-shopping-location-flow
+        [listId]="listId"
+        [itemIds]="locationFlow()?.itemIds ?? []"
+        [isOpen]="locationFlow() !== null"
+        [initialMode]="locationFlow()?.mode ?? 'prompt'"
+        [currentName]="locationFlow()?.currentName ?? ''"
+        [currentAddress]="locationFlow()?.currentAddress ?? ''"
+        (closed)="locationFlow.set(null)"
+        (saved)="locationSaved()"
+      />
     </div>
   `,
   styles: [
@@ -2853,6 +2908,7 @@ export class ShoppingListDetailComponent implements OnDestroy {
   readonly frozenLast = signal(false);
   readonly selection = signal<string[]>([]);
   readonly editing = signal<ShoppingListItem | null>(null);
+  readonly locationFlow = signal<LocationFlowRequest | null>(null);
   readonly renaming = signal(false);
   readonly estimateOpen = signal(false);
   readonly pasteOpen = signal(false);
@@ -3190,7 +3246,29 @@ export class ShoppingListDetailComponent implements OnDestroy {
       this.pick(item.id);
       return;
     }
+    const markingPurchased = item.checked === 0;
     this.shopping.toggleItem(item.list_id, item);
+    if (markingPurchased && !this.locationFlow()) this.askForLocation([item.id]);
+  }
+
+  private askForLocation(itemIds: string[]): void {
+    const ids = [...new Set(itemIds.filter(Boolean))];
+    if (!ids.length || this.locationFlow()) return;
+    this.locationFlow.set({ itemIds: ids, mode: 'prompt' });
+  }
+
+  openLocationEditor(item: ShoppingListItem): void {
+    if (this.locationFlow()) return;
+    this.locationFlow.set({
+      itemIds: [item.id],
+      mode: 'edit',
+      currentName: item.location_name ?? '',
+      currentAddress: item.location_address ?? ''
+    });
+  }
+
+  locationSaved(): void {
+    this.toast.success(this.i18n.t('shopping_list_detail.ubicacion_guardada'));
   }
 
   onTap(item: ShoppingListItem): void {
@@ -4463,11 +4541,13 @@ export class ShoppingListDetailComponent implements OnDestroy {
     this.toast.success(
       this.i18n.t('ui.lineas_anadidas'),
       this.i18n.t('ui.nuevas_y_sumadas', {
-        nuevas: applied.added,
+        nuevas: applied.added.length,
         sumadas: applied.merged.length,
         resto: created
       })
     );
+    const itemIds = [...applied.added, ...applied.merged].map((item) => item.id);
+    if (itemIds.length) this.askForLocation(itemIds);
   }
 
   minorToInput(minor: number | null | undefined): string {

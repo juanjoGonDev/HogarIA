@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
+import { createServer as createHttpServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
@@ -50,6 +51,7 @@ let ingressComposeProject;
 let ingressComposeFile;
 let ingressComposeEnvironment;
 let ingressComposeStarted = false;
+let storeGeocoderMockServer;
 let exitCode = 1;
 let preserve = !liveSmoke;
 let shutdownRequested = false;
@@ -87,6 +89,44 @@ async function availablePort(excluded = new Set()) {
     if (!excluded.has(port) && port !== 3000 && port !== 4200) return port;
   }
   throw new Error('Could not reserve a non-default ephemeral loopback port for Playwright.');
+}
+
+async function startStoreGeocoderMock() {
+  const server = createHttpServer((request, response) => {
+    const url = new URL(request.url ?? '/', 'http://127.0.0.1');
+    if (request.method !== 'GET' || url.pathname !== '/search' || !url.searchParams.has('q')) {
+      response.writeHead(404).end();
+      return;
+    }
+
+    response.writeHead(200, {
+      'content-type': 'application/json',
+      'cache-control': 'no-store'
+    });
+    response.end(JSON.stringify([{ lat: '36.834', lon: '-2.463' }]));
+  });
+  const port = await new Promise((resolvePort, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        reject(new Error('Could not resolve the isolated geocoder mock port.'));
+        return;
+      }
+      resolvePort(address.port);
+    });
+  });
+  storeGeocoderMockServer = server;
+  return port;
+}
+
+async function stopStoreGeocoderMock() {
+  if (!storeGeocoderMockServer?.listening) return;
+  const server = storeGeocoderMockServer;
+  await new Promise((resolveClose, reject) =>
+    server.close((error) => (error ? reject(error) : resolveClose()))
+  );
+  storeGeocoderMockServer = undefined;
 }
 
 function waitForExit(child) {
@@ -457,6 +497,21 @@ async function main() {
     E2E_NGINX_INGRESS: nginxIngress ? '1' : '0',
     ...(nginxIngress ? { JWT_SECRET: randomBytes(32).toString('base64url') } : {})
   };
+  const geocoderMockEnabled =
+    process.env.E2E_STORE_GEOCODER_MOCK === '1' ||
+    (process.env.E2E_STORE_GEOCODER_MOCK !== '0' &&
+      !liveSmoke &&
+      !fullStack &&
+      !nginxIngress);
+  if (geocoderMockEnabled) {
+    if (fullStack || nginxIngress) {
+      throw new Error('The isolated store geocoder mock requires the dev E2E stack.');
+    }
+    const geocoderPort = await startStoreGeocoderMock();
+    ownedPorts.push(geocoderPort);
+    env.STORE_GEOCODER_URL = `http://127.0.0.1:${geocoderPort}/search`;
+    env.STORE_GEOCODER_USER_AGENT = 'HogarIA/E2E (synthetic location fixture)';
+  }
   if (liveSmoke && process.env.HOGARIA_AI_REAL_SMOKE_WORKFLOWS_ONLY === '1') {
     // The opt-in image workflow must use Wikimedia Commons, not the repeatable fixture.
     delete env.PANTRY_IMAGE_SEARCH_FIXTURE;
@@ -506,6 +561,7 @@ async function main() {
   if (!(await stopStack())) {
     throw new Error('The isolated app process did not stop; preserving its temporary data.');
   }
+  await stopStoreGeocoderMock();
   const portsClosed = await waitForOwnedPortsToClose(ownedPorts);
   if (!portsClosed) {
     throw new Error(
@@ -553,6 +609,12 @@ try {
     }
   }
   if (!(await stopStack())) {
+    preserve = true;
+    exitCode = 1;
+  }
+  try {
+    await stopStoreGeocoderMock();
+  } catch {
     preserve = true;
     exitCode = 1;
   }

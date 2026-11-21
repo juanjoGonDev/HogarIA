@@ -288,6 +288,28 @@ export class CalendarService {
     );
   }
 
+  /** Completa una comida del calendario con una receta canónica, solo bajo demanda. */
+  generateRecipeForMeal(mealId: string): Observable<string | null> {
+    return this.http
+      .post<{
+        success?: boolean;
+        data?: { recipeId?: string };
+      }>(`${environment.apiUrl}/ai/calendar-meals/${encodeURIComponent(mealId)}/recipe`, null, {
+        context: new HttpContext().set(SILENT_TOAST, true)
+      })
+      .pipe(
+        map((response) =>
+          response?.success === true && typeof response.data?.recipeId === 'string'
+            ? response.data.recipeId
+            : null
+        ),
+        tap((recipeId) => {
+          if (recipeId) this.refresh();
+        }),
+        catchError(() => of(null))
+      );
+  }
+
   /** Confirma una sustitución múltiple en una única transacción del servidor. */
   replaceSelectedMeals(
     replacements: Array<{ id: string; customMeal: string }>

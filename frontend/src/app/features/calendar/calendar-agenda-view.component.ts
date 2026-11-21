@@ -40,7 +40,13 @@ import { labels } from './calendar.util';
             }
             <app-calendar-household-tasks [tasks]="day.tasks" />
             @for (meal of day.meals; track meal.id) {
-              <app-calendar-event mode="row" [meal]="meal" (open)="openMeal.emit(meal)" />
+              <app-calendar-event
+                mode="row"
+                [meal]="meal"
+                [showEditAction]="!meal.isShared"
+                (open)="openMeal.emit(meal)"
+                (edit)="editMeal.emit(meal)"
+              />
             }
             @if (!day.events.length && !day.meals.length && !day.tasks.length) {
               <button type="button" class="agenda-list__add" (click)="addEvent.emit(day.iso)">
@@ -149,6 +155,7 @@ export class CalendarAgendaViewComponent {
   @Input({ required: true }) days: CalendarDayView[] = [];
   @Output() openDay = new EventEmitter<string>();
   @Output() openMeal = new EventEmitter<CalendarMeal>();
+  @Output() editMeal = new EventEmitter<CalendarMeal>();
   @Output() editEvent = new EventEmitter<HouseholdEvent>();
   @Output() addEvent = new EventEmitter<string>();
 

@@ -477,12 +477,6 @@ function completeMemberPermissions(value: unknown, role: MemberRole): MemberPerm
             <p class="permissions-section__hint">{{ 'household.settings_admin_only' | t }}</p>
           </section>
 
-          <app-ai-config
-            *ngIf="activeTab() === 'settings' && hasSettingsPermission(household)"
-            [embedded]="true"
-            data-test="household-ai-config"
-          />
-
           <!-- Actions -->
           <div class="household__actions">
             <app-button variant="danger" (onClick)="leaveHousehold()">
@@ -490,6 +484,30 @@ function completeMemberPermissions(value: unknown, role: MemberRole): MemberPerm
               {{ 'household.salir_del_hogar' | t }}
             </app-button>
           </div>
+        </section>
+
+        <section
+          [hidden]="activeTab() !== 'ai'"
+          id="household-panel-ai"
+          class="household-tab-panel"
+          role="tabpanel"
+          aria-labelledby="household-tab-ai"
+          tabindex="0"
+          data-test="household-panel-ai"
+        >
+          <app-ai-config
+            *ngIf="activeTab() === 'ai' && hasSettingsPermission(household)"
+            [embedded]="true"
+            data-test="household-ai-config"
+          />
+          <section
+            class="settings-section"
+            *ngIf="!hasSettingsPermission(household)"
+            data-test="household-ai-settings-readonly"
+          >
+            <h2 class="settings-section__title">{{ 'household.tab_ai_settings' | t }}</h2>
+            <p class="permissions-section__hint">{{ 'household.ai_settings_admin_only' | t }}</p>
+          </section>
         </section>
 
         <section
@@ -1331,7 +1349,8 @@ export class HouseholdComponent implements OnInit, OnDestroy {
     { value: 'tasks', label: 'calendar.planificacion' },
     { value: 'members', label: 'household.tab_members' },
     { value: 'permissions', label: 'household.tab_permissions' },
-    { value: 'settings', label: 'household.tab_settings' }
+    { value: 'settings', label: 'household.tab_settings' },
+    { value: 'ai', label: 'household.tab_ai_settings' }
   ];
   readonly planningTabOptions: Array<{ value: HouseholdPlanningTab; label: TranslationKey }> = [
     { value: 'meals', label: 'household.planning_tab_meals' },

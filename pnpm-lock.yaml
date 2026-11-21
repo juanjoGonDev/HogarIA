@@ -125,7 +125,7 @@ importers:
     dependencies:
       '@hono/node-server':
         specifier: 2.1.5
-        version: 2.1.5(hono@4.13.14)
+        version: 2.1.5(hono@4.13.16)
       bcryptjs:
         specifier: 2.4.3
         version: 2.4.3
@@ -136,11 +136,11 @@ importers:
         specifier: 0.45.4
         version: 0.45.4(@types/better-sqlite3@7.6.12)(better-sqlite3@13.0.3)
       hono:
-        specifier: 4.13.14
-        version: 4.13.14
+        specifier: 4.13.16
+        version: 4.13.16
       hono-rate-limiter:
         specifier: 0.5.4
-        version: 0.5.4(hono@4.13.14)
+        version: 0.5.4(hono@4.13.16)
       jsonwebtoken:
         specifier: 9.0.3
         version: 9.0.3
@@ -4003,8 +4003,8 @@ packages:
       unstorage:
         optional: true
 
-  hono@4.13.14:
-    resolution: {integrity: sha512-yhRLQ21U6qa9Hsu2N7Qcbh8tE+WKEcoErjIo56LeSGiGXGp9sA7UpE86Ui9uexb61KakiGwuHMn2QdV7w6i6kQ==}
+  hono@4.13.16:
+    resolution: {integrity: sha512-AOLOEhvrV+iH92xXCnFr/5+3KjPKcI3xP63XJtX5spAnkznPdHijlIsUTpi7/9EhWqrTCekw5c5zh1K+YsVw7A==}
     engines: {node: '>=16.9.0'}
 
   hosted-git-info@8.1.0:
@@ -7550,9 +7550,9 @@ snapshots:
       '@eslint/core': 0.13.0
       levn: 0.4.1
 
-  '@hono/node-server@2.1.5(hono@4.13.14)':
+  '@hono/node-server@2.1.5(hono@4.13.16)':
     dependencies:
-      hono: 4.13.14
+      hono: 4.13.16
 
   '@humanfs/core@0.19.2':
     dependencies:
@@ -9951,11 +9951,11 @@ snapshots:
 
   help-me@5.0.0: {}
 
-  hono-rate-limiter@0.5.4(hono@4.13.14):
+  hono-rate-limiter@0.5.4(hono@4.13.16):
     dependencies:
-      hono: 4.13.14
+      hono: 4.13.16
 
-  hono@4.13.14: {}
+  hono@4.13.16: {}
 
   hosted-git-info@8.1.0:
     dependencies:

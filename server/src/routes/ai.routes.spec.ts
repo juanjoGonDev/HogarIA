@@ -2089,6 +2089,372 @@ describe('POST /replace-meal', () => {
   });
 });
 
+describe('POST /calendar-meals/:mealId/recipe', () => {
+  it('genera una receta canónica en background y la enlaza a la misma comida personal', async () => {
+    createMealForReplacement(alice.id, 'calendar-recipe-meal');
+    db.prepare('UPDATE meals SET notes = ? WHERE id = ?').run(
+      'Ingredientes: tomate, arroz',
+      'calendar-recipe-meal'
+    );
+    await crearConfig(alice, 'Proveedor de planificación', 'http://127.0.0.1:9/v1', 0);
+    const requests = stubRecipeProvider(() =>
+      responsesFixture(JSON.stringify(recetaGenerada), 'resp_calendar_recipe')
+    );
+
+    const response = await call(alice, 'POST', '/calendar-meals/calendar-recipe-meal/recipe');
+    const result = await json(response);
+
+    expect(response.status).toBe(200);
+    expect(result).toMatchObject({
+      success: true,
+      data: {
+        mealId: 'calendar-recipe-meal',
+        recipeId: expect.any(String),
+        reused: false
+      }
+    });
+    expect(requests).toHaveLength(1);
+    const providerBody = providerBodyView(requests[0].body);
+    expect(providerBody.background).toBe(true);
+    expect(providerBody.text.format).toMatchObject({ name: 'generated_recipe', strict: true });
+    expect(inputText(providerBody, 1)).toContain('Pasta con salsa');
+    expect(inputText(providerBody, 1)).toContain('Ingredientes: tomate, arroz');
+
+    const savedMeal = db
+      .prepare('SELECT recipe_id, custom_meal, notes FROM meals WHERE id = ?')
+      .get('calendar-recipe-meal') as {
+      recipe_id: string | null;
+      custom_meal: string;
+      notes: string | null;
+    };
+    expect(savedMeal).toMatchObject({
+      recipe_id: result.data.recipeId,
+      custom_meal: 'Pasta con salsa',
+      notes: 'Ingredientes: tomate, arroz'
+    });
+    const savedRecipe = db
+      .prepare('SELECT author, author_id, is_public, steps FROM recipes WHERE id = ?')
+      .get(savedMeal.recipe_id) as {
+      author: string;
+      author_id: string;
+      is_public: number;
+      steps: string;
+    };
+    expect(savedRecipe).toMatchObject({
+      author: 'ai',
+      author_id: alice.id,
+      is_public: 0,
+      steps: JSON.stringify(recetaGenerada.instructionsByLevel)
+    });
+    expect(db.prepare("SELECT kind, status FROM ai_jobs WHERE kind = 'weekly_plan'").get()).toEqual(
+      { kind: 'weekly_plan', status: 'done' }
+    );
+
+    const repeated = await call(alice, 'POST', '/calendar-meals/calendar-recipe-meal/recipe');
+    expect(repeated.status).toBe(200);
+    expect(await json(repeated)).toMatchObject({
+      success: true,
+      data: { mealId: 'calendar-recipe-meal', recipeId: result.data.recipeId, reused: true }
+    });
+    expect(requests).toHaveLength(1);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM recipes').get()).toEqual({ count: 1 });
+  });
+
+  it('reutiliza una sola receta si dos solicitudes cocinan la misma comida a la vez', async () => {
+    createMealForReplacement(alice.id, 'calendar-recipe-concurrent');
+    await crearConfig(alice, 'Proveedor de planificación', 'http://127.0.0.1:9/v1', 0);
+    const requests = stubRecipeProvider(() =>
+      responsesFixture(JSON.stringify(recetaGenerada), 'resp_calendar_recipe_concurrent')
+    );
+
+    const responses = await Promise.all([
+      call(alice, 'POST', '/calendar-meals/calendar-recipe-concurrent/recipe'),
+      call(alice, 'POST', '/calendar-meals/calendar-recipe-concurrent/recipe')
+    ]);
+    const results = await Promise.all(responses.map(json));
+
+    expect(responses.map((response) => response.status)).toEqual([200, 200]);
+    expect(results.every((result) => result.success)).toBe(true);
+    expect(new Set(results.map((result) => result.data.recipeId)).size).toBe(1);
+    expect(results.map((result) => result.data.reused).sort()).toEqual([false, true]);
+    expect(requests).toHaveLength(2);
+    expect(recipeCount()).toBe(1);
+    expect(
+      db
+        .prepare(
+          'SELECT COUNT(*) AS count FROM recipes WHERE id NOT IN (SELECT recipe_id FROM meals WHERE recipe_id IS NOT NULL)'
+        )
+        .get()
+    ).toEqual({ count: 0 });
+  });
+
+  it('rechaza una respuesta canónica incompleta sin modificar ni enlazar la comida', async () => {
+    createMealForReplacement(alice.id, 'calendar-recipe-incomplete');
+    await crearConfig(alice, 'Proveedor de planificación', 'http://127.0.0.1:9/v1', 0);
+    const incomplete = {
+      ...recetaGenerada,
+      instructionsByLevel: { ...recetaGenerada.instructionsByLevel }
+    };
+    delete (incomplete.instructionsByLevel as Partial<typeof recetaGenerada.instructionsByLevel>)
+      .expert;
+    const requests = stubRecipeProvider(() => responsesFixture(JSON.stringify(incomplete)));
+
+    const response = await call(alice, 'POST', '/calendar-meals/calendar-recipe-incomplete/recipe');
+
+    expect(response.status).toBe(502);
+    expect((await json(response)).code).toBe('INVALID_AI_RESULT');
+    expect(requests).toHaveLength(1);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM recipes').get()).toEqual({ count: 0 });
+    expect(
+      db
+        .prepare('SELECT recipe_id, custom_meal FROM meals WHERE id = ?')
+        .get('calendar-recipe-incomplete')
+    ).toEqual({ recipe_id: null, custom_meal: 'Pasta con salsa' });
+  });
+
+  it('rechaza JSON malformado sin escrituras parciales', async () => {
+    createMealForReplacement(alice.id, 'calendar-recipe-malformed');
+    await crearConfig(alice, 'Proveedor de planificación', 'http://127.0.0.1:9/v1', 0);
+    const requests = stubRecipeProvider(() => responsesFixture('no es JSON'));
+
+    const response = await call(alice, 'POST', '/calendar-meals/calendar-recipe-malformed/recipe');
+
+    expect(response.status).toBe(502);
+    expect((await json(response)).code).toBe('INVALID_AI_RESULT');
+    expect(requests).toHaveLength(1);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM recipes').get()).toEqual({ count: 0 });
+    expect(
+      db.prepare('SELECT recipe_id FROM meals WHERE id = ?').get('calendar-recipe-malformed')
+    ).toEqual({ recipe_id: null });
+  });
+
+  it('revalida las alergias en ingredientes y sustitutos antes de persistir', async () => {
+    createMealForReplacement(alice.id, 'calendar-recipe-allergy');
+    db.prepare('UPDATE users SET preferences = ? WHERE id = ?').run(
+      JSON.stringify({ taste: { allergies: ['huevo'] } }),
+      alice.id
+    );
+    await crearConfig(alice, 'Proveedor de planificación', 'http://127.0.0.1:9/v1', 0);
+    const conflicting = {
+      ...recetaGenerada,
+      ingredients: recetaGenerada.ingredients.map((ingredient, index) =>
+        index === 0 ? { ...ingredient, substitutes: ['huevo'] } : ingredient
+      )
+    };
+    const requests = stubRecipeProvider(() => responsesFixture(JSON.stringify(conflicting)));
+
+    const response = await call(alice, 'POST', '/calendar-meals/calendar-recipe-allergy/recipe');
+
+    expect(response.status).toBe(422);
+    expect((await json(response)).code).toBe('PARTICIPANT_RESTRICTION_CONFLICT');
+    expect(requests).toHaveLength(1);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM recipes').get()).toEqual({ count: 0 });
+    expect(
+      db.prepare('SELECT recipe_id FROM meals WHERE id = ?').get('calendar-recipe-allergy')
+    ).toEqual({ recipe_id: null });
+  });
+
+  it('no revela comidas ajenas ni inicia una petición de IA', async () => {
+    const bob = await makeUser('calendar-recipe-private@test.local');
+    createMealForReplacement(bob.id, 'calendar-recipe-private');
+    await crearConfig(alice, 'Proveedor de planificación', 'http://127.0.0.1:9/v1', 0);
+    const requests = stubRecipeProvider();
+
+    const response = await call(alice, 'POST', '/calendar-meals/calendar-recipe-private/recipe');
+
+    expect(response.status).toBe(404);
+    expect((await json(response)).code).toBe('MEAL_NOT_FOUND');
+    expect(requests).toHaveLength(0);
+  });
+
+  it('mantiene el flujo de comidas compartidas fuera de la generación personal', async () => {
+    createMealForReplacement(alice.id, 'calendar-recipe-shared');
+    db.prepare('UPDATE meals SET source_proposal_id = ?, proposal_id = ? WHERE id = ?').run(
+      'proposal:event',
+      'proposal',
+      'calendar-recipe-shared'
+    );
+    db.prepare('INSERT INTO meal_participants (meal_id, user_id) VALUES (?, ?)').run(
+      'calendar-recipe-shared',
+      alice.id
+    );
+    await crearConfig(alice, 'Proveedor de planificación', 'http://127.0.0.1:9/v1', 0);
+    const requests = stubRecipeProvider();
+
+    const response = await call(alice, 'POST', '/calendar-meals/calendar-recipe-shared/recipe');
+
+    expect(response.status).toBe(404);
+    expect((await json(response)).code).toBe('MEAL_NOT_FOUND');
+    expect(requests).toHaveLength(0);
+  });
+
+  it('no envía ni genera una comida vacía', async () => {
+    createMealForReplacement(alice.id, 'calendar-recipe-empty');
+    db.prepare('UPDATE meals SET custom_meal = NULL, notes = NULL WHERE id = ?').run(
+      'calendar-recipe-empty'
+    );
+    const requests = stubRecipeProvider();
+
+    const response = await call(alice, 'POST', '/calendar-meals/calendar-recipe-empty/recipe');
+
+    expect(response.status).toBe(409);
+    expect((await json(response)).code).toBe('MEAL_CONTENT_REQUIRED');
+    expect(requests).toHaveLength(0);
+  });
+
+  it('rechaza restricciones no verificables antes de llamar al proveedor', async () => {
+    createMealForReplacement(alice.id, 'calendar-recipe-unsupported');
+    db.prepare('UPDATE users SET preferences = ? WHERE id = ?').run(
+      JSON.stringify({ taste: { allergies: ['fructosa'] } }),
+      alice.id
+    );
+    const requests = stubRecipeProvider();
+
+    const response = await call(
+      alice,
+      'POST',
+      '/calendar-meals/calendar-recipe-unsupported/recipe'
+    );
+
+    expect(response.status).toBe(422);
+    expect((await json(response)).code).toBe('UNSUPPORTED_STRICT_RESTRICTION');
+    expect(requests).toHaveLength(0);
+  });
+
+  it('si la comida cambia mientras responde IA, no guarda receta ni enlaza el resultado obsoleto', async () => {
+    createMealForReplacement(alice.id, 'calendar-recipe-stale');
+    await crearConfig(alice, 'Proveedor de planificación', 'http://127.0.0.1:9/v1', 0);
+    const requests = stubRecipeProvider(() => {
+      db.prepare('UPDATE meals SET custom_meal = ? WHERE id = ?').run(
+        'Plato editado mientras carga',
+        'calendar-recipe-stale'
+      );
+      return responsesFixture(JSON.stringify(recetaGenerada));
+    });
+
+    const response = await call(alice, 'POST', '/calendar-meals/calendar-recipe-stale/recipe');
+
+    expect(response.status).toBe(409);
+    expect((await json(response)).code).toBe('MEAL_CHANGED');
+    expect(requests).toHaveLength(1);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM recipes').get()).toEqual({ count: 0 });
+    expect(
+      db
+        .prepare('SELECT recipe_id, custom_meal FROM meals WHERE id = ?')
+        .get('calendar-recipe-stale')
+    ).toEqual({ recipe_id: null, custom_meal: 'Plato editado mientras carga' });
+  });
+
+  it('fija proveedor y preferencias al hogar inicial, y no persiste si se cambia de hogar durante IA', async () => {
+    selectHousehold(alice, 'calendar-recipe-home-a', { settings: true });
+    const homeAMember = await makeUser('calendar-recipe-home-a-member@test.local');
+    addMembership(homeAMember, 'calendar-recipe-home-a', { settings: false });
+    db.prepare('UPDATE users SET preferences = ? WHERE id = ?').run(
+      JSON.stringify({ taste: { allergies: ['marisco'] } }),
+      homeAMember.id
+    );
+    const providerA = await crearConfig(
+      alice,
+      'Proveedor hogar A',
+      'http://127.0.0.1:9/home-a/v1',
+      0
+    );
+
+    db.prepare('INSERT INTO households (id, name, invite_code) VALUES (?, ?, ?)').run(
+      'calendar-recipe-home-b',
+      'Hogar B',
+      'invite-calendar-recipe-home-b'
+    );
+    addMembership(alice, 'calendar-recipe-home-b', { settings: true });
+    db.prepare('UPDATE users SET household_id = ? WHERE id = ?').run(
+      'calendar-recipe-home-b',
+      alice.id
+    );
+    const providerB = await crearConfig(
+      alice,
+      'Proveedor hogar B',
+      'http://127.0.0.1:9/home-b/v1',
+      0
+    );
+    expect(
+      (await data(await call(alice, 'GET', '/function-providers'))).find(
+        (assignment: any) => assignment.functionKey === 'planning'
+      )
+    ).toMatchObject({ configId: providerB.id });
+    const { resolveAiParticipantContext } = await import('../utils/ai-participants.js');
+    expect(
+      resolveAiParticipantContext(db, alice.id, undefined, [], {
+        householdId: 'calendar-recipe-home-a'
+      }).prompt
+    ).toContain('marisco');
+    db.prepare('UPDATE users SET household_id = ? WHERE id = ?').run(
+      'calendar-recipe-home-a',
+      alice.id
+    );
+    createMealForReplacement(alice.id, 'calendar-recipe-home-a-meal', 'calendar-recipe-home-a');
+
+    const requests = stubRecipeProvider(() => {
+      db.prepare('UPDATE users SET household_id = ? WHERE id = ?').run(
+        'calendar-recipe-home-b',
+        alice.id
+      );
+      return responsesFixture(JSON.stringify(recetaGenerada));
+    });
+
+    const response = await call(
+      alice,
+      'POST',
+      '/calendar-meals/calendar-recipe-home-a-meal/recipe'
+    );
+
+    expect(response.status).toBe(409);
+    expect((await json(response)).code).toBe('HOUSEHOLD_CHANGED');
+    expect(requests).toHaveLength(1);
+    expect(requests[0].url).toContain('/home-a/v1/responses');
+    expect(requests[0].url).not.toContain('/home-b/');
+    expect(inputText(providerBodyView(requests[0].body), 1)).toContain('marisco');
+    expect(inputText(providerBodyView(requests[0].body), 1)).not.toContain('fructosa');
+    expect(
+      db
+        .prepare('SELECT household_id, config_id, status FROM ai_jobs WHERE kind = ?')
+        .get('weekly_plan')
+    ).toMatchObject({
+      household_id: 'calendar-recipe-home-a',
+      config_id: providerA.id,
+      status: 'done'
+    });
+    expect(providerB.id).not.toBe(providerA.id);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM recipes').get()).toEqual({ count: 0 });
+    expect(
+      db.prepare('SELECT recipe_id FROM meals WHERE id = ?').get('calendar-recipe-home-a-meal')
+    ).toEqual({ recipe_id: null });
+  });
+
+  it('revierte la receta si falla el enlace de la comida dentro de la transacción', async () => {
+    createMealForReplacement(alice.id, 'calendar-recipe-rollback');
+    await crearConfig(alice, 'Proveedor de planificación', 'http://127.0.0.1:9/v1', 0);
+    db.exec(`
+      CREATE TRIGGER fail_calendar_recipe_link
+      BEFORE UPDATE OF recipe_id ON meals
+      WHEN NEW.id = 'calendar-recipe-rollback'
+      BEGIN SELECT RAISE(ABORT, 'link failure'); END;
+    `);
+    stubRecipeProvider(() => responsesFixture(JSON.stringify(recetaGenerada)));
+
+    try {
+      const response = await call(alice, 'POST', '/calendar-meals/calendar-recipe-rollback/recipe');
+
+      expect(response.status).toBe(500);
+      expect(db.prepare('SELECT COUNT(*) AS count FROM recipes').get()).toEqual({ count: 0 });
+      expect(
+        db.prepare('SELECT recipe_id FROM meals WHERE id = ?').get('calendar-recipe-rollback')
+      ).toEqual({ recipe_id: null });
+    } finally {
+      db.exec('DROP TRIGGER IF EXISTS fail_calendar_recipe_link');
+    }
+  });
+});
+
 describe('POST /recommendations y /plan-week', () => {
   it('mantiene fijo el proveedor de un trabajo admitido si después cambia la asignación', async () => {
     const original = await crearConfig(

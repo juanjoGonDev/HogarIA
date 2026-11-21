@@ -55,7 +55,7 @@ describe('AiProviderRequiredDialogComponent', () => {
     fixture = TestBed.createComponent(AiProviderRequiredDialogComponent);
   });
 
-  it('links permitted household members to Hogar settings without showing a false permission warning', async () => {
+  it('links permitted household members to AI settings without showing a false permission warning', async () => {
     fixture.detectChanges();
     await fixture.whenStable();
     fixture.detectChanges();
@@ -63,7 +63,8 @@ describe('AiProviderRequiredDialogComponent', () => {
     const link = fixture.nativeElement.querySelector(
       '.provider-required__link'
     ) as HTMLAnchorElement;
-    expect(link.href).toContain('/household?tab=settings');
+    expect(link.href).toContain('/household?tab=ai');
+    expect(link.textContent).toContain('ai_config.open_settings');
     expect(fixture.nativeElement.querySelector('.provider-required__permission')).toBeNull();
     expect(fixture.componentInstance.functionLabel()).toBe('ai_config.function_recipes');
   });
@@ -77,7 +78,7 @@ describe('AiProviderRequiredDialogComponent', () => {
     expect(fixture.nativeElement.querySelector('.provider-required__permission')).not.toBeNull();
     expect(
       (fixture.nativeElement.querySelector('.provider-required__link') as HTMLAnchorElement).href
-    ).toContain('/household?tab=settings');
+    ).toContain('/household?tab=ai');
   });
 
   it('does not imply missing permissions before a household is selected', async () => {
@@ -90,7 +91,7 @@ describe('AiProviderRequiredDialogComponent', () => {
     expect(fixture.nativeElement.querySelector('.provider-required__permission')).toBeNull();
     expect(
       (fixture.nativeElement.querySelector('.provider-required__link') as HTMLAnchorElement).href
-    ).toContain('/household?tab=settings');
+    ).toContain('/household?tab=ai');
   });
 
   it('still opens if an optional translation bundle fails to load', async () => {

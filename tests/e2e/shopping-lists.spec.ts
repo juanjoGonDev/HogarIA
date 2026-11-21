@@ -3,7 +3,11 @@ import { resolve } from 'node:path';
 import { Locator, Page, expect } from '@playwright/test';
 import { test } from './fixtures';
 import { registerAndGoto } from './helpers/auth';
-import { navigateToShopping, shoppingNewListAction } from './helpers/shopping-ui';
+import {
+  navigateToShopping,
+  shoppingNewListAction,
+  skipOptionalShoppingLocationPrompt
+} from './helpers/shopping-ui';
 
 /**
  * La lista de la compra, usada como se usa en la vida real: con un pulgar.
@@ -177,6 +181,7 @@ test.describe('Lista de la compra — bandeja y cesta', () => {
     await expect(row).toHaveCount(1);
 
     await row.locator('[data-test="check"]').click();
+    await skipOptionalShoppingLocationPrompt(page);
     const face = await row
       .locator('.detail__face')
       .innerText()
@@ -420,6 +425,7 @@ test.describe('Lista de la compra — bandeja y cesta', () => {
     await page.locator('[data-test="price-input"]').blur();
     await page.locator('[data-test="edit-sheet"]').getByRole('button', { name: /Hecho/i }).click();
     await row.locator('[data-test="check"]').click();
+    await skipOptionalShoppingLocationPrompt(page);
 
     await page.locator('[data-test="complete"]').click();
     await expect(page).toHaveURL(/\/shopping\?tab=hechas/);
@@ -439,6 +445,7 @@ test.describe('Lista de la compra — bandeja y cesta', () => {
     const first = row_(page, 'Azucar');
 
     await first.locator('[data-test="check"]').click();
+    await skipOptionalShoppingLocationPrompt(page);
     await page.getByRole('button', { name: /Vaciar(?: el)? carro/i }).click();
     // Y vaciar confirma antes de barrer: el carro comprado se va con un si explicito (## 12ae).
     const vaciar = page.locator('.modal-overlay');

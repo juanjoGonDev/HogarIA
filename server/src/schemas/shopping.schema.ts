@@ -495,6 +495,33 @@ export const applyLinesSchema = z.object({
     .max(200)
 });
 
+const storeCoordinate = z.number().finite();
+
+/** Coordenadas de una búsqueda consentida; nunca se persisten como ubicación del producto. */
+export const locationCandidatesSchema = z.object({
+  latitude: storeCoordinate.min(-90).max(90),
+  longitude: storeCoordinate.min(-180).max(180),
+  radiusMeters: formField(z.coerce.number().int().min(50).max(1000))
+});
+
+const locationAddress = formField(z.string().trim().max(240));
+
+/** Solo persiste una tienda elegida; no acepta ids arbitrarios ni coordenadas crudas en manual. */
+export const itemLocationsSchema = z.object({
+  itemIds: z.array(z.string().trim().min(1).max(80)).min(1).max(50),
+  store: z.discriminatedUnion('source', [
+    z.object({ source: z.literal('registered'), id: trimmed(80) }),
+    z.object({
+      source: z.literal('openstreetmap'),
+      name: trimmed(120),
+      address: locationAddress,
+      latitude: storeCoordinate.min(-90).max(90),
+      longitude: storeCoordinate.min(-180).max(180)
+    }),
+    z.object({ source: z.literal('manual'), name: trimmed(120), address: locationAddress })
+  ])
+});
+
 export type PhotoAnalyzeInput = z.infer<typeof photoAnalyzeSchema>;
 export type PhotoLines = z.infer<typeof photoLinesSchema>;
 export type ApplyLinesInput = z.infer<typeof applyLinesSchema>;

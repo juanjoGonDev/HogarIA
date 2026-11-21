@@ -600,6 +600,33 @@ describe('CalendarService visible range concurrency', () => {
     expect(service.calendar()?.id).toBe('created-calendar');
   });
 
+  it('requests one canonical recipe for a calendar meal and returns its linked recipe id', () => {
+    let recipeId: string | null | undefined;
+
+    service.generateRecipeForMeal('meal-to-cook').subscribe((result) => (recipeId = result));
+
+    const request = http.expectOne('/api/ai/calendar-meals/meal-to-cook/recipe');
+    expect(request.request.method).toBe('POST');
+    expect(request.request.body).toBeNull();
+    request.flush({ success: true, data: { recipeId: 'generated-recipe-1' } });
+
+    expect(recipeId).toBe('generated-recipe-1');
+    http.expectNone(rangeRequest(RANGE_A));
+  });
+
+  it('returns null when on-demand recipe generation fails', () => {
+    let recipeId: string | null | undefined;
+
+    service.generateRecipeForMeal('meal-invalid').subscribe((result) => (recipeId = result));
+
+    http
+      .expectOne('/api/ai/calendar-meals/meal-invalid/recipe')
+      .flush({}, { status: 502, statusText: 'Bad Gateway' });
+
+    expect(recipeId).toBeNull();
+    http.expectNone(rangeRequest(RANGE_A));
+  });
+
   it('filters and orders visible household events and toggles kind filters', () => {
     const allDay = householdEvent('event-all-day', RANGE_A.start, 'Todo el día');
     const late = {

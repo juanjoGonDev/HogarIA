@@ -4,7 +4,7 @@ import { map } from 'rxjs';
 import { HouseholdService } from '../services/household.service';
 
 /** Keeps direct navigation to the AI provider screen aligned with the server's settings ACL. */
-export const aiHouseholdSettingsGuard: CanActivateFn = () => {
+export const aiHouseholdSettingsGuard: CanActivateFn = (route) => {
   const household = inject(HouseholdService);
   const router = inject(Router);
 
@@ -18,7 +18,9 @@ export const aiHouseholdSettingsGuard: CanActivateFn = () => {
       const active = memberships.find((membership) => membership.id === activeId);
       return active?.permissions?.settings === true
         ? true
-        : router.parseUrl('/household?tab=settings');
+        : router.createUrlTree(['/household'], {
+            queryParams: { ...route.queryParams, tab: 'ai' }
+          });
     })
   );
 };

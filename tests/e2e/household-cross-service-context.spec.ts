@@ -249,8 +249,12 @@ test('isolates pantry, receipts, calendar and shopping across active homes in on
         {
           name: 'calendar',
           route: '/calendar',
-          included: page.getByRole('button', { name: included.mealName, exact: true }),
-          excluded: page.getByRole('button', { name: excluded.mealName, exact: true })
+          included: page
+            .locator('[data-test="timeline-block-meal"]')
+            .filter({ hasText: included.mealName }),
+          excluded: page
+            .locator('[data-test="timeline-block-meal"]')
+            .filter({ hasText: excluded.mealName })
         },
         {
           name: 'shopping',

@@ -20,6 +20,11 @@ export interface AiParticipantContext {
   prompt: string;
 }
 
+export interface AiParticipantContextOptions {
+  /** Pin participant profiles to the request's captured household; null means personal scope. */
+  householdId: string | null;
+}
+
 function uniqueSafe(values: readonly string[]): string[] {
   return [...new Set(values.map((value) => safeGuestNote(value).trim()).filter(Boolean))];
 }
@@ -51,19 +56,25 @@ export function resolveAiParticipantContext(
   db: Database,
   userId: string,
   requestedMemberIds: readonly string[] | undefined,
-  guests: readonly GuestPreferences[]
+  guests: readonly GuestPreferences[],
+  options?: AiParticipantContextOptions
 ): AiParticipantContext {
-  const householdId = activeHouseholdId(db, userId);
+  const householdId = options ? options.householdId : activeHouseholdId(db, userId);
   let selectedMemberIds: string[] = [];
   let profiles: TasteFields[] = [];
 
   if (!householdId) {
     if ((requestedMemberIds?.length ?? 0) > 0) {
-      return { valid: false, selectedMemberIds: [], servings: 2, strictRestrictions: [], prompt: '' };
+      return {
+        valid: false,
+        selectedMemberIds: [],
+        servings: 2,
+        strictRestrictions: [],
+        prompt: ''
+      };
     }
     const current = db.prepare('SELECT preferences FROM users WHERE id = ?').get(userId) as
-      | { preferences: string | null }
-      | undefined;
+      { preferences: string | null } | undefined;
     profiles = current ? [parseTaste(current.preferences)] : [];
   } else {
     const rows = db
@@ -78,7 +89,13 @@ export function resolveAiParticipantContext(
     const requested = requestedMemberIds ?? rows.map((row) => row.member_id);
     const byId = new Map(rows.map((row) => [row.member_id, row]));
     if (requested.some((memberId) => !byId.has(memberId))) {
-      return { valid: false, selectedMemberIds: [], servings: 2, strictRestrictions: [], prompt: '' };
+      return {
+        valid: false,
+        selectedMemberIds: [],
+        servings: 2,
+        strictRestrictions: [],
+        prompt: ''
+      };
     }
     selectedMemberIds = [...requested];
     profiles = selectedMemberIds
@@ -119,7 +136,10 @@ export function resolveAiParticipantContext(
     listLine('Gustos', [...selectedLikes, ...guests.flatMap((guest) => guest.likes)]),
     listLine('Aversiones', [...selectedDislikes, ...guests.flatMap((guest) => guest.dislikes)]),
     guests.flatMap((guest) => guest.diets).length
-      ? listLine('Dietas de invitados', guests.flatMap((guest) => guest.diets))
+      ? listLine(
+          'Dietas de invitados',
+          guests.flatMap((guest) => guest.diets)
+        )
       : '',
     guestLines.length ? `Perfiles de invitados efímeros:\n${guestLines.join('\n')}` : '',
     'Las alergias e intolerancias son restricciones absolutas: no uses ingredientes afectados, derivados, sustitutos ni opcionales. No afirmes evitar trazas o contaminación cruzada.'

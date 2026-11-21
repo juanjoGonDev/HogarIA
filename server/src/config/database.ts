@@ -612,8 +612,10 @@ async function runMigrations(db: Database.Database): Promise<void> {
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
       household_id TEXT,
+      receipt_id TEXT,
       product_key TEXT NOT NULL,
       product_name TEXT NOT NULL,
+      store_id TEXT,
       store_name TEXT,
       price_minor INTEGER NOT NULL CHECK (price_minor >= 0),
       quantity REAL NOT NULL DEFAULT 1 CHECK (quantity > 0),
@@ -764,6 +766,13 @@ async function runMigrations(db: Database.Database): Promise<void> {
       household_id TEXT,
       status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'analyzing', 'review', 'confirmed', 'failed', 'stopped')),
       store TEXT,
+      store_id TEXT,
+      store_address TEXT,
+      store_address_manual INTEGER NOT NULL DEFAULT 0 CHECK (store_address_manual IN (0, 1)),
+      store_latitude REAL CHECK (store_latitude IS NULL OR store_latitude BETWEEN -90 AND 90),
+      store_longitude REAL CHECK (store_longitude IS NULL OR store_longitude BETWEEN -180 AND 180),
+      store_attribution TEXT,
+      store_attribution_url TEXT,
       store_manual INTEGER NOT NULL DEFAULT 0,
       ai_output_language TEXT NOT NULL DEFAULT 'es' CHECK (ai_output_language IN ('es', 'en')),
       purchase_date TEXT,
@@ -798,6 +807,10 @@ async function runMigrations(db: Database.Database): Promise<void> {
       price_minor INTEGER CHECK (price_minor IS NULL OR price_minor >= 0),
       offer_buy INTEGER,
       offer_take INTEGER,
+      discount_kind TEXT CHECK (discount_kind IS NULL OR discount_kind IN ('amount', 'percent')),
+      discount_value_minor INTEGER CHECK (discount_value_minor IS NULL OR discount_value_minor > 0),
+      discount_percent_bps INTEGER CHECK (discount_percent_bps IS NULL OR discount_percent_bps BETWEEN 1 AND 10000),
+      discount_units REAL CHECK (discount_units IS NULL OR discount_units > 0),
       note TEXT,
       confidence REAL,
       position INTEGER NOT NULL DEFAULT 0,
@@ -870,6 +883,12 @@ async function runMigrations(db: Database.Database): Promise<void> {
       user_id TEXT NOT NULL,
       household_id TEXT,
       name TEXT NOT NULL,
+      address TEXT,
+      normalized_address TEXT,
+      latitude REAL CHECK (latitude IS NULL OR latitude BETWEEN -90 AND 90),
+      longitude REAL CHECK (longitude IS NULL OR longitude BETWEEN -180 AND 180),
+      attribution TEXT,
+      attribution_url TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
@@ -928,6 +947,33 @@ async function runMigrations(db: Database.Database): Promise<void> {
   addColumnIfMissing('recipes', 'source_attribution', 'TEXT');
   addColumnIfMissing('recipes', 'recipe_guidance', 'TEXT');
   addColumnIfMissing('recipes', 'image_attribution', 'TEXT');
+  addColumnIfMissing('price_observations', 'store_id', 'TEXT');
+  addColumnIfMissing('price_observations', 'receipt_id', 'TEXT');
+  addColumnIfMissing('receipts', 'store_id', 'TEXT');
+  addColumnIfMissing('receipts', 'store_address', 'TEXT');
+  addColumnIfMissing('receipts', 'store_address_manual', 'INTEGER NOT NULL DEFAULT 0');
+  addColumnIfMissing('receipts', 'store_latitude', 'REAL');
+  addColumnIfMissing('receipts', 'store_longitude', 'REAL');
+  addColumnIfMissing('receipts', 'store_attribution', 'TEXT');
+  addColumnIfMissing('receipts', 'store_attribution_url', 'TEXT');
+  addColumnIfMissing('receipt_items', 'discount_kind', 'TEXT');
+  addColumnIfMissing('receipt_items', 'discount_value_minor', 'INTEGER');
+  addColumnIfMissing('receipt_items', 'discount_percent_bps', 'INTEGER');
+  addColumnIfMissing('receipt_items', 'discount_units', 'REAL');
+  addColumnIfMissing('stores', 'address', 'TEXT');
+  addColumnIfMissing('stores', 'normalized_address', 'TEXT');
+  addColumnIfMissing('stores', 'latitude', 'REAL');
+  addColumnIfMissing('stores', 'longitude', 'REAL');
+  addColumnIfMissing('stores', 'attribution', 'TEXT');
+  addColumnIfMissing('stores', 'attribution_url', 'TEXT');
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_stores_branch_scope
+      ON stores(user_id, household_id, name, normalized_address);
+    CREATE INDEX IF NOT EXISTS idx_price_observations_store
+      ON price_observations(store_id, observed_at);
+    CREATE INDEX IF NOT EXISTS idx_price_observations_receipt
+      ON price_observations(receipt_id, product_key);
+  `);
   db.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_recipes_catalog_key
       ON recipes(catalog_key) WHERE catalog_key IS NOT NULL;
@@ -1146,6 +1192,21 @@ async function runMigrations(db: Database.Database): Promise<void> {
   // la misma marca para que actualizarlas no borre lo que la casa anadio a mano.
   addColumnIfMissing('shopping_lists', 'source', "TEXT NOT NULL DEFAULT 'manual'");
   addColumnIfMissing('shopping_list_items', 'source', "TEXT NOT NULL DEFAULT 'manual'");
+  // Snapshot de la tienda elegida para cada producto. Nunca se guarda aqui la coordenada del
+  // dispositivo: lat/lon solo contienen las coordenadas publicadas del establecimiento.
+  addColumnIfMissing('shopping_list_items', 'location_store_id', 'TEXT');
+  addColumnIfMissing('shopping_list_items', 'location_name', 'TEXT');
+  addColumnIfMissing('shopping_list_items', 'location_address', 'TEXT');
+  addColumnIfMissing('shopping_list_items', 'location_latitude', 'REAL');
+  addColumnIfMissing('shopping_list_items', 'location_longitude', 'REAL');
+  addColumnIfMissing('shopping_list_items', 'location_attribution', 'TEXT');
+  addColumnIfMissing('shopping_list_items', 'location_attribution_url', 'TEXT');
+  addColumnIfMissing(
+    'shopping_list_items',
+    'location_source',
+    "TEXT CHECK (location_source IS NULL OR location_source IN ('registered', 'openstreetmap', 'manual'))"
+  );
+  addColumnIfMissing('shopping_list_items', 'location_updated_at', 'DATETIME');
 
   // weekly_calendars.household_id nacio NOT NULL con FK a households, y las rutas
   // metían '' para las cuentas sin hogar: la FK lo rechaza (foreign_keys = ON),
