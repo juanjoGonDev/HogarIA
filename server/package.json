@@ -19,7 +19,7 @@
     "node": ">=22.0.0"
   },
   "dependencies": {
-    "hono": "4.13.19",
+    "hono": "4.13.20",
     "hono-rate-limiter": "0.5.4",
     "@hono/node-server": "2.1.11",
     "better-sqlite3": "13.2.0",
