@@ -107,7 +107,7 @@ test('onboarding y preferencias conservan emojis de comida y usan SVG para objet
   await waitForRouterViewTransition(page);
   await waitForStableView(page);
   const onboardingLogo = page.locator('.onboarding__logo app-icon[name="home"]');
-  expect.soft(await onboardingLogo.count(), 'Onboarding debe usar la casa SVG').toBe(1);
+  await expect.soft(onboardingLogo, 'Onboarding debe usar la casa SVG').toHaveCount(1);
 
   await page.getByRole('button', { name: 'Siguiente →' }).click();
   await expect(page.locator('.onboarding__step-label')).toContainText('Alergias');
