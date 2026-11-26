@@ -50,13 +50,14 @@ Generadas tras esperar contenido visible y comprobar el recuento de miembros; `.
 - Los runs `45875190646` y `45875336322` fallaron antes de las pruebas porque siete pins de `server/package.json` no coincidían con `pnpm-lock.yaml`; no era un fallo de las generaciones loopback.
 - `3c5432e4` alineó el manifiesto de server y las resoluciones del lockfile sin desactivar `--frozen-lockfile`. La reproducción falló antes del arreglo; instalación frozen aislada pasó después con pnpm 10.15.0 y 1043 paquetes.
 - CI run [45878848795 (#1352)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45878848795) pasó 11/11 jobs, incluidos instalación, smokes de contenedor `amd64` y `arm64`, cuatro shards E2E, build, typecheck y pruebas de servidor.
+- Tras corregir la secuenciación de foco que falló en #1354, CI run [45890876833 (#1359)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45890876833) pasó 11/11 jobs en `764067a9`, incluidos los cuatro shards E2E.
 
 ## Estado del smoke real de IA
 
-- El grupo DevBar `IA` estaba con `dev` detenido; se inició el comando configurado. WebAPI quedó escuchando en `127.0.0.1:3001` y reportó readiness y sesión de proveedor listas.
-- El preflight oficial **rechazó antes de crear token o enviar una generación**: WebAPI tiene activo el modo debug/captura de peticiones. También rechaza el modo de logs redacted porque el estado actual no satisface sus límites de privacidad.
-- No se cambiaron los controles de WebAPI ni se llamó al modelo. El smoke solo continúa tras apagar captura/debug temporalmente y restaurar exactamente el estado previo; se pidió aprobación al usuario.
-- Pendiente: con privacidad habilitada de forma segura, ejecutar la matriz finita existente por flujos/job y perfiles; sin reintentos ciegos. La matriz loopback prueba contratos, colas y persistencia, pero no sustituye la generación real: no se ha llamado al modelo.
+- Revalidación read-only 2026-11-26: el grupo DevBar `IA` sigue ejecutando `dev` en `127.0.0.1:3001`; `/health/ready` informa `ready` y storage listo. Los flags efectivos son `requestLogging.enabled=true`, `captureDetails=true` y `debugMode=true`; el preflight de smoke real falla antes de crear token o llamar al modelo.
+- La guía de persistencia de WebAPI documenta que las sesiones operativas normales guardan el prompt completo y el resultado del proveedor en `session_events.content`. Por tanto, no basta con apagar temporalmente el logging del WebAPI normal: un smoke real requiere un WebAPI con DB temporal y estado de proveedor autorizado/aislado.
+- No se modificaron los controles, la base de datos ni la sesión existente del WebAPI; no se creó token y no se hizo ninguna llamada real. Los 11 `AiJobKind` sí se ejercitan con proveedor loopback en los E2E aislados descritos arriba.
+- Pendiente: establecer el WebAPI de prueba aislado, luego ejecutar la matriz finita existente por flujos/job y perfiles, con presupuesto y limpieza propios. No hacer reintentos ciegos ni afirmar que el modelo real funciona hasta completar ese run.
 
 ## Hallazgo UI
 

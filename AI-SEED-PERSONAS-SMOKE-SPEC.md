@@ -26,6 +26,7 @@ Crear un generador reutilizable de cuentas de prueba para usuarios solos y hogar
 - Toda escritura del smoke debe pasar por una SQLite temporal cuya ruta efectiva `DATABASE_PATH` esté contenida en el directorio exclusivo de esa ejecución. El generador debe rechazar orígenes no loopback y bases no aisladas en modo de prueba. No usar la SQLite del servidor DevBar en ejecución.
 - Los smokes reales son opt-in, secuenciales y con presupuesto máximo de llamadas explícito por flujo. Un error detiene la matriz; no hay reintentos ciegos ni bucles sin límite. Las suites repetibles simulan al proveedor.
 - Las propuestas no se aplican salvo que un escenario exija comprobar un flujo de confirmación; ese escenario usa datos y DB desechables.
+- El WebAPI normal de DevBar no es una base de prueba: sus sesiones operativas persisten el prompt completo y la respuesta en `session_events.content` (contrato de `docs/session-recording.md`). El smoke real debe usar DB WebAPI aislada además de la SQLite aislada de HogarIA. El 2026-11-26 se revalidó el servicio `IA` en `127.0.0.1:3001`: readiness/storage listos, pero `requestLogging.enabled`, `captureDetails` y `debugMode` siguen activos; el preflight no debe crear token ni enviar generaciones en ese estado.
 
 ## Checklist de aceptación
 
@@ -39,8 +40,9 @@ Crear un generador reutilizable de cuentas de prueba para usuarios solos y hogar
 - [ ] Una respuesta fallida, inválida, timeout, cancelación o límite de presupuesto detiene el run y ejecuta cleanup; los snapshots verifican escrituras esperadas y ausencia de efectos laterales.
 - [x] UI E2E sobre app/SQLite aisladas; perfil individual (hogar de 1) y familia de 6, escritorio y móvil. Capturas sintéticas locales ignoradas por Git: `.e2e-screenshots/ai-persona-seeds/{solo,family}-{desktop,mobile}.png`.
 - [x] Documento de resultados registra matriz, comandos, resultados y limitaciones sin credenciales ni prompts/respuestas: `AI-SEED-PERSONAS-SMOKE-RESULTS.md`.
-- [x] Gates CI/coverage vigentes: run [45878848795 (#1352)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45878848795), 11/11 jobs verdes en `3c5432e4`. El PR #72 enlaza esta spec y sigue Draft mientras queden otras casillas pendientes.
+- [x] Gate de referencia: run [45878848795 (#1352)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45878848795), 11/11 jobs verdes en `3c5432e4`.
+- [x] Gate del tip actual: run [45890876833 (#1359)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45890876833) pasó 11/11 jobs para `764067a9`, incluidos los cuatro shards E2E. El fallo de foco del run #1354 queda corregido; el PR #72 permanece Draft por las casillas de smoke real y auditoría de fallos pendientes.
 
 ## Estado de verificación
 
-E2E aislado de generación de perfiles y cobertura loopback de los 11 `AiJobKind` pasaron en Chromium; los proyectos móviles se omiten para no duplicar escrituras en la misma ejecución, pero las vistas se prueban con viewport PC/móvil en un solo test. El servicio WebAPI DevBar responde y su sesión figura lista, aunque el preflight de privacidad bloquea las generaciones reales. Ver `AI-SEED-PERSONAS-SMOKE-RESULTS.md`; no se ejecutó ninguna generación contra el modelo real.
+E2E aislado de generación de perfiles y cobertura loopback de los 11 `AiJobKind` pasaron en Chromium; los proyectos móviles se omiten para no duplicar escrituras en la misma ejecución, pero las vistas se prueban con viewport PC/móvil en un solo test. El WebAPI está listo, pero no se ejecutaron generaciones reales: además de sus flags actuales de captura/debug, su almacenamiento operativo normal conserva prompts y respuestas. Hace falta un WebAPI de prueba con DB aislada y estado de proveedor autorizado. Ver `AI-SEED-PERSONAS-SMOKE-RESULTS.md`.
