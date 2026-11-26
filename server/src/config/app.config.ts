@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { assertDemoDatabaseSelection } from './demo-mode.js';
 
 const configSchema = z.object({
   server: z.object({
@@ -54,6 +55,9 @@ const configSchema = z.object({
 type Config = z.infer<typeof configSchema>;
 
 function loadConfig(): Config {
+  const databasePath = process.env.DATABASE_PATH || './data/hogaria.sqlite';
+  assertDemoDatabaseSelection({ mode: process.env.HOGARIA_DEMO_MODE, databasePath });
+
   const rawConfig = {
     server: {
       port: parseInt(process.env.PORT || '3000', 10),
@@ -61,7 +65,7 @@ function loadConfig(): Config {
       host: process.env.HOST || '0.0.0.0'
     },
     database: {
-      path: process.env.DATABASE_PATH || './data/hogaria.sqlite',
+      path: databasePath,
       walMode: process.env.DB_WAL_MODE !== 'false',
       cacheSize: parseInt(process.env.DB_CACHE_SIZE || '-2000', 10)
     },
