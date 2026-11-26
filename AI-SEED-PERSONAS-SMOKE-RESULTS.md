@@ -62,6 +62,7 @@ Generadas tras esperar contenido visible y comprobar el recuento de miembros; `.
 - CI run [45878848795 (#1352)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45878848795) pasó 11/11 jobs, incluidos instalación, smokes de contenedor `amd64` y `arm64`, cuatro shards E2E, build, typecheck y pruebas de servidor.
 - Tras corregir la secuenciación de foco que falló en #1354, CI run [45890876833 (#1359)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45890876833) pasó 11/11 jobs en `764067a9`, incluidos los cuatro shards E2E.
 - CI run [45893533271 (#1361)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45893533271) pasó 11/11 jobs en `eab195fa`; el run anterior #1360 fue cancelado.
+- Commit `fb7e536a` añadió la regresión de fallo parcial, cargó el bundle `profile` en `/household` y fijó el timeout de una migración de test que el pre-push había encontrado flaky. Hook completo pasó en 98,56 s; suite servidor 2.260 pass/1 skip. CI run [45896836456 (#1362)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45896836456) sigue en cola.
 
 ## Estado del smoke real de IA
 
