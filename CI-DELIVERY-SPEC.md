@@ -132,3 +132,14 @@ Los runs `45875190646` y `45875336322` fallaron por la misma causa en dos áreas
 **Evidencia local (2026-11-26):** `server/package.json` coincide con `origin/master` (`git diff origin/master -- server/package.json` vacío); se reprodujo el `ERR_PNPM_OUTDATED_LOCKFILE` exacto al aplicar los pins del merge de CI, y el lockfile se regeneró sin scripts. `pnpm install --frozen-lockfile --lockfile-only --ignore-scripts` pasó. Instalación real aislada: workspace temporal con los tres manifests y lockfile, `pnpm install --frozen-lockfile --ignore-scripts` instaló 1043 paquetes con pnpm 10.15.0; el directorio temporal se eliminó. El diff queda limitado a los siete pins de server y resoluciones transitivas de esos paquetes (Hono, better-sqlite3, typescript-eslint y Vitest); no cambia el importador del frontend.
 
 **Evidencia remota (2026-11-26):** run [45878848795 (#1352)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45878848795), commit `3c5432e4`, completado con éxito (11/11 jobs): instalación frozen, builds y smokes de contenedor amd64/arm64, pruebas de servidor, typecheck, build de producción, full-stack y los cuatro shards E2E.
+
+### Hallazgo del run #1354 — 2026-11-26
+
+El run [45882536558 (#1354)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45882536558), en `6d07c681`, completó instalación, smokes de contenedor y los demás jobs, pero falló `E2E Tests (shard 1)`. El resumen del job atribuye fallos a `ai-provider-queue.spec.ts` (el orden esperado tras el movimiento con teclado no se reflejó y la aserción de foco falló) y a `auth-onboarding-icons.spec.ts` (el selector del icono SVG de onboarding obtuvo cero elementos). El test de cola solo espera el orden persistido tras el arrastre antes de enfocar y activar el control de teclado; aún no demuestra que el estado visual del control haya terminado de actualizarse. Para el icono, el log no basta para concluir si es regresión de la aplicación o sincronización del test: hay que reproducirlo antes de ajustar la aserción.
+
+### Criterios correctivos
+
+- [ ] Reproducir en ejecución local aislada ambos fallos del shard y confirmar DB temporal, puertos y limpieza propios de cada run.
+- [ ] Corregir la sincronización del movimiento con teclado sin eliminar la verificación de orden ni la de foco; comprobar movimiento y restauración de foco tras el estado visible actualizado.
+- [ ] Determinar por reproducción si el icono SVG de onboarding está ausente en la app o si la prueba consulta antes de que se renderice; arreglar la causa, sin relajar la aserción.
+- [ ] Ejecutar las pruebas afectadas en aislamiento y obtener un CI nuevo del PR #72 completamente verde; conservar el PR en Draft.
