@@ -66,9 +66,15 @@ Generadas tras esperar contenido visible y comprobar el recuento de miembros; `.
 
 ## Estado del smoke real de IA
 
+### Intento real anónimo sin sesión
+
+- El 26-11-2026 se ejecutó una única prueba `ChatGPT guest live smoke` con prompt e imagen sintéticos, perfil nuevo y temporales aislados; no se usó la instancia DevBar ni la sesión de Brave. Preparación, imagen y servidor local pasaron (3/4 pasos); la solicitud terminó en HTTP 401 `authentication_required` al comprobar el estado del proveedor, sin respuesta del modelo. No cuenta como generación real válida.
+- El intento confirma que la ruta anónima Guest no está disponible en este entorno. Un token API de WebAPI autentica la llamada a la API, pero no proporciona por sí solo autenticación del proveedor ChatGPT.
+- El smoke de WebAPI borra `.tmp/opencode/attachments` relativo a `cwd`; ese directorio del checkout ya contenía artefactos previos. Por seguridad el test corrió con un `cwd` temporal nuevo, que se limpió al terminar; el directorio previo quedó intacto.
+
 - Revalidación read-only 2026-11-26: el grupo DevBar `IA` sigue ejecutando `dev` en `127.0.0.1:3001`; `/health/ready` informa `ready` y storage listo. Los flags efectivos son `requestLogging.enabled=true`, `captureDetails=true` y `debugMode=true`; el preflight de smoke real falla antes de crear token o llamar al modelo.
 - La guía de persistencia de WebAPI documenta que las sesiones operativas normales guardan el prompt completo y el resultado del proveedor en `session_events.content`. Por tanto, no basta con apagar temporalmente el logging del WebAPI normal: un smoke real requiere un WebAPI con DB temporal y estado de proveedor autorizado/aislado.
-- No se modificaron los controles, la base de datos ni la sesión existente del WebAPI; no se creó token y no se hizo ninguna llamada real. Los 11 `AiJobKind` sí se ejercitan con proveedor loopback en los E2E aislados descritos arriba.
+- No se modificaron los controles, la base de datos ni la sesión existente del WebAPI; no se creó token ni se usó la instancia DevBar. El intento anónimo no produjo una respuesta del modelo. Los 11 `AiJobKind` sí se ejercitan con proveedor loopback en los E2E aislados descritos arriba.
 - Pendiente: establecer el WebAPI de prueba aislado, luego ejecutar la matriz finita existente por flujos/job y perfiles, con presupuesto y limpieza propios. No hacer reintentos ciegos ni afirmar que el modelo real funciona hasta completar ese run.
 
 ## Hallazgo UI resuelto

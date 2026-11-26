@@ -155,4 +155,4 @@ El primer pre-push del commit local `ced191f8` falló solo en `server/src/config
 
 - [x] Dar un timeout explícito de 30 s al test de migración/reinicio, coherente con el test vecino, y explicar la carga que cubre. El test focal pasó 1/1 (0,878 s); tras el cambio, la suite completa de servidor pasó 127 ficheros / 2.260 tests, 1 omitido.
 - [x] Enmendar el commit local como `fb7e536a` e intentar el hook pre-push completo antes de push, sin saltar hooks. PASS · 98,56 s; formato (7 rutas), UI (278 ficheros/21 reglas), build, E2E typecheck y `test:config`/cliente/servidor; servidor 2.260 pass, 1 skip.
-- [ ] Gate remoto del commit `fb7e536a`: run [45896836456 (#1362)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45896836456) está en cola; esperar 11/11 jobs y conservar Draft.
+- [ ] Gate remoto del commit `fb7e536a`: run #1362 [45896836456](https://github.com/juanjoGonDev/HogarIA/actions/runs/45896836456) fue cancelado; el run [45897463409 (#1363)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45897463409) está en curso. Esperar 11/11 jobs y conservar Draft.

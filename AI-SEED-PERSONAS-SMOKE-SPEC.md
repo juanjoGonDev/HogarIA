@@ -1,6 +1,6 @@
 # Generador de perfiles sintéticos y smoke de IA
 
-**Estado:** Draft; generador, matriz loopback, fallo parcial y UI de perfiles verificados; generación real WebAPI pendiente.
+**Estado:** Draft; generador, matriz loopback, fallo parcial y UI de perfiles verificados; intento real anónimo bloqueado por `401 authentication_required`; generación WebAPI real pendiente.
 **Rama/PR:** `feat/calendar-recipe-cooking` / #72 Draft. Sin merge ni publicación de datos.
 
 ## Objetivo
@@ -43,8 +43,8 @@ Crear un generador reutilizable de cuentas de prueba para usuarios solos y hogar
 - [x] Gate de referencia: run [45878848795 (#1352)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45878848795), 11/11 jobs verdes en `3c5432e4`.
 - [x] Corrección del fallo de foco del run #1354: CI [45890876833 (#1359)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45890876833) pasó 11/11 jobs en `764067a9`.
 - [x] Estado/spec actualizado en `eab195fa`: CI [45893533271 (#1361)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45893533271) pasó 11/11 jobs; el PR #72 permanece Draft por las generaciones reales y la auditoría de errores del proveedor.
-- [ ] Regresión de fallo parcial/i18n y timeout de test en `fb7e536a`: pre-push completo pasó; CI [45896836456 (#1362)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45896836456) está en cola.
+- [ ] Regresión de fallo parcial/i18n y timeout de test en `fb7e536a`: pre-push completo pasó; CI #1362 fue cancelado; CI [45897463409 (#1363)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45897463409) está en curso.
 
 ## Estado de verificación
 
-E2E aislado de perfiles pasó en Chromium y ahora comprueba que `profile.cooking.none` se traduzca; los proyectos móviles se omiten para no duplicar escrituras, pero se capturan PC/móvil. El fallo parcial inyectado tras el primer registro aborta y limpia el entorno temporal. La cobertura loopback de los 11 `AiJobKind` sigue pasando. No se ejecutaron generaciones reales: el almacenamiento operativo normal de WebAPI conserva prompts y respuestas. Hace falta un WebAPI de prueba con DB aislada y estado de proveedor autorizado. Ver `AI-SEED-PERSONAS-SMOKE-RESULTS.md`.
+E2E aislado de perfiles pasó en Chromium y ahora comprueba que `profile.cooking.none` se traduzca; los proyectos móviles se omiten para no duplicar escrituras, pero se capturan PC/móvil. El fallo parcial inyectado tras el primer registro aborta y limpia el entorno temporal. La cobertura loopback de los 11 `AiJobKind` sigue pasando. Un smoke real anónimo con perfil temporal recibió `401 authentication_required` y no obtuvo respuesta del modelo; no valida generaciones reales. Hace falta un WebAPI de prueba con DB aislada y estado de proveedor autorizado. El WebAPI normal sigue sin usarse para pruebas con escritura porque persiste prompts y respuestas. Ver `AI-SEED-PERSONAS-SMOKE-RESULTS.md`.
