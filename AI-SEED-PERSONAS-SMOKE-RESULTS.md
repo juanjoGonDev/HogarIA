@@ -45,6 +45,12 @@ Generadas tras esperar contenido visible y comprobar el recuento de miembros; `.
 - Escritorio, familia de seis: `.e2e-screenshots/ai-persona-seeds/family-desktop.png`
 - Móvil, familia de seis: `.e2e-screenshots/ai-persona-seeds/family-mobile.png`
 
+## Corrección del CI de lockfile
+
+- Los runs `45875190646` y `45875336322` fallaron antes de las pruebas porque siete pins de `server/package.json` no coincidían con `pnpm-lock.yaml`; no era un fallo de las generaciones loopback.
+- `3c5432e4` alineó el manifiesto de server y las resoluciones del lockfile sin desactivar `--frozen-lockfile`. La reproducción falló antes del arreglo; instalación frozen aislada pasó después con pnpm 10.15.0 y 1043 paquetes.
+- CI run [45878848795 (#1352)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45878848795) pasó 11/11 jobs, incluidos instalación, smokes de contenedor `amd64` y `arm64`, cuatro shards E2E, build, typecheck y pruebas de servidor.
+
 ## Estado del smoke real de IA
 
 - El grupo DevBar `IA` estaba con `dev` detenido; se inició el comando configurado. WebAPI quedó escuchando en `127.0.0.1:3001` y reportó readiness y sesión de proveedor listas.

@@ -126,7 +126,9 @@ Los runs `45875190646` y `45875336322` fallaron por la misma causa en dos áreas
 
 - [x] Alinear `server/package.json` de la rama y `pnpm-lock.yaml` con el manifiesto de la base `master` que usa CI; conservar `--frozen-lockfile`.
 - [x] Ejecutar `pnpm install --frozen-lockfile` localmente y confirmar que el diff del lockfile solo resuelve las discrepancias reportadas.
-- [ ] Confirmar que las imágenes `amd64` y `arm64` completan build y smoke con la instalación congelada.
-- [ ] Obtener un run remoto nuevo del PR #72 con instalación, ambos smokes y todos los demás jobs requeridos verdes.
+- [x] Confirmar que las imágenes `amd64` y `arm64` completan build y smoke con la instalación congelada.
+- [x] Obtener un run remoto nuevo del PR #72 con instalación, ambos smokes y todos los demás jobs requeridos verdes.
 
 **Evidencia local (2026-11-26):** `server/package.json` coincide con `origin/master` (`git diff origin/master -- server/package.json` vacío); se reprodujo el `ERR_PNPM_OUTDATED_LOCKFILE` exacto al aplicar los pins del merge de CI, y el lockfile se regeneró sin scripts. `pnpm install --frozen-lockfile --lockfile-only --ignore-scripts` pasó. Instalación real aislada: workspace temporal con los tres manifests y lockfile, `pnpm install --frozen-lockfile --ignore-scripts` instaló 1043 paquetes con pnpm 10.15.0; el directorio temporal se eliminó. El diff queda limitado a los siete pins de server y resoluciones transitivas de esos paquetes (Hono, better-sqlite3, typescript-eslint y Vitest); no cambia el importador del frontend.
+
+**Evidencia remota (2026-11-26):** run [45878848795 (#1352)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45878848795), commit `3c5432e4`, completado con éxito (11/11 jobs): instalación frozen, builds y smokes de contenedor amd64/arm64, pruebas de servidor, typecheck, build de producción, full-stack y los cuatro shards E2E.

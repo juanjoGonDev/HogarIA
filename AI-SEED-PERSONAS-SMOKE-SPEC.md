@@ -1,6 +1,6 @@
 # Generador de perfiles sintéticos y smoke de IA
 
-**Estado:** Draft; criterios pendientes de implementación y ejecución.
+**Estado:** Draft; generador y matriz loopback verificados; generación real WebAPI y auditoría de fallos pendientes.
 **Rama/PR:** `feat/calendar-recipe-cooking` / #72 Draft. Sin merge ni publicación de datos.
 
 ## Objetivo
@@ -39,7 +39,7 @@ Crear un generador reutilizable de cuentas de prueba para usuarios solos y hogar
 - [ ] Una respuesta fallida, inválida, timeout, cancelación o límite de presupuesto detiene el run y ejecuta cleanup; los snapshots verifican escrituras esperadas y ausencia de efectos laterales.
 - [x] UI E2E sobre app/SQLite aisladas; perfil individual (hogar de 1) y familia de 6, escritorio y móvil. Capturas sintéticas locales ignoradas por Git: `.e2e-screenshots/ai-persona-seeds/{solo,family}-{desktop,mobile}.png`.
 - [x] Documento de resultados registra matriz, comandos, resultados y limitaciones sin credenciales ni prompts/respuestas: `AI-SEED-PERSONAS-SMOKE-RESULTS.md`.
-- [ ] Se cumplen los gates CI/coverage vigentes; el Draft PR enlaza esta spec y sigue Draft hasta cerrar toda casilla con evidencia reproducible.
+- [x] Gates CI/coverage vigentes: run [45878848795 (#1352)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45878848795), 11/11 jobs verdes en `3c5432e4`. El PR #72 enlaza esta spec y sigue Draft mientras queden otras casillas pendientes.
 
 ## Estado de verificación
 
