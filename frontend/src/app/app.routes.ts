@@ -153,6 +153,7 @@ export const routes: Routes = [
             'onboarding',
             'recipes',
             'preferences',
+            'profile',
             'settings',
             'shoppingSuggested',
             'pantry',

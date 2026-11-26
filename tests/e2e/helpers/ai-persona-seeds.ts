@@ -135,6 +135,12 @@ export async function seedAiPersonaMatrix(page: Page, runId: string): Promise<Se
       token,
       householdId: null
     };
+    if (
+      index === 0 &&
+      process.env.HOGARIA_AI_SEED_GENERATION_INJECT_FAILURE === 'after-first-account'
+    ) {
+      throw new Error('Injected failure after first synthetic persona account.');
+    }
   }
 
   await logout(page);

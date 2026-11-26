@@ -142,6 +142,16 @@ El run [45882536558 (#1354)](https://github.com/juanjoGonDev/HogarIA/actions/run
 - [x] Contrastar el run fallido con Playwright aislado: el icono existe en el template; el test lo detectó 3/3 veces tras cambiar el conteo instantáneo por `toHaveCount(1)` con autoespera. La pérdida de foco de cola se reprodujo en 2/3 repeticiones al comprobarlo explícitamente. El orden ya aparecía en SQLite y `document.activeElement` era el botón de diagnóstico del mismo producto; el código confirma que, tras el PATCH, `saveOrder()` programa `restoreFocus()` en `requestAnimationFrame`, que prioriza el primer botón habilitado del job. Esto apunta a que el test iniciaba el segundo movimiento antes de que acabara la restauración de foco del arrastre.
 - [x] Mantener la aserción del icono SVG (cantidad exacta 1) y hacer que espere el render; E2E Chromium repetido: 3/3 pasan, sin relajar cobertura.
 - [x] Sincronizar el E2E de cola con la finalización del foco restaurado por el arrastre antes de enfocar el botón «subir»; conservar la comprobación de habilitado, foco, movimiento por Enter, orden persistido y foco final. E2E Chromium aislado con `--repeat-each=3`: la prueba de cola pasa 3/3.
-- [ ] Ejecutar las pruebas afectadas en aislamiento y obtener un CI nuevo del PR #72 completamente verde; conservar el PR en Draft.
+- [x] Ejecutar las pruebas afectadas en aislamiento: 6/6 repeticiones focales (cola 3/3, icono 3/3). CI [45890876833 (#1359)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45890876833) pasó 11/11 jobs en `764067a9`; conservar el PR en Draft.
+- [x] Verificar el commit documental `eab195fa`: CI [45893533271 (#1361)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45893533271) pasó 11/11 jobs.
 
 **Evidencia local aislada (2026-11-26):** la suite `auth-onboarding-icons.spec.ts` pasó 3/3 antes del cambio y el test del icono pasó 3/3 con `toHaveCount(1)` tras el cambio. El test de cola pasó una vez antes de cambiarlo; al forzar la comprobación de foco, tres repeticiones devolvieron 1 pasada y 2 fallidas después de `focus()`. En ambas, `document.activeElement` era `copy-diagnostic` del job: el test leía SQLite antes de terminar la respuesta del PATCH y el `requestAnimationFrame` de restauración. El test ahora espera el anuncio accesible del reordenado, el siguiente frame y el foco en el mismo job antes de activar «subir». Repetición conjunta final: 6/6 (cola 3/3, icono 3/3), 32,3 s. El runner usó SQLite bajo `%TEMP%`, confirmó cierre de sus puertos y eliminó artefactos; no se tocó DevBar ni proveedor externo.
+
+### Fallo reciente del hook pre-push — 2026-11-26
+
+El primer pre-push del commit local `ced191f8` falló solo en `server/src/config/database.spec.ts`: el test «elige al admin elegible más antiguo en hogares legacy de forma estable e idempotente» excedió el timeout predeterminado de 5 s (5,711 ms) dentro de la suite paralela. No falló ninguna aserción ni se detectó acceso a datos persistentes. El test ejecuta dos inicializaciones completas con migraciones históricas; un test vecino de la misma inicialización ya fija 30 s por el coste de migraciones bajo carga paralela.
+
+#### Criterios correctivos
+
+- [x] Dar un timeout explícito de 30 s al test de migración/reinicio, coherente con el test vecino, y explicar la carga que cubre. El test focal pasó 1/1 (0,878 s); tras el cambio, la suite completa de servidor pasó 127 ficheros / 2.260 tests, 1 omitido.
+- [ ] Enmendar el commit aún local y volver a ejecutar el hook pre-push completo; confirmar éxito antes de reintentar push, sin saltar hooks.

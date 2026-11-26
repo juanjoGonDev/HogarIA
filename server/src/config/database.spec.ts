@@ -640,7 +640,8 @@ describe('initializeDatabase con fichero heredado', () => {
       restarted?.closeDatabase();
       mod.closeDatabase();
     }
-  });
+    // This scenario performs two full legacy migrations and can exceed 5 s under parallel load.
+  }, 30_000);
 
   it('añade recurrence_rule a una tabla legacy conservando la fila, recurrencia y excepciones', async () => {
     const databaseFile = target();

@@ -19,6 +19,7 @@ async function captureHousehold(
   });
   await page.locator('[data-test="household-tab-members"]').click();
   await expect(page.locator('.members-list .member-card')).toHaveCount(household.members.length);
+  await expect(page.locator('.members-list')).toContainText('Apenas cocino');
   await page.screenshot({
     path: resolve(PERSONA_SCREENSHOT_DIR, fileName),
     fullPage: true,
@@ -41,6 +42,28 @@ test('genera perfiles sintéticos solos y de hogar con la matriz completa', asyn
 
   const runId = process.env.E2E_SEED;
   expect(runId).toBeTruthy();
+  if (process.env.HOGARIA_AI_SEED_GENERATION_INJECT_FAILURE === 'after-first-account') {
+    let registrations = 0;
+    page.on('request', (request) => {
+      const url = new URL(request.url());
+      if (request.method() === 'POST' && url.pathname === '/api/auth/register') {
+        registrations += 1;
+      }
+    });
+
+    let injectedFailure: unknown;
+    try {
+      await seedAiPersonaMatrix(page, runId!);
+    } catch (error) {
+      injectedFailure = error;
+    }
+    expect(registrations).toBe(1);
+    if (injectedFailure === undefined) {
+      throw new Error('Expected an injected failure after the first synthetic account.');
+    }
+    throw injectedFailure;
+  }
+
   const seeded = await seedAiPersonaMatrix(page, runId!);
   if (process.env.HOGARIA_AI_SEED_GENERATION_INJECT_FAILURE === 'after-seed') {
     throw new Error('Injected failure after synthetic persona seeding.');

@@ -1,6 +1,6 @@
 # Generador de perfiles sintéticos y smoke de IA
 
-**Estado:** Draft; generador y matriz loopback verificados; generación real WebAPI y auditoría de fallos pendientes.
+**Estado:** Draft; generador, matriz loopback, fallo parcial y UI de perfiles verificados; generación real WebAPI pendiente.
 **Rama/PR:** `feat/calendar-recipe-cooking` / #72 Draft. Sin merge ni publicación de datos.
 
 ## Objetivo
@@ -34,15 +34,16 @@ Crear un generador reutilizable de cuentas de prueba para usuarios solos y hogar
 - [x] Alta y re-login reutilizan el helper de contraseña común; correos sintéticos únicos y sin contraseña/token en plan, reportes o capturas. Evidencia: helper E2E y test de unicidad.
 - [x] Generación determinista por semilla, correos distintos entre ejecuciones; rechaza semilla vacía/inválida. Evidencia: test unitario.
 - [x] Guardas de opt-in, loopback y ruta exacta de SQLite aislada. Evidencia: test unitario.
-- [ ] Pruebas unitarias/integración cubren generación, repetición, aislamiento, miembros, fallo parcial y limpieza sin tocar datos/procesos preexistentes.
+- [x] Pruebas unitarias/integración cubren generación, repetición, aislamiento, miembros, fallo parcial y limpieza sin tocar datos/procesos preexistentes. La inyección `after-first-account` confirma exactamente un registro antes de abortar; el runner cierra el proceso/puerto propio y elimina la SQLite temporal.
 - [x] Los E2E con proveedor loopback cubren los 11 `AiJobKind` vigentes entre las rutas de recetas, planificación, compra/ticket, hogar y asistente; se ejecutan con cuentas del generador y DB temporal, sin red externa. Evidencia: dos pruebas Playwright pasaron en una ejecución aislada; perfiles solo y familia; salida `2 passed`, sin directorio temporal residual.
 - [ ] La matriz real WebAPI cubre las rutas de generación síncronas y los jobs AI activos; cada ruta queda mapeada a su perfil y presupuesto explícito.
 - [ ] Una respuesta fallida, inválida, timeout, cancelación o límite de presupuesto detiene el run y ejecuta cleanup; los snapshots verifican escrituras esperadas y ausencia de efectos laterales.
 - [x] UI E2E sobre app/SQLite aisladas; perfil individual (hogar de 1) y familia de 6, escritorio y móvil. Capturas sintéticas locales ignoradas por Git: `.e2e-screenshots/ai-persona-seeds/{solo,family}-{desktop,mobile}.png`.
 - [x] Documento de resultados registra matriz, comandos, resultados y limitaciones sin credenciales ni prompts/respuestas: `AI-SEED-PERSONAS-SMOKE-RESULTS.md`.
 - [x] Gate de referencia: run [45878848795 (#1352)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45878848795), 11/11 jobs verdes en `3c5432e4`.
-- [x] Gate del tip actual: run [45890876833 (#1359)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45890876833) pasó 11/11 jobs para `764067a9`, incluidos los cuatro shards E2E. El fallo de foco del run #1354 queda corregido; el PR #72 permanece Draft por las casillas de smoke real y auditoría de fallos pendientes.
+- [x] Corrección del fallo de foco del run #1354: CI [45890876833 (#1359)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45890876833) pasó 11/11 jobs en `764067a9`.
+- [x] Estado/spec actualizado en `eab195fa`: CI [45893533271 (#1361)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45893533271) pasó 11/11 jobs; el PR #72 permanece Draft por las generaciones reales y la auditoría de errores del proveedor.
 
 ## Estado de verificación
 
-E2E aislado de generación de perfiles y cobertura loopback de los 11 `AiJobKind` pasaron en Chromium; los proyectos móviles se omiten para no duplicar escrituras en la misma ejecución, pero las vistas se prueban con viewport PC/móvil en un solo test. El WebAPI está listo, pero no se ejecutaron generaciones reales: además de sus flags actuales de captura/debug, su almacenamiento operativo normal conserva prompts y respuestas. Hace falta un WebAPI de prueba con DB aislada y estado de proveedor autorizado. Ver `AI-SEED-PERSONAS-SMOKE-RESULTS.md`.
+E2E aislado de perfiles pasó en Chromium y ahora comprueba que `profile.cooking.none` se traduzca; los proyectos móviles se omiten para no duplicar escrituras, pero se capturan PC/móvil. El fallo parcial inyectado tras el primer registro aborta y limpia el entorno temporal. La cobertura loopback de los 11 `AiJobKind` sigue pasando. No se ejecutaron generaciones reales: el almacenamiento operativo normal de WebAPI conserva prompts y respuestas. Hace falta un WebAPI de prueba con DB aislada y estado de proveedor autorizado. Ver `AI-SEED-PERSONAS-SMOKE-RESULTS.md`.
