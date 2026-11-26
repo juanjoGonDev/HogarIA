@@ -3,6 +3,7 @@ import { writeFileSync } from 'node:fs';
 import { relative } from 'node:path';
 
 import { config } from './config/app.config.js';
+import { acquireDemoDatabaseLock } from './config/demo-mode.js';
 import { getDatabase, initializeDatabase } from './config/database.js';
 import { memoryMonitor } from './utils/memory-monitor.js';
 import { installConsoleCapture } from './utils/log-store.js';
@@ -19,6 +20,7 @@ installConsoleCapture();
 const staticDir = resolveStaticDir();
 const app = createApp({ rateLimit: rateLimitFromEnv(), staticDir });
 let stopPlanningAutomation: (() => Promise<void>) | null = null;
+let releaseDemoDatabaseLock: (() => void) | undefined;
 let shutdown: Promise<void> | null = null;
 
 // ═══════════════════════════════════════════════════════════════════
@@ -27,6 +29,9 @@ let shutdown: Promise<void> | null = null;
 
 async function startServer() {
   try {
+    if (process.env.HOGARIA_DEMO_MODE === '1') {
+      releaseDemoDatabaseLock = acquireDemoDatabaseLock();
+    }
     await initializeDatabase();
     console.log('[SERVER] ✓ Database initialized');
 
@@ -74,6 +79,8 @@ async function startServer() {
     );
   } catch (error) {
     await stopPlanningAutomation?.();
+    releaseDemoDatabaseLock?.();
+    releaseDemoDatabaseLock = undefined;
     memoryMonitor.stop();
     console.error('[SERVER] Failed to start server:', error);
     process.exit(1);
@@ -88,6 +95,8 @@ function shutdownServer(signal: 'SIGTERM' | 'SIGINT'): Promise<void> {
   shutdown = (async () => {
     await stopPlanningAutomation?.();
     memoryMonitor.stop();
+    releaseDemoDatabaseLock?.();
+    releaseDemoDatabaseLock = undefined;
     process.exit(0);
   })();
   return shutdown;
