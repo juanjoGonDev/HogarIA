@@ -30,6 +30,9 @@ const args = process.argv.slice(2).filter((arg) => arg !== '--');
 const nginxIngress = args.includes('--nginx-ingress');
 const playwrightArgs = args.filter((arg) => arg !== '--nginx-ingress');
 const liveSmoke = validateAiLiveSmokeRunner(process.env, playwrightArgs);
+const cleanupFailedSeedRuns =
+  process.env.HOGARIA_AI_SEED_GENERATION === '1' &&
+  process.env.HOGARIA_AI_SEED_CLEANUP_ON_FAILURE === '1';
 if (nginxIngress && liveSmoke) {
   throw new Error('The isolated Nginx ingress runner cannot be combined with the live AI smoke.');
 }
@@ -499,10 +502,7 @@ async function main() {
   };
   const geocoderMockEnabled =
     process.env.E2E_STORE_GEOCODER_MOCK === '1' ||
-    (process.env.E2E_STORE_GEOCODER_MOCK !== '0' &&
-      !liveSmoke &&
-      !fullStack &&
-      !nginxIngress);
+    (process.env.E2E_STORE_GEOCODER_MOCK !== '0' && !liveSmoke && !fullStack && !nginxIngress);
   if (geocoderMockEnabled) {
     if (fullStack || nginxIngress) {
       throw new Error('The isolated store geocoder mock requires the dev E2E stack.');
@@ -568,7 +568,8 @@ async function main() {
       'An isolated app port is still listening; preserving its temp data and not attempting to stop an unknown process.'
     );
   }
-  preserve = liveSmoke ? false : exitCode !== 0 || process.env.CI === 'true';
+  preserve =
+    liveSmoke || cleanupFailedSeedRuns ? false : exitCode !== 0 || process.env.CI === 'true';
 }
 
 for (const signal of ['SIGINT', 'SIGTERM']) {
@@ -593,7 +594,7 @@ try {
     reportSmokeProgress('runner-error');
     console.error('[hogaria] isolated AI smoke runner failed.');
   } else console.error(error instanceof Error ? error.message : String(error));
-  preserve = !liveSmoke;
+  preserve = !liveSmoke && !cleanupFailedSeedRuns;
   exitCode = 1;
 } finally {
   if (testProcess && testProcess.exitCode === null && testProcess.signalCode === null) {

@@ -10,7 +10,7 @@ Crear un generador reutilizable de cuentas de prueba para usuarios solos y hogar
 ## Fuente vigente revisada
 
 - `server/src/schemas/auth.schema.ts` y `server/src/routes/auth.routes.ts`: el alta acepta nivel de cocina; `PATCH /api/auth/taste` permite generar perfil culinario, objetivos, alergias, gustos, módulos y horarios.
-- `server/src/schemas/household.schema.ts`: enum de roles, nivel, dieta, tolerancia al picante, ración y gravedad de alergia.
+- `server/src/schemas/household.schema.ts`: declara enums de roles, nivel, dieta, tolerancia al picante, ración y gravedad de alergia. Discrepancia verificada: `updateMemberSchema` no está conectado a una ruta; la API vigente de perfil es `PATCH /api/auth/taste`, con alergias como nombres simples y notas libres.
 - `server/src/utils/taste-profile.ts`: niveles `none | beginner | intermediate | expert`, objetivos `balanced | weight-loss | weight-gain | muscle-gain | maintenance | variety | custom`, módulos `meals | pantry | shopping | receipts | home`.
 - `server/src/utils/ai-client.ts` y `server/src/utils/ai-function-providers.ts`: jobs actuales `receipt | recipe | multiple_recipes | recommendations | weekly_plan | shopping_photo | expiry_estimate | household_plan | assistant | product_image_search | connection_test`; asignaciones de proveedor para recetas, planificación, despensa/compra y hogar.
 - `server/src/routes/ai.routes.ts`, `ai-assistant.routes.ts`, `household-meal-proposals.routes.ts`, `household-plan.routes.ts`, `shopping.routes.ts` y `receipts.routes.ts`: rutas síncronas y trabajos de fondo que generan o interpretan contenido mediante IA.
@@ -18,9 +18,10 @@ Crear un generador reutilizable de cuentas de prueba para usuarios solos y hogar
 
 ## Decisiones y límites
 
-- Cubrir los valores válidos del contrato con una matriz pareada, no el producto cartesiano de todas las opciones: cuentas solas, hogar de 2 miembros y hogar numeroso; variedad de niveles, objetivos, módulos, alergias, dietas y permisos.
+- Cubrir los valores válidos del contrato con una matriz pareada, no el producto cartesiano de todas las opciones: dos cuentas solas (cada una en un hogar de un miembro, porque el API vigente exige seleccionar/crear hogar), pareja de 2 miembros y hogar numeroso; variedad de niveles, objetivos, módulos, alergias, dietas y permisos.
 - Crear correos sintéticos bajo `hogaria.test`, con identificador único de ejecución. No incorporar datos de personas reales.
 - Crear cuentas mediante el helper de registro E2E existente, que aplica una contraseña común de prueba sin duplicarla en el generador. Mantener JWT y token WebAPI solo en memoria; no guardar credenciales, prompts ni respuestas en fixtures, logs, capturas o reportes.
+- Mantener los valores `dietType`, tolerancia, ración y severidad solo como contexto sintético dentro de `taste.notes`, porque el API activo no persiste esos campos tipados. Verificar su lectura de vuelta; no escribirlos directamente a SQLite ni presentarlos como propiedades estructuradas del perfil.
 - El smoke no depende de una sesión real ni de Brave. Los JWT de las cuentas sintéticas y el token temporal de WebAPI viven solo en memoria. Reutilizar el harness que crea y elimina el token propio; no revocar tokens ajenos.
 - Toda escritura del smoke debe pasar por una SQLite temporal cuya ruta efectiva `DATABASE_PATH` esté contenida en el directorio exclusivo de esa ejecución. El generador debe rechazar orígenes no loopback y bases no aisladas en modo de prueba. No usar la SQLite del servidor DevBar en ejecución.
 - Los smokes reales son opt-in, secuenciales y con presupuesto máximo de llamadas explícito por flujo. Un error detiene la matriz; no hay reintentos ciegos ni bucles sin límite. Las suites repetibles simulan al proveedor.
@@ -28,17 +29,17 @@ Crear un generador reutilizable de cuentas de prueba para usuarios solos y hogar
 
 ## Checklist de aceptación
 
-- [ ] El generador comparte un catálogo tipado de perfiles y hogares; valores de nivel/objetivo/módulo/rol/dieta/alergia cubiertos, con hogares solo y multi-miembro.
-- [ ] Todas las cuentas de una ejecución usan el helper de contraseña común y correos sintéticos únicos; no se expone la contraseña ni se guardan tokens.
-- [ ] Generación de perfiles repetible con la misma semilla, sin colisiones entre ejecuciones; rechaza semilla vacía o inválida.
-- [ ] Guardas impiden writes si falta el opt-in, el servidor no es loopback o `DATABASE_PATH` no es la SQLite temporal de la ejecución.
+- [x] Matriz sintética cubre enums declarados de nivel/objetivo/módulo/rol/dieta/alergia; datos activos de perfil (`goals`, alergias, gustos, aversiones, notas, nivel, módulos) se leen de vuelta del API. Dieta/picante/ración/severidad permanecen solo en notas por la discrepancia de rutas documentada. Dos hogares de un miembro y hogares multi-miembro. Evidencia: pruebas unitarias y E2E (10 usuarios, 4 hogares; API read-back).
+- [x] Alta y re-login reutilizan el helper de contraseña común; correos sintéticos únicos y sin contraseña/token en plan, reportes o capturas. Evidencia: helper E2E y test de unicidad.
+- [x] Generación determinista por semilla, correos distintos entre ejecuciones; rechaza semilla vacía/inválida. Evidencia: test unitario.
+- [x] Guardas de opt-in, loopback y ruta exacta de SQLite aislada. Evidencia: test unitario.
 - [ ] Pruebas unitarias/integración cubren generación, repetición, aislamiento, miembros, fallo parcial y limpieza sin tocar datos/procesos preexistentes.
 - [ ] La matriz real cubre las rutas de generación síncronas y los jobs AI activos (incluidos los flujos de compra/ticket, hogar, recetas, plan semanal y asistente); cada ruta queda mapeada a su perfil y presupuesto.
 - [ ] Una respuesta fallida, inválida, timeout, cancelación o límite de presupuesto detiene el run y ejecuta cleanup; los snapshots verifican escrituras esperadas y ausencia de efectos laterales.
-- [ ] La verificación UI usa Playwright contra app/servidor aislados; cubre un perfil solo y uno con hogar, escritorio y móvil, y guarda capturas sintéticas ignoradas por Git.
-- [ ] El documento de resultados registra perfiles/flows probados, comandos, respuestas agregadas, coverage y limitaciones, sin credenciales ni contenido del proveedor.
+- [x] UI E2E sobre app/SQLite aisladas; perfil individual (hogar de 1) y familia de 6, escritorio y móvil. Capturas sintéticas locales ignoradas por Git: `.e2e-screenshots/ai-persona-seeds/{solo,family}-{desktop,mobile}.png`.
+- [x] Documento de resultados registra matriz, comandos, resultados y limitaciones sin credenciales ni prompts/respuestas: `AI-SEED-PERSONAS-SMOKE-RESULTS.md`.
 - [ ] Se cumplen los gates CI/coverage vigentes; el Draft PR enlaza esta spec y sigue Draft hasta cerrar toda casilla con evidencia reproducible.
 
 ## Estado de verificación
 
-Pendiente. La inspección inicial confirma que el servidor DevBar `HogarAI` está levantado con health `error`, y que el grupo `IA` no anuncia su servicio `dev` en ejecución. No se harán pruebas con esos servicios ni con su DB hasta verificar aislamiento/health y resolverlo dentro del harness temporal.
+E2E aislado de generación de perfiles pasó en Chromium; los proyectos móviles se omiten para no duplicar escrituras en la misma ejecución, pero las vistas se prueban con viewport PC/móvil en un solo test. El servicio WebAPI DevBar responde y su sesión figura lista, aunque el preflight de privacidad bloquea las generaciones reales. Ver `AI-SEED-PERSONAS-SMOKE-RESULTS.md`; no se ejecutó ninguna generación real.
