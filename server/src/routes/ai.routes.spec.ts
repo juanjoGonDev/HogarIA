@@ -218,7 +218,7 @@ describe('proveedores de IA por función', () => {
     expect(configs.find((row: any) => row.id === segunda.id).assignedFunctions).toEqual([
       'assistant'
     ]);
-    expect(JSON.stringify(configs)).not.toContain('sk-x');
+    expect(configs.every((row: any) => !('api_key' in row) && !('apiKey' in row))).toBe(true);
   });
 
   it('omite la api_key sin rechazar ids que contienen texto parecido', async () => {

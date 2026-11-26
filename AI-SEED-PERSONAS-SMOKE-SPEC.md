@@ -5,7 +5,7 @@
 
 ## Objetivo
 
-Crear un generador reutilizable de cuentas de prueba para usuarios solos y hogares con varios miembros, y una matriz finita que ejercite las entradas de generación de IA con perfiles sintéticos. Todas las cuentas creadas por el generador comparten una contraseña configurada fuera de Git; el valor nunca se registra ni se incluye en capturas o informes.
+Crear un generador reutilizable de cuentas de prueba para usuarios solos y hogares con varios miembros, y una matriz finita que ejercite las entradas de generación de IA con perfiles sintéticos. Todas las cuentas creadas por el generador comparten la contraseña de prueba centralizada en el helper E2E existente; el generador no la duplica ni la incluye en capturas o informes.
 
 ## Fuente vigente revisada
 
@@ -20,8 +20,8 @@ Crear un generador reutilizable de cuentas de prueba para usuarios solos y hogar
 
 - Cubrir los valores válidos del contrato con una matriz pareada, no el producto cartesiano de todas las opciones: cuentas solas, hogar de 2 miembros y hogar numeroso; variedad de niveles, objetivos, módulos, alergias, dietas y permisos.
 - Crear correos sintéticos bajo `hogaria.test`, con identificador único de ejecución. No incorporar datos de personas reales.
-- Leer la contraseña común solo de `HOGARIA_AI_SEED_PASSWORD`; fallar pronto si falta. No guardar su valor, hashes, tokens WebAPI, prompts ni respuestas en fixtures, logs, specs, capturas o reportes.
-- El smoke no depende de una sesión de usuario real ni de Brave. Los JWT de la app y el token temporal de WebAPI viven solo en memoria. Reutilizar el harness que crea y elimina el token propio; no revocar tokens ajenos.
+- Crear cuentas mediante el helper de registro E2E existente, que aplica una contraseña común de prueba sin duplicarla en el generador. Mantener JWT y token WebAPI solo en memoria; no guardar credenciales, prompts ni respuestas en fixtures, logs, capturas o reportes.
+- El smoke no depende de una sesión real ni de Brave. Los JWT de las cuentas sintéticas y el token temporal de WebAPI viven solo en memoria. Reutilizar el harness que crea y elimina el token propio; no revocar tokens ajenos.
 - Toda escritura del smoke debe pasar por una SQLite temporal cuya ruta efectiva `DATABASE_PATH` esté contenida en el directorio exclusivo de esa ejecución. El generador debe rechazar orígenes no loopback y bases no aisladas en modo de prueba. No usar la SQLite del servidor DevBar en ejecución.
 - Los smokes reales son opt-in, secuenciales y con presupuesto máximo de llamadas explícito por flujo. Un error detiene la matriz; no hay reintentos ciegos ni bucles sin límite. Las suites repetibles simulan al proveedor.
 - Las propuestas no se aplican salvo que un escenario exija comprobar un flujo de confirmación; ese escenario usa datos y DB desechables.
@@ -29,7 +29,7 @@ Crear un generador reutilizable de cuentas de prueba para usuarios solos y hogar
 ## Checklist de aceptación
 
 - [ ] El generador comparte un catálogo tipado de perfiles y hogares; valores de nivel/objetivo/módulo/rol/dieta/alergia cubiertos, con hogares solo y multi-miembro.
-- [ ] Todas las cuentas de una ejecución usan la contraseña común de entorno y correos sintéticos únicos; no se expone la contraseña ni se guardan tokens.
+- [ ] Todas las cuentas de una ejecución usan el helper de contraseña común y correos sintéticos únicos; no se expone la contraseña ni se guardan tokens.
 - [ ] Generación de perfiles repetible con la misma semilla, sin colisiones entre ejecuciones; rechaza semilla vacía o inválida.
 - [ ] Guardas impiden writes si falta el opt-in, el servidor no es loopback o `DATABASE_PATH` no es la SQLite temporal de la ejecución.
 - [ ] Pruebas unitarias/integración cubren generación, repetición, aislamiento, miembros, fallo parcial y limpieza sin tocar datos/procesos preexistentes.
