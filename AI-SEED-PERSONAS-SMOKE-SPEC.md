@@ -34,7 +34,8 @@ Crear un generador reutilizable de cuentas de prueba para usuarios solos y hogar
 - [x] Generación determinista por semilla, correos distintos entre ejecuciones; rechaza semilla vacía/inválida. Evidencia: test unitario.
 - [x] Guardas de opt-in, loopback y ruta exacta de SQLite aislada. Evidencia: test unitario.
 - [ ] Pruebas unitarias/integración cubren generación, repetición, aislamiento, miembros, fallo parcial y limpieza sin tocar datos/procesos preexistentes.
-- [ ] La matriz real cubre las rutas de generación síncronas y los jobs AI activos (incluidos los flujos de compra/ticket, hogar, recetas, plan semanal y asistente); cada ruta queda mapeada a su perfil y presupuesto.
+- [x] Los E2E con proveedor loopback cubren los 11 `AiJobKind` vigentes entre las rutas de recetas, planificación, compra/ticket, hogar y asistente; se ejecutan con cuentas del generador y DB temporal, sin red externa. Evidencia: dos pruebas Playwright pasaron en una ejecución aislada; perfiles solo y familia; salida `2 passed`, sin directorio temporal residual.
+- [ ] La matriz real WebAPI cubre las rutas de generación síncronas y los jobs AI activos; cada ruta queda mapeada a su perfil y presupuesto explícito.
 - [ ] Una respuesta fallida, inválida, timeout, cancelación o límite de presupuesto detiene el run y ejecuta cleanup; los snapshots verifican escrituras esperadas y ausencia de efectos laterales.
 - [x] UI E2E sobre app/SQLite aisladas; perfil individual (hogar de 1) y familia de 6, escritorio y móvil. Capturas sintéticas locales ignoradas por Git: `.e2e-screenshots/ai-persona-seeds/{solo,family}-{desktop,mobile}.png`.
 - [x] Documento de resultados registra matriz, comandos, resultados y limitaciones sin credenciales ni prompts/respuestas: `AI-SEED-PERSONAS-SMOKE-RESULTS.md`.
@@ -42,4 +43,4 @@ Crear un generador reutilizable de cuentas de prueba para usuarios solos y hogar
 
 ## Estado de verificación
 
-E2E aislado de generación de perfiles pasó en Chromium; los proyectos móviles se omiten para no duplicar escrituras en la misma ejecución, pero las vistas se prueban con viewport PC/móvil en un solo test. El servicio WebAPI DevBar responde y su sesión figura lista, aunque el preflight de privacidad bloquea las generaciones reales. Ver `AI-SEED-PERSONAS-SMOKE-RESULTS.md`; no se ejecutó ninguna generación real.
+E2E aislado de generación de perfiles y cobertura loopback de los 11 `AiJobKind` pasaron en Chromium; los proyectos móviles se omiten para no duplicar escrituras en la misma ejecución, pero las vistas se prueban con viewport PC/móvil en un solo test. El servicio WebAPI DevBar responde y su sesión figura lista, aunque el preflight de privacidad bloquea las generaciones reales. Ver `AI-SEED-PERSONAS-SMOKE-RESULTS.md`; no se ejecutó ninguna generación contra el modelo real.
