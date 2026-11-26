@@ -19,10 +19,10 @@
     "node": ">=22.0.0"
   },
   "dependencies": {
-    "hono": "4.13.16",
+    "hono": "4.13.20",
     "hono-rate-limiter": "0.5.4",
-    "@hono/node-server": "2.1.5",
-    "better-sqlite3": "13.0.3",
+    "@hono/node-server": "2.1.11",
+    "better-sqlite3": "13.2.0",
     "drizzle-orm": "0.45.4",
     "zod": "4.6.7",
     "jsonwebtoken": "9.0.3",
@@ -36,13 +36,13 @@
     "@types/jsonwebtoken": "9.0.10",
     "@types/bcryptjs": "2.4.6",
     "@types/node": "22.5.1",
-    "@typescript-eslint/eslint-plugin": "8.72.1",
-    "@typescript-eslint/parser": "8.72.1",
+    "@typescript-eslint/eslint-plugin": "8.73.0",
+    "@typescript-eslint/parser": "8.73.0",
     "drizzle-kit": "0.31.11",
     "eslint": "9.17.0",
     "tsx": "4.23.15",
     "typescript": "5.7.3",
-    "vitest": "5.0.5",
-    "@vitest/coverage-v8": "5.0.5"
+    "vitest": "5.1.1",
+    "@vitest/coverage-v8": "5.1.1"
   }
 }

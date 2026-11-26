@@ -117,3 +117,16 @@ Run #1146 (`41894912465`, commit `1589a83d`) pasó instalación congelada, smoke
 El run terminó con fallo en los shards E2E 1 y 4; instalación, smokes `amd64`/`arm64`, full-stack, servidor, typecheck y build pasaron. Ocho pruebas fallaban porque, después de marcar un producto como comprado, la nueva pregunta de ubicación queda correctamente modal y bloquea interacciones posteriores. Una era `account.spec.ts`; siete eran de lista, ciclo de vida, orden o sugerencias. No es un fallo del flujo de compra: las pruebas omitían contestar la pregunta.
 
 Corrección publicada en `7990cd35`: helper E2E `skipOptionalShoppingLocationPrompt`, que exige el aviso y elige «Ahora no» en pruebas ajenas a ubicación; las pruebas de ubicación conservan sus aserciones. Verificado localmente: suites Chromium focales (42 pasaron, 3 omitidas), full-stack dinero/presupuesto (4 pasaron), Prettier, `typecheck:e2e` y hook pre-push completo (configuración 146, cliente 1837, servidor 2260; 1 omitido). El run final `41916635303`, head `6015d7a2`, pasó los 11 jobs; CodeQL `41916547240` pasó ambos análisis.
+
+## Hallazgo del CI del PR #72 — 2026-11-26
+
+Los runs `45875190646` y `45875336322` fallaron por la misma causa en dos áreas distintas. El job `Install & warm caches` rechazó `pnpm install --frozen-lockfile`; ambos builds de contenedor fallaron en el mismo paso congelado del Dockerfile. El manifiesto de `server/package.json` del merge temporal (base `e88336a5`) pide siete versiones distintas de las declaradas por el importador `server` de `pnpm-lock.yaml`: `@hono/node-server`, `better-sqlite3`, `hono`, `@typescript-eslint/eslint-plugin`, `@typescript-eslint/parser`, `@vitest/coverage-v8` y `vitest`. No es un fallo de runtime ni de los tests E2E. No desactivar el lockfile congelado.
+
+### Criterios de corrección vigentes
+
+- [x] Alinear `server/package.json` de la rama y `pnpm-lock.yaml` con el manifiesto de la base `master` que usa CI; conservar `--frozen-lockfile`.
+- [x] Ejecutar `pnpm install --frozen-lockfile` localmente y confirmar que el diff del lockfile solo resuelve las discrepancias reportadas.
+- [ ] Confirmar que las imágenes `amd64` y `arm64` completan build y smoke con la instalación congelada.
+- [ ] Obtener un run remoto nuevo del PR #72 con instalación, ambos smokes y todos los demás jobs requeridos verdes.
+
+**Evidencia local (2026-11-26):** `server/package.json` coincide con `origin/master` (`git diff origin/master -- server/package.json` vacío); se reprodujo el `ERR_PNPM_OUTDATED_LOCKFILE` exacto al aplicar los pins del merge de CI, y el lockfile se regeneró sin scripts. `pnpm install --frozen-lockfile --lockfile-only --ignore-scripts` pasó. Instalación real aislada: workspace temporal con los tres manifests y lockfile, `pnpm install --frozen-lockfile --ignore-scripts` instaló 1043 paquetes con pnpm 10.15.0; el directorio temporal se eliminó. El diff queda limitado a los siete pins de server y resoluciones transitivas de esos paquetes (Hono, better-sqlite3, typescript-eslint y Vitest); no cambia el importador del frontend.
