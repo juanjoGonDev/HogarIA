@@ -1,7 +1,7 @@
 # Perfiles sintéticos y smoke de IA — resultados
 
 **Ejecución inicial:** 26-11-2026 · **Actualización:** 27-11-2026 · rama `feat/calendar-recipe-cooking` · PR #72 (Draft).
-**Estado:** generador, UI E2E, fallo parcial y matriz loopback de los 11 `AiJobKind` verificados. Hubo 11 respuestas reales de `gpt-5` en un WebAPI temporal aislado; no fueron a `localhost:3001`. El teardown elimina la configuración temporal y la DB demo conserva solo datos sintéticos.
+**Estado:** generador, UI E2E, fallo parcial y matriz loopback de los 11 `AiJobKind` verificados. Hubo 11 respuestas reales de `gpt-5` en un WebAPI temporal aislado. En la revalidación posterior autorizada, las llamadas de receta y conexión sí llegaron al WebAPI DevBar de `localhost:3001`, pero el proveedor terminó ambas en `internal_error`; no son respuestas generadas y la matriz completa sigue pendiente.
 
 ## Matriz generada
 
@@ -142,6 +142,14 @@ Generadas tras esperar contenido visible y comprobar el recuento de miembros; `.
 - La carga/verificación de seeds solo usó la API local aislada de HogarIA. Las 11 respuestas reales citadas arriba corresponden a un contenedor WebAPI temporal con DB propia, así que tampoco aparecen en la instancia de `:3001`.
 - En el HEAD actual se conectaron los escenarios live a la matriz de personas (`solo-beginner`, `solo-allergy`, `family-owner`) y se ejecutó E2E loopback aislado: 2/2 tests, salida `2 passed`; `pnpm run test:config` pasó 157/157 y `pnpm typecheck:e2e` pasó. Ninguno de esos tests emitió tráfico a `:3001`.
 - La instancia normal sigue lista y con sesión ChatGPT `ready`, pero mantiene `requestLogging.captureDetails=true` y `sessionRecording.enabled=true`. El preflight fail-closed impide crear token o enviar prompts mientras esa instancia no sea de prueba aislada; no se alteraron sus ajustes.
+
+### Smoke real contra WebAPI DevBar (27-11-2026)
+
+- Por instrucción expresa del usuario, la acción temporal de DevBar probó el API existente `http://127.0.0.1:3001`; no arrancó otra instancia. El proveedor reportado por los logs de ciclo de vida fue `chatgpt`.
+- La configuración temporal mantuvo apagados request logging/captura y grabación de sesión durante las pruebas. El runner verificó la restauración (`WEBAPI_PRIVACY_RESTORED=True`); el HTML diagnóstico siguió desactivado. Los logs consultados fueron solo metadatos saneados de estado, sin inspeccionar ni registrar cuerpos de solicitudes/respuestas o credenciales.
+- Receta sintética: aceptación en background HTTP 200, seguida de estado terminal `failed`, `errorCode=internal_error`; en la SQLite aislada de HogarIA el job resultó `PROVIDER`, con un intento y sin resultado. El test esperó 270 s hasta su timeout porque el job fallido esperaba la ventana de reintento manual.
+- Test de conexión sintético: aceptación HTTP 200, pero el estado terminal del trabajo fue `failed`/`internal_error` en ~3,7 s. Por tanto, el HTTP 200 inicial confirma solo la aceptación en background, no éxito del modelo.
+- Tras reproducir el mismo fallo del proveedor en receta y conexión, se detuvieron los intentos para evitar llamadas repetidas sin señal útil. No se probaron live planificación, tickets, compra, hogar ni asistente; la matriz real no está completa. Las capturas/apps y DB de HogarIA siguieron aisladas; el comando `demo (seeds)` permaneció bajo DevBar.
 
 ## Hallazgo UI resuelto
 
