@@ -61,7 +61,7 @@ Crear un generador reutilizable de cuentas de prueba para usuarios solos y hogar
 - [x] Gate de referencia: run [45878848795 (#1352)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45878848795), 11/11 jobs verdes en `3c5432e4`.
 - [x] Corrección del fallo de foco del run #1354: CI [45890876833 (#1359)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45890876833) pasó 11/11 jobs en `764067a9`.
 - [x] Estado/spec actualizado en `eab195fa`: CI [45893533271 (#1361)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45893533271) pasó 11/11 jobs; el PR #72 permanece Draft por las generaciones reales y la auditoría de errores del proveedor.
-- [x] Regresión de fallo parcial/i18n y timeout de test en `fb7e536a`: pre-push completo pasó; el CI [45915858398 (#1369)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45915858398) del HEAD `f2d71cce` pasó 11/11 jobs; el run #1362 anterior fue cancelado.
+- [x] Regresión de fallo parcial/i18n y timeout de test en `fb7e536a`: pre-push completo pasó; el CI [45922014375 (#1371)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45922014375) del HEAD `de96f7bf` pasó 11/11 jobs; el run #1362 anterior fue cancelado.
 
 ## Scripts de demo implementados
 
