@@ -1,6 +1,6 @@
 # Perfiles sintéticos y smoke de IA — resultados
 
-**Ejecución:** 26-11-2026 · rama `feat/calendar-recipe-cooking` · PR #72 (Draft).
+**Ejecución inicial:** 26-11-2026 · **Actualización:** 27-11-2026 · rama `feat/calendar-recipe-cooking` · PR #72 (Draft).
 **Estado:** generador, UI E2E, fallo parcial y matriz loopback de los 11 `AiJobKind` verificados; smoke real de generación IA pendiente por el aislamiento de WebAPI.
 
 ## Matriz generada
@@ -79,7 +79,7 @@ Generadas tras esperar contenido visible y comprobar el recuento de miembros; `.
 - CI run [45878848795 (#1352)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45878848795) pasó 11/11 jobs, incluidos instalación, smokes de contenedor `amd64` y `arm64`, cuatro shards E2E, build, typecheck y pruebas de servidor.
 - Tras corregir la secuenciación de foco que falló en #1354, CI run [45890876833 (#1359)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45890876833) pasó 11/11 jobs en `764067a9`, incluidos los cuatro shards E2E.
 - CI run [45893533271 (#1361)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45893533271) pasó 11/11 jobs en `eab195fa`; el run anterior #1360 fue cancelado.
-- Commit `fb7e536a` añadió la regresión de fallo parcial, cargó el bundle `profile` en `/household` y fijó el timeout de una migración de test que el pre-push había encontrado flaky. Hook completo pasó en 98,56 s; suite servidor 2.260 pass/1 skip. CI run [45896836456 (#1362)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45896836456) sigue en cola.
+- Commit `fb7e536a` añadió la regresión de fallo parcial, cargó el bundle `profile` en `/household` y fijó el timeout de una migración de test que el pre-push había encontrado flaky. Hook completo pasó en 98,56 s; suite servidor 2.260 pass/1 skip. El CI [45915858398 (#1369)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45915858398) del HEAD `f2d71cce` pasó 11/11 jobs; el run #1362 anterior fue cancelado.
 
 ## Estado del smoke real de IA
 
@@ -92,7 +92,15 @@ Generadas tras esperar contenido visible y comprobar el recuento de miembros; `.
 - Revalidación read-only 2026-11-26: el grupo DevBar `IA` sigue ejecutando `dev` en `127.0.0.1:3001`; `/health/ready` informa `ready` y storage listo. Los flags efectivos son `requestLogging.enabled=true`, `captureDetails=true` y `debugMode=true`; el preflight de smoke real falla antes de crear token o llamar al modelo.
 - La guía de persistencia de WebAPI documenta que las sesiones operativas normales guardan el prompt completo y el resultado del proveedor en `session_events.content`. Por tanto, no basta con apagar temporalmente el logging del WebAPI normal: un smoke real requiere un WebAPI con DB temporal y estado de proveedor autorizado/aislado.
 - No se modificaron los controles, la base de datos ni la sesión existente del WebAPI; no se creó token ni se usó la instancia DevBar. El intento anónimo no produjo una respuesta del modelo. Los 11 `AiJobKind` sí se ejercitan con proveedor loopback en los E2E aislados descritos arriba.
-- Pendiente: establecer el WebAPI de prueba aislado, luego ejecutar la matriz finita existente por flujos/job y perfiles, con presupuesto y limpieza propios. No hacer reintentos ciegos ni afirmar que el modelo real funciona hasta completar ese run.
+- Pendiente: disponer de un runtime de proveedor autorizado y compatible en el WebAPI aislado, luego ejecutar la matriz finita existente por flujos/job y perfiles, con presupuesto y limpieza propios. No hacer reintentos ciegos ni afirmar que el modelo real funciona hasta completar ese run.
+
+### Verificación WebAPI aislada y token API (27-11-2026)
+
+- Se levantó otra instancia local del WebAPI en loopback, con una SQLite temporal propia; no se usó la DB ni el proceso DevBar normal.
+- Con request logging, captura de detalles, debug, grabación de sesión y HTML diagnóstico desactivados, `/health/ready` respondió listo. Se creó un bearer temporal por la API administrativa y `GET /v1/models` devolvió HTTP 200 con tres modelos (`gpt-5` activo).
+- Se borró el token mediante la API y se verificó su ausencia; el servidor se detuvo, el puerto dejó de aceptar conexiones y se retiró la carpeta temporal exacta. El secreto nunca se imprimió ni persistió.
+- No se envió prompt: un token bearer autentica al cliente frente al WebAPI, pero no sustituye la autenticación del proveedor ChatGPT. En otro WebAPI aislado, el chequeo de sesión falló con HTTP 503 `browser_unavailable` / `browser_launch_failed` porque la distribución Chrome configurada para Patchright no estaba disponible en el entorno aislado. No se abrió Chrome ni se utilizó el perfil Brave existente.
+- Resultado: la conectividad/autenticación de la API local queda verificada; generación real pendiente. La matriz de `pnpm demo:regenerate` sigue sin ejecutarse y los checks de generación real permanecen sin marcar.
 
 ## Hallazgo UI resuelto
 

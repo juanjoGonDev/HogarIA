@@ -1,6 +1,6 @@
 # Generador de perfiles sintéticos y smoke de IA
 
-**Estado:** Draft; generador, matriz loopback y comandos/SQLite demo verificados; la generación WebAPI real sigue bloqueada por los controles de privacidad activos.
+**Estado:** Draft; generador, matriz loopback, DB demo y bearer de WebAPI aislado verificados; la generación WebAPI real sigue pendiente: DevBar no cumple privacidad y el runtime aislado no encuentra el navegador esperado.
 **Rama/PR:** `feat/calendar-recipe-cooking` / #72 Draft. Sin merge ni publicación de datos.
 
 ## Objetivo
@@ -27,6 +27,8 @@ Crear un generador reutilizable de cuentas de prueba para usuarios solos y hogar
 - Los smokes reales son opt-in, secuenciales y con presupuesto máximo de llamadas explícito por flujo. Un error detiene la matriz; no hay reintentos ciegos ni bucles sin límite. Las suites repetibles simulan al proveedor.
 - Las propuestas no se aplican salvo que un escenario exija comprobar un flujo de confirmación; ese escenario usa datos y DB desechables.
 - El WebAPI normal de DevBar no es una base de prueba: sus sesiones operativas persisten el prompt completo y la respuesta en `session_events.content` (contrato de `docs/session-recording.md`). El smoke real debe usar DB WebAPI aislada además de la SQLite aislada de HogarIA. El 2026-11-26 se revalidó el servicio `IA` en `127.0.0.1:3001`: readiness/storage listos, pero `requestLogging.enabled`, `captureDetails` y `debugMode` siguen activos; el preflight no debe crear token ni enviar generaciones en ese estado.
+- El 2026-11-27, un WebAPI temporal de loopback con SQLite propia y logging/captura/sesiones desactivados aceptó un bearer token temporal; `GET /v1/models` devolvió HTTP 200 y tres modelos. El token se eliminó y verificó ausente; proceso y DB temporal se limpiaron. Esto valida autenticación del cliente a WebAPI, no generación IA ni autenticación del proveedor.
+- En un intento aislado distinto, `POST /admin/api/chatgpt/session/check` devolvió HTTP 503 `browser_unavailable` (`browser_launch_failed`: el runtime Patchright no encontró la distribución Chrome configurada). No se envió prompt ni generación, no se abrió Chrome y no se usó ni alteró el perfil Brave existente. El WebAPI normal de DevBar quedó intacto.
 
 ## Modo demo persistente
 
@@ -58,7 +60,7 @@ Crear un generador reutilizable de cuentas de prueba para usuarios solos y hogar
 - [x] Gate de referencia: run [45878848795 (#1352)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45878848795), 11/11 jobs verdes en `3c5432e4`.
 - [x] Corrección del fallo de foco del run #1354: CI [45890876833 (#1359)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45890876833) pasó 11/11 jobs en `764067a9`.
 - [x] Estado/spec actualizado en `eab195fa`: CI [45893533271 (#1361)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45893533271) pasó 11/11 jobs; el PR #72 permanece Draft por las generaciones reales y la auditoría de errores del proveedor.
-- [ ] Regresión de fallo parcial/i18n y timeout de test en `fb7e536a`: pre-push completo pasó; CI #1362 fue cancelado; CI [45897463409 (#1363)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45897463409) está en curso.
+- [x] Regresión de fallo parcial/i18n y timeout de test en `fb7e536a`: pre-push completo pasó; el CI [45915858398 (#1369)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45915858398) del HEAD `f2d71cce` pasó 11/11 jobs; el run #1362 anterior fue cancelado.
 
 ## Scripts de demo implementados
 
