@@ -19,7 +19,7 @@
     "node": ">=22.0.0"
   },
   "dependencies": {
-    "hono": "4.13.20",
+    "hono": "4.13.21",
     "hono-rate-limiter": "0.5.4",
     "@hono/node-server": "2.1.11",
     "better-sqlite3": "13.2.0",
@@ -36,8 +36,8 @@
     "@types/jsonwebtoken": "9.0.10",
     "@types/bcryptjs": "2.4.6",
     "@types/node": "22.5.1",
-    "@typescript-eslint/eslint-plugin": "8.73.0",
-    "@typescript-eslint/parser": "8.73.0",
+    "@typescript-eslint/eslint-plugin": "8.74.0",
+    "@typescript-eslint/parser": "8.74.0",
     "drizzle-kit": "0.31.11",
     "eslint": "9.17.0",
     "tsx": "4.23.15",
