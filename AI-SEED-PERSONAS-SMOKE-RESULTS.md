@@ -51,6 +51,14 @@
 - `pnpm demo` inició API y frontend en puertos loopback efímeros, respondió health/UI y reutilizó la DB semilla. La prueba IPC del launcher, tras readiness, cerró ambos hijos con código 0, liberó el lock del API y retiró el proxy temporal; no tocó servicios DevBar. La SQLite demo y su marker se conservaron.
 - En la actualización previa del 27-11 `pnpm demo:regenerate` seguía sin ejecutar: la instancia normal de DevBar mantenía `requestLogging.enabled=true` y `captureDetails=true`; por seguridad no se creó token ni se envió prompt. La ejecución real descrita más abajo usó un WebAPI temporal aislado, no ese servicio normal.
 
+### DevBar y prueba de la demo (27-11-2026)
+
+- En el grupo `HogarAI` se añadieron las acciones `Demo: cargar seeds` (`pnpm demo:seed`), `Demo: reset DB` (`pnpm demo:db:reset`, confirmación obligatoria) y `Demo: regenerar con IA` (`pnpm demo:regenerate`, confirmación obligatoria). La acción de seed terminó con exit code 0 y confirmó que los perfiles existentes no se duplicaron.
+- Se añadió el comando largo `demo (seeds)` (`pnpm demo`) sin sustituir `start` (`pnpm dev`). El comando demo quedó iniciado por DevBar en loopback; API/proxy y frontend escucharon en los puertos efímeros 58385/58386.
+- Se inició el navegador Brave local apuntando al frontend DevBar. Login HTTP 200 y datos visibles comprobados en los hogares sintéticos de 1 y 6 miembros; el perfil de cocina se renderizó como `Apenas cocino`. No se usó Chrome.
+- Capturas nuevas, solo con datos sintéticos, quedaron en `.e2e-screenshots/ai-persona-seeds/devbar-{solo,family}-{desktop,mobile}.png`; `.e2e-screenshots/` está ignorado por Git. Reset y regeneración AI no se ejecutaron para validar la configuración de sus acciones.
+- El primer intento de arranque informó que la DB demo estaba en uso. No se borró/resetó la DB ni se detuvieron procesos ajenos; el reintento quedó iniciado y la verificación browser posterior pasó. El comando sigue activo en DevBar.
+
 | Verificación                                       | Resultado                                                                                                                                    |
 | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | `pnpm run test:config`                             | PASS · 157/157.                                                                                                                              |

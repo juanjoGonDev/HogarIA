@@ -1,6 +1,6 @@
 # Generador de perfiles sintéticos y smoke de IA
 
-**Estado:** Draft; generador, matriz loopback y DB demo verificados. El 27-11 se completó la matriz real contra un WebAPI aislado usando su sesión ChatGPT autenticada (11 respuestas reales entre smoke completo y pruebas enfocadas). Se corrigió y probó el cleanup de la configuración temporal; quedan pendientes criterios de fallos/timeout/cancelación y el mapeo explícito de toda la matriz.
+**Estado:** Draft; generador, matriz loopback, DB demo y launcher DevBar verificados. El 27-11 se completó la matriz real contra un WebAPI aislado usando su sesión ChatGPT autenticada (11 respuestas reales entre smoke completo y pruebas enfocadas). Se corrigió y probó el cleanup de la configuración temporal; quedan pendientes criterios de fallos/timeout/cancelación y el mapeo explícito de toda la matriz.
 **Rama/PR:** `feat/calendar-recipe-cooking` / #72 Draft. Sin merge ni publicación de datos.
 
 ## Objetivo
@@ -55,6 +55,8 @@ Crear un generador reutilizable de cuentas de prueba para usuarios solos y hogar
 - [x] pnpm demo:seed solo crea datos sintéticos por API en modo demo; la repetición se comporta de forma idempotente y un error parcial deja un resultado recuperable. Evidencia: 10 usuarios/4 hogares leídos de SQLite, segunda llamada sin cambios y regresión de cleanup parcial.
 - [x] pnpm demo:db:reset solo elimina/restablece el fichero DB demo y sidecars propios, y falla cerrada ante ruta alterada, proceso en uso o destino igual a DB normal/WebAPI. Evidencia: tests de ruta exacta, lock en uso y sidecars; comando real ejecutado sobre la DB demo.
 - [x] El camino de éxito de pnpm demo:regenerate hace reset + seed + matriz AI acotada contra el WebAPI local real, sin proveedor fake ni fallback externo. Evidencia: ejecución aislada con modelo `gpt-5`, 9/9 completions HTTP 200 y JSON válido; el seed idempotente y el smoke de conexión/receta enfocados también pasaron.
+- [x] DevBar, grupo `HogarAI`, expone acciones para `pnpm demo:seed`, `pnpm demo:db:reset` y `pnpm demo:regenerate`; reset/regenerate requieren confirmación. El comando `pnpm demo` separado levanta la app con la DB demo sembrada sin reemplazar `pnpm dev`; seed/regenerate y el comando demo configuran Brave para Playwright.
+- [x] Acción DevBar de seed idempotente ejecutada; comando demo iniciado; login, hogar y perfiles sintéticos de 1 y 6 miembros comprobados en Brave. Capturas PC/móvil guardadas; reset/regenerate no se ejecutaron para validar su configuración. Evidencia: `AI-SEED-PERSONAS-SMOKE-RESULTS.md`.
 - [x] El preflight rechaza WebAPI no listo/no autenticado o con controles de privacidad inseguros antes de crear token o transmitir prompts; pruebas de contrato/configuración y safety pasan en `pnpm run test:config` (157/157).
 - [ ] La matriz real WebAPI cubre las rutas de generación síncronas y los jobs AI activos; cada ruta queda mapeada a su perfil, DB demo y presupuesto explícito.
 - [ ] Una respuesta fallida, inválida, timeout, cancelación o límite de presupuesto detiene el run y ejecuta cleanup; los snapshots verifican escrituras esperadas y ausencia de efectos laterales.
