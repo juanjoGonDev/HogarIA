@@ -1,7 +1,7 @@
 # Perfiles sintéticos y smoke de IA — resultados
 
 **Ejecución inicial:** 26-11-2026 · **Actualización:** 27-11-2026 · rama `feat/calendar-recipe-cooking` · PR #72 (Draft).
-**Estado:** generador, UI E2E, fallo parcial y matriz loopback de los 11 `AiJobKind` verificados; smoke real de generación pendiente por autenticación/runtime del proveedor (el bearer local solo validó `/v1/models`).
+**Estado:** generador, UI E2E, fallo parcial y matriz loopback de los 11 `AiJobKind` verificados. Generación real completada: 11 respuestas del modelo `gpt-5` mediante WebAPI local autenticado; el teardown ya elimina la configuración temporal y la DB demo conserva solo datos sintéticos.
 
 ## Matriz generada
 
@@ -49,7 +49,7 @@
 - Revalidación read-only 2026-11-27 de `.tmp/ai-persona-demo/hogaria.sqlite` con conexión `readonly`: `users=10`, `households=4`, tamaños `[6,1,1,2]`. No se tocó la DB normal ni se mostraron emails.
 - El contrato del CLI verifica que el seed usa el supervisor Playwright local con ambos flags demo y ruta exacta; y que `regenerate` ordena reset → seed → únicamente `scripts/run-ai-real-smoke.mjs`, con `HOGARIA_AI_REAL_SMOKE=1` y sin heredar claves de proveedor.
 - `pnpm demo` inició API y frontend en puertos loopback efímeros, respondió health/UI y reutilizó la DB semilla. La prueba IPC del launcher, tras readiness, cerró ambos hijos con código 0, liberó el lock del API y retiró el proxy temporal; no tocó servicios DevBar. La SQLite demo y su marker se conservaron.
-- `pnpm demo:regenerate` no se ejecutó: habría reseteado la DB persistente antes del smoke, y la revisión read-only de `127.0.0.1:3001` mantiene `requestLogging.enabled=true` y `captureDetails=true`. Esas opciones incumplen el preflight; no se creó token ni se envió prompt. El comando debe abortar allí hasta disponer de WebAPI aislado y autorizado.
+- En la actualización previa del 27-11 `pnpm demo:regenerate` seguía sin ejecutar: la instancia normal de DevBar mantenía `requestLogging.enabled=true` y `captureDetails=true`; por seguridad no se creó token ni se envió prompt. La ejecución real descrita más abajo usó un WebAPI temporal aislado, no ese servicio normal.
 
 | Verificación                                       | Resultado                                                                                                                                    |
 | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -84,6 +84,17 @@ Generadas tras esperar contenido visible y comprobar el recuento de miembros; `.
 
 ## Estado del smoke real de IA
 
+### Resultado real aislado (27-11-2026)
+
+- Se verificó una sesión ChatGPT autenticada en WebAPI. El fallo inicial no era de login: el chequeo del navegador automatizado en modo headless devolvía challenge. En el WebAPI aislado se cambió el runtime a headed sobre Xvfb; la sesión pasó el chequeo y las generaciones funcionaron. La app E2E se ejecutó con el binario Brave configurado; no se abrió una ventana Chrome. Son dos navegadores distintos: Brave para Playwright local y el Chromium/Patchright interno del contenedor WebAPI para ChatGPT.
+- Se mantuvo el provider ChatGPT de WebAPI. HogarIA usó temporalmente provider `custom` para enrutar al proxy loopback aislado; ese proxy solo validaba/reenviaba requests al WebAPI local y medía el presupuesto. No se sustituyó el provider del WebAPI ni se usó un modelo local/API externa.
+- `pnpm demo:regenerate`: PASS · reset → seed de 10 perfiles/4 hogares → matriz live acotada; 9 completions reales, HTTP 200, JSON válido, `stop`, modelo `gpt-5`. Dos smokes enfocados adicionales (conexión y receta) añadieron 2 completions: 11 en total. `pnpm demo:seed` posterior confirmó idempotencia.
+- Estado antes de cleanup: DB demo con 11 usuarios/5 hogares, 12 recetas, 1 lista, 1 ticket y 21 trabajos terminados; un usuario adicional y las salidas pertenecen al smoke sintético. La ejecución había dejado activa una config HogarIA con base URL loopback efímera y marcador de prueba. Se añadió teardown autenticado por API en `tests/e2e/ai-real-smoke.spec.ts`; E2E aislado de regresión pasó 1/1. La config de la ejecución real se eliminó por API, preservando las salidas; lectura posterior confirmó `ai_configs=0` y 21 trabajos aún presentes.
+- Preflight/aislamiento: la ejecución usó una SQLite de WebAPI temporal y logging, captura, grabación y HTML diagnóstico desactivados; el bearer temporal quedó eliminado (conteo final 0). Se retiraron el contenedor temporal, la copia temporal del perfil Patchright y la DB temporal tras verificar que solo el contenedor de esta tarea usaba esos volúmenes. `web-api` normal continuó arriba e intacto.
+- La configuración headless se cambió solo en el WebAPI aislado (effectiveHeadless=false, display Xvfb); no se alteraron settings ni DB del WebAPI normal. El runtime headless de WebAPI no debe confundirse con que el servicio Docker estuviese apagado o que la sesión ChatGPT no estuviese autenticada.
+- Checks de esta actualización: `pnpm run test:config` PASS · 157/157; `pnpm run typecheck:e2e` PASS; `pnpm exec prettier --check …` PASS; E2E de cleanup con Brave PASS · 1/1. El pre-push del commit de documentación también pasó build, typecheck, UI quality y suites client/server (1.837 client; 2.291 server, 1 skip).
+- Pendiente: completar los criterios separados de fallo de respuesta/proveedor, timeout/cancelación de la matriz live y el mapeo de cada ruta/job a perfil y presupuesto. No se declara cubierto todo el producto cartesiano ni toda condición de error.
+
 ### Intento real anónimo sin sesión
 
 - El 26-11-2026 se ejecutó una única prueba `ChatGPT guest live smoke` con prompt e imagen sintéticos, perfil nuevo y temporales aislados; no se usó la instancia DevBar ni la sesión de Brave. Preparación, imagen y servidor local pasaron (3/4 pasos); la solicitud terminó en HTTP 401 `authentication_required` al comprobar el estado del proveedor, sin respuesta del modelo. No cuenta como generación real válida.
@@ -107,7 +118,7 @@ Generadas tras esperar contenido visible y comprobar el recuento de miembros; `.
 
 - Inspección read-only del WebAPI actual: el handler `/v1/chat/completions` declara `provider: "chatgpt"` y ejecuta el adaptador ChatGPT/Patchright; no se encontró otro módulo de inferencia en `src/providers`.
 - `patchright.browserChannel` en el schema admite `chrome`, aunque hay un `browserExecutablePath` personalizado; la instancia probada usó el valor configurado y no encontró Chrome. La clave `agenta.apiKey` alimenta `src/shared/observability/agenta.ts` (telemetría/observabilidad), no sustituye una API key del modelo.
-- Implicación (inferencia por la separación del perfil Patchright documentada por WebAPI): la extensión Brave del navegador no autentica por sí sola el perfil propio del proceso WebAPI. La generación real sin sesión de proveedor no está soportada por la configuración actual; hace falta añadir/configurar un proveedor de inferencia por API key (guardada localmente) o una vía compatible. No se leyó ninguna clave ni se modificó el repositorio externo/configuración del WebAPI.
+- Implicación de entonces (inferencia tras el intento headless fallido): la extensión Brave no autentica por sí sola el perfil del proceso WebAPI. La conclusión de que la generación real no estaba disponible quedó **superada** por el smoke autenticado y exitoso del 27-11, documentado al inicio de esta sección. No se leyó ninguna clave ni se modificó el repositorio externo/configuración del WebAPI normal.
 
 ## Hallazgo UI resuelto
 
@@ -115,4 +126,4 @@ La tarjeta con nivel `none` mostraba literalmente `profile.cooking.none`. La cla
 
 ## Límites
 
-No se ejecutó una generación real de IA, ni se recorrió el producto cartesiano de perfiles. No se declara que «todas las generaciones funcionan». La matriz viva, la cobertura de fallo/timeout/cancelación y gates CI restantes siguen pendientes en `AI-SEED-PERSONAS-SMOKE-SPEC.md`.
+Se completó la matriz live acotada indicada arriba; no se recorrió el producto cartesiano de perfiles. No se declara que «todas las generaciones» ni todas las condiciones de error funcionan. La cobertura de fallo/timeout/cancelación y gates restantes siguen pendientes en `AI-SEED-PERSONAS-SMOKE-SPEC.md`.

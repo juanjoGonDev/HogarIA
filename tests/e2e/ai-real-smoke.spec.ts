@@ -6,6 +6,7 @@ import type { AddressInfo } from 'node:net';
 import { mkdir, readFile } from 'node:fs/promises';
 import { writeFileSync } from 'node:fs';
 import { expect, test } from './fixtures';
+import type { Page } from './fixtures';
 import { registerAndGoto, registerWithHousehold } from './helpers/auth';
 import { activateAiPersona, seedAiPersonaMatrix } from './helpers/ai-persona-seeds';
 import {
@@ -20,6 +21,7 @@ import {
 
 const TOKEN_KEY = 'hogar:v1:auth_token';
 const PROVIDER_KEY_MARKER = '__HOGARIA_AI_REAL_SMOKE_PROVIDER_KEY__';
+const liveAiConfigsByPage = new WeakMap<Page, { token: string; ids: string[] }>();
 const STORE_CORRECTED = 'Supermercado QA corregido';
 const DATE_CORRECTED = '2024-03-01';
 const DATE_CORRECTED_HISTORY = '1/3/24';
@@ -59,6 +61,7 @@ const LIVE_ASSISTANT_ONLY = process.env.HOGARIA_AI_REAL_SMOKE_ASSISTANT_ONLY ===
 const LIVE_CONNECTION_ONLY = process.env.HOGARIA_AI_REAL_SMOKE_CONNECTION_ONLY === '1';
 const LIVE_WORKFLOWS_ONLY = process.env.HOGARIA_AI_REAL_SMOKE_WORKFLOWS_ONLY === '1';
 const LIVE_HOUSEHOLD_PLAN_ONLY = process.env.HOGARIA_AI_REAL_SMOKE_HOUSEHOLD_PLAN_ONLY === '1';
+const CONFIG_CLEANUP_TEST_ONLY = process.env.HOGARIA_AI_CONFIG_CLEANUP_TEST === '1';
 const LIVE_RECEIPT_SELECTION = process.env.HOGARIA_AI_REAL_SMOKE_RECEIPT_SELECTION;
 const LIVE_SMOKE_PHASE_FILE = process.env.E2E_RUN_DIR
   ? join(process.env.E2E_RUN_DIR, 'ai-live-smoke-phase')
@@ -516,6 +519,10 @@ async function saveLiveAiConfig(
   expect(config.data?.id).toBeTruthy();
   expect(config.data).toMatchObject({ retryAttempts: 0, concurrency, isActive: true });
 
+  const cleanup = liveAiConfigsByPage.get(page) ?? { token, ids: [] };
+  cleanup.ids.push(config.data!.id!);
+  liveAiConfigsByPage.set(page, cleanup);
+
   // GPT-5 does not accept a custom temperature. The UI config schema permits null
   // as “leave this provider option out”, but create defaults it, so clear it here.
   const updated = await page.request.patch(`/api/ai/configs/${config.data!.id}`, {
@@ -530,6 +537,44 @@ async function saveLiveAiConfig(
   expect(updated.ok()).toBeTruthy();
   return config.data!.id!;
 }
+
+test.afterEach(async ({ page }) => {
+  const cleanup = liveAiConfigsByPage.get(page);
+  if (!cleanup) return;
+
+  try {
+    for (const configId of [...cleanup.ids].reverse()) {
+      const deadline = Date.now() + LIVE_CONFIG_TIMEOUT_MS + 5_000;
+      while (true) {
+        const response = await page.request.delete(`/api/ai/configs/${configId}`, {
+          headers: { authorization: `Bearer ${cleanup.token}` }
+        });
+        if (response.status() === 200 || response.status() === 404) break;
+
+        const payload = (await response.json().catch(() => ({}))) as { code?: string };
+        if (response.status() !== 409 || payload.code !== 'AI_CONFIG_TEST_RUNNING') {
+          throw new Error(
+            `No se pudo eliminar la configuración temporal del smoke (HTTP ${response.status()}).`
+          );
+        }
+        if (Date.now() >= deadline) {
+          throw new Error('La configuración temporal siguió en uso al vencer el plazo de cleanup.');
+        }
+        await page.waitForTimeout(500);
+      }
+    }
+  } finally {
+    liveAiConfigsByPage.delete(page);
+  }
+});
+
+test('cleans up a temporary provider config after the isolated smoke test', async ({ page }) => {
+  test.skip(!CONFIG_CLEANUP_TEST_ONLY, 'La regresión de cleanup requiere su opt-in aislado.');
+  test.setTimeout(LIVE_TEST_TIMEOUT_MS);
+  await registerAndGoto(page, '/ai-config', 'ai-live-config-cleanup');
+  const token = await authToken(page);
+  await saveLiveAiConfig(page, token);
+});
 
 type LiveAiConfigStatus = {
   id: string;
