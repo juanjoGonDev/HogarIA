@@ -1,7 +1,7 @@
 # Perfiles sintéticos y smoke de IA — resultados
 
 **Ejecución inicial:** 26-11-2026 · **Actualización:** 27-11-2026 · rama `feat/calendar-recipe-cooking` · PR #72 (Draft).
-**Estado:** generador, UI E2E, fallo parcial y matriz loopback de los 11 `AiJobKind` verificados. Hubo 11 respuestas reales de `gpt-5` en un WebAPI temporal aislado. En la revalidación posterior autorizada, las llamadas de receta y conexión sí llegaron al WebAPI DevBar de `localhost:3001`, pero el proveedor terminó ambas en `internal_error`; no son respuestas generadas y la matriz completa sigue pendiente.
+**Estado:** generador, UI E2E y matriz loopback de los 11 `AiJobKind` verificados. Hubo 11 respuestas reales de `gpt-5` en un WebAPI temporal aislado. La matriz live posterior, solicitada por el usuario y ejecutada contra el WebAPI DevBar `localhost:3001`, pasó 7 modos y 25 generaciones; un probe adicional de conexión también pasó. El primer intento headless falló, pero el runtime headed temporal resolvió el challenge; los controles originales quedaron restaurados.
 
 ## Matriz generada
 
@@ -151,10 +151,18 @@ Generadas tras esperar contenido visible y comprobar el recuento de miembros; `.
 - Test de conexión sintético: aceptación HTTP 200, pero el estado terminal del trabajo fue `failed`/`internal_error` en ~3,7 s. Por tanto, el HTTP 200 inicial confirma solo la aceptación en background, no éxito del modelo.
 - Tras reproducir el mismo fallo del proveedor en receta y conexión, se detuvieron los intentos para evitar llamadas repetidas sin señal útil. No se probaron live planificación, tickets, compra, hogar ni asistente; la matriz real no está completa. Las capturas/apps y DB de HogarIA siguieron aisladas; el comando `demo (seeds)` permaneció bajo DevBar.
 
+### Reprueba headed y matriz completa (27-11-2026)
+
+- Diagnóstico seguro vía DevBar encontró `mode=inherit`, `effectiveHeadless=true`, Xvfb `:99` disponible y runtime idle. En los fallos headless, los datos estructurales de página indicaban `challengeScript=1`, `composer=0` y estado `interactive`. Esto es compatible con una página de challenge/no lista; es una inferencia, no el mensaje interno exacto que produjo `internal_error`.
+- Se cambió el control dinámico del WebAPI a `headed` por una acción temporal de DevBar, sin reiniciar el servicio. El probe enfocado de conexión pasó; luego la matriz de perfiles seed ejecutada desde DevBar completó sus 7 modos: `core routes`, `recipe generation`, `recipe workflows and Commons`, `household plan`, `household meal planning`, `assistant action matrix` y `connection test`.
+- La acción de matriz terminó `done`, exit code 0. Los logs de ciclo de vida del proveedor registraron 25/25 respuestas completadas de la matriz, más la respuesta del probe, con cero fallos terminales. Las aserciones de los modos validaron las salidas esperadas; HTTP 200 solo se contó como éxito tras estado terminal `completed`.
+- Cada modo utilizó perfiles seed sintéticos en SQLite HogarIA aislada; la DB persistente de `demo (seeds)` no se reseteó ni recibió estas escrituras. No se levantó otro WebAPI ni otra instancia de HogarIA fuera de DevBar. Playwright apuntó a Brave; no se abrió Chrome.
+- Al finalizar, WebAPI volvió a `mode=inherit`, `effectiveHeadless=true`, cero páginas activas y coordinador `ready`. Verificación read-only confirmó los controles originales: request logging y captureDetails activados, debugMode desactivado, session recording activado y diagnostic HTML desactivado. Durante la prueba, logging/recording se apagaron de forma temporal; por eso no se esperaban sesiones con prompt en `/admin/sessions`. No se copiaron prompts, respuestas ni credenciales.
+
 ## Hallazgo UI resuelto
 
 La tarjeta con nivel `none` mostraba literalmente `profile.cooking.none`. La clave ES/EN ya existía, pero el resolver de `/household` no cargaba el bundle lazy `profile`; se añadió a `translationBundlesResolver` y el E2E exige `Apenas cocino` antes de guardar capturas. La prueba reprodujo el defecto antes del arreglo y pasó después. Las capturas sintéticas escritorio/móvil se regeneraron e inspeccionaron.
 
 ## Límites
 
-Se completó la matriz live acotada indicada arriba; no se recorrió el producto cartesiano de perfiles. No se declara que «todas las generaciones» ni todas las condiciones de error funcionan. La cobertura de fallo/timeout/cancelación y gates restantes siguen pendientes en `AI-SEED-PERSONAS-SMOKE-SPEC.md`.
+Se completó la matriz live finita de rutas/jobs indicada arriba; no se recorrió el producto cartesiano de perfiles. La cobertura separada de respuesta inválida, timeout/cancelación, presupuesto y contratos de acciones demo sigue pendiente en `AI-SEED-PERSONAS-SMOKE-SPEC.md`.
