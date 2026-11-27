@@ -1199,6 +1199,7 @@ test('builds a minimal live-runner environment without inherited provider creden
       HOGARIA_AI_REAL_SMOKE_RECEIPTS_ONLY: '1',
       HOGARIA_AI_REAL_SMOKE_RECEIPT_SELECTION: 'unsubmitted-only',
       HOGARIA_AI_REAL_SMOKE_ALLOW_REDACTED_REQUEST_LOGS: '1',
+      HOGARIA_AI_SEED_GENERATION: '0',
       CI: 'true',
       OPENAI_API_KEY: 'sentinel-openai-secret',
       HOGARIA_AI_REAL_SMOKE_PROVIDER_TOKEN: 'sentinel-webapi-bearer',
@@ -1221,6 +1222,7 @@ test('builds a minimal live-runner environment without inherited provider creden
   assert.equal(env.HOGARIA_AI_REAL_SMOKE_RECEIPTS_ONLY, '1');
   assert.equal(env.HOGARIA_AI_REAL_SMOKE_RECEIPT_SELECTION, 'unsubmitted-only');
   assert.equal(env.HOGARIA_AI_REAL_SMOKE_PROXY_TOKEN, 'synthetic-local-proxy-token');
+  assert.equal(env.HOGARIA_AI_SEED_GENERATION, '1');
   assert.equal(env.HOGARIA_AI_REAL_SMOKE_RECIPE_MAX_TOKENS, '4096');
   assert.equal(env.HOGARIA_AI_REAL_SMOKE_CONFIG_TIMEOUT_MS, '240000');
   assert.equal(env.HOGARIA_AI_REAL_SMOKE_REQUEST_TIMEOUT_MS, '270000');
@@ -1230,6 +1232,10 @@ test('builds a minimal live-runner environment without inherited provider creden
   assert.equal('HOGARIA_AI_REAL_SMOKE_PROVIDER_TOKEN' in env, false);
   assert.equal('HOGARIA_AI_REAL_SMOKE_ALLOW_REDACTED_REQUEST_LOGS' in env, false);
   assert.equal('NODE_OPTIONS' in env, false);
+  const processEnvironments = isolatedProcessEnvironments(env);
+  assert.equal(processEnvironments.server.HOGARIA_AI_SEED_GENERATION, undefined);
+  assert.equal(processEnvironments.browser.HOGARIA_AI_SEED_GENERATION, undefined);
+  assert.equal(processEnvironments.playwright.HOGARIA_AI_SEED_GENERATION, '1');
   assert.equal(
     validateAiLiveSmokeRunner(env, [
       '--config=playwright.ai-real-smoke.config.ts',

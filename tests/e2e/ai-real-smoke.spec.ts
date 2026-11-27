@@ -1,14 +1,18 @@
 import Database from 'better-sqlite3';
 import { isDeepStrictEqual } from 'node:util';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { mkdir, readFile } from 'node:fs/promises';
 import { writeFileSync } from 'node:fs';
 import { expect, test } from './fixtures';
 import type { Page } from './fixtures';
-import { registerAndGoto, registerWithHousehold } from './helpers/auth';
-import { activateAiPersona, seedAiPersonaMatrix } from './helpers/ai-persona-seeds';
+import { registerAndGoto } from './helpers/auth';
+import {
+  activateAiPersona,
+  seedAiPersonaMatrix,
+  type SeededPersonaMatrix
+} from './helpers/ai-persona-seeds';
 import {
   AI_LIVE_RECEIPT_LONG_TICKET_ONLY_SELECTION,
   AI_LIVE_RECEIPT_PREFERRED_JPEG_ONLY_SELECTION,
@@ -22,6 +26,7 @@ import {
 const TOKEN_KEY = 'hogar:v1:auth_token';
 const PROVIDER_KEY_MARKER = '__HOGARIA_AI_REAL_SMOKE_PROVIDER_KEY__';
 const liveAiConfigsByPage = new WeakMap<Page, { token: string; ids: string[] }>();
+let livePersonaMatrixPromise: Promise<SeededPersonaMatrix> | undefined;
 const STORE_CORRECTED = 'Supermercado QA corregido';
 const DATE_CORRECTED = '2024-03-01';
 const DATE_CORRECTED_HISTORY = '1/3/24';
@@ -66,6 +71,18 @@ const LIVE_RECEIPT_SELECTION = process.env.HOGARIA_AI_REAL_SMOKE_RECEIPT_SELECTI
 const LIVE_SMOKE_PHASE_FILE = process.env.E2E_RUN_DIR
   ? join(process.env.E2E_RUN_DIR, 'ai-live-smoke-phase')
   : undefined;
+
+async function activateLivePersona(page: Page, personaKey: string, path: string): Promise<void> {
+  const runDirectory = process.env.E2E_RUN_DIR;
+  if (!runDirectory) throw new Error('E2E_RUN_DIR es obligatorio para sembrar personas live.');
+  const runId = `${basename(runDirectory)}-live`;
+  livePersonaMatrixPromise ??= seedAiPersonaMatrix(page, runId);
+  const matrix = await livePersonaMatrixPromise;
+  const account = matrix.accounts[personaKey];
+  if (!account) throw new Error(`La persona sintética ${personaKey} no existe en la matriz.`);
+  await activateAiPersona(page, account);
+  await page.goto(path);
+}
 
 function reportLiveSmokePhase(phase: string): void {
   if (!LIVE_SMOKE_ENABLED || !LIVE_SMOKE_PHASE_FILE) return;
@@ -571,7 +588,7 @@ test.afterEach(async ({ page }) => {
 test('cleans up a temporary provider config after the isolated smoke test', async ({ page }) => {
   test.skip(!CONFIG_CLEANUP_TEST_ONLY, 'La regresión de cleanup requiere su opt-in aislado.');
   test.setTimeout(LIVE_TEST_TIMEOUT_MS);
-  await registerAndGoto(page, '/ai-config', 'ai-live-config-cleanup');
+  await activateLivePersona(page, 'solo-beginner', '/ai-config');
   const token = await authToken(page);
   await saveLiveAiConfig(page, token);
 });
@@ -819,7 +836,7 @@ test('HogarIA connection-only real test survives closing and re-opening the brow
   test.setTimeout(LIVE_TEST_TIMEOUT_MS);
   page.setDefaultTimeout(LIVE_REQUEST_TIMEOUT_MS);
   reportLiveSmokePhase('connection-only-start');
-  await registerAndGoto(page, '/ai-config', 'ai-live-connection-only');
+  await activateLivePersona(page, 'solo-beginner', '/ai-config');
   reportLiveSmokePhase('connection-only-registered');
   const token = await authToken(page);
   const configId = await saveLiveAiConfig(page, token);
@@ -910,7 +927,7 @@ test('HogarIA household plan proposal real workflow reaches the provider and sta
   test.setTimeout(LIVE_TEST_TIMEOUT_MS);
   page.setDefaultTimeout(LIVE_REQUEST_TIMEOUT_MS);
   reportLiveSmokePhase('household-plan-only-register-start');
-  await registerWithHousehold(page, '/household', 'ai-live-household-plan-only');
+  await activateLivePersona(page, 'family-owner', '/household');
   const token = await authToken(page);
   const configId = await saveLiveAiConfig(page, token);
   const memberships = await page.request.get('/api/household/memberships', {
@@ -983,7 +1000,7 @@ test(AI_LIVE_WORKFLOWS_SMOKE_GREP, async ({ page }) => {
   expect(process.env.PANTRY_IMAGE_SEARCH_FIXTURE).not.toBe('1');
 
   reportLiveSmokePhase('workflow-only-register-start');
-  await registerWithHousehold(page, '/recipes', 'ai-live-workflows-only');
+  await activateLivePersona(page, 'solo-allergy', '/recipes');
   reportLiveSmokePhase('workflow-only-registered');
   const token = await authToken(page);
   // Workflow-only is sequential, and unlimited mode settles permanent provider errors
@@ -1305,7 +1322,7 @@ test('procesa solo los tickets reales seleccionados y verifica la revisión sin 
   );
   reportLiveSmokePhase('real-receipts-inputs-validated');
 
-  await registerWithHousehold(page, '/receipts', 'ai-live-receipts-only');
+  await activateLivePersona(page, 'solo-allergy', '/receipts');
   const token = await authToken(page);
   const configId = await saveLiveAiConfig(page, token);
   reportLiveSmokePhase('real-receipts-started');
@@ -1417,7 +1434,7 @@ test('recorre los ocho AiJobKind con WebAPI real y ticket sintético editable', 
   test.setTimeout(LIVE_TEST_TIMEOUT_MS);
   page.setDefaultTimeout(LIVE_REQUEST_TIMEOUT_MS);
   reportLiveSmokePhase('register-start');
-  await registerWithHousehold(page, '/recipes', 'ai-live-smoke');
+  await activateLivePersona(page, 'solo-allergy', '/recipes');
   reportLiveSmokePhase('registered');
   const token = await authToken(page);
   reportLiveSmokePhase('config-start');
@@ -2060,7 +2077,7 @@ test('valida una receta sintética con texto sin topes mediante una única petic
   test.setTimeout(LIVE_TEST_TIMEOUT_MS);
   page.setDefaultTimeout(LIVE_REQUEST_TIMEOUT_MS);
   reportLiveSmokePhase('recipe-only-register-start');
-  await registerWithHousehold(page, '/recipes', 'ai-live-recipe-only');
+  await activateLivePersona(page, 'solo-allergy', '/recipes');
   reportLiveSmokePhase('recipe-only-registered');
   const token = await authToken(page);
   await saveLiveAiConfig(page, token);
@@ -2126,7 +2143,7 @@ test('valida toda la matriz de acciones transitorias del asistente con WebAPI re
   page.setDefaultTimeout(LIVE_REQUEST_TIMEOUT_MS);
 
   reportLiveSmokePhase('assistant-only-register-start');
-  await registerWithHousehold(page, '/dashboard', 'ai-live-assistant-only');
+  await activateLivePersona(page, 'family-owner', '/dashboard');
   const token = await authToken(page);
   const configId = await saveLiveAiConfig(page, token);
   reportLiveSmokePhase('assistant-only-configured');

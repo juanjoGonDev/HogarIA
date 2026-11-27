@@ -1,7 +1,7 @@
 # Perfiles sintéticos y smoke de IA — resultados
 
 **Ejecución inicial:** 26-11-2026 · **Actualización:** 27-11-2026 · rama `feat/calendar-recipe-cooking` · PR #72 (Draft).
-**Estado:** generador, UI E2E, fallo parcial y matriz loopback de los 11 `AiJobKind` verificados. Generación real completada: 11 respuestas del modelo `gpt-5` mediante WebAPI local autenticado; el teardown ya elimina la configuración temporal y la DB demo conserva solo datos sintéticos.
+**Estado:** generador, UI E2E, fallo parcial y matriz loopback de los 11 `AiJobKind` verificados. Hubo 11 respuestas reales de `gpt-5` en un WebAPI temporal aislado; no fueron a `localhost:3001`. El teardown elimina la configuración temporal y la DB demo conserva solo datos sintéticos.
 
 ## Matriz generada
 
@@ -134,6 +134,14 @@ Generadas tras esperar contenido visible y comprobar el recuento de miembros; `.
 - Inspección read-only del WebAPI actual: el handler `/v1/chat/completions` declara `provider: "chatgpt"` y ejecuta el adaptador ChatGPT/Patchright; no se encontró otro módulo de inferencia en `src/providers`.
 - `patchright.browserChannel` en el schema admite `chrome`, aunque hay un `browserExecutablePath` personalizado; la instancia probada usó el valor configurado y no encontró Chrome. La clave `agenta.apiKey` alimenta `src/shared/observability/agenta.ts` (telemetría/observabilidad), no sustituye una API key del modelo.
 - Implicación de entonces (inferencia tras el intento headless fallido): la extensión Brave no autentica por sí sola el perfil del proceso WebAPI. La conclusión de que la generación real no estaba disponible quedó **superada** por el smoke autenticado y exitoso del 27-11, documentado al inicio de esta sección. No se leyó ninguna clave ni se modificó el repositorio externo/configuración del WebAPI normal.
+
+### Revisión solicitada del tráfico a `localhost:3001` (27-11-2026)
+
+- Llamadas de esta revalidación, todas de lectura: `GET /health/ready`, `GET /admin/api/chatgpt/session`, `GET /admin/api/runtime-controls`, `GET /admin/api/settings/session-recording` y `GET /admin/api/settings/diagnostic-html`.
+- No se llamó a `POST /admin/api/tokens` ni a una ruta de generación del proveedor (`/v1/chat/completions`); por tanto, esta ejecución no debía crear una fila en `/admin/sessions`.
+- La carga/verificación de seeds solo usó la API local aislada de HogarIA. Las 11 respuestas reales citadas arriba corresponden a un contenedor WebAPI temporal con DB propia, así que tampoco aparecen en la instancia de `:3001`.
+- En el HEAD actual se conectaron los escenarios live a la matriz de personas (`solo-beginner`, `solo-allergy`, `family-owner`) y se ejecutó E2E loopback aislado: 2/2 tests, salida `2 passed`; `pnpm run test:config` pasó 157/157 y `pnpm typecheck:e2e` pasó. Ninguno de esos tests emitió tráfico a `:3001`.
+- La instancia normal sigue lista y con sesión ChatGPT `ready`, pero mantiene `requestLogging.captureDetails=true` y `sessionRecording.enabled=true`. El preflight fail-closed impide crear token o enviar prompts mientras esa instancia no sea de prueba aislada; no se alteraron sus ajustes.
 
 ## Hallazgo UI resuelto
 

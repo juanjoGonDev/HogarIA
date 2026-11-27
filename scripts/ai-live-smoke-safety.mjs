@@ -852,6 +852,8 @@ export function isolatedProcessEnvironments(env) {
   const server = { ...env };
   const browser = { ...env };
   const playwright = { ...env };
+  delete server.HOGARIA_AI_SEED_GENERATION;
+  delete browser.HOGARIA_AI_SEED_GENERATION;
   delete server[AI_LIVE_SMOKE_ENV.providerToken];
   delete browser[AI_LIVE_SMOKE_ENV.providerToken];
   delete playwright[AI_LIVE_SMOKE_ENV.providerToken];
@@ -950,6 +952,7 @@ export function createAiLiveSmokeRunnerEnvironment(
     [AI_LIVE_SMOKE_ENV.requestTimeoutMs]: String(deadlines.requestMs),
     [AI_LIVE_SMOKE_ENV.testTimeoutMs]: String(deadlines.testMs),
     [AI_LIVE_SMOKE_ENV.globalTimeoutMs]: String(deadlines.globalMs),
+    HOGARIA_AI_SEED_GENERATION: '1',
     ...(householdMealOnly ? { [AI_LIVE_SMOKE_ENV.householdMealOnly]: '1' } : {}),
     ...(recipeOnly ? { [AI_LIVE_SMOKE_ENV.recipeOnly]: '1' } : {}),
     ...(assistantOnly ? { [AI_LIVE_SMOKE_ENV.assistantOnly]: '1' } : {}),
