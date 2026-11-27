@@ -67,6 +67,13 @@
 | `pnpm exec prettier --check …`                     | PASS · todos los archivos de la unidad.                                                                                                      |
 | Launcher IPC controlado                            | PASS · readiness, exit code 0, lock/proxy/puertos propios retirados; DB y marker permanecen.                                                 |
 
+### Revalidación solicitada (27-11-2026)
+
+- DevBar ya tenía las tres acciones correctas (`demo:seed`, `demo:db:reset`, `demo:regenerate`) y el comando largo `demo (seeds)`; no dupliqué acciones. Reejecuté `Demo: cargar seeds`: exit code 0, seed idempotente, sin altas duplicadas.
+- `start` (`pnpm dev`) estaba detenido; `demo (seeds)` (`pnpm demo`) seguía activo en loopback. UI y API respondieron HTTP 200; se mantuvo la DB demo dedicada.
+- Prueba de inicio de sesión y vista de miembros con Brave instalado, en ejecución headless: perfiles sintéticos solo y familia devolvieron login HTTP 200 y hogares de 1 y 6 miembros; cero errores de página. Sin cambios en la DB durante la verificación.
+- Capturas nuevas, PC/móvil: `.e2e-screenshots/ai-persona-seeds/demo-live-20261127-202048/{synthetic-solo,synthetic-family}-{desktop,mobile}.png` (artefactos ignorados por Git).
+
 ### Regresión i18n y capturas
 
 - La prueba falló primero porque la tarjeta mostraba la clave `profile.cooking.none`; la traducción ya existía, pero `/household` no cargaba el bundle lazy `profile`. Se añadió ese bundle al resolver de la ruta y el E2E ahora exige `Apenas cocino` antes de capturar.
