@@ -1,7 +1,7 @@
 # Perfiles sintéticos y smoke de IA — resultados
 
 **Ejecución inicial:** 26-11-2026 · **Actualización:** 27-11-2026 · rama `feat/calendar-recipe-cooking` · PR #72 (Draft).
-**Estado:** generador, UI E2E, fallo parcial y matriz loopback de los 11 `AiJobKind` verificados; smoke real de generación IA pendiente por el aislamiento de WebAPI.
+**Estado:** generador, UI E2E, fallo parcial y matriz loopback de los 11 `AiJobKind` verificados; smoke real de generación pendiente por autenticación/runtime del proveedor (el bearer local solo validó `/v1/models`).
 
 ## Matriz generada
 
@@ -101,6 +101,12 @@ Generadas tras esperar contenido visible y comprobar el recuento de miembros; `.
 - Se borró el token mediante la API y se verificó su ausencia; el servidor se detuvo, el puerto dejó de aceptar conexiones y se retiró la carpeta temporal exacta. El secreto nunca se imprimió ni persistió.
 - No se envió prompt: un token bearer autentica al cliente frente al WebAPI, pero no sustituye la autenticación del proveedor ChatGPT. En otro WebAPI aislado, el chequeo de sesión falló con HTTP 503 `browser_unavailable` / `browser_launch_failed` porque la distribución Chrome configurada para Patchright no estaba disponible en el entorno aislado. No se abrió Chrome ni se utilizó el perfil Brave existente.
 - Resultado: la conectividad/autenticación de la API local queda verificada; generación real pendiente. La matriz de `pnpm demo:regenerate` sigue sin ejecutarse y los checks de generación real permanecen sin marcar.
+
+### Límite confirmado de sesión/proveedor (27-11-2026)
+
+- Inspección read-only del WebAPI actual: el handler `/v1/chat/completions` declara `provider: "chatgpt"` y ejecuta el adaptador ChatGPT/Patchright; no se encontró otro módulo de inferencia en `src/providers`.
+- `patchright.browserChannel` en el schema admite `chrome`, aunque hay un `browserExecutablePath` personalizado; la instancia probada usó el valor configurado y no encontró Chrome. La clave `agenta.apiKey` alimenta `src/shared/observability/agenta.ts` (telemetría/observabilidad), no sustituye una API key del modelo.
+- Implicación (inferencia por la separación del perfil Patchright documentada por WebAPI): la extensión Brave del navegador no autentica por sí sola el perfil propio del proceso WebAPI. La generación real sin sesión de proveedor no está soportada por la configuración actual; hace falta añadir/configurar un proveedor de inferencia por API key (guardada localmente) o una vía compatible. No se leyó ninguna clave ni se modificó el repositorio externo/configuración del WebAPI.
 
 ## Hallazgo UI resuelto
 

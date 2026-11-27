@@ -1,6 +1,6 @@
 # Generador de perfiles sintéticos y smoke de IA
 
-**Estado:** Draft; generador, matriz loopback, DB demo y bearer de WebAPI aislado verificados; la generación WebAPI real sigue pendiente: DevBar no cumple privacidad y el runtime aislado no encuentra el navegador esperado.
+**Estado:** Draft; generador, matriz loopback, DB demo y bearer de WebAPI aislado verificados; la generación real sigue pendiente: DevBar normal no cumple privacidad y el WebAPI actual usa ChatGPT/Patchright, sin navegador disponible en la instancia aislada.
 **Rama/PR:** `feat/calendar-recipe-cooking` / #72 Draft. Sin merge ni publicación de datos.
 
 ## Objetivo
@@ -22,7 +22,8 @@ Crear un generador reutilizable de cuentas de prueba para usuarios solos y hogar
 - Crear correos sintéticos bajo `hogaria.test`, con identificador único de ejecución. No incorporar datos de personas reales.
 - Crear cuentas mediante el helper de registro E2E existente, que aplica una contraseña común de prueba sin duplicarla en el generador. Mantener JWT y token WebAPI solo en memoria; no guardar credenciales, prompts ni respuestas en fixtures, logs, capturas o reportes.
 - Mantener los valores `dietType`, tolerancia, ración y severidad solo como contexto sintético dentro de `taste.notes`, porque el API activo no persiste esos campos tipados. Verificar su lectura de vuelta; no escribirlos directamente a SQLite ni presentarlos como propiedades estructuradas del perfil.
-- El smoke no depende de una sesión real ni de Brave. Los JWT de las cuentas sintéticas y el token temporal de WebAPI viven solo en memoria. Reutilizar el harness que crea y elimina el token propio; no revocar tokens ajenos.
+- El generador no depende de una sesión humana previa: crea los usuarios sintéticos y obtiene sus JWT en la ejecución aislada. La autenticación bearer de WebAPI solo autentica al cliente. La generación real actual sí usa el proveedor ChatGPT de WebAPI a través de Patchright y requiere un perfil de proveedor autenticado; no confundirlo con las cuentas HogarIA.
+- Evidencia de código WebAPI (consulta read-only 2026-11-27): `src/api/opencode/controller.ts` enruta `/v1/chat/completions` al proveedor `chatgpt`; los módulos de proveedor detectados son ChatGPT/Patchright. El schema solo admite el canal `chrome`, aunque permite `browserExecutablePath` personalizado; la guía canónica documenta el build Chrome instalado. `agenta.apiKey` se usa en `src/shared/observability/agenta.ts` para observabilidad, no como credencial de inferencia.
 - Los smokes E2E y reales conservan una SQLite temporal dentro del directorio exclusivo de ejecución. La única excepción son los comandos explícitos de demo, que usan solo .tmp/ai-persona-demo/hogaria.sqlite con HOGARIA_DEMO_MODE=1; pnpm dev y pnpm dev:server nunca la seleccionan ni la cargan. No usar la SQLite normal del servidor DevBar.
 - Los smokes reales son opt-in, secuenciales y con presupuesto máximo de llamadas explícito por flujo. Un error detiene la matriz; no hay reintentos ciegos ni bucles sin límite. Las suites repetibles simulan al proveedor.
 - Las propuestas no se aplican salvo que un escenario exija comprobar un flujo de confirmación; ese escenario usa datos y DB desechables.
