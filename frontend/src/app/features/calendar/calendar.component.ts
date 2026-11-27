@@ -13,7 +13,7 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Subscription } from 'rxjs';
+import { defaultIfEmpty, Subscription } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router } from '@angular/router';
 import { CalendarService } from '../../core/services/calendar.service';
@@ -339,6 +339,33 @@ const emptyDraft = (date: string, mealType: MealType): MealDraft => ({
 
         <!-- ══ Resumen del periodo ══ -->
         <div class="cal-strip" [class.cal-strip--bare]="!kitchen()">
+          @if (generatingRecipeMealId()) {
+            <span
+              class="cal-strip__hint"
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+              data-test="calendar-recipe-generation-status"
+            >
+              {{
+                'calendar.generating_recipe_for' | t: { meal: recipeGenerationMeal()?.title ?? '' }
+              }}
+            </span>
+          }
+          @if (recipeGenerationFailedMeal(); as failedMeal) {
+            <span
+              class="cal-strip__hint cal-strip__hint--error"
+              role="alert"
+              aria-live="assertive"
+              aria-atomic="true"
+              data-test="calendar-recipe-generation-error"
+            >
+              {{ 'calendar.recipe_generation_failed' | t: { meal: failedMeal.title } }}
+              <button type="button" class="cal-link" (click)="retryRecipeGeneration()">
+                {{ 'calendar.reintentar' | t }}
+              </button>
+            </span>
+          }
           @if (kitchen() && !calendarService.error()) {
             <div class="cal-strip__item">
               <span class="cal-strip__label">{{ 'calendar.comidas' | t }}</span>
@@ -408,7 +435,8 @@ const emptyDraft = (date: string, mealType: MealType): MealDraft => ({
               [kitchen]="kitchen()"
               [anchorIso]="anchorIso()"
               (addMeal)="openAddModal($event.date, $event.mealType)"
-              (openMeal)="openEditModal($event)"
+              (openMeal)="openCalendarMeal($event)"
+              (editMeal)="openEditModal($event)"
               (openDay)="openDayFor($event)"
               (editEvent)="openEventModal(undefined, $event)"
             ></app-calendar-month>
@@ -425,7 +453,8 @@ const emptyDraft = (date: string, mealType: MealType): MealDraft => ({
               *ngSwitchCase="'agenda'"
               [days]="days()"
               (openDay)="openDayFor($event)"
-              (openMeal)="openMealFromAgenda($event)"
+              (openMeal)="openCalendarMeal($event)"
+              (editMeal)="openEditModal($event)"
               (editEvent)="openEventModal(undefined, $event)"
               (addEvent)="openEventModal({ iso: $event })"
             />
@@ -439,7 +468,8 @@ const emptyDraft = (date: string, mealType: MealType): MealDraft => ({
               [mealAnchors]="gridMealAnchors()"
               (addMeal)="onTimelineAddMeal($event)"
               (addEvent)="onTimelineAddEvent($event)"
-              (openMeal)="openEditModal($event)"
+              (openMeal)="openCalendarMeal($event)"
+              (editMeal)="openEditModal($event)"
               (toggleMeal)="toggleMeal($event)"
               (removeMeal)="removeMeal($event)"
               (openDay)="openDayFor($event)"
@@ -1451,6 +1481,31 @@ export class CalendarComponent implements OnInit {
   );
 
   readonly isMealModalOpen = signal(false);
+  readonly generatingRecipeMealId = signal<string | null>(null);
+  readonly recipeGenerationMeal = signal<CalendarMeal | null>(null);
+  readonly recipeGenerationFailedMeal = signal<CalendarMeal | null>(null);
+  private recipeGenerationSequence = 0;
+  private readonly recipeGenerationContext = signal<{
+    householdId: string | null;
+    revision: number;
+  } | null>(null);
+  private readonly invalidateRecipeGenerationOnHouseholdChange = effect(() => {
+    const requestContext = this.recipeGenerationContext();
+    const householdId = this.householdService.activeHouseholdId();
+    const revision = this.householdService.contextRevision();
+    if (
+      !requestContext ||
+      (requestContext.householdId === householdId && requestContext.revision === revision)
+    ) {
+      return;
+    }
+
+    this.recipeGenerationSequence++;
+    this.recipeGenerationContext.set(null);
+    this.generatingRecipeMealId.set(null);
+    this.recipeGenerationMeal.set(null);
+    this.recipeGenerationFailedMeal.set(null);
+  });
   readonly selectedSharedMeal = signal<CalendarMeal | null>(null);
   readonly selectedSharedMealHouseholdId = signal<string | null>(null);
   private readonly closeSharedMealOnHouseholdChange = effect(() => {
@@ -1931,8 +1986,90 @@ export class CalendarComponent implements OnInit {
     this.view.set('month');
   }
 
-  openMealFromAgenda(meal: CalendarMeal): void {
-    this.openEditModal(meal);
+  openCalendarMeal(meal: CalendarMeal): void {
+    this.recipeGenerationFailedMeal.set(null);
+    if (meal.isShared) {
+      this.invalidateCurrentRecipeGeneration();
+      this.openEditModal(meal);
+      return;
+    }
+    if (meal.recipeId) {
+      this.invalidateCurrentRecipeGeneration();
+      void this.router.navigate(['/recipes'], {
+        queryParams: { recipe: meal.recipeId, mode: 'cooking' }
+      });
+      return;
+    }
+
+    this.generateRecipeForMeal(meal);
+  }
+
+  retryRecipeGeneration(): void {
+    const meal = this.recipeGenerationFailedMeal();
+    if (meal) this.generateRecipeForMeal(meal);
+  }
+
+  private generateRecipeForMeal(meal: CalendarMeal): void {
+    if (this.generatingRecipeMealId()) return;
+    const requestId = ++this.recipeGenerationSequence;
+    const context = {
+      householdId: this.householdService.activeHouseholdId(),
+      revision: this.householdService.contextRevision()
+    };
+    this.recipeGenerationContext.set(context);
+    this.recipeGenerationMeal.set(meal);
+    this.recipeGenerationFailedMeal.set(null);
+    this.generatingRecipeMealId.set(meal.id);
+
+    this.calendarService
+      .generateRecipeForMeal(meal.id)
+      .pipe(defaultIfEmpty(null), takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (recipeId) => {
+          if (!this.isCurrentRecipeGeneration(requestId, meal.id, context)) return;
+          this.generatingRecipeMealId.set(null);
+          this.recipeGenerationMeal.set(null);
+          if (!recipeId) {
+            this.recipeGenerationContext.set(context);
+            this.recipeGenerationFailedMeal.set(meal);
+            return;
+          }
+
+          this.recipeGenerationContext.set(null);
+          this.recipeGenerationFailedMeal.set(null);
+          void this.router.navigate(['/recipes'], {
+            queryParams: { recipe: recipeId, mode: 'cooking' }
+          });
+        },
+        error: () => {
+          if (!this.isCurrentRecipeGeneration(requestId, meal.id, context)) return;
+          this.generatingRecipeMealId.set(null);
+          this.recipeGenerationMeal.set(null);
+          this.recipeGenerationContext.set(context);
+          this.recipeGenerationFailedMeal.set(meal);
+        }
+      });
+  }
+
+  private isCurrentRecipeGeneration(
+    requestId: number,
+    mealId: string,
+    context: { householdId: string | null; revision: number }
+  ): boolean {
+    return (
+      requestId === this.recipeGenerationSequence &&
+      this.generatingRecipeMealId() === mealId &&
+      this.householdService.activeHouseholdId() === context.householdId &&
+      this.householdService.contextRevision() === context.revision
+    );
+  }
+
+  private invalidateCurrentRecipeGeneration(): void {
+    if (!this.generatingRecipeMealId()) return;
+    this.recipeGenerationSequence++;
+    this.recipeGenerationContext.set(null);
+    this.generatingRecipeMealId.set(null);
+    this.recipeGenerationMeal.set(null);
   }
 
   /* ─────────────────────────── Teclado ─────────────────────────── */
@@ -2027,6 +2164,8 @@ export class CalendarComponent implements OnInit {
   }
 
   openEditModal(meal: CalendarMeal): void {
+    this.invalidateCurrentRecipeGeneration();
+    this.recipeGenerationFailedMeal.set(null);
     if (meal.isShared) {
       this.openSharedMealConsumption(meal);
       return;

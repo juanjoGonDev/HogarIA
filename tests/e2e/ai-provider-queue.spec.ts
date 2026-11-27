@@ -434,8 +434,26 @@ test.describe('gestor de cola de IA por proveedor', () => {
       .toEqual([secondId, firstId]);
 
     const rowMovedToSecond = page.locator(`.ai-queue__job[data-job-id="${firstId}"]`);
+    // SQLite may observe the PATCH before the UI announces completion and restores focus.
+    const reorderAnnouncement = manager.locator('[role="status"][aria-live="polite"]');
+    await expect(reorderAnnouncement).toContainText(
+      /Orden de espera actualizado\.|Waiting order updated\./
+    );
+    await page.evaluate(
+      () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+    );
+    await expect
+      .poll(() =>
+        page.evaluate((jobId: string) => {
+          const active = document.activeElement;
+          return active?.closest('.ai-queue__job')?.getAttribute('data-job-id') ?? null;
+        }, firstId)
+      )
+      .toBe(firstId);
     const moveUp = rowMovedToSecond.locator('button[data-action="move-up"]');
+    await expect(moveUp).toBeEnabled();
     await moveUp.focus();
+    await expect(moveUp).toBeFocused();
     await page.keyboard.press('Enter');
     await expect
       .poll(async () =>

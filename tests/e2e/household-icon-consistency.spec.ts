@@ -183,7 +183,7 @@ test('los iconos de compartir e invitación no forman parte del texto accesible'
   await expect(page.locator('.invite-card__code')).not.toHaveText(linkBeforeRegeneration ?? '');
 
   await expect(page.locator('.household__title')).toHaveText('Hogar');
-  await page.getByRole('tab', { name: 'Ajustes' }).click();
+  await page.getByRole('tab', { name: 'Ajustes', exact: true }).click();
   const shareTitle = page
     .locator('.settings-section__title')
     .filter({ hasText: 'Compartir en el hogar' });

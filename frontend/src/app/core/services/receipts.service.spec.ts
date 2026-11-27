@@ -40,6 +40,7 @@ const LINE: ReceiptItem = {
   category: 'vegetables',
   priceMinor: 725,
   offer: null,
+  discount: null,
   note: null,
   confidence: 0.98
 };
@@ -263,6 +264,7 @@ describe('ReceiptsService', () => {
     service.history.set([RECEIPT]);
     const headerPatch = {
       store: 'Mercado de prueba',
+      storeAddress: 'Avenida sintética 12',
       purchaseDate: '2026-10-01',
       notes: 'Compra semanal'
     };
@@ -273,6 +275,7 @@ describe('ReceiptsService', () => {
     const updatedReceipt = {
       ...RECEIPT,
       store: 'Mercado de prueba',
+      storeAddress: 'Avenida sintética 12',
       purchaseDate: '2026-10-01',
       notes: 'Compra semanal'
     };

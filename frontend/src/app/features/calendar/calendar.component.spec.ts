@@ -69,6 +69,7 @@ describe('CalendarComponent meal deletion feedback', () => {
       'toggleComplete',
       'addMeal',
       'generateWithAi',
+      'generateRecipeForMeal',
       'refreshHouseholdEvents',
       'saveHouseholdEvent',
       'removeHouseholdEvent',
@@ -128,6 +129,7 @@ describe('CalendarComponent meal deletion feedback', () => {
     (calendar.updateGoals as jasmine.Spy).and.returnValue(of(undefined));
     calendar.addMeal.and.returnValue(of(null));
     calendar.generateWithAi.and.returnValue(of(null));
+    calendar.generateRecipeForMeal.and.returnValue(of(null));
     calendar.saveHouseholdEvent.and.returnValue(Promise.resolve({} as never));
     calendar.removeHouseholdEvent.and.returnValue(Promise.resolve(true));
     calendar.skipHouseholdOccurrence.and.returnValue(Promise.resolve(true));
@@ -1092,6 +1094,138 @@ describe('CalendarComponent meal deletion feedback', () => {
     ]);
     expect(toast.success).toHaveBeenCalledOnceWith('calendar.replacement_applied', 'Arroz vegetal');
     expect(component.isMealModalOpen()).toBeFalse();
+  });
+
+  it('opens linked recipes in cooking mode and requests one recipe for a legacy meal', () => {
+    const recipeMeal: CalendarMeal = {
+      id: 'meal-recipe',
+      date: '2026-10-05',
+      mealType: 'dinner',
+      title: 'Lentejas de prueba',
+      recipeId: 'recipe-1',
+      servings: 4,
+      completed: false
+    };
+
+    component.openCalendarMeal(recipeMeal);
+
+    expect(routerNavigate).toHaveBeenCalledOnceWith(['/recipes'], {
+      queryParams: { recipe: 'recipe-1', mode: 'cooking' }
+    });
+    expect(component.isMealModalOpen()).toBeFalse();
+
+    const customMeal: CalendarMeal = {
+      ...recipeMeal,
+      id: 'meal-custom',
+      title: 'Comida escrita',
+      recipeId: null,
+      customMeal: 'Comida escrita'
+    };
+    const pendingGeneration = new Subject<string | null>();
+    calendar.generateRecipeForMeal.and.returnValue(pendingGeneration);
+    component.openCalendarMeal(customMeal);
+
+    expect(calendar.generateRecipeForMeal).toHaveBeenCalledOnceWith('meal-custom');
+    expect(component.generatingRecipeMealId()).toBe('meal-custom');
+    expect(component.isMealModalOpen()).toBeFalse();
+    expect(routerNavigate).toHaveBeenCalledTimes(1);
+    component.openCalendarMeal(customMeal);
+    expect(calendar.generateRecipeForMeal).toHaveBeenCalledTimes(1);
+
+    pendingGeneration.next('recipe-generated-1');
+    pendingGeneration.complete();
+
+    expect(component.generatingRecipeMealId()).toBeNull();
+    expect(component.recipeGenerationFailedMeal()).toBeNull();
+    expect(routerNavigate).toHaveBeenCalledWith(['/recipes'], {
+      queryParams: { recipe: 'recipe-generated-1', mode: 'cooking' }
+    });
+  });
+
+  it('announces generation progress and an accessible retryable error without changing the meal', () => {
+    const customMeal: CalendarMeal = {
+      id: 'meal-custom-failure',
+      date: '2026-10-05',
+      mealType: 'dinner',
+      title: 'Comida escrita',
+      recipeId: null,
+      customMeal: 'Comida escrita',
+      servings: 4,
+      completed: false
+    };
+    calendar.generateRecipeForMeal.and.returnValue(of(null));
+
+    component.openCalendarMeal(customMeal);
+
+    expect(component.generatingRecipeMealId()).toBeNull();
+    expect(component.recipeGenerationFailedMeal()).toEqual(customMeal);
+    expect(component.isMealModalOpen()).toBeFalse();
+    expect(routerNavigate).not.toHaveBeenCalled();
+
+    component.retryRecipeGeneration();
+    expect(calendar.generateRecipeForMeal).toHaveBeenCalledTimes(2);
+  });
+
+  it('ignores a pending recipe result after switching household context', () => {
+    const customMeal: CalendarMeal = {
+      id: 'meal-context-change',
+      date: '2026-10-05',
+      mealType: 'dinner',
+      title: 'Comida escrita',
+      recipeId: null,
+      servings: 2,
+      completed: false
+    };
+    const pendingGeneration = new Subject<string | null>();
+    calendar.generateRecipeForMeal.and.returnValue(pendingGeneration);
+
+    component.openCalendarMeal(customMeal);
+    contextRevisionState.update((revision) => revision + 1);
+    fixture.detectChanges();
+    pendingGeneration.next('stale-recipe');
+    pendingGeneration.complete();
+
+    expect(component.generatingRecipeMealId()).toBeNull();
+    expect(component.recipeGenerationFailedMeal()).toBeNull();
+    expect(routerNavigate).not.toHaveBeenCalled();
+  });
+
+  it('keeps shared recipe meals in the consumption flow', () => {
+    const permissions = {
+      pantry: { view: true, edit: true, manage: true },
+      recipes: { view: true, create: true, edit: true, delete: true, generateAI: true },
+      calendar: { view: true, edit: true },
+      members: { invite: true, kick: true, manageRoles: true },
+      settings: true
+    };
+    const household = householdState()!;
+    householdState.set({
+      ...household,
+      myPermissions: permissions,
+      members: household.members.map((member) => ({
+        ...member,
+        userId: 'user-1',
+        permissions
+      }))
+    });
+    const sharedMeal: CalendarMeal = {
+      id: 'shared-recipe-meal',
+      date: '2026-10-05',
+      mealType: 'dinner',
+      title: 'Comida compartida',
+      recipeId: 'shared-recipe',
+      servings: 2,
+      completed: false,
+      isShared: true,
+      participantIds: ['user-1'],
+      canRecordConsumption: true
+    };
+
+    component.openCalendarMeal(sharedMeal);
+
+    expect(component.selectedSharedMeal()).toEqual(sharedMeal);
+    expect(calendar.generateRecipeForMeal).not.toHaveBeenCalled();
+    expect(routerNavigate).not.toHaveBeenCalled();
   });
 
   it('sends full-length guest allergy details and notes to meal replacement', () => {

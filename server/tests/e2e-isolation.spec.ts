@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { validateIsolatedEnvironment } from './support/e2e-isolation.mjs';
+import { DEMO_DATABASE_PATH, validateIsolatedEnvironment } from './support/e2e-isolation.mjs';
 
 const ownedDirectories: string[] = [];
 
@@ -49,6 +49,30 @@ describe('validateIsolatedEnvironment', () => {
     });
   });
 
+  it('accepts the persistent demo database only with both explicit demo flags', () => {
+    const env = environment({
+      HOGARIA_DEMO_MODE: '1',
+      HOGARIA_DEMO_RUN: '1',
+      DATABASE_PATH: DEMO_DATABASE_PATH
+    });
+
+    expect(validateIsolatedEnvironment(env).databasePath).toBe(DEMO_DATABASE_PATH);
+  });
+
+  it.each([
+    ['missing demo mode', { HOGARIA_DEMO_RUN: '1' }],
+    ['missing demo runner flag', { HOGARIA_DEMO_MODE: '1' }],
+    [
+      'demo mode with temporary database',
+      {
+        HOGARIA_DEMO_MODE: '1',
+        HOGARIA_DEMO_RUN: '1'
+      }
+    ],
+    ['demo database without demo flags', { DATABASE_PATH: DEMO_DATABASE_PATH }]
+  ])('rejects %s', (_label, overrides) => {
+    expect(() => validateIsolatedEnvironment(environment(overrides))).toThrow();
+  });
   it('accepts a full-stack run when its single port serves both UI and API', () => {
     const env = environment({
       E2E_STACK: 'full-stack',

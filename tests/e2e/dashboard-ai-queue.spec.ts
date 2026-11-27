@@ -272,7 +272,7 @@ test('no revela la cola a miembros sin permiso de configuración, ni por API dir
     });
 
     await memberPage.goto(`/ai-config/${provider.id}/queue`);
-    await expect(memberPage).toHaveURL(/\/household\?tab=settings$/);
+    await expect(memberPage).toHaveURL(/\/household\?tab=ai$/);
     expect(queueReads).toEqual([]);
   } finally {
     await memberContext.close();

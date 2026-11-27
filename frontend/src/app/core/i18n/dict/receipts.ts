@@ -69,6 +69,7 @@ export const receiptsEs = {
   // ── la revisión ──
   'receipts.tienda': 'Tienda',
   'receipts.tienda_no_detectada': 'Tienda no detectada',
+  'receipts.direccion_tienda': 'Dirección de la tienda',
   'receipts.guardar_metadatos': 'Guardar cambios',
   'receipts.metadatos_guardados': 'Cambios guardados',
   'receipts.metadatos_error': 'No se pudieron guardar. Puedes reintentarlo.',
@@ -82,6 +83,42 @@ export const receiptsEs = {
   'receipts.categoria': 'Categoría',
   'receipts.precio': 'Precio',
   'receipts.oferta': 'Oferta',
+  'receipts.oferta_de': 'Oferta de {name}',
+  'receipts.editar_oferta': 'Editar oferta',
+  'receipts.editar_oferta_de': 'Editar oferta de {name}. Ahora: {summary}.',
+  'receipts.anadir_oferta': 'Añadir',
+  'receipts.tipo_de_oferta': 'Tipo de oferta',
+  'receipts.sin_descuento': 'Sin descuento',
+  'receipts.porcentaje': 'Porcentaje',
+  'receipts.importe_euros': 'Importe (€)',
+  'receipts.personalizada': 'Personalizada',
+  'receipts.ofertas_rapidas': 'Ofertas rápidas',
+  'receipts.descuento_porcentaje': 'Descuento (%)',
+  'receipts.descuento_importe': 'Descuento total (€)',
+  'receipts.descuento_porcentaje_hint':
+    'Se aplica a las unidades seleccionadas. Debe ser mayor que 0 y menor que 100; máximo 2 decimales.',
+  'receipts.descuento_importe_total_hint':
+    'Debe ser mayor que 0. Se descuenta una sola vez del conjunto de unidades seleccionadas, no por unidad; máximo 2 decimales.',
+  'receipts.unidades_afectadas': 'Unidades con descuento',
+  'receipts.unidades_afectadas_hint':
+    'De {quantity} unidades. Déjalo vacío para aplicarlo a todas.',
+  'receipts.unidades_compradas': 'Llevas',
+  'receipts.unidades_pagadas': 'Pagas',
+  'receipts.oferta_personalizada_hint': 'Indica cuántas unidades llevas y cuántas pagas.',
+  'receipts.promocion_informativa_hint':
+    'La oferta es informativa: no modifica el importe ya pagado que figura en el ticket.',
+  'receipts.preview_promotion_offer':
+    '{buy}x{take}: regala {free} de cada grupo de {buy} unidades.',
+  'receipts.preview_promotion_percent': '{percent} % de descuento sobre {units} unidades.',
+  'receipts.preview_promotion_amount': 'Descuento total de {amount} € sobre {units} unidades.',
+  'receipts.guardar_oferta': 'Guardar oferta',
+  'receipts.descuento_valor_invalido':
+    'El importe debe ser mayor que 0; el porcentaje, mayor que 0 y menor que 100. Usa hasta 2 decimales.',
+  'receipts.descuento_unidades_invalidas':
+    'Indica unidades mayores que cero y no superiores a la cantidad de la línea.',
+  'receipts.oferta_personalizada_invalida':
+    'La oferta debe llevar al menos 2 unidades y hacer pagar menos unidades.',
+  'receipts.promocion_guardado_error': 'No se pudo guardar la oferta. Puedes reintentarlo.',
   'receipts.anadir_linea': 'Añadir línea',
   'receipts.borrar_linea': 'Quitar la línea',
   'receipts.total_del_ticket': 'Total del ticket',
@@ -185,6 +222,7 @@ export const receiptsEn: Record<keyof typeof receiptsEs, string> = {
 
   'receipts.tienda': 'Store',
   'receipts.tienda_no_detectada': 'Store not detected',
+  'receipts.direccion_tienda': 'Store address',
   'receipts.guardar_metadatos': 'Save changes',
   'receipts.metadatos_guardados': 'Changes saved',
   'receipts.metadatos_error': "Couldn't save changes. You can retry.",
@@ -198,6 +236,40 @@ export const receiptsEn: Record<keyof typeof receiptsEs, string> = {
   'receipts.categoria': 'Category',
   'receipts.precio': 'Price',
   'receipts.oferta': 'Offer',
+  'receipts.oferta_de': 'Offer for {name}',
+  'receipts.editar_oferta': 'Edit offer',
+  'receipts.editar_oferta_de': 'Edit offer for {name}. Current: {summary}.',
+  'receipts.anadir_oferta': 'Add',
+  'receipts.tipo_de_oferta': 'Offer type',
+  'receipts.sin_descuento': 'No discount',
+  'receipts.porcentaje': 'Percentage',
+  'receipts.importe_euros': 'Amount (€)',
+  'receipts.personalizada': 'Custom',
+  'receipts.ofertas_rapidas': 'Quick offers',
+  'receipts.descuento_porcentaje': 'Discount (%)',
+  'receipts.descuento_importe': 'Total discount (€)',
+  'receipts.descuento_porcentaje_hint':
+    'Applies to the selected units. Must be greater than 0 and below 100; up to 2 decimals.',
+  'receipts.descuento_importe_total_hint':
+    'Must be greater than 0. Deducted once from the selected units as a whole, not per unit; up to 2 decimals.',
+  'receipts.unidades_afectadas': 'Units with discount',
+  'receipts.unidades_afectadas_hint': 'Out of {quantity} units. Leave blank to apply to all.',
+  'receipts.unidades_compradas': 'You take',
+  'receipts.unidades_pagadas': 'You pay for',
+  'receipts.oferta_personalizada_hint': 'Enter how many units you take and how many you pay for.',
+  'receipts.promocion_informativa_hint':
+    'The offer is informational: it does not change the amount already paid on the receipt.',
+  'receipts.preview_promotion_offer': '{buy}x{take}: {free} free from each group of {buy}.',
+  'receipts.preview_promotion_percent': '{percent}% discount on {units} units.',
+  'receipts.preview_promotion_amount': 'Total discount of €{amount} on {units} units.',
+  'receipts.guardar_oferta': 'Save offer',
+  'receipts.descuento_valor_invalido':
+    'Amount must be greater than 0; percentage must be greater than 0 and below 100. Use up to 2 decimals.',
+  'receipts.descuento_unidades_invalidas':
+    'Enter units greater than zero and no greater than the line quantity.',
+  'receipts.oferta_personalizada_invalida':
+    'The offer must include at least 2 units and make you pay for fewer units.',
+  'receipts.promocion_guardado_error': 'Could not save the offer. You can try again.',
   'receipts.anadir_linea': 'Add line',
   'receipts.borrar_linea': 'Remove line',
   'receipts.total_del_ticket': 'Receipt total',

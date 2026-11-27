@@ -7,6 +7,7 @@ import { mkdir, readFile } from 'node:fs/promises';
 import { writeFileSync } from 'node:fs';
 import { expect, test } from './fixtures';
 import { registerAndGoto, registerWithHousehold } from './helpers/auth';
+import { activateAiPersona, seedAiPersonaMatrix } from './helpers/ai-persona-seeds';
 import {
   AI_LIVE_RECEIPT_LONG_TICKET_ONLY_SELECTION,
   AI_LIVE_RECEIPT_PREFERRED_JPEG_ONLY_SELECTION,
@@ -2548,16 +2549,33 @@ test('valida toda la matriz de acciones transitorias del asistente con WebAPI re
   reportLiveSmokePhase('assistant-proposals-read-only-validated');
 });
 
-test('cubre los ocho AiJobKind con fixtures de proveedor loopback', async ({ page }) => {
+test('cubre siete AiJobKind en ocho llamadas con perfiles seed y proveedor loopback', async ({
+  page
+}, testInfo) => {
   test.skip(LIVE_SMOKE_ENABLED, 'Las fixtures loopback se ejecutan fuera del smoke real.');
-  test.setTimeout(120_000);
+  test.skip(
+    process.env.HOGARIA_AI_SEED_GENERATION !== '1',
+    'La matriz escribe perfiles solo en el runner E2E opt-in y con SQLite aislada.'
+  );
+  test.skip(
+    testInfo.project.name !== 'chromium-ai-real-smoke',
+    'La matriz crea cuentas una vez; usa un único proyecto Chromium.'
+  );
+  test.setTimeout(5 * 60_000);
 
   const provider = new SyntheticAiProvider();
   await provider.start();
   try {
-    await registerWithHousehold(page, '/dashboard', 'ai-synthetic-job-kinds');
-    const token = await authToken(page);
-    const headers = { authorization: `Bearer ${token}` };
+    const runId = process.env.E2E_SEED;
+    expect(runId).toBeTruthy();
+    const seeded = await seedAiPersonaMatrix(page, `${runId!.slice(0, 20)}-jobs`);
+    const owner = seeded.accounts['solo-allergy'];
+    const token = owner.token;
+    const headers = {
+      authorization: `Bearer ${token}`,
+      'x-household-id': seeded.households['solo-two'].id
+    };
+    await activateAiPersona(page, owner);
 
     const configResponse = await page.request.post('/api/ai/configs', {
       headers,
@@ -2944,6 +2962,255 @@ test('cubre los ocho AiJobKind con fixtures de proveedor loopback', async ({ pag
     expect(provider.requests.every(({ hasResponseFormat }) => hasResponseFormat)).toBe(true);
     expect(provider.requests.every(({ background }) => background)).toBe(true);
     expect(provider.pendingReplyCount).toBe(0);
+  } finally {
+    await provider.close();
+  }
+});
+
+test('cubre los jobs sintéticos de ticket, plano, asistente e imagen con perfiles de seed', async ({
+  page
+}, testInfo) => {
+  test.skip(LIVE_SMOKE_ENABLED, 'Los fixtures loopback no corren dentro del smoke real.');
+  test.skip(
+    process.env.HOGARIA_AI_SEED_GENERATION !== '1',
+    'La matriz escribe perfiles solo en el runner E2E opt-in y con SQLite aislada.'
+  );
+  test.skip(
+    testInfo.project.name !== 'chromium-ai-real-smoke',
+    'La matriz crea cuentas una vez; usa un único proyecto Chromium.'
+  );
+  test.setTimeout(5 * 60_000);
+
+  const runId = process.env.E2E_SEED;
+  expect(runId).toBeTruthy();
+  const provider = new SyntheticAiProvider();
+  await provider.start();
+
+  try {
+    const seeded = await seedAiPersonaMatrix(page, runId!);
+    const familyOwner = seeded.accounts['family-owner'];
+    const familyAssistant = seeded.accounts['family-member-5'];
+    const familyPantryMember = seeded.accounts['family-member-1'];
+    const receiptOwner = seeded.accounts['solo-allergy'];
+
+    const createLoopbackConfig = async (token: string, name: string): Promise<{ id: string }> => {
+      const response = await page.request.post('/api/ai/configs', {
+        headers: { authorization: `Bearer ${token}` },
+        data: {
+          name,
+          provider: 'custom',
+          baseUrl: provider.baseUrl,
+          apiKey: 'synthetic-only-not-a-secret',
+          model: 'synthetic-ai-model',
+          maxTokens: 512,
+          timeout: 15_000,
+          retryAttempts: 0,
+          concurrency: 1
+        }
+      });
+      expect(response.status()).toBe(201);
+      const config = (await response.json()).data as { id?: string };
+      expect(config.id).toBeTruthy();
+      return { id: config.id! };
+    };
+
+    const familyConfig = await createLoopbackConfig(
+      familyOwner.token,
+      'Proveedor loopback hogar sintético'
+    );
+    await createLoopbackConfig(receiptOwner.token, 'Proveedor loopback ticket sintético');
+    const familyHeaders = {
+      authorization: `Bearer ${familyOwner.token}`,
+      'x-household-id': seeded.households.family.id
+    };
+
+    const planFixture = {
+      schemaVersion: 1,
+      dwellingType: 'apartment',
+      dwellingTypeLabel: null,
+      summary: 'Plano sintético revisable para QA.',
+      warnings: [],
+      floors: [
+        {
+          id: 'floor-main',
+          name: 'Planta principal',
+          level: 0,
+          walls: [],
+          openings: [],
+          spaces: [
+            {
+              id: 'kitchen-main',
+              kind: 'kitchen',
+              label: 'Cocina',
+              polygon: [
+                { x: 0, y: 0 },
+                { x: 5000, y: 0 },
+                { x: 5000, y: 4000 },
+                { x: 0, y: 4000 }
+              ],
+              parentSpaceId: null
+            }
+          ]
+        }
+      ]
+    };
+
+    // household_plan: devuelve borrador válido, sin confirmar ni persistirlo.
+    provider.enqueue(planFixture);
+    const proposal = await page.request.post('/api/household/plan/proposal', {
+      headers: familyHeaders,
+      data: { baseVersion: 0, prompt: 'Propón una cocina sintética y no la guardes.' }
+    });
+    expect(proposal.status()).toBe(200);
+    expect((await proposal.json()).data.proposal).toMatchObject({
+      schemaVersion: 1,
+      summary: 'Plano sintético revisable para QA.'
+    });
+    const unchangedPlan = await page.request.get('/api/household/plan', {
+      headers: familyHeaders
+    });
+    expect((await unchangedPlan.json()).data).toEqual({ version: 0, plan: null });
+
+    // assistant: el miembro hijo recibe una propuesta vacía, sin cambios de dominio.
+    provider.enqueue({ summary: 'Sin cambios necesarios.', actions: [], questions: [] });
+    const assistantProposal = await page.request.post('/api/ai/assistant/proposals', {
+      headers: {
+        authorization: `Bearer ${familyAssistant.token}`,
+        'x-assistant-household-id': seeded.households.family.id
+      },
+      data: {
+        prompt: 'Revisa el hogar y no apliques cambios.',
+        route: 'household',
+        referenceDate: '2026-11-26'
+      }
+    });
+    expect(assistantProposal.status()).toBe(200);
+    expect((await assistantProposal.json()).data).toMatchObject({
+      summary: 'Sin cambios necesarios.',
+      actions: [],
+      questions: []
+    });
+
+    // receipt: ticket sintético procesado a revisión; nunca se confirma la compra.
+    provider.enqueue({
+      lines: [
+        {
+          name: 'Naranjas QA',
+          quantity: 2,
+          unit: 'kg',
+          category: 'other',
+          createCategory: false,
+          priceMinor: 300,
+          confidence: 0.98
+        }
+      ],
+      store: 'Supermercado QA sintético',
+      storeAddress: '',
+      purchaseDate: '2024-02-29',
+      currency: 'EUR',
+      totalMinor: 300,
+      warnings: []
+    });
+    const upload = await page.request.post('/api/receipts', {
+      headers: { authorization: `Bearer ${receiptOwner.token}` },
+      multipart: {
+        file: {
+          name: 'ticket-sintetico.png',
+          mimeType: 'image/png',
+          buffer: await syntheticReceiptPng(page)
+        }
+      }
+    });
+    expect(upload.status()).toBe(201);
+    const receiptId = (await upload.json()).data.id as string;
+    expect(receiptId).toBeTruthy();
+    const receiptPath = `/api/receipts/${encodeURIComponent(receiptId)}`;
+    await expect
+      .poll(
+        async () => {
+          const response = await page.request.get(receiptPath, {
+            headers: { authorization: `Bearer ${receiptOwner.token}` }
+          });
+          if (!response.ok()) return 'http-error';
+          return ((await response.json()).data as { status?: string }).status;
+        },
+        { timeout: 30_000, intervals: [100, 250, 500, 1000] }
+      )
+      .toBe('review');
+    const receipt = await page.request.get(receiptPath, {
+      headers: { authorization: `Bearer ${receiptOwner.token}` }
+    });
+    expect((await receipt.json()).data).toMatchObject({
+      status: 'review',
+      store: 'Supermercado QA sintético',
+      lines: [expect.objectContaining({ name: 'Naranjas QA', quantity: 2 })]
+    });
+
+    // product_image_search: la creación encola fotos sintéticas de la suite; cero red externa.
+    const ingredientResponse = await page.request.post('/api/pantry/ingredients', {
+      headers: { authorization: `Bearer ${familyPantryMember.token}` },
+      data: {
+        name: 'Producto imagen QA sintético',
+        category: 'other',
+        quantity: 1,
+        unit: 'unit',
+        location: 'pantry'
+      }
+    });
+    expect(ingredientResponse.status()).toBe(201);
+    const ingredientId = (await ingredientResponse.json()).data.id as string;
+    const imageSearchPath = `/api/pantry/ingredients/${encodeURIComponent(ingredientId)}/image-search`;
+    await expect
+      .poll(
+        async () => {
+          const response = await page.request.get(imageSearchPath, {
+            headers: { authorization: `Bearer ${familyPantryMember.token}` }
+          });
+          if (!response.ok()) return 'http-error';
+          const result = (await response.json()).data as { status?: string };
+          return result.status;
+        },
+        { timeout: 30_000, intervals: [100, 250, 500, 1000] }
+      )
+      .toBe('complete');
+    const imageSearch = await page.request.get(imageSearchPath, {
+      headers: { authorization: `Bearer ${familyPantryMember.token}` }
+    });
+    expect((await imageSearch.json()).data.candidates).toEqual(
+      expect.arrayContaining([expect.objectContaining({ licenseName: 'CC0' })])
+    );
+
+    expect(provider.requests).toHaveLength(3);
+    expect(
+      provider.requests.every(
+        ({ model, hasResponseFormat }) => model === 'synthetic-ai-model' && hasResponseFormat
+      )
+    ).toBe(true);
+
+    const databasePath = process.env.DATABASE_PATH;
+    const runDirectory = process.env.E2E_RUN_DIR;
+    expect(databasePath).toBeTruthy();
+    expect(runDirectory).toBeTruthy();
+    expect(resolve(databasePath!)).toBe(resolve(runDirectory!, 'hogaria.sqlite'));
+    const database = new Database(databasePath!, { readonly: true, fileMustExist: true });
+    try {
+      const jobs = database
+        .prepare(
+          `SELECT kind, status FROM ai_jobs
+            WHERE kind IN ('household_plan', 'assistant', 'receipt', 'product_image_search')
+            ORDER BY kind`
+        )
+        .all() as Array<{ kind: string; status: string }>;
+      expect([...new Set(jobs.map(({ kind }) => kind))].sort()).toEqual([
+        'assistant',
+        'household_plan',
+        'product_image_search',
+        'receipt'
+      ]);
+      expect(jobs.every(({ status }) => status === 'done')).toBe(true);
+    } finally {
+      database.close();
+    }
   } finally {
     await provider.close();
   }

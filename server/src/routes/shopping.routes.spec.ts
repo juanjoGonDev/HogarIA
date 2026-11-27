@@ -110,6 +110,292 @@ async function createList(user: User, name = 'Compra semana') {
   return await data(response);
 }
 
+describe('product locations', () => {
+  it('suggests only nearby registered stores in the active scope', async () => {
+    const list = await createList(alice);
+    const item = await data(
+      await call(alice, 'POST', `/lists/${list.id}/items`, { name: 'Leche' })
+    );
+    db.prepare(
+      `INSERT INTO stores (id, user_id, household_id, name, address, latitude, longitude)
+       VALUES (?, ?, NULL, ?, ?, ?, ?)`
+    ).run('store-alice-near', alice.id, 'Tienda cercana', 'Calle Mayor 2', 40.4168, -3.7038);
+    db.prepare(
+      `INSERT INTO stores (id, user_id, household_id, name, address, latitude, longitude)
+       VALUES (?, ?, NULL, ?, ?, ?, ?)`
+    ).run('store-bob-near', bob.id, 'Tienda ajena', 'Calle Mayor 3', 40.4168, -3.7038);
+
+    const response = await call(alice, 'POST', `/lists/${list.id}/location-candidates`, {
+      latitude: 40.4168,
+      longitude: -3.7038,
+      radiusMeters: 500
+    });
+
+    expect(response.status).toBe(200);
+    const payload = await json(response);
+    expect(payload.data).toMatchObject({
+      candidates: [
+        expect.objectContaining({
+          id: 'store-alice-near',
+          name: 'Tienda cercana',
+          source: 'registered',
+          distanceMeters: 0
+        })
+      ]
+    });
+    expect(JSON.stringify(payload)).not.toContain('Tienda ajena');
+    expect(
+      (
+        await call(bob, 'POST', `/lists/${list.id}/location-candidates`, {
+          latitude: 40.4168,
+          longitude: -3.7038
+        })
+      ).status
+    ).toBe(404);
+    expect(item.name).toBe('Leche');
+  });
+
+  it('saves only selected registered store snapshots to live items', async () => {
+    const list = await createList(alice);
+    const item = await data(await call(alice, 'POST', `/lists/${list.id}/items`, { name: 'Pan' }));
+    db.prepare(
+      `INSERT INTO stores (id, user_id, household_id, name, address, latitude, longitude)
+       VALUES (?, ?, NULL, ?, ?, ?, ?)`
+    ).run('store-selected', alice.id, 'Panadería', 'Plaza Mayor 1', 40.4, -3.7);
+
+    const response = await call(alice, 'PUT', `/lists/${list.id}/items/location`, {
+      itemIds: [item.id, item.id],
+      store: { source: 'registered', id: 'store-selected' }
+    });
+
+    expect(response.status).toBe(200);
+    expect(await data(response)).toMatchObject({
+      items: [
+        expect.objectContaining({
+          id: item.id,
+          location_store_id: 'store-selected',
+          location_name: 'Panadería',
+          location_address: 'Plaza Mayor 1',
+          location_latitude: 40.4,
+          location_longitude: -3.7,
+          location_source: 'registered'
+        })
+      ]
+    });
+    const fetched = await data(await call(alice, 'GET', `/lists/${list.id}`));
+    expect(fetched.items[0].location_name).toBe('Panadería');
+    expect(fetched.items[0]).not.toHaveProperty('device_latitude');
+
+    db.prepare('UPDATE stores SET name = ?, address = ? WHERE id = ?').run(
+      'Panadería actualizada',
+      'Calle nueva 9',
+      'store-selected'
+    );
+    const afterStoreChange = await data(await call(alice, 'GET', `/lists/${list.id}`));
+    expect(afterStoreChange.items[0]).toMatchObject({
+      location_store_id: 'store-selected',
+      location_name: 'Panadería',
+      location_address: 'Plaza Mayor 1'
+    });
+  });
+
+  it('keeps item location snapshots when the user changes active household and returns', async () => {
+    db.prepare('INSERT INTO households (id, name, invite_code) VALUES (?, ?, ?)').run(
+      'location-home-one',
+      'Casa uno',
+      'LOC-HOME1'
+    );
+    db.prepare('INSERT INTO households (id, name, invite_code) VALUES (?, ?, ?)').run(
+      'location-home-two',
+      'Casa dos',
+      'LOC-HOME2'
+    );
+    for (const [householdId, memberId] of [
+      ['location-home-one', 'alice-home-one'],
+      ['location-home-two', 'alice-home-two']
+    ]) {
+      db.prepare(
+        `INSERT INTO household_members (id, household_id, user_id, role, permissions)
+         VALUES (?, ?, ?, 'admin', '{}')`
+      ).run(memberId, householdId, alice.id);
+    }
+    db.prepare('UPDATE users SET household_id = ? WHERE id = ?').run('location-home-one', alice.id);
+
+    const list = await createList(alice);
+    const item = await data(
+      await call(alice, 'POST', `/lists/${list.id}/items`, { name: 'Arroz' })
+    );
+    db.prepare(
+      `INSERT INTO stores (id, user_id, household_id, name, address, latitude, longitude)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      'store-home-one',
+      alice.id,
+      'location-home-one',
+      'Colmado Uno',
+      'Calle Sol 1',
+      40.4,
+      -3.7
+    );
+    expect(
+      (
+        await call(alice, 'PUT', `/lists/${list.id}/items/location`, {
+          itemIds: [item.id],
+          store: { source: 'registered', id: 'store-home-one' }
+        })
+      ).status
+    ).toBe(200);
+
+    db.prepare('UPDATE users SET household_id = ? WHERE id = ?').run('location-home-two', alice.id);
+    expect((await call(alice, 'GET', `/lists/${list.id}`)).status).toBe(404);
+
+    db.prepare('UPDATE users SET household_id = ? WHERE id = ?').run('location-home-one', alice.id);
+    const returnedList = await data(await call(alice, 'GET', `/lists/${list.id}`));
+    expect(returnedList.items[0]).toMatchObject({
+      id: item.id,
+      location_store_id: 'store-home-one',
+      location_name: 'Colmado Uno',
+      location_address: 'Calle Sol 1'
+    });
+  });
+
+  it('uses OSM as a simulated fallback and saves its attribution only after selection', async () => {
+    const list = await createList(alice);
+    const item = await data(
+      await call(alice, 'POST', `/lists/${list.id}/items`, { name: 'Tomates' })
+    );
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          elements: [
+            {
+              type: 'node',
+              id: 61,
+              lat: 40.4,
+              lon: -3.7,
+              tags: { shop: 'supermarket', name: 'Mercado OSM', 'addr:street': 'Calle Luna' }
+            }
+          ]
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      )
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    try {
+      const search = await call(alice, 'POST', `/lists/${list.id}/location-candidates`, {
+        latitude: 40.4,
+        longitude: -3.7,
+        radiusMeters: 500
+      });
+      const candidates = (await data(search)).candidates;
+      expect(candidates).toHaveLength(1);
+      expect(candidates[0]).toMatchObject({
+        id: 'osm:node:61',
+        name: 'Mercado OSM',
+        source: 'openstreetmap',
+        distanceMeters: 0
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      const saved = await call(alice, 'PUT', `/lists/${list.id}/items/location`, {
+        itemIds: [item.id],
+        store: {
+          source: 'openstreetmap',
+          name: candidates[0].name,
+          address: candidates[0].address,
+          latitude: candidates[0].latitude,
+          longitude: candidates[0].longitude
+        }
+      });
+      expect((await data(saved)).items[0]).toMatchObject({
+        location_name: 'Mercado OSM',
+        location_address: 'Calle Luna',
+        location_latitude: 40.4,
+        location_longitude: -3.7,
+        location_source: 'openstreetmap',
+        location_attribution: '© OpenStreetMap contributors',
+        location_attribution_url: 'https://www.openstreetmap.org/copyright'
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('rolls back a newly selected OSM store when saving item snapshots fails', async () => {
+    const list = await createList(alice);
+    const item = await data(
+      await call(alice, 'POST', `/lists/${list.id}/items`, { name: 'Arroz' })
+    );
+    db.exec(`
+      CREATE TRIGGER fail_item_location_update
+      BEFORE UPDATE OF location_name ON shopping_list_items
+      BEGIN SELECT RAISE(ABORT, 'synthetic location update failure'); END;
+    `);
+
+    try {
+      const response = await call(alice, 'PUT', `/lists/${list.id}/items/location`, {
+        itemIds: [item.id],
+        store: {
+          source: 'openstreetmap',
+          name: 'Tienda que no debe quedar',
+          address: 'Calle Falsa 1',
+          latitude: 40.4,
+          longitude: -3.7
+        }
+      });
+
+      expect(response.status).toBe(500);
+      expect(
+        db
+          .prepare('SELECT COUNT(*) AS count FROM stores WHERE name = ?')
+          .get('Tienda que no debe quedar')
+      ).toEqual({ count: 0 });
+      expect(
+        db.prepare('SELECT location_name FROM shopping_list_items WHERE id = ?').get(item.id)
+      ).toEqual({ location_name: null });
+    } finally {
+      db.exec('DROP TRIGGER IF EXISTS fail_item_location_update');
+    }
+  });
+
+  it('rejects foreign stores, foreign items, and invalid location coordinates', async () => {
+    const list = await createList(alice);
+    const item = await data(
+      await call(alice, 'POST', `/lists/${list.id}/items`, { name: 'Queso' })
+    );
+    db.prepare(
+      `INSERT INTO stores (id, user_id, household_id, name)
+       VALUES (?, ?, NULL, ?)`
+    ).run('store-bob-owned', bob.id, 'Ajena');
+
+    expect(
+      (
+        await call(alice, 'PUT', `/lists/${list.id}/items/location`, {
+          itemIds: [item.id],
+          store: { source: 'registered', id: 'store-bob-owned' }
+        })
+      ).status
+    ).toBe(404);
+    expect(
+      (
+        await call(alice, 'POST', `/lists/${list.id}/location-candidates`, {
+          latitude: 91,
+          longitude: 0
+        })
+      ).status
+    ).toBe(400);
+    expect(
+      (
+        await call(alice, 'PUT', `/lists/${list.id}/items/location`, {
+          itemIds: ['item-not-in-list'],
+          store: { source: 'manual', name: 'Tienda' }
+        })
+      ).status
+    ).toBe(404);
+  });
+});
+
 describe('/lists', () => {
   it('crea y lee una lista con su version inicial y sus totales a cero', async () => {
     const list = await createList(alice);

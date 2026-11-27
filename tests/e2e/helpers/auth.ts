@@ -89,6 +89,30 @@ export async function skipOnboarding(page: Page): Promise<void> {
   await page.waitForURL(/.*dashboard/, { timeout: 45000 });
 }
 
+/** Inicia sesión en una cuenta sintética con la contraseña común centralizada. */
+export async function loginUser(page: Page, email: string): Promise<void> {
+  await page.goto('/auth/login');
+  await page.locator('input#email').waitFor({ state: 'visible', timeout: 15000 });
+
+  const pending = page
+    .waitForResponse((response) => response.url().includes('/api/auth/login'), {
+      timeout: 20000
+    })
+    .catch(() => null);
+  await page.fill('input#email', email);
+  await page.fill('input#password', TEST_PASSWORD);
+  await page.locator('button[type="submit"]').click();
+
+  const response = await pending;
+  if (!response?.ok()) {
+    throw new Error(
+      `El inicio de sesión sintético falló (HTTP ${response?.status() ?? 'sin respuesta'}).`
+    );
+  }
+  await page.waitForURL(/.*(dashboard|onboarding|household)/, { timeout: 45000 });
+  await skipOnboarding(page);
+}
+
 /** Registra un usuario nuevo y espera su setup obligatorio sin saltarlo. */
 export async function registerToOnboarding(
   page: Page,

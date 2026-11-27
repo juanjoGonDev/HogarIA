@@ -398,7 +398,7 @@ describe('HouseholdComponent', () => {
     expect(toast.success).toHaveBeenCalledTimes(1);
   });
 
-  it('mounts the shared AI provider manager only for members with household settings permission', () => {
+  it('mounts the shared AI provider manager only in its own tab for permitted members', () => {
     const permittedHome = {
       ...HOUSEHOLD,
       myRole: 'member',
@@ -406,6 +406,11 @@ describe('HouseholdComponent', () => {
     } as Household;
     service.household.set(permittedHome);
     component.selectTab('settings');
+    fixture.detectChanges();
+
+    expect(fixture.debugElement.query(By.directive(AiConfigComponent))).toBeNull();
+
+    queryParams.next(convertToParamMap({ tab: 'ai' }));
     fixture.detectChanges();
 
     const manager = fixture.debugElement.query(By.directive(AiConfigComponent));
@@ -420,6 +425,9 @@ describe('HouseholdComponent', () => {
     } as Household);
     fixture.detectChanges();
     expect(fixture.debugElement.query(By.directive(AiConfigComponent))).toBeNull();
+    expect(
+      fixture.nativeElement.querySelector('[data-test="household-ai-settings-readonly"]')
+    ).not.toBeNull();
   });
 
   it('synchronizes direct URL changes and tab selection without discarding unrelated query params', () => {
@@ -447,6 +455,13 @@ describe('HouseholdComponent', () => {
     expect(component.activeTab()).toBe('permissions');
     expect(
       fixture.nativeElement.querySelector('[data-test="household-panel-permissions"]')?.hidden
+    ).toBeFalse();
+
+    queryParams.next(convertToParamMap({ tab: 'ai', source: 'shared-link' }));
+    fixture.detectChanges();
+    expect(component.activeTab()).toBe('ai');
+    expect(
+      fixture.nativeElement.querySelector('[data-test="household-panel-ai"]')?.hidden
     ).toBeFalse();
 
     component.selectTab('home');
@@ -692,9 +707,17 @@ describe('HouseholdComponent', () => {
     };
 
     press('End');
-    expect(component.activeTab()).toBe('settings');
+    expect(
+      fixture.nativeElement
+        .querySelector('[data-test="household-tab-ai"]')
+        ?.getAttribute('aria-selected')
+    ).toBe('true');
     press('ArrowLeft');
-    expect(component.activeTab()).toBe('permissions');
+    expect(
+      fixture.nativeElement
+        .querySelector('[data-test="household-tab-settings"]')
+        ?.getAttribute('aria-selected')
+    ).toBe('true');
     press('Home');
     expect(component.activeTab()).toBe('home');
 

@@ -6,7 +6,23 @@ describe('resolveRecipeRouteIntent', () => {
   });
 
   it('uses a selected recipe when the AI fragment is absent', () => {
-    expect(resolveRecipeRouteIntent('recipe-1', null)).toEqual({ type: 'recipe', recipeId: 'recipe-1' });
+    expect(resolveRecipeRouteIntent('recipe-1', null)).toEqual({
+      type: 'recipe',
+      recipeId: 'recipe-1'
+    });
+  });
+
+  it('starts cooking only for an explicit cooking mode on a selected recipe', () => {
+    expect(resolveRecipeRouteIntent('recipe-1', null, 'cooking')).toEqual({
+      type: 'recipe',
+      recipeId: 'recipe-1',
+      mode: 'cooking'
+    });
+    expect(resolveRecipeRouteIntent('recipe-1', null, 'other')).toEqual({
+      type: 'recipe',
+      recipeId: 'recipe-1'
+    });
+    expect(resolveRecipeRouteIntent(null, null, 'cooking')).toEqual({ type: 'none' });
   });
 
   it('does not activate route-driven dialogs without a matching URL state', () => {

@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
+import { createServer as createHttpServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
@@ -29,8 +30,20 @@ const args = process.argv.slice(2).filter((arg) => arg !== '--');
 const nginxIngress = args.includes('--nginx-ingress');
 const playwrightArgs = args.filter((arg) => arg !== '--nginx-ingress');
 const liveSmoke = validateAiLiveSmokeRunner(process.env, playwrightArgs);
+const cleanupFailedSeedRuns =
+  process.env.HOGARIA_AI_SEED_GENERATION === '1' &&
+  process.env.HOGARIA_AI_SEED_CLEANUP_ON_FAILURE === '1';
 if (nginxIngress && liveSmoke) {
   throw new Error('The isolated Nginx ingress runner cannot be combined with the live AI smoke.');
+}
+const demoMode = process.env.HOGARIA_DEMO_MODE === '1';
+const demoRun = process.env.HOGARIA_DEMO_RUN === '1';
+const demoDatabasePath = resolve(root, '.tmp', 'ai-persona-demo', 'hogaria.sqlite');
+if (demoMode !== demoRun) {
+  throw new Error('Persistent demo E2E requires both explicit demo flags.');
+}
+if (demoMode && resolve(process.env.DATABASE_PATH ?? '') !== demoDatabasePath) {
+  throw new Error('Persistent demo E2E requires the exact managed demo DATABASE_PATH.');
 }
 const fullStack = args.some((arg, index) => {
   if (arg.startsWith('--config=')) return arg.includes('playwright.full-stack.config.ts');
@@ -50,6 +63,7 @@ let ingressComposeProject;
 let ingressComposeFile;
 let ingressComposeEnvironment;
 let ingressComposeStarted = false;
+let storeGeocoderMockServer;
 let exitCode = 1;
 let preserve = !liveSmoke;
 let shutdownRequested = false;
@@ -87,6 +101,44 @@ async function availablePort(excluded = new Set()) {
     if (!excluded.has(port) && port !== 3000 && port !== 4200) return port;
   }
   throw new Error('Could not reserve a non-default ephemeral loopback port for Playwright.');
+}
+
+async function startStoreGeocoderMock() {
+  const server = createHttpServer((request, response) => {
+    const url = new URL(request.url ?? '/', 'http://127.0.0.1');
+    if (request.method !== 'GET' || url.pathname !== '/search' || !url.searchParams.has('q')) {
+      response.writeHead(404).end();
+      return;
+    }
+
+    response.writeHead(200, {
+      'content-type': 'application/json',
+      'cache-control': 'no-store'
+    });
+    response.end(JSON.stringify([{ lat: '36.834', lon: '-2.463' }]));
+  });
+  const port = await new Promise((resolvePort, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        reject(new Error('Could not resolve the isolated geocoder mock port.'));
+        return;
+      }
+      resolvePort(address.port);
+    });
+  });
+  storeGeocoderMockServer = server;
+  return port;
+}
+
+async function stopStoreGeocoderMock() {
+  if (!storeGeocoderMockServer?.listening) return;
+  const server = storeGeocoderMockServer;
+  await new Promise((resolveClose, reject) =>
+    server.close((error) => (error ? reject(error) : resolveClose()))
+  );
+  storeGeocoderMockServer = undefined;
 }
 
 function waitForExit(child) {
@@ -432,7 +484,7 @@ async function main() {
   const baseUrl = `http://127.0.0.1:${appPort}`;
   const paths = {
     runDir,
-    databasePath: join(runDir, 'hogaria.sqlite'),
+    databasePath: demoMode ? demoDatabasePath : join(runDir, 'hogaria.sqlite'),
     resultsFile: join(runDir, 'results.json'),
     reportDir: join(runDir, 'playwright-report'),
     outputDir: join(runDir, 'artifacts')
@@ -447,16 +499,29 @@ async function main() {
     E2E_FRONTEND_PORT: String(appPort),
     E2E_API_PORT: String(nginxIngress ? appPort : apiPort),
     E2E_API_URL: nginxIngress ? baseUrl : `http://127.0.0.1:${apiPort}`,
-    E2E_SEED: `qa-${basename(runDir)}`,
+    E2E_SEED: demoMode ? (process.env.HOGARIA_DEMO_SEED ?? 'demo') : 'qa-' + basename(runDir),
     E2E_READY_FILE: readyFile,
     E2E_RESULTS_FILE: paths.resultsFile,
     E2E_REPORT_DIR: paths.reportDir,
     E2E_OUTPUT_DIR: paths.outputDir,
     DATABASE_PATH: paths.databasePath,
+    ...(demoMode ? { HOGARIA_DEMO_MODE: '1', HOGARIA_DEMO_RUN: '1' } : {}),
     PANTRY_IMAGE_SEARCH_FIXTURE: '1',
     E2E_NGINX_INGRESS: nginxIngress ? '1' : '0',
     ...(nginxIngress ? { JWT_SECRET: randomBytes(32).toString('base64url') } : {})
   };
+  const geocoderMockEnabled =
+    process.env.E2E_STORE_GEOCODER_MOCK === '1' ||
+    (process.env.E2E_STORE_GEOCODER_MOCK !== '0' && !liveSmoke && !fullStack && !nginxIngress);
+  if (geocoderMockEnabled) {
+    if (fullStack || nginxIngress) {
+      throw new Error('The isolated store geocoder mock requires the dev E2E stack.');
+    }
+    const geocoderPort = await startStoreGeocoderMock();
+    ownedPorts.push(geocoderPort);
+    env.STORE_GEOCODER_URL = `http://127.0.0.1:${geocoderPort}/search`;
+    env.STORE_GEOCODER_USER_AGENT = 'HogarIA/E2E (synthetic location fixture)';
+  }
   if (liveSmoke && process.env.HOGARIA_AI_REAL_SMOKE_WORKFLOWS_ONLY === '1') {
     // The opt-in image workflow must use Wikimedia Commons, not the repeatable fixture.
     delete env.PANTRY_IMAGE_SEARCH_FIXTURE;
@@ -486,7 +551,9 @@ async function main() {
   const playwrightCommandArgs = ['test', ...playwrightArgs];
   if (!liveSmoke) {
     console.log(
-      `[hogaria] isolated Playwright (${env.E2E_STACK}) at ${baseUrl}; SQLite and artifacts are under OS temp.`
+      demoMode
+        ? `[hogaria] demo Playwright at ${baseUrl}; persistent demo SQLite retained, run artifacts are under OS temp.`
+        : `[hogaria] isolated Playwright (${env.E2E_STACK}) at ${baseUrl}; SQLite and artifacts are under OS temp.`
     );
   }
   reportSmokeProgress('playwright-starting');
@@ -506,13 +573,15 @@ async function main() {
   if (!(await stopStack())) {
     throw new Error('The isolated app process did not stop; preserving its temporary data.');
   }
+  await stopStoreGeocoderMock();
   const portsClosed = await waitForOwnedPortsToClose(ownedPorts);
   if (!portsClosed) {
     throw new Error(
       'An isolated app port is still listening; preserving its temp data and not attempting to stop an unknown process.'
     );
   }
-  preserve = liveSmoke ? false : exitCode !== 0 || process.env.CI === 'true';
+  preserve =
+    liveSmoke || cleanupFailedSeedRuns ? false : exitCode !== 0 || process.env.CI === 'true';
 }
 
 for (const signal of ['SIGINT', 'SIGTERM']) {
@@ -537,7 +606,7 @@ try {
     reportSmokeProgress('runner-error');
     console.error('[hogaria] isolated AI smoke runner failed.');
   } else console.error(error instanceof Error ? error.message : String(error));
-  preserve = !liveSmoke;
+  preserve = !liveSmoke && !cleanupFailedSeedRuns;
   exitCode = 1;
 } finally {
   if (testProcess && testProcess.exitCode === null && testProcess.signalCode === null) {
@@ -553,6 +622,12 @@ try {
     }
   }
   if (!(await stopStack())) {
+    preserve = true;
+    exitCode = 1;
+  }
+  try {
+    await stopStoreGeocoderMock();
+  } catch {
     preserve = true;
     exitCode = 1;
   }
@@ -592,7 +667,9 @@ try {
       runnerCleanupVerified = true;
       if (!liveSmoke) {
         console.log(
-          '[hogaria] isolated database and artifacts cleaned after the owned app process stopped.'
+          demoMode
+            ? '[hogaria] E2E artifacts cleaned; persistent demo database retained.'
+            : '[hogaria] isolated database and artifacts cleaned after the owned app process stopped.'
         );
       }
     } catch {

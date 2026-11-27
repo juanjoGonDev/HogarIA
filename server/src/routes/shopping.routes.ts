@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { nanoid } from 'nanoid';
 import { getDatabase } from '../config/database.js';
+import { config } from '../config/app.config.js';
 import { authMiddleware } from '../middleware/auth.middleware.js';
 import { zoneStampValue } from '../middleware/timestamp.middleware.js';
 import {
@@ -35,6 +36,8 @@ import {
   createPriceSchema,
   createSuggestedListSchema,
   listFilterSchema,
+  itemLocationsSchema,
+  locationCandidatesSchema,
   orderSchema,
   parseItemLine,
   priceFilterSchema,
@@ -84,6 +87,8 @@ import {
   approveHouseholdMealShopping
 } from '../utils/household-meal-shopping-approval.store.js';
 import { canViewSharedMeals } from '../utils/shared-meal-calendar.store.js';
+import { distanceMeters, NearbyStoreLocator } from '../utils/store-locator.js';
+import { normalizeStoreAddress } from '../utils/store-geocoder.js';
 import {
   necesidadesDelPlan,
   preciosDeLaCasa,
@@ -107,6 +112,14 @@ import {
  *   permitira migrar a `canonical_products` sin tocar las observaciones.
  */
 const shoppingRoutes = new Hono<AppEnv>();
+const nearbyStoreLocator = new NearbyStoreLocator({
+  endpoint: config.geocoding.storeNearbyEndpoint,
+  userAgent: config.geocoding.storeUserAgent,
+  attribution: {
+    text: config.geocoding.storeAttribution,
+    url: config.geocoding.storeAttributionUrl
+  }
+});
 
 shoppingRoutes.use('*', authMiddleware);
 shoppingRoutes.use('*', assistantHouseholdContextMiddleware());
@@ -546,6 +559,209 @@ shoppingRoutes.get('/lists/:id', async (c) => {
       discountDescription: describeDiscount(discount)
     }
   });
+});
+
+/** Busca tiendas del usuario/hogar primero; solo si no hay coincidencia consulta OSM. */
+shoppingRoutes.post('/lists/:id/location-candidates', async (c) => {
+  const db = getDatabase();
+  const userId = c.get('userId');
+  const scope = getScope(userId);
+  const list = readList(db, scope, c.req.param('id'));
+  if (!list) return notFound(c, 'List');
+
+  const body = locationCandidatesSchema.parse(await c.req.json());
+  const radiusMeters = body.radiusMeters ?? 500;
+  const registered = db
+    .prepare(
+      `SELECT id, name, address, latitude, longitude, attribution, attribution_url
+       FROM stores
+       WHERE ${scope.clause} AND latitude IS NOT NULL AND longitude IS NOT NULL
+       ORDER BY name COLLATE NOCASE LIMIT 500`
+    )
+    .all(...scope.params) as {
+    id: string;
+    name: string;
+    address: string | null;
+    latitude: number;
+    longitude: number;
+    attribution: string | null;
+    attribution_url: string | null;
+  }[];
+  const localCandidates = registered
+    .map((store) => ({
+      id: store.id,
+      name: store.name,
+      address: store.address,
+      latitude: store.latitude,
+      longitude: store.longitude,
+      distanceMeters: Math.round(
+        distanceMeters(body.latitude, body.longitude, store.latitude, store.longitude)
+      ),
+      attribution: store.attribution,
+      attributionUrl: store.attribution_url,
+      source: 'registered' as const
+    }))
+    .filter((store) => store.distanceMeters <= radiusMeters)
+    .sort((left, right) => left.distanceMeters - right.distanceMeters)
+    .slice(0, 12);
+
+  if (localCandidates.length > 0) {
+    return c.json({ success: true, data: { status: 'ok', candidates: localCandidates } });
+  }
+
+  // No se registra ni se escribe la coordenada de consulta. Locator guarda solo un caché en RAM.
+  const result = await nearbyStoreLocator.search(body.latitude, body.longitude, radiusMeters);
+  return c.json({
+    success: true,
+    data: { status: result.status, candidates: result.candidates }
+  });
+});
+
+/** Persiste snapshots legibles solo para los productos activos de esta lista. */
+shoppingRoutes.put('/lists/:id/items/location', async (c) => {
+  const db = getDatabase();
+  const userId = c.get('userId');
+  const scope = getScope(userId);
+  const list = readList(db, scope, c.req.param('id'));
+  if (!list) return notFound(c, 'List');
+
+  const body = itemLocationsSchema.parse(await c.req.json());
+  const itemIds = [...new Set(body.itemIds)];
+  const placeholders = itemIds.map(() => '?').join(', ');
+  const items = db
+    .prepare(
+      `SELECT id, name FROM shopping_list_items
+       WHERE list_id = ? AND deleted_at IS NULL AND id IN (${placeholders})`
+    )
+    .all(list.id, ...itemIds) as { id: string; name: string }[];
+  if (items.length !== itemIds.length) return notFound(c, 'Item');
+
+  type SelectedLocation = {
+    id: string;
+    name: string;
+    address: string | null;
+    latitude: number | null;
+    longitude: number | null;
+    attribution: string | null;
+    attributionUrl: string | null;
+    source: 'registered' | 'openstreetmap' | 'manual';
+  };
+  const save = db.transaction((): { selected: SelectedLocation; items: any[] } | null => {
+    let selected: SelectedLocation | null = null;
+
+    if (body.store.source === 'registered') {
+      const row = db
+        .prepare(`SELECT * FROM stores WHERE id = ? AND ${scope.clause}`)
+        .get(body.store.id, ...scope.params) as any;
+      if (!row) return null;
+      selected = {
+        id: row.id,
+        name: row.name,
+        address: row.address ?? null,
+        latitude: row.latitude ?? null,
+        longitude: row.longitude ?? null,
+        attribution: row.attribution ?? null,
+        attributionUrl: row.attribution_url ?? null,
+        source: 'registered'
+      };
+    } else {
+      const name = body.store.name;
+      const address = body.store.address ?? null;
+      const normalizedAddress = address ? normalizeStoreAddress(address) : '';
+      const latitude = body.store.source === 'openstreetmap' ? body.store.latitude : null;
+      const longitude = body.store.source === 'openstreetmap' ? body.store.longitude : null;
+      const existing = db
+        .prepare(
+          `SELECT * FROM stores
+           WHERE ${scope.clause} AND name = ? COLLATE NOCASE
+             AND COALESCE(normalized_address, '') = ?
+             AND ((? IS NULL AND latitude IS NULL AND longitude IS NULL)
+               OR (? IS NOT NULL AND latitude BETWEEN ? - 0.0005 AND ? + 0.0005
+                                AND longitude BETWEEN ? - 0.0005 AND ? + 0.0005))
+           LIMIT 1`
+        )
+        .get(
+          ...scope.params,
+          name,
+          normalizedAddress,
+          latitude,
+          latitude,
+          latitude,
+          latitude,
+          longitude,
+          longitude
+        ) as any;
+      const id = existing?.id ?? nanoid();
+      const attribution =
+        body.store.source === 'openstreetmap' ? config.geocoding.storeAttribution : null;
+      const attributionUrl =
+        body.store.source === 'openstreetmap' ? config.geocoding.storeAttributionUrl : null;
+      if (!existing) {
+        db.prepare(
+          `INSERT INTO stores
+           (id, user_id, household_id, name, address, normalized_address, latitude, longitude, attribution, attribution_url)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).run(
+          id,
+          userId,
+          scope.householdId,
+          name,
+          address,
+          normalizedAddress || null,
+          latitude,
+          longitude,
+          attribution,
+          attributionUrl
+        );
+      }
+      selected = {
+        id,
+        name,
+        address,
+        latitude,
+        longitude,
+        attribution,
+        attributionUrl,
+        source: body.store.source
+      };
+    }
+    if (!selected) return null;
+
+    db.prepare(
+      `UPDATE shopping_list_items SET
+         location_store_id = ?, location_name = ?, location_address = ?,
+         location_latitude = ?, location_longitude = ?, location_attribution = ?,
+         location_attribution_url = ?, location_source = ?, location_updated_at = CURRENT_TIMESTAMP,
+         updated_by = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE list_id = ? AND deleted_at IS NULL AND id IN (${placeholders})`
+    ).run(
+      selected.id,
+      selected.name,
+      selected.address,
+      selected.latitude,
+      selected.longitude,
+      selected.attribution,
+      selected.attributionUrl,
+      selected.source,
+      userId,
+      list.id,
+      ...itemIds
+    );
+    db.prepare(
+      'UPDATE shopping_lists SET version = version + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+    ).run(list.id);
+    const updated = db
+      .prepare(
+        `SELECT * FROM shopping_list_items
+         WHERE list_id = ? AND deleted_at IS NULL AND id IN (${placeholders})`
+      )
+      .all(list.id, ...itemIds);
+    return { selected, items: updated };
+  });
+  const result = save();
+  if (!result) return notFound(c, 'Store');
+  announce(db, list, userId, 'items.location', result.selected.name);
+  return c.json({ success: true, data: { items: result.items } });
 });
 
 shoppingRoutes.patch('/lists/:id/assistant-update', async (c) => {

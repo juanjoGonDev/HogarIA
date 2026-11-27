@@ -71,7 +71,47 @@ export interface ShoppingListItem {
   /** La foto de quien toco la linea por ultima vez; sin foto, `app-avatar` pinta la inicial. */
   added_by_avatar?: string | null;
   updated_by_avatar?: string | null;
+  /** Snapshot de la tienda elegida; no incluye las coordenadas crudas del dispositivo. */
+  location_store_id?: string | null;
+  location_name?: string | null;
+  location_address?: string | null;
+  location_latitude?: number | null;
+  location_longitude?: number | null;
+  location_attribution?: string | null;
+  location_attribution_url?: string | null;
+  location_source?: ShoppingLocationSource | null;
+  location_updated_at?: string | null;
 }
+
+export type ShoppingLocationSource = 'registered' | 'openstreetmap' | 'manual';
+
+export interface ShoppingLocationCandidate {
+  id: string;
+  name: string;
+  address: string | null;
+  latitude: number;
+  longitude: number;
+  distanceMeters: number;
+  attribution: string | null;
+  attributionUrl: string | null;
+  source: Exclude<ShoppingLocationSource, 'manual'>;
+}
+
+export interface ShoppingLocationSearch {
+  status: 'ok' | 'invalid_input' | 'invalid_response' | 'rate_limited' | 'timeout' | 'unavailable';
+  candidates: ShoppingLocationCandidate[];
+}
+
+export type ShoppingLocationSelection =
+  | { source: 'registered'; id: string }
+  | {
+      source: 'openstreetmap';
+      name: string;
+      address: string | null;
+      latitude: number;
+      longitude: number;
+    }
+  | { source: 'manual'; name: string; address: string | null };
 
 /**
  * Clave de producto, igual que en el server (`utils/product-key.ts`): acentos fuera,

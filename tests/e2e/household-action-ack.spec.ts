@@ -441,7 +441,7 @@ test.describe('acciones de Hogar: confirmación real y reintento', () => {
     await registerAndGoto(page, '/household', 'Owner synthetic');
     await createHouseholdThroughUi(page, 'Hogar sintético salida');
     await page.locator('.toast--success .toast__close').click();
-    await page.getByRole('tab', { name: 'Ajustes' }).click();
+    await page.getByRole('tab', { name: 'Ajustes', exact: true }).click();
 
     let leaveRequests = 0;
     await page.route('**/api/household/leave', async (route) => {

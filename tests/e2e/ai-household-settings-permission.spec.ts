@@ -27,10 +27,15 @@ test('la configuración IA del hogar respeta settings en navegación directa y l
       'Casa sintética IA permisos'
     );
 
-    await memberPage.goto('/ai-config');
-    await expect(memberPage).toHaveURL(/\/household\?tab=settings$/);
+    await memberPage.goto('/ai-config?source=calendar');
+    await expect(memberPage).toHaveURL(/\/household\?source=calendar&tab=ai$/);
     await expect(memberPage.locator('.sidebar__nav a[href="/ai-config"]')).toHaveCount(0);
     await expect(memberPage.locator('[data-test="household-ai-config"]')).toHaveCount(0);
+    await expect(
+      memberPage.getByText(
+        'Solo administradores o miembros con permiso pueden configurar la IA del hogar.'
+      )
+    ).toBeVisible();
 
     await page.goto('/household?tab=permissions');
     const memberPicker = page.locator('[data-test="permissions-member-select"]');
@@ -43,7 +48,7 @@ test('la configuración IA del hogar respeta settings en navegación directa y l
     await expect(page.locator('.toast--success')).toBeVisible();
 
     await memberPage.reload();
-    await memberPage.goto('/household?tab=settings');
+    await memberPage.goto('/household?tab=ai');
     const embeddedConfig = memberPage.locator('[data-test="household-ai-config"]');
     await expect(embeddedConfig).toBeVisible();
     await expect(
@@ -56,12 +61,35 @@ test('la configuración IA del hogar respeta settings en navegación directa y l
       test.info().project.name === 'chromium'
         ? { width: 1440, height: 900 }
         : { width: 393, height: 851 };
+    const gutterViewports = [viewport, { width: 320, height: 740 }, { width: 568, height: 320 }];
+    for (const size of gutterViewports) {
+      await memberPage.setViewportSize(size);
+      await expect
+        .poll(() => memberPage.evaluate(() => document.documentElement.scrollWidth))
+        .toBeLessThanOrEqual(size.width);
+      const bounds = await Promise.all([
+        memberPage.locator('.household-tabs').evaluate((element) => {
+          const rect = element.getBoundingClientRect();
+          return { left: rect.left, right: rect.right };
+        }),
+        memberPage.locator('[data-test="household-panel-ai"]').evaluate((element) => {
+          const rect = element.getBoundingClientRect();
+          return { left: rect.left, right: rect.right };
+        }),
+        embeddedConfig.locator('.ai-config').evaluate((element) => {
+          const rect = element.getBoundingClientRect();
+          return { left: rect.left, right: rect.right };
+        })
+      ]);
+      const [tabs, panel, config] = bounds;
+      expect(Math.abs(tabs.left - panel.left)).toBeLessThanOrEqual(1);
+      expect(Math.abs(tabs.right - panel.right)).toBeLessThanOrEqual(1);
+      expect(Math.abs(panel.left - config.left)).toBeLessThanOrEqual(1);
+      expect(Math.abs(panel.right - config.right)).toBeLessThanOrEqual(1);
+    }
     await memberPage.setViewportSize(viewport);
-    await expect
-      .poll(() => memberPage.evaluate(() => document.documentElement.scrollWidth))
-      .toBeLessThanOrEqual(viewport.width);
     const screenshotPath = resolve(
-      `.e2e-screenshots/ai-household-settings/${test.info().project.name}-embedded.png`
+      `.e2e-screenshots/ai-household-ai-tab/${test.info().project.name}-embedded.png`
     );
     await mkdir(dirname(screenshotPath), { recursive: true });
     await memberPage.screenshot({

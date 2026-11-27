@@ -977,6 +977,10 @@ app-calendar {
     flex-wrap: wrap;
   }
 
+  .cal-strip__hint--error {
+    color: var(--error);
+  }
+
   .cal-link {
     padding: 0;
     font: inherit;

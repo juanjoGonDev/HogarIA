@@ -33,6 +33,8 @@ import {
   ShoppingList,
   ShoppingListItem,
   ShoppingListStatus,
+  ShoppingLocationSearch,
+  ShoppingLocationSelection,
   StoreCount,
   SugerenciaDeCompra
 } from '../../shared/models/shopping.model';
@@ -374,13 +376,24 @@ export class ShoppingService {
   applyPhotoLines(
     listId: string,
     lines: PhotoLine[]
-  ): Promise<{ added: number; merged: number[]; createdCategories: string[] } | null> {
-    return this.request<{ added: number; merged: number[]; createdCategories: string[] }>(() =>
+  ): Promise<{
+    added: ShoppingListItem[];
+    merged: ShoppingListItem[];
+    createdCategories: string[];
+  } | null> {
+    return this.request<{
+      added: ShoppingListItem[];
+      merged: ShoppingListItem[];
+      createdCategories: string[];
+    }>(() =>
       this.http
-        .post<{ data: { added: number; merged: number[]; createdCategories: string[] } }>(
-          `${this.apiUrl}/lists/${listId}/items/apply`,
-          { lines }
-        )
+        .post<{
+          data: {
+            added: ShoppingListItem[];
+            merged: ShoppingListItem[];
+            createdCategories: string[];
+          };
+        }>(`${this.apiUrl}/lists/${listId}/items/apply`, { lines })
         .pipe(
           map((response) => response.data),
           tap(() => {
@@ -831,6 +844,52 @@ export class ShoppingService {
         })
       )
     );
+  }
+
+  /** Called only after the person accepts the location prompt. */
+  searchNearbyStores(
+    listId: string,
+    latitude: number,
+    longitude: number,
+    radiusMeters = 500
+  ): Promise<ShoppingLocationSearch | null> {
+    return this.request<ShoppingLocationSearch>(() =>
+      this.http
+        .post<{ data: ShoppingLocationSearch }>(
+          `${this.apiUrl}/lists/${listId}/location-candidates`,
+          { latitude, longitude, radiusMeters }
+        )
+        .pipe(map((response) => response.data))
+    );
+  }
+
+  saveItemLocations(
+    listId: string,
+    itemIds: string[],
+    store: ShoppingLocationSelection
+  ): Promise<ShoppingListItem[] | null> {
+    const ids = [...new Set(itemIds.filter((id) => id.trim()))];
+    if (ids.length === 0) return Promise.resolve([]);
+    const contextRevision = this.household.contextRevision();
+    const householdId = this.household.activeHouseholdId();
+    return this.request<{ items: ShoppingListItem[] }>(() =>
+      this.http
+        .put<{ data: { items: ShoppingListItem[] } }>(
+          `${this.apiUrl}/lists/${listId}/items/location`,
+          {
+            itemIds: ids,
+            store
+          }
+        )
+        .pipe(
+          map((response) => response.data),
+          tap(({ items }) => {
+            if (!this.isCurrentContext(contextRevision)) return;
+            if (this.household.activeHouseholdId() !== householdId) return;
+            items.forEach((item) => this.replaceItem(item));
+          })
+        )
+    ).then((result) => result?.items ?? null);
   }
 
   // --------------------------------------------------------------- precios

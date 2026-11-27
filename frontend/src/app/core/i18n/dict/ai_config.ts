@@ -144,7 +144,7 @@ export const aiConfigEs = {
   'ai_config.provider_required_function': 'Función: {function}',
   'ai_config.provider_required_permission':
     'Necesitas permiso de ajustes del hogar para configurarlo.',
-  'ai_config.open_settings': 'Abrir ajustes',
+  'ai_config.open_settings': 'Abrir configuración IA',
   'ai_config.provider_in_use_title': 'Proveedor en uso',
   'ai_config.provider_in_use_message':
     '{name} se usa en: {functions}. Si lo desactivas, esas funciones pasarán al proveedor activo más antiguo; si no hay otro, quedarán sin proveedor.',
@@ -296,7 +296,7 @@ export const aiConfigEn: Record<keyof typeof aiConfigEs, string> = {
   'ai_config.provider_required_function': 'Function: {function}',
   'ai_config.provider_required_permission':
     'You need household settings permission to configure it.',
-  'ai_config.open_settings': 'Open settings',
+  'ai_config.open_settings': 'Open AI settings',
   'ai_config.provider_in_use_title': 'Provider in use',
   'ai_config.provider_in_use_message':
     '{name} is assigned to: {functions}. If you deactivate it, those functions will move to the oldest active provider; if none remains, they will have no provider.',

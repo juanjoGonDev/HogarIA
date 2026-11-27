@@ -4,7 +4,8 @@ export const HOUSEHOLD_TABS = [
   'tasks',
   'members',
   'permissions',
-  'settings'
+  'settings',
+  'ai'
 ] as const;
 export type HouseholdTab = (typeof HOUSEHOLD_TABS)[number];
 

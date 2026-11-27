@@ -68,6 +68,9 @@ export const householdEs = {
   'household.tab_members': 'Miembros',
   'household.tab_permissions': 'Permisos',
   'household.tab_settings': 'Ajustes',
+  'household.tab_ai_settings': 'Ajustes IA',
+  'household.ai_settings_admin_only':
+    'Solo administradores o miembros con permiso pueden configurar la IA del hogar.',
   'household.planning_subtabs': 'Secciones de planificación',
   'household.planning_tab_meals': 'Comidas',
   'household.planning_tab_tasks': 'Tareas',
@@ -660,6 +663,9 @@ export const householdEn: Record<keyof typeof householdEs, string> = {
   'household.tab_members': 'Members',
   'household.tab_permissions': 'Permissions',
   'household.tab_settings': 'Settings',
+  'household.tab_ai_settings': 'AI settings',
+  'household.ai_settings_admin_only':
+    'Only administrators or members with permission can configure household AI.',
   'household.planning_subtabs': 'Planning sections',
   'household.planning_tab_meals': 'Meals',
   'household.planning_tab_tasks': 'Tasks',

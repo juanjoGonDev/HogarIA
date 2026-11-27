@@ -92,3 +92,67 @@ No habilitar IA real ni enviar prompts desde CI. No crear cuentas/secretos de pr
 - `docker build --platform linux/amd64 --tag hogaria-ci:pr47-final-amd64 .` y equivalente `linux/arm64` completan; ambas imágenes ejecutan el smoke anterior y llegan a `HEALTHCHECK=healthy`. DB está en tmpfs y JWT es aleatorio; ambos contenedores se eliminaron.
 - Pre-push completo en `5ba77b4`: `node scripts/check-push-format.mjs` (3 rutas), `pnpm run check:ui` (266/21), `pnpm run build` (éxito, advertencias existentes), `pnpm run typecheck:e2e`, y `pnpm run test` (config 104/104, cliente 1709/1709 con 90,62/80,96/91,73/93,18 % S/B/F/L; servidor 2082 pasados, 1 omitido). Duración del hook: 102 s.
 - Retarget y revisión del diff a `master` completados. Run #807 (`5ba77b4`) terminó verde con 11/11 jobs: instalación, amd64/arm64 build+smoke, typecheck, server coverage, producción, 4 shards E2E y full-stack. Falta publicar/pullar GHCR y validar el artefacto publicado. `ing.json` es una respuesta de datos seed genéricos (20/69 ingredientes; un ID opaco de usuario/hogar, sin notas, imágenes, email ni credenciales) y no tiene referencias en el código. No se ha llamado a WebAPI ni a un proveedor IA en CI/local smoke.
+
+## Incidencia vigente — CI del PR #72 (2026-11-04)
+
+El run [#1141](https://github.com/juanjoGonDev/HogarIA/actions/runs/41877339875) falló en `Install & warm caches` y en ambos smokes de contenedor. El merge temporal del PR combinó la actualización de `hono` a `4.13.16` en la base `master` con `4.13.14` en `server/package.json` y `pnpm-lock.yaml` de la rama. La instalación congelada rechazó el desacuerdo; los dos fallos Docker repiten la misma causa. No es un fallo de tests ni de runtime.
+
+### Criterios de corrección
+
+- [x] Alinear `server/package.json` y `pnpm-lock.yaml` con la versión de `hono` de la base actual; no desactivar `--frozen-lockfile` ni bajar la versión de la base.
+- [x] Verificar instalación local con lockfile congelado y revisar que el diff de lockfile solo contiene cambios necesarios para esa alineación.
+- [x] Ejecutar CI nuevo del PR #72 y comprobar que instalación, smokes `amd64`/`arm64` y el resto de gates dejan de fallar por `ERR_PNPM_OUTDATED_LOCKFILE` (run `41909284726`: instalador y smokes verdes; el fallo E2E posterior está descrito abajo).
+
+**Evidencia local:** `pnpm install --lockfile-only --frozen-lockfile --ignore-scripts` pasó; el diff queda limitado a Hono `4.13.14` → `4.13.16` en manifiesto, importers, resolución y snapshots. No se modificó `node_modules`.
+
+### Hallazgo del run #1146 — 2026-11-04
+
+Run #1146 (`41894912465`, commit `1589a83d`) pasó instalación congelada, smokes de contenedor `amd64`/`arm64` y resto de gates salvo shard E2E 2. Fallaron cinco pruebas por `getByRole('tab', { name: 'Ajustes' })`, que coincidía tanto con «Ajustes» como con «Ajustes IA»; no era una regresión funcional. Se cambió el locator a `exact: true` en `confirm-dialog.spec.ts`, `household-action-ack.spec.ts`, `household-icon-consistency.spec.ts` y `household.spec.ts`.
+
+- [x] Reproducir los cinco strict-locator failures y validar corrección en las cuatro suites afectadas: `node scripts/run-isolated-playwright.mjs --project=chromium --forbid-only tests/e2e/confirm-dialog.spec.ts tests/e2e/household-action-ack.spec.ts tests/e2e/household-icon-consistency.spec.ts tests/e2e/household.spec.ts` — 20/20 pasan.
+- [x] Confirmar run remoto completo verde tras publicar los fixes: run `41916635303`, head `6015d7a2`, 11/11 jobs; smokes amd64/arm64 y cuatro shards E2E verdes. CodeQL `41916547240` también pasó ambos análisis. PR #72 sigue Draft.
+
+### Hallazgo del run #41909284726 — 2026-11-04
+
+El run terminó con fallo en los shards E2E 1 y 4; instalación, smokes `amd64`/`arm64`, full-stack, servidor, typecheck y build pasaron. Ocho pruebas fallaban porque, después de marcar un producto como comprado, la nueva pregunta de ubicación queda correctamente modal y bloquea interacciones posteriores. Una era `account.spec.ts`; siete eran de lista, ciclo de vida, orden o sugerencias. No es un fallo del flujo de compra: las pruebas omitían contestar la pregunta.
+
+Corrección publicada en `7990cd35`: helper E2E `skipOptionalShoppingLocationPrompt`, que exige el aviso y elige «Ahora no» en pruebas ajenas a ubicación; las pruebas de ubicación conservan sus aserciones. Verificado localmente: suites Chromium focales (42 pasaron, 3 omitidas), full-stack dinero/presupuesto (4 pasaron), Prettier, `typecheck:e2e` y hook pre-push completo (configuración 146, cliente 1837, servidor 2260; 1 omitido). El run final `41916635303`, head `6015d7a2`, pasó los 11 jobs; CodeQL `41916547240` pasó ambos análisis.
+
+## Hallazgo del CI del PR #72 — 2026-11-26
+
+Los runs `45875190646` y `45875336322` fallaron por la misma causa en dos áreas distintas. El job `Install & warm caches` rechazó `pnpm install --frozen-lockfile`; ambos builds de contenedor fallaron en el mismo paso congelado del Dockerfile. El manifiesto de `server/package.json` del merge temporal (base `e88336a5`) pide siete versiones distintas de las declaradas por el importador `server` de `pnpm-lock.yaml`: `@hono/node-server`, `better-sqlite3`, `hono`, `@typescript-eslint/eslint-plugin`, `@typescript-eslint/parser`, `@vitest/coverage-v8` y `vitest`. No es un fallo de runtime ni de los tests E2E. No desactivar el lockfile congelado.
+
+### Criterios de corrección vigentes
+
+- [x] Alinear `server/package.json` de la rama y `pnpm-lock.yaml` con el manifiesto de la base `master` que usa CI; conservar `--frozen-lockfile`.
+- [x] Ejecutar `pnpm install --frozen-lockfile` localmente y confirmar que el diff del lockfile solo resuelve las discrepancias reportadas.
+- [x] Confirmar que las imágenes `amd64` y `arm64` completan build y smoke con la instalación congelada.
+- [x] Obtener un run remoto nuevo del PR #72 con instalación, ambos smokes y todos los demás jobs requeridos verdes.
+
+**Evidencia local (2026-11-26):** `server/package.json` coincide con `origin/master` (`git diff origin/master -- server/package.json` vacío); se reprodujo el `ERR_PNPM_OUTDATED_LOCKFILE` exacto al aplicar los pins del merge de CI, y el lockfile se regeneró sin scripts. `pnpm install --frozen-lockfile --lockfile-only --ignore-scripts` pasó. Instalación real aislada: workspace temporal con los tres manifests y lockfile, `pnpm install --frozen-lockfile --ignore-scripts` instaló 1043 paquetes con pnpm 10.15.0; el directorio temporal se eliminó. El diff queda limitado a los siete pins de server y resoluciones transitivas de esos paquetes (Hono, better-sqlite3, typescript-eslint y Vitest); no cambia el importador del frontend.
+
+**Evidencia remota (2026-11-26):** run [45878848795 (#1352)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45878848795), commit `3c5432e4`, completado con éxito (11/11 jobs): instalación frozen, builds y smokes de contenedor amd64/arm64, pruebas de servidor, typecheck, build de producción, full-stack y los cuatro shards E2E.
+
+### Hallazgo del run #1354 — 2026-11-26
+
+El run [45882536558 (#1354)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45882536558), en `6d07c681`, completó instalación, smokes de contenedor y los demás jobs, pero falló `E2E Tests (shard 1)`. El resumen del job atribuye fallos a `ai-provider-queue.spec.ts` (el orden esperado tras el movimiento con teclado no se reflejó y la aserción de foco falló) y a `auth-onboarding-icons.spec.ts` (el selector del icono SVG de onboarding obtuvo cero elementos).
+
+### Criterios correctivos
+
+- [x] Contrastar el run fallido con Playwright aislado: el icono existe en el template; el test lo detectó 3/3 veces tras cambiar el conteo instantáneo por `toHaveCount(1)` con autoespera. La pérdida de foco de cola se reprodujo en 2/3 repeticiones al comprobarlo explícitamente. El orden ya aparecía en SQLite y `document.activeElement` era el botón de diagnóstico del mismo producto; el código confirma que, tras el PATCH, `saveOrder()` programa `restoreFocus()` en `requestAnimationFrame`, que prioriza el primer botón habilitado del job. Esto apunta a que el test iniciaba el segundo movimiento antes de que acabara la restauración de foco del arrastre.
+- [x] Mantener la aserción del icono SVG (cantidad exacta 1) y hacer que espere el render; E2E Chromium repetido: 3/3 pasan, sin relajar cobertura.
+- [x] Sincronizar el E2E de cola con la finalización del foco restaurado por el arrastre antes de enfocar el botón «subir»; conservar la comprobación de habilitado, foco, movimiento por Enter, orden persistido y foco final. E2E Chromium aislado con `--repeat-each=3`: la prueba de cola pasa 3/3.
+- [x] Ejecutar las pruebas afectadas en aislamiento: 6/6 repeticiones focales (cola 3/3, icono 3/3). CI [45890876833 (#1359)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45890876833) pasó 11/11 jobs en `764067a9`; conservar el PR en Draft.
+- [x] Verificar el commit documental `eab195fa`: CI [45893533271 (#1361)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45893533271) pasó 11/11 jobs.
+
+**Evidencia local aislada (2026-11-26):** la suite `auth-onboarding-icons.spec.ts` pasó 3/3 antes del cambio y el test del icono pasó 3/3 con `toHaveCount(1)` tras el cambio. El test de cola pasó una vez antes de cambiarlo; al forzar la comprobación de foco, tres repeticiones devolvieron 1 pasada y 2 fallidas después de `focus()`. En ambas, `document.activeElement` era `copy-diagnostic` del job: el test leía SQLite antes de terminar la respuesta del PATCH y el `requestAnimationFrame` de restauración. El test ahora espera el anuncio accesible del reordenado, el siguiente frame y el foco en el mismo job antes de activar «subir». Repetición conjunta final: 6/6 (cola 3/3, icono 3/3), 32,3 s. El runner usó SQLite bajo `%TEMP%`, confirmó cierre de sus puertos y eliminó artefactos; no se tocó DevBar ni proveedor externo.
+
+### Fallo reciente del hook pre-push — 2026-11-26
+
+El primer pre-push del commit local `ced191f8` falló solo en `server/src/config/database.spec.ts`: el test «elige al admin elegible más antiguo en hogares legacy de forma estable e idempotente» excedió el timeout predeterminado de 5 s (5,711 ms) dentro de la suite paralela. No falló ninguna aserción ni se detectó acceso a datos persistentes. El test ejecuta dos inicializaciones completas con migraciones históricas; un test vecino de la misma inicialización ya fija 30 s por el coste de migraciones bajo carga paralela.
+
+#### Criterios correctivos
+
+- [x] Dar un timeout explícito de 30 s al test de migración/reinicio, coherente con el test vecino, y explicar la carga que cubre. El test focal pasó 1/1 (0,878 s); tras el cambio, la suite completa de servidor pasó 127 ficheros / 2.260 tests, 1 omitido.
+- [x] Enmendar el commit local como `fb7e536a` e intentar el hook pre-push completo antes de push, sin saltar hooks. PASS · 98,56 s; formato (7 rutas), UI (278 ficheros/21 reglas), build, E2E typecheck y `test:config`/cliente/servidor; servidor 2.260 pass, 1 skip.
+- [ ] Gate remoto del commit `fb7e536a`: run #1362 [45896836456](https://github.com/juanjoGonDev/HogarIA/actions/runs/45896836456) fue cancelado; el run [45897463409 (#1363)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45897463409) está en curso. Esperar 11/11 jobs y conservar Draft.
