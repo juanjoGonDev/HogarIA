@@ -3,7 +3,7 @@ import { writeFileSync } from 'node:fs';
 import { relative } from 'node:path';
 
 import { config } from './config/app.config.js';
-import { acquireDemoDatabaseLock } from './config/demo-mode.js';
+import { acquireDemoDatabaseLock, isDemoShutdownMessage } from './config/demo-mode.js';
 import { getDatabase, initializeDatabase } from './config/database.js';
 import { memoryMonitor } from './utils/memory-monitor.js';
 import { installConsoleCapture } from './utils/log-store.js';
@@ -104,6 +104,11 @@ function shutdownServer(signal: 'SIGTERM' | 'SIGINT'): Promise<void> {
 
 process.on('SIGTERM', () => void shutdownServer('SIGTERM'));
 process.on('SIGINT', () => void shutdownServer('SIGINT'));
+if (process.env.HOGARIA_DEMO_MODE === '1') {
+  process.on('message', (message) => {
+    if (isDemoShutdownMessage(message)) void shutdownServer('SIGTERM');
+  });
+}
 
 startServer();
 

@@ -1,7 +1,24 @@
-import { relative, resolve, sep, basename, join, isAbsolute } from 'node:path';
+import { relative, resolve, sep, basename, join, isAbsolute, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { existsSync, readFileSync } from 'node:fs';
 
+function resolveRepositoryRoot(workingDirectory = process.cwd()) {
+  let candidate = resolve(workingDirectory);
+  while (true) {
+    if (
+      existsSync(join(candidate, 'server', 'package.json')) &&
+      existsSync(join(candidate, 'frontend', 'package.json'))
+    ) {
+      return candidate;
+    }
+    const parent = dirname(candidate);
+    if (parent === candidate) throw new Error('Could not locate the HogarIA repository root.');
+    candidate = parent;
+  }
+}
+
+const REPOSITORY_ROOT = resolveRepositoryRoot();
+export const DEMO_DATABASE_PATH = resolve(REPOSITORY_ROOT, '.tmp/ai-persona-demo/hogaria.sqlite');
 const RESERVED_PORTS = new Set([3000, 4200]);
 
 function isWithin(parent, candidate) {
@@ -14,6 +31,13 @@ function isWithin(parent, candidate) {
   );
 }
 
+function pathsEqual(left, right) {
+  const normalizedLeft = resolve(left);
+  const normalizedRight = resolve(right);
+  return process.platform === 'win32'
+    ? normalizedLeft.toLowerCase() === normalizedRight.toLowerCase()
+    : normalizedLeft === normalizedRight;
+}
 function parsePort(value, name) {
   if (typeof value !== 'string' || !/^\d+$/.test(value)) {
     throw new Error(`${name} must be an explicit TCP port.`);
@@ -47,9 +71,32 @@ export function validateIsolatedEnvironment(env = process.env, systemTempRoot = 
   }
 
   const databasePath = resolve(env.DATABASE_PATH ?? '');
-  const expectedDatabasePath = join(runDir, 'hogaria.sqlite');
-  if (databasePath !== expectedDatabasePath || !isWithin(runDir, databasePath)) {
-    throw new Error('DATABASE_PATH must be exactly the isolated SQLite file inside E2E_RUN_DIR.');
+  const demoMode = env.HOGARIA_DEMO_MODE === '1';
+  const demoRun = env.HOGARIA_DEMO_RUN === '1';
+  if (
+    (env.HOGARIA_DEMO_MODE !== undefined &&
+      env.HOGARIA_DEMO_MODE !== '' &&
+      env.HOGARIA_DEMO_MODE !== '0' &&
+      env.HOGARIA_DEMO_MODE !== '1') ||
+    (env.HOGARIA_DEMO_RUN !== undefined &&
+      env.HOGARIA_DEMO_RUN !== '' &&
+      env.HOGARIA_DEMO_RUN !== '0' &&
+      env.HOGARIA_DEMO_RUN !== '1') ||
+    demoMode !== demoRun
+  ) {
+    throw new Error(
+      'Persistent demo database requires HOGARIA_DEMO_MODE=1 and HOGARIA_DEMO_RUN=1.'
+    );
+  }
+  if (demoMode) {
+    if (!pathsEqual(databasePath, DEMO_DATABASE_PATH)) {
+      throw new Error('DATABASE_PATH must be the exact persistent demo database.');
+    }
+  } else {
+    const expectedDatabasePath = join(runDir, 'hogaria.sqlite');
+    if (databasePath !== expectedDatabasePath || !isWithin(runDir, databasePath)) {
+      throw new Error('DATABASE_PATH must be exactly the isolated SQLite file inside E2E_RUN_DIR.');
+    }
   }
   const seed = env.E2E_SEED?.trim();
   if (!seed) throw new Error('E2E_SEED must be a unique synthetic fixture seed.');
@@ -81,7 +128,7 @@ export function validateIsolatedEnvironment(env = process.env, systemTempRoot = 
     throw new Error('E2E_API_PORT must not use the app’s shared development port.');
   }
 
-  if (existsSync(databasePath) && stack !== 'ingress') {
+  if (existsSync(databasePath) && stack !== 'ingress' && !demoMode) {
     const readyFile = join(runDir, 'server.ready');
     const ready = existsSync(readyFile) ? readFileSync(readyFile, 'utf8').trim().split(':') : [];
     const readyPid = Number(ready[0]);

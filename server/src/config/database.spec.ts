@@ -102,6 +102,16 @@ describe('adoptLegacyDatabase', () => {
   });
 });
 
+describe('database SQL logging policy', () => {
+  it('keeps development SQL logs off in demo mode', async () => {
+    const { shouldLogSqlStatements } = await dbModuleWith(':memory:');
+
+    expect(shouldLogSqlStatements({ NODE_ENV: 'development' })).toBe(true);
+    expect(shouldLogSqlStatements({ NODE_ENV: 'development', HOGARIA_DEMO_MODE: '1' })).toBe(false);
+    expect(shouldLogSqlStatements({ NODE_ENV: 'test', HOGARIA_DEMO_MODE: '1' })).toBe(false);
+  });
+});
+
 describe('initializeDatabase con fichero heredado', () => {
   it('migra la unicidad de categorías al ámbito y conserva claves al reiniciar', async () => {
     const databaseFile = target();

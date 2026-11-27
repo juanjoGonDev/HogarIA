@@ -1,6 +1,7 @@
 import { createServer, request as httpRequest } from 'node:http';
 import { randomUUID } from 'node:crypto';
-import { isAbsolute } from 'node:path';
+import { dirname, isAbsolute, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   AI_LIVE_RECEIPT_LONG_TICKET_ONLY_SELECTION,
   AI_LIVE_RECEIPT_PREFERRED_JPEG_ONLY_SELECTION,
@@ -18,6 +19,8 @@ import {
   assertAiLiveSmokeDeadlineContract
 } from './ai-live-smoke-contract.mjs';
 
+const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const DEMO_DATABASE_PATH = resolve(REPOSITORY_ROOT, '.tmp', 'ai-persona-demo', 'hogaria.sqlite');
 export const AI_LIVE_SMOKE_ENV = Object.freeze({
   optIn: 'HOGARIA_AI_REAL_SMOKE',
   allowRedactedRequestLogs: 'HOGARIA_AI_REAL_SMOKE_ALLOW_REDACTED_REQUEST_LOGS',
@@ -243,7 +246,32 @@ function isAbsoluteLocalPath(value) {
   return isAbsolute(value) || /^[A-Za-z]:[\\/]/.test(value) || /^\\\\[^\\]+\\[^\\]+/.test(value);
 }
 
+export function validateAiLiveDemoExecution(env = process.env) {
+  const mode = env?.HOGARIA_DEMO_MODE;
+  const runner = env?.HOGARIA_DEMO_RUN;
+  if (
+    (mode !== undefined && mode !== '' && mode !== '0' && mode !== '1') ||
+    (runner !== undefined && runner !== '' && runner !== '0' && runner !== '1') ||
+    (mode === '1') !== (runner === '1')
+  ) {
+    throw new Error(
+      'Live demo execution requires both explicit demo flags: HOGARIA_DEMO_MODE=1 and HOGARIA_DEMO_RUN=1.'
+    );
+  }
+
+  if (mode !== '1') return false;
+  const configuredPath = resolve(env?.DATABASE_PATH ?? '');
+  const matchesDemoPath =
+    process.platform === 'win32'
+      ? configuredPath.toLowerCase() === DEMO_DATABASE_PATH.toLowerCase()
+      : configuredPath === DEMO_DATABASE_PATH;
+  if (!matchesDemoPath) {
+    throw new Error('Live demo execution requires the exact managed demo DATABASE_PATH.');
+  }
+  return true;
+}
 export function validateAiLiveSmokeOptIn(env = process.env) {
+  validateAiLiveDemoExecution(env);
   if (env[AI_LIVE_SMOKE_ENV.optIn] !== '1') {
     throw new Error('The real AI smoke requires explicit opt-in.');
   }
@@ -869,6 +897,7 @@ export function createAiLiveSmokeRunnerEnvironment(
   }
 ) {
   assertAiLiveSmokeDeadlineContract(deadlines);
+  const demoExecution = validateAiLiveDemoExecution(parentEnv);
   const allowedInherited = [
     'PATH',
     'SystemRoot',
@@ -884,6 +913,7 @@ export function createAiLiveSmokeRunnerEnvironment(
     'PLAYWRIGHT_BROWSERS_PATH',
     'E2E_CHROME_BIN',
     'HOGARIA_AI_REAL_SMOKE_CAPTURE_DIR',
+    ...(demoExecution ? ['HOGARIA_DEMO_MODE', 'HOGARIA_DEMO_RUN', 'DATABASE_PATH'] : []),
     AI_LIVE_SMOKE_ENV.receiptPath,
     AI_LIVE_SMOKE_ENV.receiptsOnly,
     AI_LIVE_SMOKE_ENV.receiptSelection,

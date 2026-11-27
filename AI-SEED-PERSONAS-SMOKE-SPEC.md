@@ -1,6 +1,6 @@
 # Generador de perfiles sintéticos y smoke de IA
 
-**Estado:** Draft; generador, matriz loopback, fallo parcial y UI de perfiles verificados; intento real anónimo bloqueado por `401 authentication_required`; generación WebAPI real pendiente.
+**Estado:** Draft; generador, matriz loopback y comandos/SQLite demo verificados; la generación WebAPI real sigue bloqueada por los controles de privacidad activos.
 **Rama/PR:** `feat/calendar-recipe-cooking` / #72 Draft. Sin merge ni publicación de datos.
 
 ## Objetivo
@@ -46,9 +46,9 @@ Crear un generador reutilizable de cuentas de prueba para usuarios solos y hogar
 - [x] Guardas de opt-in, loopback y ruta exacta de SQLite aislada. Evidencia: test unitario.
 - [x] Pruebas unitarias/integración cubren generación, repetición, aislamiento, miembros, fallo parcial y limpieza sin tocar datos/procesos preexistentes. La inyección `after-first-account` confirma exactamente un registro antes de abortar; el runner cierra el proceso/puerto propio y elimina la SQLite temporal.
 - [x] Los E2E con proveedor loopback cubren los 11 `AiJobKind` vigentes entre las rutas de recetas, planificación, compra/ticket, hogar y asistente; se ejecutan con cuentas del generador y DB temporal, sin red externa. Evidencia: dos pruebas Playwright pasaron en una ejecución aislada; perfiles solo y familia; salida `2 passed`, sin directorio temporal residual.
-- [ ] La DB demo se resuelve a una ruta única ignorada por Git; pnpm dev nunca la adopta y solo pnpm demo habilita el modo/ruta demo. Verificar rutas efectivas tanto en server normal como demo.
-- [ ] pnpm demo:seed solo crea datos sintéticos por API en modo demo; la repetición se comporta de forma idempotente y un error parcial deja un resultado recuperable.
-- [ ] pnpm demo:db:reset solo elimina/restablece el fichero DB demo y sidecars propios, y falla cerrada ante ruta alterada, proceso en uso o destino igual a DB normal/WebAPI.
+- [x] La DB demo se resuelve a una ruta única ignorada por Git; pnpm dev nunca la adopta y solo los comandos demo fijan el modo/ruta dedicados. Evidencia: `app.config.ts` rechaza el modo/ruta cruzados; el launcher fija la ruta y `pnpm dev` conserva su script normal.
+- [x] pnpm demo:seed solo crea datos sintéticos por API en modo demo; la repetición se comporta de forma idempotente y un error parcial deja un resultado recuperable. Evidencia: 10 usuarios/4 hogares leídos de SQLite, segunda llamada sin cambios y regresión de cleanup parcial.
+- [x] pnpm demo:db:reset solo elimina/restablece el fichero DB demo y sidecars propios, y falla cerrada ante ruta alterada, proceso en uso o destino igual a DB normal/WebAPI. Evidencia: tests de ruta exacta, lock en uso y sidecars; comando real ejecutado sobre la DB demo.
 - [ ] pnpm demo:regenerate hace reset + seed + matriz AI acotada; cada generación usa el WebAPI local real, sin loopback/provider fake ni fallback externo; readiness/auth/privacy inválidos fallan antes de enviar prompts; error, timeout o cancelación detienen el run y limpian solo procesos/credenciales propios.
 - [ ] La matriz real WebAPI cubre las rutas de generación síncronas y los jobs AI activos; cada ruta queda mapeada a su perfil, DB demo y presupuesto explícito.
 - [ ] Una respuesta fallida, inválida, timeout, cancelación o límite de presupuesto detiene el run y ejecuta cleanup; los snapshots verifican escrituras esperadas y ausencia de efectos laterales.
@@ -60,13 +60,13 @@ Crear un generador reutilizable de cuentas de prueba para usuarios solos y hogar
 - [x] Estado/spec actualizado en `eab195fa`: CI [45893533271 (#1361)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45893533271) pasó 11/11 jobs; el PR #72 permanece Draft por las generaciones reales y la auditoría de errores del proveedor.
 - [ ] Regresión de fallo parcial/i18n y timeout de test en `fb7e536a`: pre-push completo pasó; CI #1362 fue cancelado; CI [45897463409 (#1363)](https://github.com/juanjoGonDev/HogarIA/actions/runs/45897463409) está en curso.
 
-## Scripts de demo propuestos
+## Scripts de demo implementados
 
-- pnpm demo: app frontend/API en modo demo y con la DB persistente dedicada.
+- pnpm demo: asegura la semilla y levanta frontend/API solo en loopback, en modo demo y con la DB persistente dedicada.
 - pnpm demo:seed: carga solo la matriz sintética por API en esa app/DB.
 - pnpm demo:db:reset: restablece solo la SQLite demo dedicada, sin iniciar ni parar otros procesos.
-- pnpm demo:regenerate: flujo completo de reset, seed y generaciones reales contra el WebAPI local; deja DB sintética reproducible.
+- pnpm demo:regenerate: flujo completo de reset, seed y smoke real contra WebAPI local; falla por preflight si identidad, autorización o privacidad no cumplen.
 
 ## Estado de verificación
 
-E2E aislado de perfiles pasó en Chromium y ahora comprueba que `profile.cooking.none` se traduzca; los proyectos móviles se omiten para no duplicar escrituras, pero se capturan PC/móvil. El fallo parcial inyectado tras el primer registro aborta y limpia el entorno temporal. La cobertura loopback de los 11 `AiJobKind` sigue pasando. Un smoke real anónimo con perfil temporal recibió `401 authentication_required` y no obtuvo respuesta del modelo; no valida generaciones reales. Hace falta un WebAPI de prueba con DB aislada y estado de proveedor autorizado. El WebAPI normal sigue sin usarse para pruebas con escritura porque persiste prompts y respuestas. La DB demo persistente y sus comandos aún no están implementados. Ver `AI-SEED-PERSONAS-SMOKE-RESULTS.md`.
+E2E aislado de perfiles pasó en Chromium y ahora comprueba que `profile.cooking.none` se traduzca; los proyectos móviles se omiten para no duplicar escrituras, pero se capturan PC/móvil. El fallo parcial inyectado tras el primer registro aborta y limpia el entorno temporal. La cobertura loopback de los 11 `AiJobKind` sigue pasando. La DB demo persistente, `demo`, `demo:seed`, `demo:db:reset` y `demo:regenerate` están implementados; la semilla persistente y la app local se iniciaron y verificaron. El preflight read-only revalidado en `127.0.0.1:3001` encuentra request logging y captura de detalles activos, así que la generación real aborta sin crear token ni enviar prompt. No usar el WebAPI DevBar normal para escrituras; la matriz viva sigue pendiente hasta tener WebAPI aislado y autorizado. Ver `AI-SEED-PERSONAS-SMOKE-RESULTS.md`.

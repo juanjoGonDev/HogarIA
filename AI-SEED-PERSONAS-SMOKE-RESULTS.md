@@ -41,6 +41,23 @@
 - Antes de inyectar el fallo en el generador de perfiles, el test reprodujo que `after-first-account` no abortaba: la aserción de registro único observó 10 altas. Después, la inyección se movió al bucle de registro, inmediatamente tras la primera cuenta.
 - Con `HOGARIA_AI_SEED_GENERATION_INJECT_FAILURE=after-first-account`, el E2E aborta intencionadamente tras exactamente un `POST /api/auth/register`; el run termina con error esperado. El supervisor confirma que cerró sus procesos/puertos y eliminó la SQLite/artifacts temporales. Sin directorio `hogaria-e2e-*` residual.
 
+## DB demo persistente y comandos
+
+- La SQLite se conserva solo en `.tmp/ai-persona-demo/hogaria.sqlite` (ignorada por Git), con marker sin secretos `.seeded`; el reset controlado elimina DB, sidecars SQLite y marker, no otros ficheros ni procesos.
+- Scripts disponibles: `pnpm demo` (seed idempotente + app loopback), `pnpm demo:seed`, `pnpm demo:db:reset` y `pnpm demo:regenerate` (reset + seed + smoke WebAPI real opt-in).
+- `pnpm demo:db:reset` y `pnpm demo:seed` se ejecutaron sobre la DB demo dedicada. El seed creó por API local 10 usuarios/4 hogares; la repetición detectó el marker y no volvió a registrar. Una consulta SQLite de solo lectura confirmó `users=10`, `households=4`, marker presente.
+- El contrato del CLI verifica que el seed usa el supervisor Playwright local con ambos flags demo y ruta exacta; y que `regenerate` ordena reset → seed → únicamente `scripts/run-ai-real-smoke.mjs`, con `HOGARIA_AI_REAL_SMOKE=1` y sin heredar claves de proveedor.
+- `pnpm demo` inició API y frontend en puertos loopback efímeros, respondió health/UI y reutilizó la DB semilla. La prueba IPC del launcher, tras readiness, cerró ambos hijos con código 0, liberó el lock del API y retiró el proxy temporal; no tocó servicios DevBar. La SQLite demo y su marker se conservaron.
+- `pnpm demo:regenerate` no se ejecutó: habría reseteado la DB persistente antes del smoke, y la revisión read-only de `127.0.0.1:3001` mantiene `requestLogging.enabled=true` y `captureDetails=true`. Esas opciones incumplen el preflight; no se creó token ni se envió prompt. El comando debe abortar allí hasta disponer de WebAPI aislado y autorizado.
+
+| Verificación                                       | Resultado                                                                                                                                    |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm run test:config`                             | PASS · 157/157.                                                                                                                              |
+| `pnpm run test:server:coverage`                    | PASS · 2.291 pass, 1 skip; coverage 89,47% statements, 81,72% branches, 95,46% functions y 92,37% lines (todos los gates por fichero pasan). |
+| `pnpm run build:server` / `pnpm run typecheck:e2e` | PASS.                                                                                                                                        |
+| `pnpm exec prettier --check …`                     | PASS · todos los archivos de la unidad.                                                                                                      |
+| Launcher IPC controlado                            | PASS · readiness, exit code 0, lock/proxy/puertos propios retirados; DB y marker permanecen.                                                 |
+
 ### Regresión i18n y capturas
 
 - La prueba falló primero porque la tarjeta mostraba la clave `profile.cooking.none`; la traducción ya existía, pero `/household` no cargaba el bundle lazy `profile`. Se añadió ese bundle al resolver de la ruta y el E2E ahora exige `Apenas cocino` antes de capturar.

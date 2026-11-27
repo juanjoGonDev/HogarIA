@@ -30,6 +30,12 @@ export function getDrizzle() {
   return drizzleDb;
 }
 
+export function shouldLogSqlStatements(
+  environment: Record<string, string | undefined> = process.env
+): boolean {
+  return environment.NODE_ENV === 'development' && environment.HOGARIA_DEMO_MODE !== '1';
+}
+
 /**
  * Los nombres bajo los que esta BD existio en instalaciones desplegadas. Se
  * prueban en este orden: el primero es el que dejo la ultima version publicada.
@@ -78,7 +84,7 @@ export async function initializeDatabase(): Promise<void> {
 
   // Create SQLite database
   db = new Database(config.database.path, {
-    verbose: config.server.env === 'development' ? console.log : undefined
+    verbose: shouldLogSqlStatements(process.env) ? console.log : undefined
   });
 
   // Configure SQLite for low memory usage

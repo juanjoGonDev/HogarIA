@@ -23,6 +23,16 @@ export function resolveDemoDatabasePath(projectRoot = REPOSITORY_ROOT): string {
 export const DEMO_DATABASE_PATH = resolveDemoDatabasePath();
 export const DEMO_DATABASE_LOCK_PATH = DEMO_DATABASE_PATH + '.lock';
 
+export function isDemoShutdownMessage(message: unknown): boolean {
+  return (
+    typeof message === 'object' &&
+    message !== null &&
+    !Array.isArray(message) &&
+    'type' in message &&
+    message.type === 'shutdown'
+  );
+}
+
 function pathsEqual(left: string, right: string): boolean {
   const normalizedLeft = resolve(left);
   const normalizedRight = resolve(right);

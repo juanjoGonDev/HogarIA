@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createServer, request as httpRequest } from 'node:http';
 import { once } from 'node:events';
+import { resolve } from 'node:path';
 import test from 'node:test';
 
 import {
@@ -17,6 +18,7 @@ import {
   isolatedProcessEnvironments,
   selectAiLiveModel,
   validateAiLiveSmokeOptIn,
+  validateAiLiveDemoExecution,
   validateAiLiveRecipeSmokeRequest,
   validateAiLiveAssistantSmokeRequest,
   validateAiLiveConnectionSmokeRequest,
@@ -69,10 +71,7 @@ test('connection-only mode is explicit, exclusive, and requires one real backgro
       /exact opt-in|cannot combine/i
     );
   }
-  assert.throws(
-    () => validateAiLiveSmokeRunner(env, args.slice(0, 2)),
-    /only accepts/i
-  );
+  assert.throws(() => validateAiLiveSmokeRunner(env, args.slice(0, 2)), /only accepts/i);
 
   const runnerExit = { code: 0, timedOut: false, cancelled: false, runnerCleaned: true };
   const backgroundCall = { providerTransport: 'responses_background', stream: false, status: 200 };
@@ -80,9 +79,24 @@ test('connection-only mode is explicit, exclusive, and requires one real backgro
   const input = { runnerExit, cleanupFailed: false, calls: [backgroundCall], proxyMetrics };
   assert.equal(isSuccessfulAiLiveConnectionSmokeResult(input), true);
   assert.equal(isSuccessfulAiLiveConnectionSmokeResult({ ...input, calls: [] }), false);
-  assert.equal(isSuccessfulAiLiveConnectionSmokeResult({ ...input, calls: [backgroundCall, backgroundCall] }), false);
-  assert.equal(isSuccessfulAiLiveConnectionSmokeResult({ ...input, proxyMetrics: { ...proxyMetrics, requestAttempts: 2 } }), false);
-  assert.equal(isSuccessfulAiLiveConnectionSmokeResult({ ...input, runnerExit: { ...runnerExit, runnerCleaned: false } }), false);
+  assert.equal(
+    isSuccessfulAiLiveConnectionSmokeResult({ ...input, calls: [backgroundCall, backgroundCall] }),
+    false
+  );
+  assert.equal(
+    isSuccessfulAiLiveConnectionSmokeResult({
+      ...input,
+      proxyMetrics: { ...proxyMetrics, requestAttempts: 2 }
+    }),
+    false
+  );
+  assert.equal(
+    isSuccessfulAiLiveConnectionSmokeResult({
+      ...input,
+      runnerExit: { ...runnerExit, runnerCleaned: false }
+    }),
+    false
+  );
 });
 
 test('household-plan-only mode is explicit, exclusive and requires one strict real completion', () => {
@@ -105,7 +119,11 @@ test('household-plan-only mode is explicit, exclusive and requires one strict re
   assert.equal(validateAiLiveSmokeRunner(env, args), true);
   assert.equal(validateAiLiveHouseholdPlanSmokeRequest({}), false);
   assert.throws(
-    () => validateAiLiveHouseholdPlanSmokeRequest({ ...env, HOGARIA_AI_REAL_SMOKE_HOUSEHOLD_PLAN_ONLY: 'true' }),
+    () =>
+      validateAiLiveHouseholdPlanSmokeRequest({
+        ...env,
+        HOGARIA_AI_REAL_SMOKE_HOUSEHOLD_PLAN_ONLY: 'true'
+      }),
     /exact opt-in/i
   );
   for (const conflictingInput of [
@@ -135,9 +153,15 @@ test('household-plan-only mode is explicit, exclusive and requires one strict re
   const input = { runnerExit, cleanupFailed: false, calls: [call], proxyMetrics };
   assert.equal(isSuccessfulAiLiveHouseholdPlanSmokeResult(input), true);
   assert.equal(isSuccessfulAiLiveHouseholdPlanSmokeResult({ ...input, calls: [] }), false);
-  assert.equal(isSuccessfulAiLiveHouseholdPlanSmokeResult({ ...input, calls: [call, call] }), false);
   assert.equal(
-    isSuccessfulAiLiveHouseholdPlanSmokeResult({ ...input, calls: [{ ...call, schemaName: 'recipe' }] }),
+    isSuccessfulAiLiveHouseholdPlanSmokeResult({ ...input, calls: [call, call] }),
+    false
+  );
+  assert.equal(
+    isSuccessfulAiLiveHouseholdPlanSmokeResult({
+      ...input,
+      calls: [{ ...call, schemaName: 'recipe' }]
+    }),
     false
   );
   assert.equal(
@@ -183,7 +207,10 @@ test('workflow-only mode is explicit, exclusive, and requires both real schemas'
     { HOGARIA_AI_REAL_SMOKE_WORKFLOWS_ONLY: '1', HOGARIA_AI_REAL_SMOKE_ASSISTANT_ONLY: '1' },
     { HOGARIA_AI_REAL_SMOKE_WORKFLOWS_ONLY: '1', HOGARIA_AI_REAL_SMOKE_RECEIPTS_ONLY: '1' },
     { HOGARIA_AI_REAL_SMOKE_WORKFLOWS_ONLY: '1', HOGARIA_AI_REAL_SMOKE_HOUSEHOLD_MEAL_ONLY: '1' },
-    { HOGARIA_AI_REAL_SMOKE_WORKFLOWS_ONLY: '1', HOGARIA_AI_REAL_SMOKE_RECEIPT_PATH: 'C:/private/ticket.pdf' }
+    {
+      HOGARIA_AI_REAL_SMOKE_WORKFLOWS_ONLY: '1',
+      HOGARIA_AI_REAL_SMOKE_RECEIPT_PATH: 'C:/private/ticket.pdf'
+    }
   ]) {
     assert.throws(
       () =>
@@ -214,7 +241,12 @@ test('workflow-only mode is explicit, exclusive, and requires both real schemas'
   const runnerExit = { code: 0, cancelled: false, timedOut: false, runnerCleaned: true };
   const proxyMetrics = { requestAttempts: 2, rejectedRequests: 0, failed: false };
   assert.equal(
-    isSuccessfulAiLiveWorkflowSmokeResult({ runnerExit, cleanupFailed: false, calls, proxyMetrics }),
+    isSuccessfulAiLiveWorkflowSmokeResult({
+      runnerExit,
+      cleanupFailed: false,
+      calls,
+      proxyMetrics
+    }),
     true
   );
   assert.equal(
@@ -2581,7 +2613,9 @@ test('background Responses proxy validates its fixed route, polls only accepted 
       background: true,
       store: true,
       instructions: 'Synthetic system instruction.',
-      input: [{ role: 'user', content: [{ type: 'input_text', text: 'synthetic background prompt' }] }],
+      input: [
+        { role: 'user', content: [{ type: 'input_text', text: 'synthetic background prompt' }] }
+      ],
       text: {
         format: {
           type: 'json_schema',
@@ -2701,10 +2735,14 @@ test('background Responses proxy validates its fixed route, polls only accepted 
       input: [{ role: 'system', content: 'Must be sent as instructions.' }]
     });
     assert.equal(unsupportedSystemInput.status, 400);
-    const unsupportedStringMessageContent = await postJson(`${proxy.baseUrl}/responses`, proxyToken, {
-      ...request,
-      input: [{ role: 'user', content: 'WebAPI requires input_text parts here.' }]
-    });
+    const unsupportedStringMessageContent = await postJson(
+      `${proxy.baseUrl}/responses`,
+      proxyToken,
+      {
+        ...request,
+        input: [{ role: 'user', content: 'WebAPI requires input_text parts here.' }]
+      }
+    );
     assert.equal(unsupportedStringMessageContent.status, 400);
     const invalidInstructions = await postJson(`${proxy.baseUrl}/responses`, proxyToken, {
       ...request,
@@ -3493,4 +3531,53 @@ test('connection-only mode is removed from server and browser env but retained f
   assert.equal(isolated.server.HOGARIA_AI_REAL_SMOKE_PROXY_TOKEN, 'synthetic-local-proxy-token');
   assert.equal(Object.hasOwn(isolated.browser, 'HOGARIA_AI_REAL_SMOKE_PROXY_TOKEN'), false);
   assert.equal(Object.hasOwn(isolated.playwright, 'HOGARIA_AI_REAL_SMOKE_PROXY_TOKEN'), false);
+});
+
+test('preserves explicit demo database selection for the owned live runner only', () => {
+  const env = createAiLiveSmokeRunnerEnvironment(
+    {
+      PATH: 'C:/Windows/System32',
+      HOGARIA_DEMO_MODE: '1',
+      HOGARIA_DEMO_RUN: '1',
+      DATABASE_PATH: resolve(process.cwd(), '.tmp', 'ai-persona-demo', 'hogaria.sqlite')
+    },
+    {
+      proxyToken: 'synthetic-local-proxy-token',
+      proxyUrl: 'http://127.0.0.1:41000/v1',
+      model: 'gpt-5'
+    }
+  );
+
+  assert.equal(env.HOGARIA_DEMO_MODE, '1');
+  assert.equal(env.HOGARIA_DEMO_RUN, '1');
+  assert.equal(
+    env.DATABASE_PATH,
+    resolve(process.cwd(), '.tmp', 'ai-persona-demo', 'hogaria.sqlite')
+  );
+  assert.equal('OPENAI_API_KEY' in env, false);
+});
+test('validates exact live demo mode before WebAPI setup', () => {
+  const databasePath = resolve(process.cwd(), '.tmp', 'ai-persona-demo', 'hogaria.sqlite');
+  assert.equal(validateAiLiveDemoExecution({}), false);
+  assert.equal(
+    validateAiLiveDemoExecution({
+      HOGARIA_DEMO_MODE: '1',
+      HOGARIA_DEMO_RUN: '1',
+      DATABASE_PATH: databasePath
+    }),
+    true
+  );
+  assert.throws(
+    () =>
+      validateAiLiveDemoExecution({
+        HOGARIA_DEMO_MODE: '1',
+        HOGARIA_DEMO_RUN: '1',
+        DATABASE_PATH: 'C:/data/hogaria.sqlite'
+      }),
+    /exact managed demo DATABASE_PATH/i
+  );
+  assert.throws(
+    () => validateAiLiveDemoExecution({ HOGARIA_DEMO_MODE: '1' }),
+    /both explicit demo flags/i
+  );
 });

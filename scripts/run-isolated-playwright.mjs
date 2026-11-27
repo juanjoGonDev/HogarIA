@@ -36,6 +36,15 @@ const cleanupFailedSeedRuns =
 if (nginxIngress && liveSmoke) {
   throw new Error('The isolated Nginx ingress runner cannot be combined with the live AI smoke.');
 }
+const demoMode = process.env.HOGARIA_DEMO_MODE === '1';
+const demoRun = process.env.HOGARIA_DEMO_RUN === '1';
+const demoDatabasePath = resolve(root, '.tmp', 'ai-persona-demo', 'hogaria.sqlite');
+if (demoMode !== demoRun) {
+  throw new Error('Persistent demo E2E requires both explicit demo flags.');
+}
+if (demoMode && resolve(process.env.DATABASE_PATH ?? '') !== demoDatabasePath) {
+  throw new Error('Persistent demo E2E requires the exact managed demo DATABASE_PATH.');
+}
 const fullStack = args.some((arg, index) => {
   if (arg.startsWith('--config=')) return arg.includes('playwright.full-stack.config.ts');
   return arg === '--config' && args[index + 1]?.includes('playwright.full-stack.config.ts');
@@ -475,7 +484,7 @@ async function main() {
   const baseUrl = `http://127.0.0.1:${appPort}`;
   const paths = {
     runDir,
-    databasePath: join(runDir, 'hogaria.sqlite'),
+    databasePath: demoMode ? demoDatabasePath : join(runDir, 'hogaria.sqlite'),
     resultsFile: join(runDir, 'results.json'),
     reportDir: join(runDir, 'playwright-report'),
     outputDir: join(runDir, 'artifacts')
@@ -490,12 +499,13 @@ async function main() {
     E2E_FRONTEND_PORT: String(appPort),
     E2E_API_PORT: String(nginxIngress ? appPort : apiPort),
     E2E_API_URL: nginxIngress ? baseUrl : `http://127.0.0.1:${apiPort}`,
-    E2E_SEED: `qa-${basename(runDir)}`,
+    E2E_SEED: demoMode ? (process.env.HOGARIA_DEMO_SEED ?? 'demo') : 'qa-' + basename(runDir),
     E2E_READY_FILE: readyFile,
     E2E_RESULTS_FILE: paths.resultsFile,
     E2E_REPORT_DIR: paths.reportDir,
     E2E_OUTPUT_DIR: paths.outputDir,
     DATABASE_PATH: paths.databasePath,
+    ...(demoMode ? { HOGARIA_DEMO_MODE: '1', HOGARIA_DEMO_RUN: '1' } : {}),
     PANTRY_IMAGE_SEARCH_FIXTURE: '1',
     E2E_NGINX_INGRESS: nginxIngress ? '1' : '0',
     ...(nginxIngress ? { JWT_SECRET: randomBytes(32).toString('base64url') } : {})
@@ -541,7 +551,9 @@ async function main() {
   const playwrightCommandArgs = ['test', ...playwrightArgs];
   if (!liveSmoke) {
     console.log(
-      `[hogaria] isolated Playwright (${env.E2E_STACK}) at ${baseUrl}; SQLite and artifacts are under OS temp.`
+      demoMode
+        ? `[hogaria] demo Playwright at ${baseUrl}; persistent demo SQLite retained, run artifacts are under OS temp.`
+        : `[hogaria] isolated Playwright (${env.E2E_STACK}) at ${baseUrl}; SQLite and artifacts are under OS temp.`
     );
   }
   reportSmokeProgress('playwright-starting');
@@ -655,7 +667,9 @@ try {
       runnerCleanupVerified = true;
       if (!liveSmoke) {
         console.log(
-          '[hogaria] isolated database and artifacts cleaned after the owned app process stopped.'
+          demoMode
+            ? '[hogaria] E2E artifacts cleaned; persistent demo database retained.'
+            : '[hogaria] isolated database and artifacts cleaned after the owned app process stopped.'
         );
       }
     } catch {

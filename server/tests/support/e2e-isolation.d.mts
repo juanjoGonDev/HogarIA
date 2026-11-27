@@ -1,3 +1,4 @@
+export const DEMO_DATABASE_PATH: string;
 export type IsolatedEnvironment = {
   runDir: string;
   databasePath: string;
